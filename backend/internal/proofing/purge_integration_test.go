@@ -79,7 +79,7 @@ func TestPurgeDueFollowsRetention(t *testing.T) {
 		t.Fatalf("purge due 10 days into 30 = %d, %v; want none", len(due), err)
 	}
 	week := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: 7}
-	if _, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, week); err != nil {
+	if _, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, settingsChange(week)); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 	if due, err := f.requests.ListPurgeDue(ctx, 10); err != nil || len(due) != 1 || due[0].ID != req.ID {
@@ -134,7 +134,7 @@ func TestPurgeDueTakesMemberRequests(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].ID != req.ID {
 		t.Fatalf("purge due past its retention = %+v, %v; want the member's request", due, err)
 	}
-	if err := f.requests.Purge(ctx, due[0]); err != nil {
+	if err := f.requests.Purge(ctx, due[0], nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	var diplomas, leaks int
@@ -277,7 +277,7 @@ func TestPurgeStripsReviewReason(t *testing.T) {
 	if n := leaks(); n != 1 {
 		t.Fatalf("audit events with the reason before purge = %d, want 1", n)
 	}
-	if err := f.requests.Purge(ctx, req); err != nil {
+	if err := f.requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	if n := leaks(); n != 0 {
@@ -335,14 +335,14 @@ func TestPurgeRefusesStaleSession(t *testing.T) {
 	if ok, err := f.requests.AttachSession(ctx, stale, attachedSession("s1")); err != nil || !ok {
 		t.Fatalf("AttachSession = %v, %v", ok, err)
 	}
-	if err := f.requests.Purge(ctx, stale); !errors.Is(err, errPurgeSessionMoved) {
+	if err := f.requests.Purge(ctx, stale, nil); !errors.Is(err, errPurgeSessionMoved) {
 		t.Fatalf("Purge of the stale read = %v, want %v", err, errPurgeSessionMoved)
 	}
 	fresh, err := f.requests.Get(ctx, f.orgID, stale.ID)
 	if err != nil || fresh.PurgedAt != nil {
 		t.Fatalf("after the refused purge = %+v, %v; want it kept", fresh, err)
 	}
-	if err := f.requests.Purge(ctx, fresh); err != nil {
+	if err := f.requests.Purge(ctx, fresh, nil); err != nil {
 		t.Errorf("Purge of the fresh read = %v", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestRemoveRefusesUnpurged(t *testing.T) {
 	if _, err := f.customers.Get(ctx, f.orgID, f.customer.ID); err != nil {
 		t.Fatalf("customer after the refused removal = %v, want it kept", err)
 	}
-	if err := f.requests.Purge(ctx, req); err != nil {
+	if err := f.requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	if err := f.customers.Remove(ctx, f.orgID, f.customer.ID); err != nil {
@@ -442,13 +442,14 @@ func TestPurgeAtSetOnEveryWrite(t *testing.T) {
 			return f.requests.EndSession(ctx, req, "s1", proofingprovider.StatusExpired, "")
 		}},
 		{name: "Cancel", started: true, write: func(f purgeFixture, req Request) error {
-			_, err := f.requests.Cancel(ctx, req)
+			_, err := f.requests.Cancel(ctx, req, nil)
 			return err
 		}},
 		{name: "RecordOutcome", started: true, write: func(f purgeFixture, req Request) error {
 			return f.requests.RecordOutcome(ctx, req, "s1", StatusApproved, approved)
 		}},
-		{name: "RecordOutcome review", started: true, cleared: true, write: func(f purgeFixture, req Request) error {
+		// An identity review counts its retention from going there, as a decision would.
+		{name: "RecordOutcome review", started: true, write: func(f purgeFixture, req Request) error {
 			return f.requests.RecordOutcome(ctx, req, "s1", StatusNeedsReview, review)
 		}},
 		{name: "LapseLinks", hosted: true, write: func(f purgeFixture, _ Request) error {
@@ -456,7 +457,7 @@ func TestPurgeAtSetOnEveryWrite(t *testing.T) {
 			return err
 		}},
 		{name: "Purge", started: true, write: func(f purgeFixture, req Request) error {
-			return f.requests.Purge(ctx, req)
+			return f.requests.Purge(ctx, req, nil)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -562,7 +563,7 @@ func TestRetentionWaitsForInsert(t *testing.T) {
 	week := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: weekDays}
 	saved := make(chan error, 1)
 	go func() {
-		_, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, week)
+		_, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, settingsChange(week))
 		saved <- err
 	}()
 	done, saveErr := awaitLockWait(t, f.pool, saved)
@@ -608,7 +609,7 @@ func TestRetentionBesideWrite(t *testing.T) {
 	week := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: weekDays}
 	saved := make(chan error, 1)
 	go func() {
-		_, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, week)
+		_, err := f.customers.SaveSettings(ctx, f.orgID, f.customer.ID, settingsChange(week))
 		saved <- err
 	}()
 	done, saveErr := awaitLockWait(t, f.pool, saved)

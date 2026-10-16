@@ -199,6 +199,8 @@ describe("auditActorLabel", () => {
     expect(auditActorLabel("hosted_link", t)).toBe(
       t("auditLog.hostedLinkActor"),
     );
+    // An admin who acted on a member's request, unnamed in their timeline.
+    expect(auditActorLabel("admin", t)).toBe(t("auditLog.adminActor"));
     expect(auditActorLabel("app:idem_app", t)).toBe(
       t("identityProofing.methods.idemApp"),
     );

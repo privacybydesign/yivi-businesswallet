@@ -6,15 +6,22 @@ package clientip
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 )
 
-// headerForwardedFor is the header each proxy appends the address it received
-// the request from to.
-const headerForwardedFor = "X-Forwarded-For"
+const (
+	// headerForwardedFor is the header each proxy appends the address it
+	// received the request from to.
+	headerForwardedFor = "X-Forwarded-For"
+	// subscriberPrefixBits is the IPv6 block one subscriber is given: a /64
+	// is the smallest a provider hands out, so its addresses are one source.
+	subscriberPrefixBits = 64
+)
 
 // Trusted is the parsed list of trusted proxies.
 type Trusted = []netip.Prefix
@@ -124,14 +131,36 @@ func peerAddr(remoteAddr string) (netip.Addr, bool) {
 type contextKey struct{}
 
 // Middleware stores each request's client address, as res resolves it, in
-// its context.
+// its context. The first request carrying X-Forwarded-For from a peer res does
+// not trust is logged once: behind a proxy missing from TRUSTED_PROXIES every
+// caller resolves to the proxy, and so shares one per-source limit.
 func Middleware(res Resolver) func(http.Handler) http.Handler {
+	var warn sync.Once
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if peer, ok := peerAddr(r.RemoteAddr); ok && !res.isTrusted(peer) && r.Header.Get(headerForwardedFor) != "" {
+				warn.Do(func() {
+					slog.WarnContext(r.Context(), "clientip: X-Forwarded-For from a peer TRUSTED_PROXIES does not list is ignored; "+
+						"behind a reverse proxy, list it, or every caller shares one rate limit",
+						slog.String("peer", peer.String()))
+				})
+			}
 			ctx := context.WithValue(r.Context(), contextKey{}, res.ClientIP(r))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// SourceKey is what a per-source limit counts r under: its client address,
+// or for IPv6 the /64 that address is in, since one subscriber holds the
+// whole block and could otherwise take a fresh address per request.
+func SourceKey(r *http.Request) string {
+	ip := FromRequest(r)
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is6() {
+		return ip
+	}
+	return netip.PrefixFrom(addr, subscriberPrefixBits).Masked().String()
 }
 
 // FromRequest is r's client address as Middleware stored it, or its peer

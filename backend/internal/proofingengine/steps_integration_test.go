@@ -4,7 +4,6 @@ package proofingengine_test
 
 import (
 	"context"
-	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strings"
@@ -71,7 +70,7 @@ func TestFailedLivenessRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFlow: %v", err)
 	}
-	photo := &pp.Image{MimeType: "image/jpeg", Base64: base64.StdEncoding.EncodeToString([]byte("the org's photo"))}
+	photo := orgPhoto(t)
 	newSession := func() (string, string) {
 		t.Helper()
 		sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID, ReferencePhoto: photo})
@@ -156,7 +155,7 @@ func TestNFCStepRefusals(t *testing.T) {
 		}
 	}
 
-	photo := &pp.Image{MimeType: "image/jpeg", Base64: base64.StdEncoding.EncodeToString([]byte("the org's photo"))}
+	photo := orgPhoto(t)
 	token, device := start(faceOnlySpec, pp.SessionInput{ReferencePhoto: photo})
 	if code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": evidence}); code != http.StatusBadRequest {
 		t.Errorf("nfc on a flow without nfc_read = %d %v, want 400", code, step)

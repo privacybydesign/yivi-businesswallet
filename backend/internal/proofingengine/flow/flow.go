@@ -322,12 +322,12 @@ type FlowDefinition struct {
 	// collection and no check, and the achieved level is computed without it.
 	// Validate refuses one the flow's checks cannot reach.
 	RequiredAssuranceLevel AssuranceLevel `json:"RequiredAssuranceLevel"`
-	// BSNPolicy, BlurFace and BlurBSN override the defaults one by one, each only
-	// when set (empty or nil inherits), so setting BlurBSN alone does not force
-	// BlurFace off.
-	BSNPolicy privacy.BSNPolicy `json:"BSNPolicy"`
-	BlurFace  *bool             `json:"BlurFace"`
-	BlurBSN   *bool             `json:"BlurBSN"`
+	// BSNPolicy, KeepFacePhotos and BlurBSN override the defaults one by one,
+	// each only when set (empty or nil is the default), so setting BlurBSN alone
+	// does not change KeepFacePhotos.
+	BSNPolicy      privacy.BSNPolicy `json:"BSNPolicy"`
+	KeepFacePhotos *bool             `json:"KeepFacePhotos"`
+	BlurBSN        *bool             `json:"BlurBSN"`
 	// RetentionOverride, when set, is how long the flow's finished sessions are
 	// kept, replacing the customer's retention and the engine default. A session
 	// stamps it at creation, so a later edit does not change it.

@@ -236,6 +236,7 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 		return proofingprovider.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
 	}
 	_, redaction := effectivePrivacyPolicy(fd)
+	threshold := s.boundLoginThreshold(fd)
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
 	if !sess.Yivi.FaceStarted {
@@ -268,7 +269,7 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 		}
 		if st.RegulaCalls >= s.boundLoginFrameBudget() {
 			verdict.Attempts = st.Attempts
-			details, err = s.decideBoundLogin(sess, st, proofingprovider.FaceDecisionRejected, &verdict, redaction)
+			details, err = s.decideBoundLogin(sess, st, proofingprovider.FaceDecisionRejected, &verdict, redaction, threshold)
 			return err
 		}
 		st.RegulaCalls++
@@ -310,7 +311,7 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 			st.FrameHashes = append(st.FrameHashes, hash)
 			st.Attempts++
 			st.LastScore, st.BestScore = score, math.Max(st.BestScore, score)
-			matched = score >= s.cfg.RegulaFaceMatchThreshold
+			matched = score >= threshold
 			if matched {
 				st.Consecutive++
 				st.LastFrame = frame
@@ -328,7 +329,7 @@ func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame stri
 		if approved {
 			decision = proofingprovider.FaceDecisionApproved
 		}
-		details, err = s.decideBoundLogin(sess, st, decision, &verdict, redaction)
+		details, err = s.decideBoundLogin(sess, st, decision, &verdict, redaction, threshold)
 		return err
 	})
 	if err != nil {
@@ -402,14 +403,14 @@ func disclosedDate(raw string) (time.Time, bool) {
 // decideBoundLogin ends sess's face check as decision: approved with a
 // result, or rejected because its attempts or Regula budget are spent. It
 // returns the outcome's audit details and sets verdict's decision.
-func (s *Server) decideBoundLogin(sess *session.Session, st *session.YiviState, decision proofingprovider.FaceDecision, verdict *proofingprovider.FaceVerdict, redaction privacy.RedactionPolicy) (map[string]any, error) {
+func (s *Server) decideBoundLogin(sess *session.Session, st *session.YiviState, decision proofingprovider.FaceDecision, verdict *proofingprovider.FaceVerdict, redaction privacy.RedactionPolicy, threshold float64) (map[string]any, error) {
 	details := boundLoginOutcomeDetails(st)
 	to, errorCode := session.StatusApproved, ""
 	verdict.Decision = decision
 	if decision != proofingprovider.FaceDecisionApproved {
 		to, errorCode = session.StatusRejected, errCodeFaceNoMatch
 	} else {
-		result, err := s.buildBoundLoginResult(*sess, st, redaction)
+		result, err := s.buildBoundLoginResult(*sess, st, redaction, threshold)
 		if err != nil {
 			return nil, err
 		}
@@ -440,17 +441,29 @@ func (s *Server) boundLoginFrameBudget() int {
 
 // boundLoginAssurance is an approved Yivi-method session's assurance: the
 // live face matched the credential's photo, with no chip check and no
-// liveness, which is eIDAS low.
+// liveness, which is eIDAS low. It is not scored on the tier ladder: one
+// check out of one would name the top tier ("perfect") for a session that ran
+// neither liveness nor a chip check.
 func boundLoginAssurance() assuranceInfo {
-	return assuranceInfo{
-		Level: flow.LevelForScore(flow.DefaultAssuranceTiers, 1), Score: 1, ChecksPassed: 1, ChecksTotal: 1,
-		EIDASLevel: flow.AssuranceLevelLow,
+	return assuranceInfo{EIDASLevel: flow.AssuranceLevelLow}
+}
+
+// boundLoginThreshold is the score a Yivi frame must reach: the deployment's
+// Regula threshold, and the flow's face.match threshold when that is higher,
+// as the Idem path holds a match to both (checkItems).
+func (s *Server) boundLoginThreshold(fd *flow.FlowDefinition) float64 {
+	threshold := s.cfg.RegulaFaceMatchThreshold
+	if fd != nil {
+		if t, ok := fd.CheckThresholds[flow.CheckFaceMatch]; ok && t > threshold {
+			threshold = t
+		}
 	}
+	return threshold
 }
 
 // buildBoundLoginResult is the released result, gated by requestedAttributes,
-// its faces blurred under the flow's redaction policy.
-func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState, redaction privacy.RedactionPolicy) (map[string]any, error) {
+// with the faces only when the flow keeps them.
+func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState, redaction privacy.RedactionPolicy, threshold float64) (map[string]any, error) {
 	var info disclosureInfo
 	if err := json.Unmarshal(st.Disclosure, &info); err != nil {
 		return nil, fmt.Errorf("proofingengine: decode disclosure: %w", err)
@@ -463,25 +476,17 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 	}
 	result["disclosure"] = info
 	result["assurance"] = boundLoginAssurance()
-	if st.KeepPhoto && attrRequested(sess, attrDG2, attrFaceImage) {
-		if photo, ok := releasedFace(photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}, redaction); ok {
-			result["photo"] = photo
-		} else {
-			slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
-		}
+	// The face photos only when the flow keeps them, as in buildResult.
+	if st.KeepPhoto && redaction.KeepFacePhotos && attrRequested(sess, attrDG2, attrFaceImage) {
+		result["photo"] = &photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}
 	}
-	if st.LastFrame != "" && attrRequested(sess, attrSelfie) {
+	if st.LastFrame != "" && redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
 		if raw, mime, err := decodeImageBase64(st.LastFrame, defaultImageMime); err == nil {
-			selfie := photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
-			if released, ok := releasedFace(selfie, redaction); ok {
-				result["selfie"] = released
-			} else {
-				slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
-			}
+			result["selfie"] = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
 		}
 	}
 	if attrRequested(sess, attrBiometrics) {
-		verified, threshold, frames, score := true, s.cfg.RegulaFaceMatchThreshold, st.Attempts, st.LastScore
+		verified, frames, score := true, st.Attempts, st.LastScore
 		result["biometrics"] = &biometricsInfo{
 			FaceMatchScore: &score, FaceVerified: &verified, LivenessResult: boundLoginLiveness, Engine: boundLoginEngine,
 			Threshold: &threshold, FramesEvaluated: &frames, ReferenceSource: info.Source + ":" + info.PhotoAttribute,
@@ -489,19 +494,6 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 		}
 	}
 	return result, nil
-}
-
-// releasedFace is face as released under redaction: blurred when the policy
-// asks it, ok false when it could not be, and the face is then left out.
-func releasedFace(face photoInfo, redaction privacy.RedactionPolicy) (*photoInfo, bool) {
-	if !redaction.BlurFace {
-		return &face, true
-	}
-	blurred, mime, ok := blurFace(face.ImageBase64, face.MimeType)
-	if !ok {
-		return nil, false
-	}
-	return &photoInfo{ImageBase64: blurred, MimeType: mime}, true
 }
 
 // boundLoginOutcomeDetails is the terminal event's face-check details.

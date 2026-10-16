@@ -157,6 +157,16 @@ type Session struct {
 	// FaceAttempts is how many face step attempts were reserved, each before
 	// the face provider was called.
 	FaceAttempts int `json:"faceAttempts,omitempty"`
+	// Review is the manual review that decided the session, when one did.
+	Review *ReviewDecision `json:"review,omitempty"`
+}
+
+// ReviewDecision is a manual review's record: who decided, why and when, as
+// the relying party gave them.
+type ReviewDecision struct {
+	Reviewer  string    `json:"reviewer"`
+	Reason    string    `json:"reason"`
+	DecidedAt time.Time `json:"decidedAt"`
 }
 
 // ForStorage is sess as it is persisted: a session whose face step can no
@@ -287,12 +297,16 @@ type ChipAccessKey struct {
 
 // ParsedMRZ is a document's MRZ identity fields, flattened for storage.
 type ParsedMRZ struct {
-	DocumentType   string `json:"documentType,omitempty"`
-	IssuingState   string `json:"issuingState,omitempty"`
-	Number         string `json:"number,omitempty"`
-	Nationality    string `json:"nationality,omitempty"`
-	Surname        string `json:"surname,omitempty"`
-	GivenNames     string `json:"givenNames,omitempty"`
+	DocumentType string `json:"documentType,omitempty"`
+	IssuingState string `json:"issuingState,omitempty"`
+	Number       string `json:"number,omitempty"`
+	Nationality  string `json:"nationality,omitempty"`
+	Surname      string `json:"surname,omitempty"`
+	GivenNames   string `json:"givenNames,omitempty"`
+	// FullSurname and FullGivenNames are the chip's DG11 name, when it has
+	// one: unlike the MRZ fields above, never cut off at a field's width.
+	FullSurname    string `json:"fullSurname,omitempty"`
+	FullGivenNames string `json:"fullGivenNames,omitempty"`
 	Sex            string `json:"sex,omitempty"`
 	DateOfBirth    string `json:"dateOfBirth,omitempty"`
 	DateOfExpiry   string `json:"dateOfExpiry,omitempty"`

@@ -141,3 +141,35 @@ func TestStoreRefusesMovedData(t *testing.T) {
 		t.Error("Update opened org A's session in org B's row")
 	}
 }
+
+// ChangedAt moves on every write and on nothing else, and is the row's own:
+// another org's tenant id reads nothing.
+func TestStoreChangedAt(t *testing.T) {
+	s, org := newStore(t)
+	created, err := s.Create(session.Session{TenantID: org, Method: session.MethodNFCPassport, ExpiresAt: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ChangedAt(org, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(org, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := s.ChangedAt(org, created.ID); err != nil || !again.Equal(first) {
+		t.Fatalf("after a read = %v, %v; want %v", again, err, first)
+	}
+	if _, err := s.Update(org, created.ID, func(sess *session.Session) error {
+		sess.Status = session.StatusInProgress
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := s.ChangedAt(org, created.ID); err != nil || !moved.After(first) {
+		t.Fatalf("after a write = %v, %v; want after %v", moved, err, first)
+	}
+	if _, err := s.ChangedAt("00000000-0000-0000-0000-000000000000", created.ID); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("other tenant err = %v", err)
+	}
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -134,9 +135,16 @@ func (h *Handler) removeWebhook(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// webhookTestLimit is how many test events an org may queue for one
+// customer: enough to try an endpoint out, not to fill the delivery queue.
+var webhookTestLimit = ratelimit.Limit{Burst: 10, Per: time.Minute}
+
 func (h *Handler) testWebhook(w http.ResponseWriter, r *http.Request) error {
 	id, err := customerIDFromPath(r)
 	if err != nil {
+		return err
+	}
+	if err := rateLimited(w, h.webhookTests, id.String()); err != nil {
 		return err
 	}
 	if err := h.service.SendTestWebhook(r.Context(), orgFromRequest(r).ID, id); err != nil {

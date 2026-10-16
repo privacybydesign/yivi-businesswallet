@@ -30,6 +30,9 @@ export default function AuditLog(): React.JSX.Element {
   const isAdmin = org.data?.role === "admin";
   const audit = useOrganizationAuditEventsQuery(slug, org.isSuccess);
   const events = audit.data?.pages.flatMap((page) => page.events) ?? [];
+  // The server decides: an admin whose mandate was withdrawn reads the log
+  // as a member does.
+  const detailHidden = !isAdmin || events.some((event) => event.detailHidden);
 
   const dateFormatter = React.useMemo(
     () =>
@@ -84,7 +87,7 @@ export default function AuditLog(): React.JSX.Element {
           </Card>
         ) : (
           <>
-            {org.isSuccess && !isAdmin && (
+            {org.isSuccess && detailHidden && (
               <p className="text-ink-soft mb-4 text-[13px]">
                 {t("auditLog.detailHidden")}
               </p>

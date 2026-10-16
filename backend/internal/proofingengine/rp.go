@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"net/http"
 	"regexp"
 	"slices"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/i18n"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -37,7 +39,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		SelfieLocation: flow.StepLocation(in.SelfieLocation), FaceProvider: flow.FaceProvider(in.FaceProvider),
 		AcceptedDocumentTypes: in.AcceptedDocumentTypes, AcceptedIssuingCountries: in.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: flow.AssuranceLevel(in.RequiredAssuranceLevel),
-		BSNPolicy:              privacyBSN(in.BSNPolicy), BlurFace: in.BlurFace, BlurBSN: in.BlurBSN,
+		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
 	}
@@ -71,7 +73,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
-		BlurFace: fd.BlurFace, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
+		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
 	}
 	for _, st := range fd.Steps {
@@ -232,7 +234,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		}
 		method, ttl = session.MethodBiometricBoundLogin, s.cfg.BoundLoginTTL
 	default:
-		return pp.Session{}, fmt.Errorf("proofingengine: no session can be started for method %q", in.Method)
+		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s or %s", in.Method, pp.MethodIdem, pp.MethodYivi))
 	}
 	// A session runs its flow's steps to finish: without one it never could.
 	if in.FlowID == "" {
@@ -251,6 +253,20 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	// reference photo with each session, and only such a flow takes one.
 	needsReference := flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
+	if method == session.MethodBiometricBoundLogin {
+		// The Yivi method matches a live face against the disclosed photo, with
+		// no liveness and no chip read: it reaches eIDAS low, matches no
+		// reference photo and takes no document photo. The wallet offers it only
+		// where that fits (yiviAppAvailable); the engine refuses the rest too.
+		switch {
+		case !flow.MeetsLevel(flow.AssuranceLevelLow, resolvedFlow.RequiredAssuranceLevel):
+			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
+		case needsReference:
+			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method matches the disclosed photo, not a reference photo")
+		case slices.Contains(resolvedFlow.Steps, flow.StepDocumentPhoto):
+			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method takes no document photo")
+		}
+	}
 	switch {
 	case needsReference && !hasReference:
 		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto is required: the flow matches the face without nfc_read, so there is no chip photo to compare the live face against")
@@ -258,6 +274,11 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto is only taken by a flow that matches the face without nfc_read")
 	case hasReference && !slices.Contains(displayableImageTypes, in.ReferencePhoto.MimeType):
 		return pp.Session{}, rejected(http.StatusBadRequest, "referencePhoto must be a PNG, JPEG or WebP image")
+	}
+	if hasReference {
+		if err := checkReferencePhoto(in.ReferencePhoto); err != nil {
+			return pp.Session{}, err
+		}
 	}
 	if in.Retention > 0 {
 		retention = in.Retention
@@ -294,6 +315,24 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 
 // referenceBase64 and referenceMime are a relying party's reference photo
 // as a session holds it; "" for none.
+// checkReferencePhoto refuses a reference photo that does not decode within
+// the image limits now, rather than at the subject's face step, where it could
+// never be matched. A decoder busy or out of time is the engine's failure,
+// not the photo's.
+func checkReferencePhoto(img *pp.Image) error {
+	raw, _, err := decodeImageBase64(img.Base64, img.MimeType)
+	if err == nil {
+		err = images.Decode(raw, func(image.Image, string) error { return nil })
+	}
+	switch {
+	case errors.Is(err, images.ErrBusy), errors.Is(err, images.ErrDecodeTimeout):
+		return fmt.Errorf("proofingengine: check reference photo: %w", err)
+	case err != nil:
+		return rejected(http.StatusBadRequest, "referencePhoto is not a readable image")
+	}
+	return nil
+}
+
 func referenceBase64(img *pp.Image) string {
 	if img == nil {
 		return ""
@@ -366,7 +405,7 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	}, &out); err != nil {
 		return pp.Result{}, err
 	}
-	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt}
+	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt, ExpiresAt: sess.ExpiresAt}
 	var roles []string
 	for _, d := range out.Devices {
 		roles = append(roles, d.Role)
@@ -418,8 +457,11 @@ type resultView struct {
 			DisplayName  string `json:"displayName"`
 			FirstName    string `json:"firstName"`
 			LastName     string `json:"lastName"`
-			DateOfBirth  string `json:"dateOfBirth"`
-			DateOfExpiry string `json:"dateOfExpiry"`
+			// The chip's DG11 name, never cut off; absent without DG11.
+			FullFirstName string `json:"fullFirstName"`
+			FullLastName  string `json:"fullLastName"`
+			DateOfBirth   string `json:"dateOfBirth"`
+			DateOfExpiry  string `json:"dateOfExpiry"`
 		} `json:"document"`
 		ChipChecks *struct {
 			Passive *struct {
@@ -560,6 +602,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	}
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
+		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
 		out.BirthDate, out.Nationality = doc.DateOfBirth, doc.Nationality
 		ev.DocumentType, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.IssuingState, doc.DateOfExpiry
 	}
@@ -676,10 +719,14 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 		if sess.Status != session.StatusNeedsReview {
 			return errNotUnderReview
 		}
-		if err := sess.SetStatus(to, time.Now().UTC()); err != nil {
+		now := time.Now().UTC()
+		if err := sess.SetStatus(to, now); err != nil {
 			return err
 		}
+		// Who decided and why stay with the session, sealed like the rest:
+		// never in the server log, where a free-text reason does not belong.
 		sess.ErrorCode = errorCode
+		sess.Review = &session.ReviewDecision{Reviewer: reviewer, Reason: reason, DecidedAt: now}
 		return nil
 	})
 	switch {
@@ -697,6 +744,10 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
 	return nil
 }
+
+// errWrongSessionToken is a session that exists under the org but not with the
+// token given.
+var errWrongSessionToken = errors.New("the session token does not match")
 
 // errDeviceActive refuses a handover of a slot whose device is still there.
 var errDeviceActive = errors.New("the device holding this slot is still active; only it can hand the session over")
@@ -787,6 +838,11 @@ func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string)
 func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token string) error {
 	sess, err := s.session(t, id, token)
 	if errors.Is(err, pp.ErrNotFound) {
+		// Gone is fine; there with another token is not erased, and the caller
+		// must not record it as erased.
+		if _, err := s.sessions.ChangedAt(t.ID, id); err == nil {
+			return fmt.Errorf("proofingengine: delete session %s: %w", id, errWrongSessionToken)
+		}
 		return nil
 	}
 	if err != nil {

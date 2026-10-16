@@ -351,7 +351,7 @@ func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
 	if cfg.DiplomaValidatorProvider != ProviderDUO {
 		t.Errorf("diploma validator = %q, want %q", cfg.DiplomaValidatorProvider, ProviderDUO)
 	}
-	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub, envDevMode: "true"})
+	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub, envDevMode: "true", envAppBaseURL: localStack})
 	if err != nil || stub.DiplomaValidatorProvider != ProviderStub {
 		t.Errorf("explicit stub = %q, %v; want %q", stub.DiplomaValidatorProvider, err, ProviderStub)
 	}
@@ -370,6 +370,41 @@ func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
 	}
 }
 
+// DEV_MODE needs APP_BASE_URL set: its default is localhost, so a deployment
+// that left it out would otherwise pass the localhost check.
+func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envDevMode: "true"}); err == nil {
+		t.Error("DEV_MODE without APP_BASE_URL loaded, want an error")
+	}
+}
+
+// The URLs the Idem app sends chip data and selfies to are https, or plain
+// http to this machine, outside a local stack; a local stack may use a LAN
+// address for the phone.
+func TestLoadPhoneURLsNeedHTTPS(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://proofing.example.org": true,
+		"http://localhost:8080":        true,
+		"http://proofing.example.org":  false,
+		"http://192.168.1.20:8080":     false,
+	} {
+		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL} {
+			t.Run(key+"="+raw, func(t *testing.T) {
+				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
+					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
+				}
+			})
+		}
+	}
+	t.Run("a LAN address on a local stack", func(t *testing.T) {
+		if _, err := loadWith(t, map[string]string{
+			envDevMode: "true", envAppBaseURL: localStack, envIdentityProofingPublicURL: "http://192.168.1.20:8080",
+		}); err != nil {
+			t.Errorf("%v, want it loaded", err)
+		}
+	})
+}
+
 // A stub outcome with the engine provider is a half-switched .env: refused,
 // not silently ignored.
 func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
@@ -377,13 +412,17 @@ func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
 		envIdentityProofingProvider:    ProviderEngine,
 		envIdentityProofingStubOutcome: "approved",
 		envDevMode:                     "true",
+		envAppBaseURL:                  localStack,
 	}); err == nil {
 		t.Errorf("%s with %s=%s loaded, want an error", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderEngine)
 	}
 }
 
+// localStack is the APP_BASE_URL of a local developer stack.
+const localStack = "http://localhost:5173"
+
 // A stub that passes a real check runs only on a local stack (DEV_MODE), and
-// DEV_MODE only with a localhost APP_BASE_URL.
+// DEV_MODE only with APP_BASE_URL set to a localhost URL.
 func TestLoadStubsNeedDevMode(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		envIdentityProofingProvider: {envIdentityProofingProvider: ProviderStub},
@@ -399,7 +438,7 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 			}
 		})
 		t.Run(name+" with", func(t *testing.T) {
-			withDevMode := map[string]string{envDevMode: "true"}
+			withDevMode := map[string]string{envDevMode: "true", envAppBaseURL: localStack}
 			maps.Copy(withDevMode, env)
 			if _, err := loadWith(t, withDevMode); err != nil {
 				t.Errorf("%v with %s: %v", env, envDevMode, err)

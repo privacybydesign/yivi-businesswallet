@@ -75,7 +75,11 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 	// the raw DG11, which carries the same BSN and is stored with the evidence.
 	// Older Dutch chips have a BSN in DG11 even when the MRZ shows none. Without
 	// any document to tell the issuing state, DG11 is dropped under a mask or omit
-	// policy rather than kept possibly readable.
+	// policy rather than kept possibly readable. The raw DG1, whose MRZ holds the
+	// BSN on older Dutch documents too, stays until the finish: it re-runs
+	// Passive Authentication, which needs DG1, and then drops it
+	// (redactStepsForStorage). Until then it is sealed with the session, and an
+	// expired or cancelled session keeps none of its steps.
 	bsnPolicy, _ := effectivePrivacyPolicy(resolvedFlow)
 	switch {
 	case req.Document != nil:

@@ -50,10 +50,13 @@ Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stu
 The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
 
 - The stub settings above work only with it; a deployment refuses them at boot.
-- On a fresh database the first person to log in with Yivi whose e-mail address the
-  wallet does not know becomes the platform admin. Every later unknown address is
-  refused as usual. No `PLATFORM_ADMIN_EMAILS` entry is needed.
-- The backend refuses to start with it unless `APP_BASE_URL` is a localhost URL.
+- The first person to log in with Yivi whose e-mail address the wallet does not know
+  becomes the platform admin, whenever that happens: logging in as a seeded account
+  leaves the claim open. Every later unknown address is refused as usual. No
+  `PLATFORM_ADMIN_EMAILS` entry is needed.
+- The backend refuses to start with it unless `APP_BASE_URL` is set to a localhost URL.
+- Outside it, the URLs the phone talks to (`IDENTITY_PROOFING_PUBLIC_URL`,
+  `REGULA_FACE_API_PUBLIC_URL`) must be https, or plain http to localhost.
 
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so

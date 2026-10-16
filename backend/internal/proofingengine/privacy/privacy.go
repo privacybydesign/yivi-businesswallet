@@ -9,8 +9,7 @@ package privacy
 type BSNPolicy string
 
 const (
-	// BSNPolicyRetrieve keeps the BSN as extracted; also what an empty
-	// policy means (see Effective).
+	// BSNPolicyRetrieve keeps the BSN as extracted.
 	BSNPolicyRetrieve BSNPolicy = "retrieve"
 	// BSNPolicyMask replaces all but the BSN's last three digits with stars
 	// (internal/proofingengine/bsn.Mask).
@@ -18,6 +17,11 @@ const (
 	// BSNPolicyOmit drops the BSN entirely before storage.
 	BSNPolicyOmit BSNPolicy = "omit"
 )
+
+// DefaultBSNPolicy is what an empty policy means. An organisation may process
+// a BSN only where a law allows it (Wet algemene bepalingen
+// burgerservicenummer), so keeping one is a flow's explicit choice.
+const DefaultBSNPolicy = BSNPolicyOmit
 
 // ValidBSNPolicy reports whether p is a known BSNPolicy, the empty one included.
 func ValidBSNPolicy(p BSNPolicy) bool {
@@ -29,10 +33,10 @@ func ValidBSNPolicy(p BSNPolicy) bool {
 	}
 }
 
-// Effective is the policy to apply: an empty one behaves as BSNPolicyRetrieve.
+// Effective is the policy to apply: an empty one is DefaultBSNPolicy.
 func (p BSNPolicy) Effective() BSNPolicy {
 	if p == "" {
-		return BSNPolicyRetrieve
+		return DefaultBSNPolicy
 	}
 	return p
 }
@@ -61,10 +65,15 @@ func ValidLegalBasis(b LegalBasis) bool {
 	}
 }
 
-// RedactionPolicy is which evidence images are blurred before storage.
+// RedactionPolicy is which evidence images a session keeps, and what it
+// covers in them, before a result or stored evidence is written.
 type RedactionPolicy struct {
-	// BlurFace blurs the document portrait (DG2) and the live selfie.
-	BlurFace bool
-	// BlurBSN blurs a document photo's located BSN region.
+	// KeepFacePhotos keeps the face photos (the document portrait, DG2 or a
+	// disclosed credential's; the live selfie; the customer's reference photo)
+	// in the result and the stored evidence. Off by default: the face match has
+	// run by then and its verdicts stay, and most customers need no picture. One
+	// under a duty to keep it turns this on.
+	KeepFacePhotos bool
+	// BlurBSN covers a document photo's located BSN region.
 	BlurBSN bool
 }

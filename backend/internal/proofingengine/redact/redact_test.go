@@ -10,11 +10,10 @@ import (
 	"testing"
 )
 
-// checkerboardPNG returns a 64x64 base64 PNG with a high-frequency
+// checkerboardPNG returns a size x size base64 PNG with a high-frequency
 // checkerboard pattern (alternating black/white pixels) so a redacted
-// region is easy to distinguish from an untouched one: pixelation flattens
-// the checkerboard's per-pixel variance within the redacted block, while an
-// untouched region keeps it.
+// region is easy to distinguish from an untouched one: a cover flattens the
+// checkerboard's per-pixel variance, while an untouched region keeps it.
 func checkerboardPNG(t *testing.T, size int) string {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
@@ -61,21 +60,6 @@ func hasVariance(img *image.RGBA, r image.Rectangle) bool {
 	return false
 }
 
-func TestImageBlursWholeImage(t *testing.T) {
-	src := checkerboardPNG(t, 64)
-	out, mime, err := Image(src, "image/png")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mime != "image/png" {
-		t.Errorf("mime = %q, want image/png", mime)
-	}
-	got := decodePNG(t, out)
-	if hasVariance(got, got.Bounds()) {
-		t.Error("whole image still shows checkerboard variance after Image()")
-	}
-}
-
 func TestRegionBlursOnlyItsRect(t *testing.T) {
 	src := checkerboardPNG(t, 64)
 	// Redact only the left half.
@@ -106,14 +90,7 @@ func TestRegionClampsCoordinates(t *testing.T) {
 	}
 }
 
-func TestImageEmptyPassesThrough(t *testing.T) {
-	out, mime, err := Image("", "image/jpeg")
-	if err != nil || out != "" || mime != "image/jpeg" {
-		t.Fatalf("Image(\"\", ...) = %q, %q, %v, want passthrough", out, mime, err)
-	}
-}
-
-func TestImagePreservesJPEGFormat(t *testing.T) {
+func TestRegionPreservesJPEGFormat(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 32, 32))
 	for y := range 32 {
 		for x := range 32 {
@@ -126,17 +103,11 @@ func TestImagePreservesJPEGFormat(t *testing.T) {
 	}
 	src := base64.StdEncoding.EncodeToString(buf.Bytes())
 
-	_, mime, err := Image(src, "image/jpeg")
+	_, mime, err := Region(src, "image/jpeg", Rect{X: 0, Y: 0, W: 0.5, H: 0.5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mime != "image/jpeg" {
-		t.Errorf("mime = %q, want image/jpeg (format should be preserved)", mime)
-	}
-}
-
-func TestImageRejectsCorruptData(t *testing.T) {
-	if _, _, err := Image("not-actually-base64-image-data", "image/jpeg"); err == nil {
-		t.Fatal("expected an error for corrupt/undecodable image data")
+	if mime != mimeJPEG {
+		t.Errorf("mime = %q, want %s (format should be preserved)", mime, mimeJPEG)
 	}
 }

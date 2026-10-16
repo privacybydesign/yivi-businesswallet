@@ -17,7 +17,7 @@ func TestApplyBSNPolicy(t *testing.T) {
 		want            string
 	}{
 		{"retrieve keeps a BSN", dutchIssuingState, validBSN, privacy.BSNPolicyRetrieve, validBSN},
-		{"empty policy keeps a BSN", dutchIssuingState, validBSN, "", validBSN},
+		{"empty policy drops a BSN", dutchIssuingState, validBSN, "", ""},
 		{"mask masks a BSN", dutchIssuingState, validBSN, privacy.BSNPolicyMask, "****.**.782"},
 		{"omit drops a BSN", dutchIssuingState, validBSN, privacy.BSNPolicyOmit, ""},
 		{"retrieve drops a non-BSN", dutchIssuingState, invalidBSN, privacy.BSNPolicyRetrieve, ""},

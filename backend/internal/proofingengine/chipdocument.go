@@ -121,6 +121,7 @@ func icaoDocument(dg1Bytes []byte, ev *mrtdEvidenceRequest, now time.Time) (*doc
 	details := dg11.Details
 	// DG11's name is UTF-8 and keeps diacritics the MRZ transliterates away.
 	if g, s := mrzNameParts(details.NameOfHolder); s != "" {
+		doc.FullFirstName, doc.FullLastName = g, s
 		doc.DisplayName = displayName(g, s)
 	}
 	if full, ok := fullDate(details.FullDateOfBirth); ok {

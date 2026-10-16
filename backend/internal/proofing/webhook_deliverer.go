@@ -22,18 +22,17 @@ const (
 	// that never answers holds a worker for safehttp.RequestTimeout, not the
 	// batch.
 	deliveryWorkers = 10
-	// endpointWorkers is how many of a batch go to one endpoint at once, so a
-	// slow endpoint holds at most this many workers and the rest keep sending
-	// every other org's deliveries.
+	// endpointWorkers is how many of one endpoint's deliveries a batch takes
+	// (claimDue) and sends at once (sendFair). A slow endpoint holds at most
+	// this many workers, and since the next batch waits for the last, it costs
+	// every other org one RequestTimeout per batch, not its whole backlog.
 	//
 	// It also bounds the batch inside deliveryLease. Worst case, every
-	// delivery of the batch goes to one endpoint that never answers: that
-	// endpoint's sends run ceil(deliveryBatch/endpointWorkers) = 10 deep,
-	// 10 x RequestTimeout (10 s) = 100 s. Across endpoints, the time all
-	// deliveryWorkers are busy adds at most deliveryBatch/deliveryWorkers x
-	// RequestTimeout = 20 s, so a batch ends within 120 s, well inside the
-	// 5 min lease, and no delivery is re-claimed and sent twice.
-	// TestDeliveryBatchFitsLease holds this.
+	// delivery of the batch goes to an endpoint that never answers: each
+	// endpoint's sends run one round deep, and all deliveryWorkers busy adds
+	// at most deliveryBatch/deliveryWorkers x RequestTimeout (10 s) = 20 s, so
+	// a batch ends within 30 s, well inside the 5 min lease, and no delivery
+	// is re-claimed and sent twice. TestDeliveryBatchFitsLease holds this.
 	endpointWorkers = 2
 	// responseDrainLimit bounds how much of a receiver's answer is read: only
 	// its status matters.
@@ -65,7 +64,7 @@ func NewDeliverer(store *WebhookStore, policy safehttp.Policy) *Deliverer {
 // DeliverDue sends the deliveries that are due and records each outcome; it
 // reports how many it attempted. One endpoint failing does not stop the round.
 func (d *Deliverer) DeliverDue(ctx context.Context) (int64, error) {
-	due, err := d.store.claimDue(ctx, deliveryBatch)
+	due, err := d.store.claimDue(ctx, deliveryBatch, endpointWorkers)
 	if err != nil {
 		return 0, err
 	}

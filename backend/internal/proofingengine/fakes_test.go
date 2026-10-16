@@ -19,10 +19,14 @@ import (
 type memSessions struct {
 	mu   sync.Mutex
 	byID map[string]session.Session
+	// writes counts each session's writes, standing in for updated_at;
+	// gets counts the reads that unseal (Get).
+	writes map[string]int
+	gets   atomic.Int64
 }
 
 func newMemSessions(sessions ...session.Session) *memSessions {
-	m := &memSessions{byID: map[string]session.Session{}}
+	m := &memSessions{byID: map[string]session.Session{}, writes: map[string]int{}}
 	for _, s := range sessions {
 		m.byID[s.ID] = copyYivi(s)
 	}
@@ -36,7 +40,17 @@ func (m *memSessions) Create(sess session.Session) (session.Session, error) {
 	return sess, nil
 }
 
+func (m *memSessions) ChangedAt(_, id string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.byID[id]; !ok {
+		return time.Time{}, session.ErrNotFound
+	}
+	return time.Unix(int64(m.writes[id]), 0), nil
+}
+
 func (m *memSessions) Get(_, id string) (session.Session, error) {
+	m.gets.Add(1)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sess, ok := m.byID[id]
@@ -91,6 +105,7 @@ func (m *memSessions) Update(_, id string, fn func(*session.Session) error) (ses
 		return session.Session{}, err
 	}
 	m.byID[id] = sess
+	m.writes[id]++
 	return copyYivi(sess), nil
 }
 

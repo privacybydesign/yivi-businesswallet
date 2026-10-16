@@ -281,8 +281,9 @@ func (s *DataRequestStore) scanRequests(ctx context.Context, query string, args 
 }
 
 // RecordDecision marks each of req's matches approved or not, and sets until
-// when an approved "see my data" request's data downloads (nil for none).
-func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time) error {
+// when an approved "see my data" request's data downloads (nil for none) and
+// how many matches an approved erasure kept (nil for any other decision).
+func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
 			return cmp.Or(err, ErrNotUnderReview)
@@ -291,8 +292,9 @@ func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, appr
 			WHERE request_id = $1`, req.ID, approved); err != nil {
 			return fmt.Errorf("proofing: decide matches request %s: %w", req.ID, err)
 		}
-		if _, err := q.Exec(ctx, `UPDATE identity_proofing_requests SET data_export_until = $2, updated_at = now()
-			WHERE id = $1`, req.ID, exportUntil); err != nil {
+		if _, err := q.Exec(ctx, `UPDATE identity_proofing_requests SET data_export_until = $2, data_matches_kept = $3,
+				updated_at = now()
+			WHERE id = $1`, req.ID, exportUntil, kept); err != nil {
 			return fmt.Errorf("proofing: data export request %s: %w", req.ID, err)
 		}
 		return nil

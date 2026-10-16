@@ -13,9 +13,15 @@ import (
 // diplomaFormField is the multipart field each extract is uploaded in.
 const diplomaFormField = "file"
 
-// maxDiplomaUploadBytes bounds one upload request: every extract at its
-// largest, plus the multipart framing.
-const maxDiplomaUploadBytes = MaxDiplomasPerRequest*MaxDiplomaFileBytes + 1<<20
+// diplomaUploadFraming is what an upload's multipart framing may add to its
+// extracts' bytes.
+const diplomaUploadFraming = 1 << 20
+
+// maxDiplomaUpload bounds an upload of at most slots extracts: each at its
+// largest, plus the framing.
+func maxDiplomaUpload(slots int) int64 {
+	return int64(slots)*MaxDiplomaFileBytes + diplomaUploadFraming
+}
 
 type flowDiplomasBody struct {
 	DiplomaMode DiplomaMode `json:"diplomaMode"`
@@ -115,11 +121,11 @@ func writeDiplomaVerdicts(w http.ResponseWriter, r *http.Request, verdicts []Dip
 	respond.JSON(w, r, http.StatusOK, out)
 }
 
-// readDiplomaFiles reads the extracts of a multipart upload, each at most
-// MaxDiplomaFileBytes, part by part into memory: an upload never spills to a
-// temporary file, as ParseMultipartForm's would.
-func readDiplomaFiles(w http.ResponseWriter, r *http.Request) ([]DiplomaFile, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxDiplomaUploadBytes)
+// readDiplomaFiles reads the extracts of a multipart upload, at most slots of
+// them and each at most MaxDiplomaFileBytes, part by part into memory: an
+// upload never spills to a temporary file, as ParseMultipartForm's would.
+func readDiplomaFiles(w http.ResponseWriter, r *http.Request, slots int) ([]DiplomaFile, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxDiplomaUpload(slots))
 	reader, err := r.MultipartReader()
 	if err != nil {
 		return nil, diplomaReadError(err)
@@ -136,8 +142,8 @@ func readDiplomaFiles(w http.ResponseWriter, r *http.Request) ([]DiplomaFile, er
 		if part.FormName() != diplomaFormField || part.FileName() == "" {
 			continue
 		}
-		if len(files) == MaxDiplomasPerRequest {
-			return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "too_many_files", Message: fmt.Sprintf("upload at most %d extracts", MaxDiplomasPerRequest)}
+		if len(files) == slots {
+			return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "too_many_files", Message: fmt.Sprintf("upload at most %d extracts", slots)}
 		}
 		b, err := io.ReadAll(io.LimitReader(part, MaxDiplomaFileBytes+1))
 		if err != nil {
@@ -155,7 +161,7 @@ func readDiplomaFiles(w http.ResponseWriter, r *http.Request) ([]DiplomaFile, er
 }
 
 // diplomaReadError is the answer to an upload that does not read: too large
-// past maxDiplomaUploadBytes, else not well-formed multipart/form-data.
+// past maxDiplomaUpload, else not well-formed multipart/form-data.
 func diplomaReadError(err error) error {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
@@ -170,7 +176,7 @@ func (h *Handler) addDiplomas(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	files, err := readDiplomaFiles(w, r)
+	files, err := readDiplomaFiles(w, r, MaxDiplomasPerRequest)
 	if err != nil {
 		return err
 	}
@@ -185,12 +191,14 @@ func (h *Handler) addDiplomas(w http.ResponseWriter, r *http.Request) error {
 // hostedAddDiplomas checks the extracts a hosted link's subject uploaded. The
 // link is checked before the body is read: the route is anonymous, and its
 // rate limit is keyed on the token, so a fresh token per call would otherwise
-// buy a full upload's worth of memory each time.
+// buy a full upload's worth of memory each time. It reads no more extracts
+// than the request still takes.
 func (h *Handler) hostedAddDiplomas(w http.ResponseWriter, r *http.Request) error {
-	if err := h.service.HostedDiplomasOpen(r.Context(), r.PathValue("token")); err != nil {
+	slots, err := h.service.HostedDiplomasOpen(r.Context(), r.PathValue("token"))
+	if err != nil {
 		return mapError(err)
 	}
-	files, err := readDiplomaFiles(w, r)
+	files, err := readDiplomaFiles(w, r, slots)
 	if err != nil {
 		return err
 	}

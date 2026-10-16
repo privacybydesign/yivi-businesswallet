@@ -18,12 +18,14 @@ import {
   BSN_POLICIES,
   FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
+  ATTRIBUTE_DOCUMENT,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
   emptyFlowDraft,
   flowDraftError,
   flowSpecFromDraft,
+  identityRequired,
   isProofingStep,
   proofingErrorMessage,
 } from "../lib/identity-proofing";
@@ -86,11 +88,30 @@ export function FlowEditor({
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
   const [touched, setTouched] = useState(false);
-  const invalid = flowDraftError(draft);
+  // A data request asks for no diplomas.
+  const diplomas: DiplomaMode = isDataRequest(flowKind) ? "off" : diplomaMode;
+  const requiresIdentity = identityRequired(flowKind, diplomas);
+  const invalid = flowDraftError(draft, requiresIdentity);
   const steps = draftSteps(draft);
 
   function update(patch: Partial<ProofingFlowDraft>): void {
     setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  // Choosing a data request or required diplomas ticks Document data, which
+  // then stays ticked (identityRequired).
+  function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
+    setFlowKind(kind);
+    setDiplomaMode(mode);
+    if (identityRequired(kind, isDataRequest(kind) ? "off" : mode)) {
+      setDraft((current) => ({
+        ...current,
+        requestedAttributes: new Set([
+          ...current.requestedAttributes,
+          ATTRIBUTE_DOCUMENT,
+        ]),
+      }));
+    }
   }
 
   function toggleAttribute(value: string, on: boolean): void {
@@ -111,42 +132,48 @@ export function FlowEditor({
     }
     const spec = flowSpecFromDraft(draft);
     const specKey = JSON.stringify(spec);
-    const followUps = (flow: ProofingFlow): void => {
-      const finish = (): void => {
-        onSaved?.(flow);
-        onDone();
-      };
-      const kindThenFinish = (): void => {
+    const finish = (flow: ProofingFlow): void => {
+      onSaved?.(flow);
+      onDone();
+    };
+    // The diploma mode, then the kind, each only when it changed.
+    const saveSettings = (flowId: string, then: () => void): void => {
+      const kindThen = (): void => {
         if (flowKind === savedKind) {
-          finish();
+          then();
           return;
         }
-        saveKind.mutate(
-          { flowId: flow.id, kind: flowKind },
-          { onSuccess: finish },
-        );
+        saveKind.mutate({ flowId, kind: flowKind }, { onSuccess: then });
       };
-      // A data request asks for no diplomas.
-      const diplomas = isDataRequest(flowKind) ? "off" : diplomaMode;
       if (diplomas === savedDiplomas) {
-        kindThenFinish();
+        kindThen();
         return;
       }
-      saveDiplomas.mutate(
-        { flowId: flow.id, mode: diplomas },
-        { onSuccess: kindThenFinish },
-      );
+      saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess: kindThen });
     };
-    if (saved !== null && saved.spec === specKey) {
-      followUps(saved.flow);
+    const saveSpec = (then: (flow: ProofingFlow) => void): void => {
+      if (saved !== null && saved.spec === specKey) {
+        then(saved.flow);
+        return;
+      }
+      save.mutate(spec, {
+        onSuccess: (flow) => {
+          setSaved({ flow, spec: specKey });
+          then(flow);
+        },
+      });
+    };
+    // The service holds a data request or required-diplomas flow to reading
+    // the name and date of birth, in each version and setting. Settings that
+    // lift that go before a version that may drop it; otherwise the version
+    // goes first, and the settings that need it check the version that reads
+    // it.
+    const existingId = saved?.flow.id ?? editing?.id;
+    if (existingId !== undefined && !requiresIdentity) {
+      saveSettings(existingId, () => saveSpec(finish));
       return;
     }
-    save.mutate(spec, {
-      onSuccess: (flow) => {
-        setSaved({ flow, spec: specKey });
-        followUps(flow);
-      },
-    });
+    saveSpec((flow) => saveSettings(flow.id, () => finish(flow)));
   }
 
   const fieldError = (field: typeof invalid): string | null =>
@@ -198,7 +225,9 @@ export function FlowEditor({
             id="proofing-flow-kind"
             className={SELECT_CLASS}
             value={flowKind}
-            onChange={(event) => setFlowKind(event.target.value as FlowKind)}
+            onChange={(event) =>
+              chooseKindAndDiplomas(event.target.value as FlowKind, diplomaMode)
+            }
           >
             {FLOW_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -249,7 +278,9 @@ export function FlowEditor({
             disabled={isDataRequest(flowKind)}
             label={t("identityProofingFlows.steps.diploma_upload")}
             hint={t("identityProofingFlows.new.diplomaUploadHint")}
-            onChange={(checked) => setDiplomaMode(checked ? "required" : "off")}
+            onChange={(checked) =>
+              chooseKindAndDiplomas(flowKind, checked ? "required" : "off")
+            }
           />
           {saveDiplomas.isError && (
             <p className={ERROR}>
@@ -263,7 +294,7 @@ export function FlowEditor({
                     ...steps
                       .filter(isProofingStep)
                       .map((step) => t(`identityProofingFlows.steps.${step}`)),
-                    ...(diplomaMode === "off"
+                    ...(diplomas === "off"
                       ? []
                       : [t("identityProofingFlows.steps.diploma_upload")]),
                   ].join(" → "),
@@ -314,12 +345,17 @@ export function FlowEditor({
           <div className="grid gap-3 sm:grid-cols-2">
             {REQUESTED_ATTRIBUTES.map(({ value }) => {
               const available = attributeAvailable(draft, value);
+              // Once ticked: an older version without it can still tick it.
+              const locked =
+                requiresIdentity &&
+                value === ATTRIBUTE_DOCUMENT &&
+                draft.requestedAttributes.has(value);
               return (
                 <Checkbox
                   key={value}
                   id={`proofing-flow-attr-${value}`}
                   checked={available && draft.requestedAttributes.has(value)}
-                  disabled={!available}
+                  disabled={!available || locked}
                   label={t(`identityProofingFlows.attributes.${value}`)}
                   hint={t(`identityProofingFlows.attributeHints.${value}`)}
                   onChange={(checked) => toggleAttribute(value, checked)}
@@ -328,6 +364,16 @@ export function FlowEditor({
             })}
           </div>
           <p className={HINT}>{t("identityProofingFlows.new.dataHint")}</p>
+          {requiresIdentity && (
+            <p className={HINT}>
+              {t("identityProofingFlows.new.identityLocked")}
+            </p>
+          )}
+          {fieldError("identity") && (
+            <p role="alert" className={ERROR}>
+              {fieldError("identity")}
+            </p>
+          )}
         </fieldset>
 
         <fieldset className="flex flex-col gap-3">
@@ -470,7 +516,11 @@ export function FlowEditor({
                 })
               }
             >
-              <option value="">{t("identityProofingFlows.new.inherit")}</option>
+              <option value="">
+                {t("identityProofingFlows.new.defaultOption", {
+                  option: t("identityProofingFlows.bsnPolicies.omit"),
+                })}
+              </option>
               {BSN_POLICIES.map((policy) => (
                 <option key={policy} value={policy}>
                   {t(`identityProofingFlows.bsnPolicies.${policy}`)}
@@ -496,10 +546,11 @@ export function FlowEditor({
             />
           </Field>
           <TristateField
-            id="proofing-flow-blur-face"
-            label={t("identityProofingFlows.new.blurFace")}
-            value={draft.blurFace}
-            onChange={(blurFace) => update({ blurFace })}
+            id="proofing-flow-keep-face-photos"
+            label={t("identityProofingFlows.new.keepFacePhotos")}
+            hint={t("identityProofingFlows.new.keepFacePhotosHint")}
+            value={draft.keepFacePhotos}
+            onChange={(keepFacePhotos) => update({ keepFacePhotos })}
           />
           <TristateField
             id="proofing-flow-blur-bsn"
@@ -564,24 +615,30 @@ function Field({
 function TristateField({
   id,
   label,
+  hint,
   value,
   onChange,
 }: {
   id: string;
   label: string;
+  hint?: string;
   value: Tristate;
   onChange: (value: Tristate) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <Field id={id} label={label}>
+    <Field id={id} label={label} hint={hint}>
       <select
         id={id}
         className={SELECT_CLASS}
         value={value}
         onChange={(event) => onChange(event.target.value as Tristate)}
       >
-        <option value="">{t("identityProofingFlows.new.inherit")}</option>
+        <option value="">
+          {t("identityProofingFlows.new.defaultOption", {
+            option: t("identityProofingFlows.new.no"),
+          })}
+        </option>
         <option value="true">{t("identityProofingFlows.new.yes")}</option>
         <option value="false">{t("identityProofingFlows.new.no")}</option>
       </select>

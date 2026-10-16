@@ -9,6 +9,7 @@ import {
 } from "../api/identity-proofing.queries";
 import type {
   ProofingCustomer,
+  ProofingImage,
   ProofingRequest,
   ProofingResult,
 } from "../api/identity-proofing";
@@ -370,7 +371,9 @@ function SessionRow({
                   {showIdentity && <IdentityRows result={result} />}
                 </dl>
                 {showIdentity && result.data && (
-                  <IdentityPhotos result={result.data} />
+                  // Keyed by the session, so a photo revealed in one session is
+                  // blurred again in the next.
+                  <IdentityPhotos key={request.id} result={result.data} />
                 )}
                 {showIdentity && (
                   <p className={HINT}>
@@ -654,8 +657,9 @@ function IdentityRows({
 // The document's photo (read off the chip over NFC, or the disclosed
 // credential's), or the customer's own photo for a flow without the chip,
 // beside the live selfie matched against it, and the photos of
-// the document's front and back; only an approval carries them, and only when
-// the flow requested them.
+// the document's front and back; only an approval carries them, only when
+// the flow requested them, and the face photos only when it keeps them. Each
+// is blurred until a member reveals it.
 function IdentityPhotos({
   result,
 }: {
@@ -675,19 +679,68 @@ function IdentityPhotos({
       {photos.map(
         ({ key, image }) =>
           image && (
-            <figure key={key} className="flex flex-col gap-1.5">
-              <img
-                src={imageSource(image)}
-                alt={t(`customers.sessions.identity.${key}`)}
-                className="border-line h-40 w-auto rounded-md border object-cover"
-              />
-              <figcaption className="text-muted text-[12px]">
-                {t(`customers.sessions.identity.${key}`)}
-              </figcaption>
-            </figure>
+            <RevealablePhoto
+              key={key}
+              image={image}
+              label={t(`customers.sessions.identity.${key}`)}
+            />
           ),
       )}
     </div>
+  );
+}
+
+const REVEAL_ICON_SIZE = 16;
+
+// A photo blurred until a member reveals it. It is in the page already (and
+// opening the session is audited); the blur keeps a face or a document from
+// being seen in passing, on a shared screen or over a shoulder.
+function RevealablePhoto({
+  image,
+  label,
+}: {
+  image: ProofingImage;
+  label: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <figure className="flex flex-col gap-1.5">
+      <div className="border-line relative h-40 overflow-hidden rounded-md border">
+        <img
+          src={imageSource(image)}
+          alt={label}
+          className={`h-full w-auto object-cover transition-[filter] motion-reduce:transition-none ${revealed ? "" : "scale-110 blur-xl"}`}
+        />
+        {!revealed && (
+          <button
+            type="button"
+            onClick={() => setRevealed(true)}
+            aria-label={t("customers.sessions.identity.revealPhoto", {
+              name: label,
+            })}
+            className="focus-visible:ring-ink/30 absolute inset-0 flex items-center justify-center outline-none focus-visible:ring-3"
+          >
+            <span className="bg-surface/90 text-ink inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold shadow-sm">
+              <Icon name="view" size={REVEAL_ICON_SIZE} />
+              {t("customers.sessions.identity.reveal")}
+            </span>
+          </button>
+        )}
+      </div>
+      <figcaption className="text-muted flex items-center gap-2 text-[12px]">
+        {label}
+        {revealed && (
+          <button
+            type="button"
+            onClick={() => setRevealed(false)}
+            className="text-link font-semibold hover:underline"
+          >
+            {t("customers.sessions.identity.conceal")}
+          </button>
+        )}
+      </figcaption>
+    </figure>
   );
 }
 

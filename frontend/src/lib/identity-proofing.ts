@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
+import { isDataRequest } from "../api/identity-proofing";
 import type {
   DiplomaMode,
   FlowKind,
@@ -47,10 +48,26 @@ export function progressPollContinues(
   progress: { status: string } | undefined,
   error: Error | null,
 ): boolean {
-  if (error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)) {
+  if (refusedForGood(error)) {
     return false;
   }
   return progress === undefined || isProofingLive(progress.status);
+}
+
+// Whether a verify page keeps re-reading a session in review, slowly: a
+// person decides it, or its customer's erasure setting seconds after it got
+// there, while the subject may still be watching.
+export function reviewPollContinues(
+  progress: { status: string } | undefined,
+  error: Error | null,
+): boolean {
+  return !refusedForGood(error) && progress?.status === "needs_review";
+}
+
+function refusedForGood(error: Error | null): boolean {
+  return (
+    error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)
+  );
 }
 
 export function proofingStatusTone(status: string): ProofingStatusTone {
@@ -185,7 +202,8 @@ export function yiviAppAvailable(flow: {
   );
 }
 
-// "" inherits the tenant's policy at the proofing service.
+// "" is the proofing service's default: omit for the BSN policy, off for the
+// covers.
 export type Inherit<T extends string> = "" | T;
 export type Tristate = "" | "true" | "false";
 
@@ -206,7 +224,7 @@ export interface ProofingFlowDraft {
   acceptedIssuingCountries: string;
   assuranceLevel: Inherit<AssuranceLevel>;
   bsnPolicy: Inherit<(typeof BSN_POLICIES)[number]>;
-  blurFace: Tristate;
+  keepFacePhotos: Tristate;
   blurBsn: Tristate;
   // Whole seconds as typed; "" or 0 is no override.
   retentionSeconds: string;
@@ -304,7 +322,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     acceptedIssuingCountries: "",
     assuranceLevel: "",
     bsnPolicy: "",
-    blurFace: "",
+    keepFacePhotos: "",
     blurBsn: "",
     retentionSeconds: "",
     carried: {},
@@ -346,7 +364,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
     bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy),
-    blurFace: tristate(flow.blurFace),
+    keepFacePhotos: tristate(flow.keepFacePhotos),
     blurBsn: tristate(flow.blurBsn),
     retentionSeconds: flow.retentionOverrideSeconds
       ? String(flow.retentionOverrideSeconds)
@@ -372,6 +390,7 @@ function list(raw: string): string[] {
 export type FlowDraftError =
   | "name"
   | "steps"
+  | "identity"
   | "assuranceLevel"
   | "issuingCountries"
   | "faceMatchThreshold"
@@ -381,14 +400,25 @@ export type FlowDraftError =
 // a country has the code is the engine's check (flow.ValidIssuingCountry).
 const ISSUING_COUNTRY = /^[A-Z]{3}$/;
 
+// requiresIdentity is identityRequired for the flow's kind and diplomas.
 export function flowDraftError(
   draft: ProofingFlowDraft,
+  requiresIdentity = false,
 ): FlowDraftError | null {
   if (draft.name.trim() === "") {
     return "name";
   }
   if (draftSteps(draft).length === 0) {
     return "steps";
+  }
+  if (
+    requiresIdentity &&
+    !(
+      draft.requestedAttributes.has(ATTRIBUTE_DOCUMENT) &&
+      attributeAvailable(draft, ATTRIBUTE_DOCUMENT)
+    )
+  ) {
+    return "identity";
   }
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
@@ -444,7 +474,10 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     requiredChecks,
     requestedAttributes:
       requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
-    acceptedDocumentTypes: list(draft.acceptedDocumentTypes),
+    // The engine compares both exactly, against the MRZ's capitals.
+    acceptedDocumentTypes: list(draft.acceptedDocumentTypes).map((type) =>
+      type.toUpperCase(),
+    ),
     acceptedIssuingCountries: list(draft.acceptedIssuingCountries).map(
       (country) => country.toUpperCase(),
     ),
@@ -463,8 +496,8 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.bsnPolicy !== "") {
     spec.bsnPolicy = draft.bsnPolicy;
   }
-  if (draft.blurFace !== "") {
-    spec.blurFace = draft.blurFace === "true";
+  if (draft.keepFacePhotos !== "") {
+    spec.keepFacePhotos = draft.keepFacePhotos === "true";
   }
   if (draft.blurBsn !== "") {
     spec.blurBsn = draft.blurBsn === "true";
@@ -557,12 +590,15 @@ export function reviewSubmitStep({
     : "decide";
 }
 
-// Whether a reviewer may tick a match of level for a data request of kind: an
-// erasure takes only a session proven with the requester's own document
-// (proofing.approvedMatches), since any other may be another person's and an
-// erasure cannot be undone.
-export function matchTickable(kind: FlowKind, level: string): boolean {
-  return kind !== "data_erasure" || level === "strong";
+// Whether a match of level starts ticked on a data request of kind, as
+// proofing.approvedMatches takes it without a tick: for an erasure, a session
+// whose name and date of birth were read off a verified chip (the same
+// document or another); for "see my data", only one proven with the same
+// document. The reviewer ticks any other that is the person's.
+export function matchTickedByDefault(kind: FlowKind, level: string): boolean {
+  return (
+    level === "strong" || (kind === "data_erasure" && level === "probable")
+  );
 }
 
 // The backend's own message for an error whose text is meant for the reader:
@@ -583,36 +619,63 @@ function serverMessage(error: unknown): string | null {
 // Why the proofing service did not approve a session, from its errorCode. An
 // unknown code is shown as is, so a new one still says something.
 export function proofingRejectionReason(code: string, t: TFunction): string {
-  switch (code) {
-    case "DOCUMENT_TYPE_NOT_ACCEPTED":
-      return t("identityProofing.rejectionReasons.documentTypeNotAccepted");
-    case "DOCUMENT_COUNTRY_NOT_ACCEPTED":
-      return t("identityProofing.rejectionReasons.documentCountryNotAccepted");
-    case "FACE_STEP_NOT_COMPLETED":
-      return t("identityProofing.rejectionReasons.faceStepNotCompleted");
-    case "FACE_NO_MATCH":
-      return t("identityProofing.rejectionReasons.faceNoMatch");
-    case "LIVENESS_FAILED":
-      return t("identityProofing.rejectionReasons.livenessFailed");
-    case "CHIP_AUTH_MISSING":
-      return t("identityProofing.rejectionReasons.chipAuthMissing");
-    case "DOC_TAMPERED":
-      return t("identityProofing.rejectionReasons.docTampered");
-    case "CHIP_CLONE_DETECTED":
-      return t("identityProofing.rejectionReasons.chipCloneDetected");
-    case "DOC_EXPIRED":
-      return t("identityProofing.rejectionReasons.docExpired");
-    case "ASSURANCE_NOT_MET":
-      return t("identityProofing.rejectionReasons.assuranceNotMet");
-    case "IDENTITY_MISMATCH":
-      return t("identityProofing.rejectionReasons.identityMismatch");
-    case "REVIEW_LAPSED":
-      return t("identityProofing.rejectionReasons.reviewLapsed");
-    case "ORG_PAUSED":
-      return t("identityProofing.rejectionReasons.orgPaused");
-    default:
-      return code;
-  }
+  const key = REJECTION_REASON_KEYS[code as ProofingRejectionCode];
+  return key === undefined
+    ? t("identityProofing.rejectionReasons.unknown", { code })
+    : t(`identityProofing.rejectionReasons.${key}`);
+}
+
+// The copy of every code a session is rejected with: the engine's failed
+// checks and the wallet's own decisions (a review, a lapse, a pause, a legal
+// duty). The test holds it to the backend's codes, both ways.
+const REJECTION_REASON_KEYS = {
+  DOCUMENT_TYPE_NOT_ACCEPTED: "documentTypeNotAccepted",
+  DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
+  FACE_STEP_NOT_COMPLETED: "faceStepNotCompleted",
+  FACE_NO_MATCH: "faceNoMatch",
+  REFERENCE_NO_FACE: "referenceNoFace",
+  PHOTO_MISSING: "photoMissing",
+  LIVENESS_FAILED: "livenessFailed",
+  DOC_TAMPERED: "docTampered",
+  CHIP_CLONE_DETECTED: "chipCloneDetected",
+  DOC_EXPIRED: "docExpired",
+  ASSURANCE_NOT_MET: "assuranceNotMet",
+  IDENTITY_MISMATCH: "identityMismatch",
+  MANUAL_REVIEW_REJECTED: "manualReviewRejected",
+  REVIEW_LAPSED: "reviewLapsed",
+  LEGAL_RETENTION: "legalRetention",
+  ORG_PAUSED: "orgPaused",
+} as const;
+
+export type ProofingRejectionCode = keyof typeof REJECTION_REASON_KEYS;
+
+export const PROOFING_REJECTION_CODES = Object.keys(
+  REJECTION_REASON_KEYS,
+) as ProofingRejectionCode[];
+
+// Why a data request whose subject did prove who they are was refused: a
+// reviewer refused it, nobody answered it, proofing was paused, or the
+// customer must keep the data. The subject's page then says the request was
+// refused, not that they were not verified.
+export type DataRequestRefusal = "reviewer" | "lapsed" | "paused" | "law";
+
+const DATA_REQUEST_REFUSALS: Partial<
+  Record<ProofingRejectionCode, DataRequestRefusal>
+> = {
+  MANUAL_REVIEW_REJECTED: "reviewer",
+  REVIEW_LAPSED: "lapsed",
+  ORG_PAUSED: "paused",
+  LEGAL_RETENTION: "law",
+};
+
+// The refusal a data request's error code stands for; undefined for a failed
+// identity check, which the outcome explains itself.
+export function dataRequestRefusal(
+  errorCode: string | undefined,
+): DataRequestRefusal | undefined {
+  return errorCode === undefined
+    ? undefined
+    : DATA_REQUEST_REFUSALS[errorCode as ProofingRejectionCode];
 }
 
 // The stages a verify page's stepper shows: what is collected, the app (when
@@ -671,6 +734,9 @@ export function sendableByMail(
   return (flow?.diplomaMode ?? "off") === "off";
 }
 
+// The document data a flow releases: the holder's name and date of birth.
+export const ATTRIBUTE_DOCUMENT = "dg1";
+
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1), which a request for one known person is matched
 // against (proofing.readsIdentity). The service hands a flow back listing
@@ -678,7 +744,17 @@ export function sendableByMail(
 export function readsIdentity(
   flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {
-  return flow?.requestedAttributes?.includes("dg1") ?? false;
+  return flow?.requestedAttributes?.includes(ATTRIBUTE_DOCUMENT) ?? false;
+}
+
+// Whether a flow of kind with diplomas must read the name and date of birth
+// (proofing.identityRequired): a data request's other sessions are found by
+// them, and a required diploma's holder is checked against them.
+export function identityRequired(
+  kind: FlowKind,
+  diplomas: DiplomaMode,
+): boolean {
+  return isDataRequest(kind) || diplomas !== "off";
 }
 
 // Why an uploaded diploma extract was not kept, from its verdict's reason.
@@ -767,6 +843,10 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.dataFlowForMember");
     case "export_unavailable":
       return t("identityProofing.errors.exportUnavailable");
+    // An admin by role whose mandate was withdrawn: the backend refuses every
+    // admin call, though the role still shows the admin's tabs.
+    case "mandate_withdrawn":
+      return t("identityProofing.errors.mandateWithdrawn");
     // too_large is a diploma upload's, payload_too_large a branding logo's.
     case "too_large":
     case "payload_too_large":
@@ -778,6 +858,63 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
     default:
       return t("identityProofing.errors.generic");
   }
+}
+
+// What a hosted link's subject is told when a call fails. The wallet's copy
+// speaks to its members ("an admin can resume it", "pick another flow"), so
+// whatever the subject cannot act on reads as the link not working for now.
+export function hostedErrorMessage(error: unknown, t: TFunction): string {
+  switch (errorCode(error)) {
+    case null:
+    case "rate_limited":
+      return t("identityProofing.errors.generic");
+    case "link_started":
+    case "device_active":
+    case "diplomas_closed":
+    case "export_unavailable":
+    case "too_large":
+    case "payload_too_large":
+    case "too_many_files":
+    case "invalid_input":
+    case "rejected_by_provider":
+      return proofingErrorMessage(error, t);
+    case "session_over":
+      return t("proofLink.errors.sessionOver");
+    case "method_unavailable":
+      return t("proofLink.errors.methodUnavailable");
+    default:
+      return t("proofLink.errors.unavailable");
+  }
+}
+
+// The error message a verify page shows: the subject's copy on a hosted link,
+// the members' on the on-screen page.
+export function verifyErrorMessage(
+  target: { kind: "request" | "hosted" },
+  error: unknown,
+  t: TFunction,
+): string {
+  return target.kind === "hosted"
+    ? hostedErrorMessage(error, t)
+    : proofingErrorMessage(error, t);
+}
+
+// The worker makes a due delivery's first send within seconds; a failing one
+// retries with backoff for about a day.
+const DELIVERY_FIRST_SEND_POLL_MS = 5_000;
+const DELIVERY_RETRY_POLL_MS = 60_000;
+
+// How often a customer's webhook deliveries are re-read: soon while one waits
+// for its first send, slowly while one retries, not at all once none is
+// pending.
+export function deliveriesPollInterval(
+  deliveries: readonly { status: string; attempts: number }[] | undefined,
+): number | false {
+  const pending = (deliveries ?? []).filter((d) => d.status === "pending");
+  if (pending.length === 0) return false;
+  return pending.some((d) => d.attempts === 0)
+    ? DELIVERY_FIRST_SEND_POLL_MS
+    : DELIVERY_RETRY_POLL_MS;
 }
 
 // The outcome counts of a set of stats rows, summed.

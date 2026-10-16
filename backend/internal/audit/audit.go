@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -393,6 +394,12 @@ var IdentityProofingPersonalKeys = []string{
 	"reason",
 	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
 }
+
+// IdentityProofingOrphanKeys are the fields stripped from a proofing request's
+// audit events once the request itself is gone with its org: its personal
+// keys, and the member it was sent to, which a purged request still names
+// but nothing ties to an outcome once the request row is deleted.
+var IdentityProofingOrphanKeys = append(slices.Clone(IdentityProofingPersonalKeys), "subjectUserId")
 
 // StripFields removes keys from orgID's audit events on targetType, at the
 // top and in their before and after: one target's events when targetID is

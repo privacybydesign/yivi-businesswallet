@@ -5,6 +5,7 @@ package seed
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -152,5 +153,31 @@ func TestEnsureProofingDemoRefusesForeignOrg(t *testing.T) {
 	customers, err := proofing.NewCustomerStore(pool, audit.NopRecorder{}).List(ctx, orgID)
 	if err != nil || len(customers) != 0 {
 		t.Errorf("foreign org customers = %d, %v; want 0", len(customers), err)
+	}
+}
+
+// A demo org an older seed named without "(Demo)" takes the current name: the
+// seed owns it (requireSeedOwned), so the rename is its to make.
+func TestEnsureProofingDemoRenamesItsOwnOrg(t *testing.T) {
+	pool, dsn := testdb.Fresh(t)
+	ctx := context.Background()
+	if err := EnsureProofingDemo(ctx, dsn, "qerds.localhost"); err != nil {
+		t.Fatalf("EnsureProofingDemo: %v", err)
+	}
+	want := ""
+	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
+		if o.slug == radboudSlug {
+			want = o.name
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE organizations SET name = 'Radboud Universiteit' WHERE slug = $1`, radboudSlug); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureProofingDemo(ctx, dsn, "qerds.localhost"); err != nil {
+		t.Fatalf("EnsureProofingDemo again: %v", err)
+	}
+	var name string
+	if err := pool.QueryRow(ctx, "SELECT name FROM organizations WHERE slug = $1", radboudSlug).Scan(&name); err != nil || name != want {
+		t.Errorf("name = %q, %v; want %q", name, err, want)
 	}
 }

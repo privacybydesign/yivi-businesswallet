@@ -484,7 +484,7 @@ func TestStoreCustomerProofedName(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].ID != req.ID {
 		t.Fatalf("purge due past retention = %+v, %v; want the request", due, err)
 	}
-	if err := store.Purge(ctx, due[0]); err != nil {
+	if err := store.Purge(ctx, due[0], nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	after, err := store.List(ctx, orgID, RequestFilter{CustomerID: &customer.ID})
@@ -703,7 +703,7 @@ func TestStoreStatsByOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if ok, err := store.Cancel(ctx, cancelled); err != nil || !ok {
+	if ok, err := store.Cancel(ctx, cancelled, nil); err != nil || !ok {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
 
@@ -745,7 +745,7 @@ func TestCustomerStoreRemovePurges(t *testing.T) {
 		}
 		// Removal takes only purged requests (Service.RemoveCustomer purges first).
 		if c.ID == gone.ID {
-			if err := requests.Purge(ctx, req); err != nil {
+			if err := requests.Purge(ctx, req, nil); err != nil {
 				t.Fatalf("purge request: %v", err)
 			}
 		}
@@ -780,12 +780,12 @@ func TestCustomerStoreSettings(t *testing.T) {
 	if err != nil || c.Settings.SessionTTL != SessionTTL || c.Settings.DataRetention() != proofedNameRetention {
 		t.Fatalf("Create = %+v, %v; want the default settings", c, err)
 	}
-	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7}
-	year := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: 365}
-	if saved, err := customers.SaveSettings(ctx, orgID, c.ID, year); err != nil || saved.Settings != year {
+	week := CustomerSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7, ErasureHandling: ErasureReview}
+	year := CustomerSettings{SessionTTL: SessionTTL, DataRetentionDays: 365, ErasureHandling: ErasureAutomatic}
+	if saved, err := customers.SaveSettings(ctx, orgID, c.ID, settingsChange(year)); err != nil || saved.Settings != year {
 		t.Fatalf("SaveSettings(a year) = %+v, %v; the database must allow up to 365 days", saved.Settings, err)
 	}
-	if c, err = customers.SaveSettings(ctx, orgID, c.ID, week); err != nil || c.Settings != week {
+	if c, err = customers.SaveSettings(ctx, orgID, c.ID, settingsChange(week)); err != nil || c.Settings != week {
 		t.Fatalf("SaveSettings = %+v, %v", c.Settings, err)
 	}
 
@@ -935,7 +935,7 @@ func TestPurgeSendsPurgedEvent(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
-	if err := requests.Purge(ctx, req); err != nil {
+	if err := requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
@@ -1002,7 +1002,7 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	if err := requests.RecordHandover(ctx, req, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("RecordHandover: %v", err)
 	}
-	if ok, err := requests.Cancel(ctx, req); err != nil || !ok {
+	if ok, err := requests.Cancel(ctx, req, nil); err != nil || !ok {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
@@ -1119,7 +1119,7 @@ func TestWebhookLeaseFence(t *testing.T) {
 	if err := webhooks.SendTest(ctx, orgID, customer.ID); err != nil {
 		t.Fatalf("SendTest: %v", err)
 	}
-	late, err := webhooks.claimDue(ctx, 1)
+	late, err := webhooks.claimDue(ctx, 1, 1)
 	if err != nil || len(late) != 1 {
 		t.Fatalf("claimDue = %d, %v", len(late), err)
 	}
@@ -1127,7 +1127,7 @@ func TestWebhookLeaseFence(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
 		t.Fatal(err)
 	}
-	current, err := webhooks.claimDue(ctx, 1)
+	current, err := webhooks.claimDue(ctx, 1, 1)
 	if err != nil || len(current) != 1 {
 		t.Fatalf("second claimDue = %d, %v", len(current), err)
 	}
@@ -1207,7 +1207,7 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 			WHERE status = $1`, DeliveryPending); err != nil {
 			t.Fatalf("make due: %v", err)
 		}
-		due, err := webhooks.claimDue(ctx, 1)
+		due, err := webhooks.claimDue(ctx, 1, 1)
 		if err != nil || len(due) != 1 {
 			t.Fatalf("claimDue = %d, %v", len(due), err)
 		}
@@ -1483,7 +1483,7 @@ func TestCancelDropsBirthDate(t *testing.T) {
 	}
 	req := createStarted(t, store, newStoredRequest(orgID, requester,
 		Subject{CustomerID: &customer.ID, Name: "Anna de Vries", Email: "anna@example.org", BirthDate: "1990-04-12"}), "s1")
-	if ok, err := store.Cancel(ctx, req); err != nil || !ok {
+	if ok, err := store.Cancel(ctx, req, nil); err != nil || !ok {
 		t.Fatalf("Cancel = %v, %v", ok, err)
 	}
 	var birthDateCT []byte
@@ -1603,7 +1603,7 @@ func TestPurgeClearsPointers(t *testing.T) {
 		SET redirect_url = 'https://shop.example.org/back?user=anna', yivi_transaction_id = 'tx-1' WHERE id = $1`, req.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := requests.Purge(ctx, req); err != nil {
+	if err := requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
 

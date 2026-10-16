@@ -12,7 +12,6 @@ import (
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
-	"github.com/tetratelabs/wazero"
 )
 
 // The parser is a port of go-vog-issuer's (#242), the implementation that was
@@ -52,8 +51,6 @@ func NewPDFiumParser() (*PDFiumParser, error) {
 		MinIdle:  poolMinIdle,
 		MaxIdle:  poolMaxIdle,
 		MaxTotal: poolMaxTotal,
-		// Lets an instance's Kill interrupt the WebAssembly call in flight.
-		RuntimeConfig: wazero.NewRuntimeConfig().WithCloseOnContextDone(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("vog: initialise pdfium: %w", err)

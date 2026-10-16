@@ -31,8 +31,10 @@ import {
   isRequestedAttribute,
   proofingErrorMessage,
   proofingRejectionReason,
+  dataRequestRefusal,
   secondsUntil,
   sessionView,
+  verifyErrorMessage,
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
@@ -282,6 +284,37 @@ export function MethodChoice({
   );
 }
 
+// A verify page's current step. When step changes after the first render,
+// focus moves to the step's heading, so a screen reader reads the new step
+// instead of focus dropping to the page.
+export function StepRegion({
+  step,
+  children,
+}: {
+  step: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const shown = useRef(step);
+  useEffect(() => {
+    if (shown.current === step) return;
+    shown.current = step;
+    const heading = ref.current?.querySelector<HTMLElement>("h2, h3");
+    const target = heading ?? ref.current;
+    if (heading) heading.tabIndex = -1;
+    target?.focus();
+  }, [step]);
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      className="flex flex-col gap-6 outline-none [&_h2]:outline-none [&_h3]:outline-none"
+    >
+      {children}
+    </div>
+  );
+}
+
 // The running session: the app's QR code and link with a countdown, until
 // the request settles or the session runs out. onRestart, when set, offers a
 // new session after one ended; outcomeActions go under the outcome.
@@ -297,6 +330,7 @@ export function Session({
   diplomaMode = "off",
   diplomas = [],
   onDiplomaStep,
+  dataRequest = false,
 }: {
   target: VerifyTarget;
   initial: ProofingProgress;
@@ -305,15 +339,19 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
-  // Called with the status once the session has an outcome, and the subject
-  // is done adding diploma extracts when it asks for them.
-  onSettled?: (status: string) => void;
+  // Called with the progress once the session has an outcome, and the subject
+  // is done adding diploma extracts when it asks for them; again whenever
+  // that outcome changes (a data request's review decided).
+  onSettled?: (progress: ProofingProgress) => void;
   // Whether an approved session goes on to the diploma step, and the extracts
   // already added (a hosted page reopened).
   diplomaMode?: DiplomaMode;
   diplomas?: HostedDiploma[];
   // Told whether the diploma step shows, for the page's stepper.
   onDiplomaStep?: (active: boolean) => void;
+  // A data request: a refusal reads as the request refused, not the person
+  // unverified.
+  dataRequest?: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
@@ -331,9 +369,9 @@ export function Session({
   const showsOutcome = view === "outcome";
   useEffect(() => {
     if (showsOutcome) {
-      onSettled?.(current.status);
+      onSettled?.(current);
     }
-  }, [showsOutcome, current.status, onSettled]);
+  }, [showsOutcome, current, onSettled]);
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
@@ -358,8 +396,8 @@ export function Session({
         {t("customers.onScreen.scan.newCodeHint")}
       </p>
       {fresh.isError && (
-        <p className={`${ERROR} text-center`}>
-          {proofingErrorMessage(fresh.error, t)}
+        <p role="alert" className={`${ERROR} text-center`}>
+          {verifyErrorMessage(target, fresh.error, t)}
         </p>
       )}
     </div>
@@ -376,7 +414,13 @@ export function Session({
     );
   }
   if (showsOutcome) {
-    return <SessionOutcome progress={current} actions={outcomeActions} />;
+    return (
+      <SessionOutcome
+        progress={current}
+        actions={outcomeActions}
+        dataRequest={dataRequest}
+      />
+    );
   }
   if (view === "expired") {
     return <Expired onRestart={onRestart} />;
@@ -461,6 +505,9 @@ function DiplomaStep({
   const fileInput = useRef<HTMLInputElement>(null);
   const [held, setHeld] = useState<HostedDiploma[]>(initial);
   const [refused, setRefused] = useState<DiplomaVerdict[]>([]);
+  // What the last upload decided, for a screen reader: the lists below
+  // appear without moving focus.
+  const [announced, setAnnounced] = useState("");
   const secondsLeft = useSecondsLeft(until);
   const open = secondsLeft > 0;
   const canFinish = diplomaStepDone(held.length, secondsLeft);
@@ -473,13 +520,24 @@ function DiplomaStep({
           ...current,
           ...verdicts.flatMap((v) => (v.diploma ? [v.diploma] : [])),
         ]);
-        setRefused(verdicts.filter((v) => !v.accepted));
+        const refusedNow = verdicts.filter((v) => !v.accepted);
+        setRefused(refusedNow);
+        setAnnounced(
+          t("identityProofing.diplomas.verdictsAnnounced", {
+            accepted: verdicts.length - refusedNow.length,
+            refused: refusedNow.length,
+          }),
+        );
       },
     });
   }
 
   return (
     <div className="flex w-full flex-col gap-5">
+      {/* Mounted throughout, so each upload's verdicts are announced. */}
+      <p role="status" className="sr-only">
+        {announced}
+      </p>
       <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
         <Icon name="valid" className="text-success shrink-0" />
         {t("identityProofing.diplomas.identityDone")}
@@ -589,7 +647,9 @@ function DiplomaStep({
                 : t("identityProofing.diplomas.chooseAnother")}
           </Button>
           {upload.isError && (
-            <p className={ERROR}>{proofingErrorMessage(upload.error, t)}</p>
+            <p role="alert" className={ERROR}>
+              {verifyErrorMessage(target, upload.error, t)}
+            </p>
           )}
         </div>
       ) : (
@@ -806,7 +866,7 @@ function YiviSession({
   if (start.isError) {
     return (
       <Failed
-        message={proofingErrorMessage(start.error, t)}
+        message={verifyErrorMessage(target, start.error, t)}
         onRestart={onRestart}
       />
     );
@@ -814,7 +874,7 @@ function YiviSession({
   if (disclosure.isError) {
     return (
       <Failed
-        message={proofingErrorMessage(disclosure.error, t)}
+        message={verifyErrorMessage(target, disclosure.error, t)}
         onRestart={onRestart}
       />
     );
@@ -890,7 +950,9 @@ function FaceCheck({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [cameraError, setCameraError] = useState(false);
+  // "framed": refused inside an embedding page that did not grant the camera
+  // (its iframe needs allow="camera"), which the subject cannot change there.
+  const [cameraError, setCameraError] = useState<"refused" | "framed">();
   const [ready, setReady] = useState(false);
   const [verdict, setVerdict] = useState<ProofingFaceVerdict>();
   const [frameError, setFrameError] = useState<string>();
@@ -924,8 +986,13 @@ function FaceCheck({
         await video.play();
         setReady(true);
       })
-      .catch(() => {
-        if (!cancelled) setCameraError(true);
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const framed =
+          error instanceof DOMException &&
+          error.name === "NotAllowedError" &&
+          window.parent !== window;
+        setCameraError(framed ? "framed" : "refused");
       });
     return () => {
       cancelled = true;
@@ -953,14 +1020,14 @@ function FaceCheck({
           if (!cancelled) setVerdict(next);
         })
         .catch((error: unknown) => {
-          if (!cancelled) setFrameError(proofingErrorMessage(error, t));
+          if (!cancelled) setFrameError(verifyErrorMessage(target, error, t));
         });
     }, FACE_FRAME_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [ready, decided, frameError, verdict, frameTick, mutateAsync, t]);
+  }, [ready, decided, frameError, verdict, frameTick, mutateAsync, target, t]);
 
   const total = verdict?.stableFrames ?? stableFrames;
   const noFace = verdict !== undefined && !verdict.faceDetected;
@@ -972,12 +1039,26 @@ function FaceCheck({
       <p className={`${HINT} text-center`}>
         {t("customers.onScreen.face.hint")}
       </p>
-      {cameraError ? (
+      {cameraError === "framed" ? (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p role="alert" className={ERROR}>
+            {t("customers.onScreen.face.cameraFramed")}
+          </p>
+          <a
+            href={window.location.href}
+            target="_blank"
+            rel="noreferrer"
+            className={LINK_BUTTON}
+          >
+            {t("customers.onScreen.face.openInTab")}
+          </a>
+        </div>
+      ) : cameraError === "refused" ? (
         <Failed
           message={t("customers.onScreen.face.cameraError")}
           actionLabel={t("customers.onScreen.face.retry")}
           onRestart={() => {
-            setCameraError(false);
+            setCameraError(undefined);
             setAttempt((a) => a + 1);
           }}
         />
@@ -1030,11 +1111,29 @@ function captureFrame(video: HTMLVideoElement | null): string | undefined {
 function SessionOutcome({
   progress,
   actions,
+  dataRequest,
 }: {
   progress: ProofingProgress;
   actions?: React.ReactNode;
+  dataRequest: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  if (
+    progress.status === "rejected" &&
+    dataRequest &&
+    dataRequestRefusal(progress.errorCode) !== undefined
+  ) {
+    return (
+      <Outcome
+        tone="info"
+        role="status"
+        icon="invalid"
+        title={t("customers.onScreen.outcome.refused.title")}
+        message={t("customers.onScreen.outcome.refused.message")}
+        action={actions}
+      />
+    );
+  }
   switch (progress.status) {
     case "approved":
       return (
@@ -1174,7 +1273,7 @@ function QrCode({ value }: { value: string }): React.JSX.Element {
       alt=""
       width={QR_SIZE}
       height={QR_SIZE}
-      className="rounded-yivi border-line-strong border"
+      className="rounded-yivi border-line-strong h-auto max-w-full border"
     />
   );
 }
@@ -1189,7 +1288,7 @@ function QrPlaceholder({
   return (
     <div
       className="border-line-strong bg-surface rounded-yivi text-muted flex flex-col items-center justify-center gap-2 border px-4 text-center"
-      style={{ width: QR_SIZE, height: QR_SIZE }}
+      style={{ width: QR_SIZE, maxWidth: "100%", aspectRatio: "1" }}
     >
       {expired ? (
         <Icon name="time" size={32} />

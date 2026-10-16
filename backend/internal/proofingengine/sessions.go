@@ -78,15 +78,15 @@ func stepAuditDetails(sess session.Session, fd *flow.FlowDefinition, stage, step
 }
 
 // effectivePrivacyPolicy is the flow's BSN and redaction policy, else the
-// default (BSN kept, nothing blurred).
+// default (BSN left out, no face photos kept, nothing covered).
 func effectivePrivacyPolicy(resolvedFlow *flow.FlowDefinition) (privacy.BSNPolicy, privacy.RedactionPolicy) {
-	bsnPolicy, redaction := privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{}
+	bsnPolicy, redaction := privacy.DefaultBSNPolicy, privacy.RedactionPolicy{}
 	if resolvedFlow != nil {
 		if resolvedFlow.BSNPolicy != "" {
 			bsnPolicy = resolvedFlow.BSNPolicy
 		}
-		if resolvedFlow.BlurFace != nil {
-			redaction.BlurFace = *resolvedFlow.BlurFace
+		if resolvedFlow.KeepFacePhotos != nil {
+			redaction.KeepFacePhotos = *resolvedFlow.KeepFacePhotos
 		}
 		if resolvedFlow.BlurBSN != nil {
 			redaction.BlurBSN = *resolvedFlow.BlurBSN
@@ -132,18 +132,15 @@ func hasFaceStep(fd *flow.FlowDefinition) bool {
 }
 
 // faceStepFailure reports a face step that did not verify the person:
-//   - in a step that compares faces, no passing match, at any level;
-//   - a capture that was not live, only when fd requires a level or lists
-//     face.liveness. Otherwise the match alone decides.
-//
-// Regula matches only a live capture, so a failed liveness leaves no match at
-// all: a face step that compares faces still fails, with FACE_NO_MATCH.
+//   - a capture that was not live, whatever fd lists: Regula, the only face
+//     provider, runs liveness on every capture, and a flow without a face
+//     match (liveness or a selfie alone) has nothing else to fail on;
+//   - in a step that compares faces, no passing match, at any level.
 func faceStepFailure(fd *flow.FlowDefinition, req appResultRequest, checks *chipChecksInfo) (failed bool, errorCode string) {
 	if fd == nil || !hasFaceStep(fd) {
 		return false, ""
 	}
-	livenessGates := fd.RequiredAssuranceLevel != "" || flowListsCheck(fd, flow.CheckFaceLiveness)
-	if livenessGates && checkOutcome(fd, flow.CheckFaceLiveness, req, checks) == checkStateFail {
+	if checkOutcome(fd, flow.CheckFaceLiveness, req, checks) == checkStateFail {
 		return true, errCodeLivenessFailed
 	}
 	if flowNeedsFaceMatch(fd) && checkOutcome(fd, flow.CheckFaceMatch, req, checks) != checkStatePass {
@@ -207,6 +204,11 @@ type documentInfo struct {
 	Nationality  string `json:"nationality,omitempty"`
 	FirstName    string `json:"firstName,omitempty"`
 	LastName     string `json:"lastName,omitempty"`
+	// FullFirstName and FullLastName are DG11's name, when the chip has one:
+	// UTF-8, and never cut off, where the MRZ's fixed-width field truncates a
+	// long name (30 characters on an ID card).
+	FullFirstName string `json:"fullFirstName,omitempty"`
+	FullLastName  string `json:"fullLastName,omitempty"`
 	// DisplayName prefers DG11's UTF-8 name over the transliterated MRZ name, as
 	// vcmrtd does.
 	DisplayName string `json:"displayName,omitempty"`

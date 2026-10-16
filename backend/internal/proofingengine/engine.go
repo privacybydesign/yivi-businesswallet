@@ -59,6 +59,9 @@ type Config struct {
 	// retried, or abuse of a leaked link). Per session rather than per client
 	// IP: behind the wallet's reverse proxy every phone has the proxy's address.
 	ClaimLimit ratelimit.Limit
+	// HandoverLimit bounds the grants one session's devices mint: each is
+	// audited in the org's log, so an unbounded loop would flood it.
+	HandoverLimit ratelimit.Limit
 
 	// PublicBaseURL is the origin the Idem app reaches /api/v1/app at: the
 	// api= of every vcmrtd deep link.
@@ -160,6 +163,7 @@ func DefaultConfig() Config {
 		SessionEventsPoll:        500 * time.Millisecond,
 		SessionRetention:         defaultSessionRetention,
 		ClaimLimit:               ratelimit.Limit{Burst: 20, Per: time.Minute},
+		HandoverLimit:            ratelimit.Limit{Burst: 20, Per: time.Minute},
 		RegulaFaceMatchThreshold: regula.DefaultMatchThreshold,
 		BoundLoginTTL:            5 * time.Minute,
 		BoundLoginStableFrames:   3,
@@ -198,15 +202,28 @@ type Server struct {
 	tenants  TenantLookup
 	notify   Notifier
 
-	claimLimit *ratelimit.Limiter
-	waiters    eventWaiters
-	denials    denialSet
+	claimLimit    *ratelimit.Limiter
+	handoverLimit *ratelimit.Limiter
+	waiters       eventWaiters
+	denials       denialSet
+	// draining is closed by StopWaiting, when the server shuts down: every
+	// waiting /events poll answers at once instead of holding the drain.
+	draining     chan struct{}
+	stopWaitOnce sync.Once
 
 	// changed queues the sessions to tell notify about; pending holds the
 	// ones queued, so a burst of events for one session is one notice.
 	changed   chan string
 	pendingMu sync.Mutex
 	pending   map[string]bool
+}
+
+// StopWaiting answers every waiting /events poll with the session as it is,
+// and every later one at once: the server is shutting down
+// (http.Server.RegisterOnShutdown), and a poll would otherwise hold the drain
+// for its whole wait. The app polls again, at another replica.
+func (s *Server) StopWaiting() {
+	s.stopWaitOnce.Do(func() { close(s.draining) })
 }
 
 // Engine is the name internal/proofing and cmd/api know the engine by.
@@ -232,10 +249,11 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	}
 	s := &Server{
 		cfg: cfg, sessions: sessions, flows: flows, tenants: tenants, notify: notify,
-		claimLimit: ratelimit.New(cfg.ClaimLimit),
-		changed:    make(chan string, notifyQueue),
-		pending:    map[string]bool{},
-		waiters:    eventWaiters{bySession: map[string]int{}},
+		claimLimit: ratelimit.New(cfg.ClaimLimit), handoverLimit: ratelimit.New(cfg.HandoverLimit),
+		changed:  make(chan string, notifyQueue),
+		pending:  map[string]bool{},
+		waiters:  eventWaiters{bySession: map[string]int{}},
+		draining: make(chan struct{}),
 	}
 	// A session expiring is noticed lazily, by whichever read finds its
 	// deadline passed; this is how that reaches the wallet.

@@ -180,7 +180,7 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 // newProofingProvider builds what the proofing service drives: the wallet's
 // own engine (on the pool, sealing under cipher), or the in-memory stub. The
 // engine is also returned on its own so its app routes and jobs get wired.
-func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store, trail proofingengine.DeviceTrail) (proofing.Provider, *proofingengine.Engine, error) {
+func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store, trail proofingengine.DeviceTrail) (proofing.Provider, *proofingengine.Engine, error) {
 	switch cfg.IdentityProofingProvider {
 	case config.ProviderStub:
 		stub := proofingprovider.NewStub()
@@ -192,6 +192,11 @@ func newProofingProvider(cfg config.Config, pool *pgxpool.Pool, cipher *crypto.C
 		engineCfg.DeviceTrail = trail
 		if cfg.RegulaFaceAPIURL != "" {
 			regulaClient := regula.New(cfg.RegulaFaceAPIURL)
+			// A Face API that does not answer fails the deploy, not every
+			// subject's face step.
+			if err := regulaClient.Ping(ctx); err != nil {
+				return nil, nil, fmt.Errorf("regula face API ping: %w", err)
+			}
 			engineCfg.Regula = regulaClient
 			engineCfg.RegulaFaceAPIPublicURL = cfg.RegulaFaceAPIPublicURL
 			engineCfg.RegulaSweeps = regulasweep.NewDedup(regulasweep.NewStore(pool))
@@ -866,7 +871,12 @@ func run() error {
 		slog.WarnContext(ctx, "identity proofing is off: IDENTITY_PROOFING_ENCRYPTION_KEY is not set, so no proofing request can be sent and no webhook is delivered")
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
-	ips, proofingEngine, err := newProofingProvider(cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests})
+	// The proofing jobs outlive the HTTP drain, so the notices and webhook
+	// deliveries the last requests cause still go out; they stop when run
+	// returns, after it.
+	proofingJobs, stopProofingJobs := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopProofingJobs()
+	ips, proofingEngine, err := newProofingProvider(ctx, cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests})
 	if err != nil {
 		return err
 	}
@@ -894,35 +904,35 @@ func run() error {
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
 	// A customer's session keeps its personal data for its customer's data retention.
-	startPruner(ctx, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
+	startPruner(proofingJobs, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session
 	// nobody finishes is reconciled at its cap. Neither polls.
 	proofingService.SetHostedBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/p/")
 	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
-		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(ctx, sessionID) })
+		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(proofingJobs, sessionID) })
 	}
 	var proofingApp server.Registerer = noRoutes{}
 	if proofingEngine != nil {
 		proofingEngine.SetNotifier(proofingService.SessionChanged)
-		go proofingEngine.Run(ctx)
+		go proofingEngine.Run(proofingJobs)
 		proofingApp = proofingEngine
-		startPruner(ctx, "identity_proofing_engine_sessions", cfg.SessionPruneEvery, proofingEngine.Purge)
-		startPruner(ctx, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
+		startPruner(proofingJobs, "identity_proofing_engine_sessions", cfg.SessionPruneEvery, proofingEngine.Purge)
+		startPruner(proofingJobs, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
 	}
-	database.RunOnNotify(ctx, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
+	database.RunOnNotify(proofingJobs, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
 	// Customer webhooks go out as their change commits, retries at their due
 	// time, to the customer's endpoint (https, public addresses only). Without
 	// the key no secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
-		database.RunOnNotify(ctx, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
+		database.RunOnNotify(proofingJobs, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
 			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
 	}
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 	proofingIdempotency := proofing.NewIdempotencyStore(pool, proofingCipher)
 	proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	proofingHandler.SetPlatformAdmins(platformAdmins)
-	startPruner(ctx, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
-	startPruner(ctx, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
+	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
+	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 
 	handler := server.New(
 		pool,
@@ -958,6 +968,11 @@ func run() error {
 		ReadHeaderTimeout: serverReadHeaderTimeout,
 		IdleTimeout:       serverIdleTimeout,
 		MaxHeaderBytes:    serverMaxHeaderBytes,
+	}
+	// A waiting /events poll answers at once on shutdown instead of holding
+	// the drain past shutdownTimeout.
+	if proofingEngine != nil {
+		httpServer.RegisterOnShutdown(proofingEngine.StopWaiting)
 	}
 
 	shutdownErr := make(chan error, 1)

@@ -101,7 +101,10 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		result["document"] = doc
 	}
 
-	if req.Photo != nil && attrRequested(sess, attrDG2, attrFaceImage) {
+	// The face photos are released only when the flow keeps them
+	// (KeepFacePhotos): the face match has run on them already, and its verdicts
+	// are in the result either way.
+	if req.Photo != nil && redaction.KeepFacePhotos && attrRequested(sess, attrDG2, attrFaceImage) {
 		photo := *req.Photo
 		// Browsers do not render JPEG2000, which DG2 portraits often are.
 		if converted, mime, err := images.ToDisplayablePNG(photo.ImageBase64, photo.MimeType); err != nil {
@@ -109,25 +112,17 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		} else {
 			photo.ImageBase64, photo.MimeType = converted, mime
 		}
-		if released, ok := releasedFace(photo, redaction); ok {
-			result["photo"] = released
-		} else {
-			slog.Warn("identity proofing: could not blur the photo; leaving it out", slog.String("session_id", sess.ID))
-		}
+		result["photo"] = &photo
 	}
 
-	if req.Selfie != nil && attrRequested(sess, attrSelfie) {
+	if req.Selfie != nil && redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
 		selfie := *req.Selfie
 		if converted, mime, err := images.ToDisplayablePNG(selfie.ImageBase64, selfie.MimeType); err != nil {
 			slog.Warn("identity proofing: could not convert the selfie for display", slog.String("session_id", sess.ID), slog.Any("error", err))
 		} else {
 			selfie.ImageBase64, selfie.MimeType = converted, mime
 		}
-		if released, ok := releasedFace(selfie, redaction); ok {
-			result["selfie"] = released
-		} else {
-			slog.Warn("identity proofing: could not blur the selfie; leaving it out", slog.String("session_id", sess.ID))
-		}
+		result["selfie"] = &selfie
 	}
 
 	// A face matched against the relying party's own photo (a flow without
@@ -135,13 +130,8 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	// reads the result sees both faces that were compared.
 	if sess.ReferencePhoto != "" {
 		result["faceReference"] = faceReferenceRelyingParty
-		if attrRequested(sess, attrSelfie) {
-			ref := photoInfo{ImageBase64: sess.ReferencePhoto, MimeType: sess.ReferencePhotoMime}
-			if released, ok := releasedFace(ref, redaction); ok {
-				result["referencePhoto"] = released
-			} else {
-				slog.Warn("identity proofing: could not blur the reference photo; leaving it out", slog.String("session_id", sess.ID))
-			}
+		if redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
+			result["referencePhoto"] = &photoInfo{ImageBase64: sess.ReferencePhoto, MimeType: sess.ReferencePhotoMime}
 		}
 	}
 

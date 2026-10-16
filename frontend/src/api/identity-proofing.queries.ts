@@ -93,20 +93,22 @@ import type {
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
 import {
+  deliveriesPollInterval,
   isProofingLive,
   progressPollContinues,
+  reviewPollContinues,
 } from "../lib/identity-proofing";
 
 // Both reads reconcile live requests at the proofing service, so a request in
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
-// The worker sends a due delivery within seconds, so a pending one is watched
-// until it is sent.
-const DELIVERIES_POLL_INTERVAL_MS = 5_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
+// A session in review is decided by a person, or seconds later by its
+// customer's erasure setting, so a verify page re-reads it slowly.
+const REVIEW_POLL_INTERVAL_MS = 15_000;
 // A mutation whose answer carries a secret (a new API key, a webhook signing
 // secret) is dropped from the cache as soon as nothing shows it, instead of
 // lingering there for the default five minutes.
@@ -492,6 +494,12 @@ export function useUpdateCustomerMutation(
           queryKey: proofingRequestsQueryKey(slug),
         });
       }
+      // A flow's "kept for N days" is the customer's retention.
+      if (update.dataRetentionDays !== undefined) {
+        void queryClient.invalidateQueries({
+          queryKey: proofingCustomerFlowsQueryKey(slug, customerId),
+        });
+      }
     },
   });
 }
@@ -676,10 +684,7 @@ export function useWebhookDeliveriesQuery(
     queryFn: ({ signal }) =>
       getProofingWebhookDeliveries(slug, customerId, signal),
     enabled: slug !== "" && customerId !== "",
-    refetchInterval: (query) =>
-      query.state.data?.some((d) => d.status === "pending")
-        ? DELIVERIES_POLL_INTERVAL_MS
-        : false,
+    refetchInterval: (query) => deliveriesPollInterval(query.state.data),
   });
 }
 
@@ -914,7 +919,9 @@ export function useProofingProgressQuery(
     refetchInterval: (query) =>
       progressPollContinues(query.state.data, query.state.error)
         ? ON_SCREEN_POLL_INTERVAL_MS
-        : false,
+        : reviewPollContinues(query.state.data, query.state.error)
+          ? REVIEW_POLL_INTERVAL_MS
+          : false,
   });
 }
 

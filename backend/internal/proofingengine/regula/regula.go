@@ -190,6 +190,26 @@ func (c *Client) DeleteLivenessByTag(ctx context.Context, tag string) error {
 	}
 }
 
+// pingTransactionID is a liveness transaction no Face API holds: Ping asks
+// for it.
+const pingTransactionID = "00000000-0000-0000-0000-000000000000"
+
+// Ping checks the Face API answers, through the endpoint the face step reads
+// liveness from: it asks for a transaction that does not exist. Any answer
+// short of a server error will do (Regula answers 404); an unreachable host
+// or a 5xx is an error, which fails the boot (BACKEND.md's provider seam).
+func (c *Client) Ping(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodGet, c.livenessURL(pingTransactionID), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return statusError("ping", resp)
+	}
+	return nil
+}
+
 func (c *Client) livenessURL(transactionID string) string {
 	return c.baseURL + "/api/v2/liveness?transactionId=" + url.QueryEscape(transactionID)
 }

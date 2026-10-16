@@ -53,9 +53,11 @@ func TestReconcileDueWakesAtTheCap(t *testing.T) {
 		t.Fatalf("still open at the cap: next = %v, %v; want a retry", next, err)
 	}
 
+	// Nothing left to wait for: the safety net, for a lease another replica
+	// left behind, is the only wake-up.
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusExpired}
-	if next, err = f.svc.ReconcileDue(context.Background()); err != nil || !next.IsZero() || f.requests.ended != 1 {
-		t.Errorf("expired at IPS: next = %v, %v, ended = %d; want it ended and nothing left", next, err, f.requests.ended)
+	if next, err = f.svc.ReconcileDue(context.Background()); err != nil || !next.Equal(now.Add(deadlineSafetyNet)) || f.requests.ended != 1 {
+		t.Errorf("expired at IPS: next = %v, %v, ended = %d; want it ended and the safety net next", next, err, f.requests.ended)
 	}
 }
 

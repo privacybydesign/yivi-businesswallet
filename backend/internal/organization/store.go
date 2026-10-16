@@ -107,7 +107,7 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		// The proofing requests go with the org, but their audit events stay
 		// (org id set null), out of every purge's reach: strip whom they name now.
 		if err := audit.StripFields(ctx, q, id, audit.TargetIdentityProofingRequest, "",
-			audit.IdentityProofingPersonalKeys); err != nil {
+			audit.IdentityProofingOrphanKeys); err != nil {
 			return err
 		}
 		const del = `DELETE FROM organizations WHERE id = $1 RETURNING name, slug`

@@ -43,7 +43,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
-	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until,
+	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.retention_override_seconds, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
@@ -68,15 +68,19 @@ const dataRequestReviewDays = 30
 //     settled: cancelled, its session ended, decided, or else its running
 //     session's or unstarted link's cap. A cap is stored before it passes; the
 //     purge asks purge_at <= now(), which holds only after the cap anyway,
-//     since a retention is never zero.
+//     since a retention is never zero. An identity review counts as settled
+//     when it went there: undecided, it is kept no longer than a decided one,
+//     the most its subject was told.
 //   - a data request in review: dataRequestReviewDays after it went there.
-//   - NULL while a review has no end.
+//   - an approved erasure: when it was decided. Its decision purges it at
+//     once; this is the retry when that purge failed.
 //
 // The customer's retention is read in the statement: CustomerStore.SaveSettings
 // sets it again for that customer's requests (refreshCustomerPurgeAt).
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 		COALESCE(r.cancelled_at, r.ips_session_ended_at,
-			CASE WHEN r.status IN ('approved', 'rejected') THEN r.completed_at END,
+			CASE WHEN r.status IN ('approved', 'rejected')
+				OR (r.status = 'needs_review' AND r.flow_kind = 'identity') THEN r.completed_at END,
 			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),
@@ -84,7 +88,8 @@ const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 					WHERE c.id = r.customer_id)),
 				make_interval(secs => $3)),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
-			THEN r.completed_at + make_interval(days => $2) END)
+			THEN r.completed_at + make_interval(days => $2) END,
+		CASE WHEN r.status = 'approved' AND r.flow_kind = 'data_erasure' THEN r.completed_at END)
 	WHERE `
 
 // refreshPurgeAt stores purge_at (setPurgeAt) for requests ids. Every write to
@@ -143,7 +148,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
 		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &overrideSeconds, &r.PurgeAt); err != nil {
+		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = proofedNameRetention
@@ -386,6 +391,15 @@ func (s *RequestStore) ListDue(ctx context.Context, now time.Time, limit int) ([
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
+		// A row whose seal does not open cannot be reconciled: logged and
+		// skipped, as ListPurgeDue does, so it does not fail the rows leased
+		// with it. Its lease brings it back, logged again.
+		var bad *unreadableRequestError
+		if errors.As(err, &bad) {
+			slog.ErrorContext(ctx, "identity proofing: cannot open request at its deadline",
+				slog.String("request_id", bad.id.String()), slog.Any("error", bad.err))
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("proofing: scan due request: %w", err)
 		}
@@ -409,17 +423,26 @@ const openLinkWhere = `r.link_token_hash IS NOT NULL AND r.ips_session_id IS NUL
 func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int) (int, error) {
 	ended := 0
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		rows, err := q.Query(ctx, `WITH lapsed AS (
+		// Ended first, read after: one statement's read would see the rows
+		// before its own update, sealed birth date still on them, and a row
+		// whose seal no longer opens would fail every batch it heads.
+		idRows, err := q.Query(ctx, `WITH lapsed AS (
 				SELECT r.id FROM identity_proofing_requests r
 				WHERE `+openLinkWhere+` AND r.link_expires_at <= $1
 				ORDER BY r.link_expires_at LIMIT $2 FOR UPDATE SKIP LOCKED
-			), ended AS (
-				UPDATE identity_proofing_requests e SET ips_session_ended_at = now(),
-					reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
-					expected_birth_date_ciphertext = NULL, updated_at = now()
-				FROM lapsed WHERE e.id = lapsed.id RETURNING e.id
 			)
-			SELECT `+requestColumns+requestFrom+` WHERE r.id IN (SELECT id FROM ended)`, now, limit)
+			UPDATE identity_proofing_requests e SET ips_session_ended_at = now(),
+				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
+				expected_birth_date_ciphertext = NULL, updated_at = now()
+			FROM lapsed WHERE e.id = lapsed.id RETURNING e.id`, now, limit)
+		if err != nil {
+			return fmt.Errorf("proofing: lapse links: %w", err)
+		}
+		endedIDs, err := pgx.CollectRows(idRows, pgx.RowTo[uuid.UUID])
+		if err != nil {
+			return fmt.Errorf("proofing: lapse links: %w", err)
+		}
+		rows, err := q.Query(ctx, `SELECT `+requestColumns+requestFrom+` WHERE r.id = ANY($1)`, endedIDs)
 		if err != nil {
 			return fmt.Errorf("proofing: lapse links: %w", err)
 		}
@@ -778,14 +801,36 @@ func (s *RequestStore) SetYiviTransaction(ctx context.Context, req Request, sess
 	return nil
 }
 
+// ExtendSession moves the stored cap of the request's session to expiresAt,
+// as the engine moved it: later only, and only while the session has not
+// ended, so a stale read never shortens it. purge_at follows, as it counts
+// from the cap while the session runs.
+func (s *RequestStore) ExtendSession(ctx context.Context, req Request, sessionID string, expiresAt time.Time) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
+			SET ips_session_expires_at = $3, updated_at = now()
+			WHERE id = $1 AND ips_session_id = $2 AND ips_session_expires_at < $3
+				AND ips_session_ended_at IS NULL AND purged_at IS NULL`, req.ID, sessionID, expiresAt)
+		if err != nil {
+			return fmt.Errorf("proofing: extend session request %s: %w", req.ID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
+		}
+		return refreshPurgeAt(ctx, q, req.ID)
+	})
+}
+
 // MarkStarted records that the subject's phone joined the session (the engine reports
 // it opened), and audits identity_proofing.session_started. A no-op when the row
-// already moved on, so concurrent pollers record it once.
+// already moved on, so concurrent pollers record it once, and once the request was
+// cancelled or its session seen to end: a late "opened" must not follow them.
 func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error {
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests
 			SET status = 'in_progress', method = COALESCE(NULLIF($3, ''), method), updated_at = now()
-			WHERE id = $1 AND ips_session_id = $2 AND status = 'pending' AND purged_at IS NULL`
+			WHERE id = $1 AND ips_session_id = $2 AND status = 'pending' AND purged_at IS NULL
+				AND cancelled_at IS NULL AND ips_session_ended_at IS NULL`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(method))
 		if err != nil {
 			return fmt.Errorf("proofing: mark started request %s: %w", req.ID, err)
@@ -873,14 +918,21 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 
 // Cancel marks a request without an outcome cancelled and its session ended,
 // audited identity_proofing.session_cancelled. False when it moved on first.
-func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
+//
+// endSession, when set, ends the session in the engine, inside the
+// transaction and under the row's lock: the engine's own change notice for
+// the cancel then waits for this one and finds the session ended, instead of
+// recording it expired first, so one cancel sends one final webhook. An error
+// from it rolls the cancel back.
+func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(context.Context) error) (bool, error) {
 	var sessionID *string
 	if req.session != nil {
 		sessionID = &req.session.ID
 	}
 	var done bool
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND status IN ('pending', 'in_progress')`
+		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND ips_session_ended_at IS NULL
+			AND status IN ('pending', 'in_progress')`
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
 			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
@@ -899,6 +951,12 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
 				return errCancelSessionMoved
 			}
 			return nil
+		}
+		if endSession != nil {
+			if err := endSession(ctx); err != nil {
+				done = false
+				return err
+			}
 		}
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
@@ -933,7 +991,12 @@ func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error 
 // purged request changes nothing. A request that got a session req does not
 // hold (a hosted start attached one since req was read) is
 // errPurgeSessionMoved and kept: its engine session is not erased yet.
-func (s *RequestStore) Purge(ctx context.Context, req Request) error {
+//
+// endSession, when set, erases the engine session inside the transaction and
+// under the row's lock, as Cancel's does: a reconcile in between would find
+// the session gone and record it expired, a stray session.expired before
+// session.purged. An error from it rolls the purge back, for a retry.
+func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(context.Context) error) error {
 	var sessionID *string
 	if req.session != nil {
 		sessionID = &req.session.ID
@@ -954,6 +1017,11 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 				return cmp.Or(err, errPurgeSessionMoved)
 			}
 			return nil
+		}
+		if endSession != nil {
+			if err := endSession(ctx); err != nil {
+				return err
+			}
 		}
 		// Kept on a purged request too: the time it was due, as shown.
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {

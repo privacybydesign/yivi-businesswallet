@@ -92,7 +92,7 @@ const proofingFlowSchema = z.object({
   checkThresholds: z.record(z.string(), z.number()).optional(),
   requiredAssuranceLevel: z.string().optional(),
   bsnPolicy: z.string().optional(),
-  blurFace: z.boolean().optional(),
+  keepFacePhotos: z.boolean().optional(),
   blurBsn: z.boolean().optional(),
   retentionOverrideSeconds: z.number().optional(),
   assuranceTiers: z.array(assuranceTierSchema).optional(),
@@ -189,7 +189,7 @@ export interface ProofingFlowSpec {
   checkThresholds?: Record<string, number>;
   requiredAssuranceLevel?: string;
   bsnPolicy?: string;
-  blurFace?: boolean;
+  keepFacePhotos?: boolean;
   blurBsn?: boolean;
   retentionOverrideSeconds?: number;
   assuranceTiers?: ProofingAssuranceTier[];
@@ -223,6 +223,13 @@ export type ProofingRequestInput =
 
 // A paused customer takes no new request; requests already sent run out.
 const PROOFING_CUSTOMER_STATUSES = ["active", "paused"] as const;
+
+// How a customer's "delete my data" requests are decided once the person is
+// proven: by a reviewer, automatically (the sure matches erased at once, the
+// unsure ones left to a reviewer), or kept under a legal duty. ErasureHandling
+// in backend/internal/proofing.
+export const ERASURE_HANDLINGS = ["review", "automatic", "keep"] as const;
+export type ErasureHandling = (typeof ERASURE_HANDLINGS)[number];
 
 // How a customer's webhook endpoint has been answering. State is a plain
 // string: an unknown one renders neutrally.
@@ -259,6 +266,7 @@ const proofingCustomerSchema = z.object({
   pausedAt: z.string().optional(),
   sessionTtlSeconds: z.number(),
   dataRetentionDays: z.number(),
+  erasureHandling: z.enum(ERASURE_HANDLINGS).catch("review"),
   webhook: webhookHealthSchema,
   branding: proofingCustomerBrandingSchema,
   // Where a hosted page may send its subject back to and be embedded on.
@@ -301,6 +309,7 @@ export interface ProofingCustomerUpdate {
   paused?: boolean;
   sessionTtlSeconds?: number;
   dataRetentionDays?: number;
+  erasureHandling?: ErasureHandling;
   allowedRedirectOrigins?: string[];
 }
 
@@ -1046,6 +1055,10 @@ export interface ProofingProgress {
   linkExpiresAt: string;
   // Until when the subject can add diploma extracts, once approved.
   diplomasUntil?: string;
+  // A hosted data request's: until when approved data downloads, and how many
+  // sessions an approved erasure kept.
+  dataExportUntil?: string;
+  dataMatchesKept?: number;
 }
 
 export function startProofingYivi(
@@ -1161,6 +1174,8 @@ const hostedProgressSchema = z.object({
   diplomasUntil: z.string().optional(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
+  // How many sessions an approved erasure kept, not deleted.
+  dataMatchesKept: z.number().optional(),
 });
 
 export type HostedProgress = z.infer<typeof hostedProgressSchema>;

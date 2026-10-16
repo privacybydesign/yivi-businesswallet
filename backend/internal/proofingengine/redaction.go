@@ -1,11 +1,9 @@
 package proofingengine
 
 import (
-	"encoding/base64"
 	"errors"
 	"log/slog"
 
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/redact"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -23,15 +21,11 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	if coversDocumentBSN(redaction, bsnPolicy, storedState) {
 		redactStoredDocumentPhoto(sess)
 	}
-	if redaction.BlurFace && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
-		// A copy, not a write through the pointer (see handleSubmitNFCStep).
+	if !redaction.KeepFacePhotos && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
+		// A copy, not a write through the pointer (see handleSubmitNFCStep). The
+		// verdicts stay; only the picture goes.
 		selfie := *sess.Steps.Selfie
-		if blurred, mime, ok := blurFace(selfie.Image, selfie.MimeType); ok {
-			selfie.Image, selfie.MimeType = blurred, mime
-		} else {
-			slog.Warn("identity proofing: could not blur the stored selfie; dropping it", slog.String("session_id", sess.ID))
-			selfie.Image, selfie.MimeType = "", ""
-		}
+		selfie.Image, selfie.MimeType = "", ""
 		sess.Steps.Selfie = &selfie
 	}
 	if sess.Steps.NFC == nil {
@@ -42,20 +36,15 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 		return
 	}
 	changed := false
-	if redaction.BlurFace && req.Photo != nil && req.Photo.ImageBase64 != "" {
-		if blurred, mime, ok := blurFace(req.Photo.ImageBase64, req.Photo.MimeType); ok {
-			req.Photo.ImageBase64, req.Photo.MimeType = blurred, mime
-		} else {
-			slog.Warn("identity proofing: could not blur the stored chip photo; dropping it", slog.String("session_id", sess.ID))
-			req.Photo = nil
-		}
+	if !redaction.KeepFacePhotos && req.Photo != nil {
+		req.Photo = nil
 		changed = true
 	}
 	if req.MrtdEvidence != nil {
 		// The raw data groups are the same face and the same BSN again, as
-		// the chip's own bytes: no redacted encoding of them exists, so they
-		// go. Passive Authentication needed them; the result is built.
-		if redaction.BlurFace {
+		// the chip's own bytes. Passive Authentication needed them; the result
+		// is built.
+		if !redaction.KeepFacePhotos {
 			changed = dropDataGroups(req.MrtdEvidence, dataGroupPortrait, dataGroupDLPortrait) || changed
 		}
 		if p := bsnPolicy.Effective(); (p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit) && dutchDocument(*sess, req) {
@@ -184,23 +173,4 @@ func coverBSN(imageBase64, mimeType string, region *imageRegion) (string, string
 		return "", "", errNoBSNRegion
 	}
 	return redact.Region(imageBase64, mimeType, redact.Rect{X: region.X, Y: region.Y, W: region.W, H: region.H})
-}
-
-// blurFace pixelates a face under a BlurFace policy, including a chip's
-// JPEG2000 portrait. ok is false when it could not, and the caller then drops
-// the image.
-func blurFace(imageBase64, mimeType string) (string, string, bool) {
-	raw, mime, err := decodeImageBase64(imageBase64, mimeType)
-	if err != nil {
-		return "", "", false
-	}
-	plain := base64.StdEncoding.EncodeToString(raw)
-	if converted, convertedMime, err := images.ToDisplayablePNG(plain, mime); err == nil {
-		plain, mime = converted, convertedMime
-	}
-	blurred, blurredMime, err := redact.Image(plain, mime)
-	if err != nil {
-		return "", "", false
-	}
-	return blurred, blurredMime, true
 }

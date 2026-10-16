@@ -80,8 +80,8 @@ func checkerboardPNG(t *testing.T) string {
 }
 
 // Once a session is finished, the raw chip data groups that are the face and
-// the BSN again go with the policy: DG2 under BlurFace, a Dutch document's
-// DG1 and DG11 under mask or omit. DG15 (the AA key) stays.
+// the BSN again go with the policy: DG2 unless the flow keeps face photos, a
+// Dutch document's DG1 and DG11 under mask or omit. DG15 (the AA key) stays.
 func TestRedactStepsDropsRawDGs(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -90,11 +90,11 @@ func TestRedactStepsDropsRawDGs(t *testing.T) {
 		redaction privacy.RedactionPolicy
 		want      []string
 	}{
-		{"retrieve, no blur", dutchIssuingState, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{}, []string{"DG1", "DG11", "DG15", "DG2"}},
-		{"blur face", dutchIssuingState, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{BlurFace: true}, []string{"DG1", "DG11", "DG15"}},
-		{"omit, Dutch", dutchIssuingState, privacy.BSNPolicyOmit, privacy.RedactionPolicy{}, []string{"DG15", "DG2"}},
-		{"mask, Dutch", dutchIssuingState, privacy.BSNPolicyMask, privacy.RedactionPolicy{}, []string{"DG15", "DG2"}},
-		{"omit, German", "D", privacy.BSNPolicyOmit, privacy.RedactionPolicy{}, []string{"DG1", "DG11", "DG15", "DG2"}},
+		{"retrieve, face photos kept", dutchIssuingState, privacy.BSNPolicyRetrieve, keepFaces, []string{"DG1", "DG11", "DG15", "DG2"}},
+		{"retrieve, by default", dutchIssuingState, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{}, []string{"DG1", "DG11", "DG15"}},
+		{"omit, Dutch", dutchIssuingState, privacy.BSNPolicyOmit, keepFaces, []string{"DG15", "DG2"}},
+		{"mask, Dutch", dutchIssuingState, privacy.BSNPolicyMask, keepFaces, []string{"DG15", "DG2"}},
+		{"omit, German", "D", privacy.BSNPolicyOmit, keepFaces, []string{"DG1", "DG11", "DG15", "DG2"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

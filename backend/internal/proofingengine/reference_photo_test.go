@@ -7,14 +7,15 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
-// A face matched against the relying party's photo says so in the result, and
-// releases that photo with the selfie, so a reviewer sees both faces.
+// A face matched against the relying party's photo says so in the result, and,
+// in a flow that keeps face photos, releases that photo with the selfie, so a
+// reviewer sees both faces.
 func TestResultReferencePhoto(t *testing.T) {
 	sess := session.Session{
 		ID: "s1", ReferencePhoto: "cGhvdG8=", ReferencePhotoMime: "image/png",
 		RequestedAttributes: []string{attrSelfie, attrBiometrics},
 	}
-	result := buildResult(sess, appResultRequest{}, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})
+	result := buildResult(sess, appResultRequest{}, nil, nil, privacy.BSNPolicyRetrieve, keepFaces)
 	if result["faceReference"] != faceReferenceRelyingParty {
 		t.Errorf("faceReference = %v, want %q", result["faceReference"], faceReferenceRelyingParty)
 	}
@@ -24,7 +25,7 @@ func TestResultReferencePhoto(t *testing.T) {
 	}
 
 	sess.RequestedAttributes = []string{attrBiometrics}
-	result = buildResult(sess, appResultRequest{}, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})
+	result = buildResult(sess, appResultRequest{}, nil, nil, privacy.BSNPolicyRetrieve, keepFaces)
 	if _, ok := result["referencePhoto"]; ok || result["faceReference"] != faceReferenceRelyingParty {
 		t.Errorf("without the selfie requested: result = %v; want only the faceReference marker", result)
 	}

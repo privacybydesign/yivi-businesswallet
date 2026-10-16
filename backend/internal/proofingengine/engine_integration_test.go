@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -169,7 +171,11 @@ func TestIdemAppFlow(t *testing.T) {
 		c.Now = func() time.Time { return time.Date(2021, time.June, 1, 0, 0, 0, 0, time.UTC) }
 	})
 	ctx := context.Background()
-	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
+	// This flow keeps its face photos, so the chip portrait comes back below.
+	keepFacePhotos := true
+	kept := chipFlow
+	kept.KeepFacePhotos = &keepFacePhotos
+	f, err := h.engine.CreateFlow(ctx, h.tenant, kept)
 	if err != nil {
 		t.Fatalf("CreateFlow: %v", err)
 	}
@@ -498,6 +504,17 @@ func TestYiviFaceAcrossReplicas(t *testing.T) {
 // relying party's own photo: required on such a flow, refused on a chip
 // flow, handed to the app for the face step, and dropped once the session
 // can no longer run it.
+// orgPhoto is a customer's reference photo: a JPEG the engine can decode,
+// which it checks before taking one.
+func orgPhoto(t *testing.T) *pp.Image {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewGray(image.Rect(0, 0, 8, 8)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return &pp.Image{MimeType: "image/jpeg", Base64: base64.StdEncoding.EncodeToString(buf.Bytes())}
+}
+
 func TestReferencePhotoFaceCheck(t *testing.T) {
 	h := newHarness(t, func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9} })
 	ctx := context.Background()
@@ -512,7 +529,7 @@ func TestReferencePhotoFaceCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFlow(chip): %v", err)
 	}
-	photo := &pp.Image{MimeType: "image/jpeg", Base64: base64.StdEncoding.EncodeToString([]byte("the org's photo"))}
+	photo := orgPhoto(t)
 	var rejected *pp.RejectedError
 	if _, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: faceOnly.ID}); !errors.As(err, &rejected) {
 		t.Errorf("face-only session without a photo = %v, want refused", err)

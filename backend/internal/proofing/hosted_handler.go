@@ -31,6 +31,10 @@ var hostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 // a reload, a second tab and a few people behind one NAT.
 var hostedSourceLimit = ratelimit.Limit{Burst: 600, Per: time.Minute}
 
+// staleLinkLimit holds one link that is no longer live (Request.linkLive):
+// its page only shows the outcome, polling its status every 2 s at most.
+var staleLinkLimit = ratelimit.Limit{Burst: 60, Per: time.Minute}
+
 // hostedPagePrefix is the SPA route of a hosted link's page, /p/:token.
 const hostedPagePrefix = "/p/"
 
@@ -54,7 +58,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 	if ok, _ := h.hostedSources.Allow(requestSource(r)); !ok {
 		return frameNone
 	}
-	ctx, key, err := h.service.hostedLimitKey(r.Context(), token)
+	ctx, budget, err := h.service.hostedLimitKey(r.Context(), token)
 	if errors.Is(err, ErrRequestNotFound) {
 		h.authFailures.Allow(requestSource(r))
 		return frameNone
@@ -64,7 +68,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 		return frameNone
 	}
 	r = r.WithContext(ctx)
-	if ok, _ := h.hostedCalls.Allow(key.String()); !ok {
+	if ok, _ := h.hostedLimiter(budget).Allow(budget.key); !ok {
 		return frameNone
 	}
 	origins, err := h.service.HostedEmbedOrigins(r.Context(), token)
@@ -95,14 +99,15 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 }
 
 // limitHosted counts a hosted call against its source's hostedSourceLimit
-// and its customer's hostedCallLimit, and an unknown link against its
-// source's authFailureLimit.
+// and its budget: the customer's hostedCallLimit for a live link, the link's
+// own staleLinkLimit otherwise. An unknown link counts against its source's
+// authFailureLimit.
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		if err := rateLimited(w, h.hostedSources, requestSource(r)); err != nil {
 			return err
 		}
-		ctx, key, err := h.service.hostedLimitKey(r.Context(), r.PathValue("token"))
+		ctx, budget, err := h.service.hostedLimitKey(r.Context(), r.PathValue("token"))
 		if errors.Is(err, ErrRequestNotFound) {
 			if err := h.failureLimited(w, r); err != nil {
 				return err
@@ -111,11 +116,19 @@ func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
 		if err != nil {
 			return mapError(err)
 		}
-		if err := rateLimited(w, h.hostedCalls, key.String()); err != nil {
+		if err := rateLimited(w, h.hostedLimiter(budget), budget.key); err != nil {
 			return err
 		}
 		return next(w, r.WithContext(ctx))
 	}
+}
+
+// hostedLimiter is the limiter budget's calls are counted in.
+func (h *Handler) hostedLimiter(budget hostedBudget) *ratelimit.Limiter {
+	if budget.live {
+		return h.hostedCalls
+	}
+	return h.staleLinks
 }
 
 type hostedProgressResponse struct {
@@ -131,6 +144,9 @@ type hostedProgressResponse struct {
 	// DataExportUntil is until when an approved "see my data" request's data
 	// downloads (GET /proof/{token}/data-export); absent otherwise.
 	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
+	// DataMatchesKept is how many sessions an approved erasure kept, so its
+	// person is not told everything was deleted when it was not.
+	DataMatchesKept *int `json:"dataMatchesKept,omitempty"`
 }
 
 func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
@@ -141,7 +157,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	return hostedProgressResponse{
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
-		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now),
+		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 	}
 }
 
