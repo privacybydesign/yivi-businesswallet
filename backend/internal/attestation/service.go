@@ -774,6 +774,11 @@ func (s *Service) RecheckAllHeld(ctx context.Context) (int64, error) {
 	}
 	var changed int64
 	for _, orgID := range orgs {
+		// Each org's re-check ignores cancellation (see recheckHeld), so a
+		// shutdown is honoured here, between orgs.
+		if err := ctx.Err(); err != nil {
+			return changed, err
+		}
 		n, err := s.RecheckHeld(ctx, orgID)
 		changed += int64(n)
 		if err != nil {

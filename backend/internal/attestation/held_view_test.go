@@ -30,6 +30,8 @@ type heldViewStore struct {
 	lastRevoked map[uuid.UUID]bool
 	// failing makes recording a status change fail for these credentials.
 	failing map[uuid.UUID]bool
+	// holderOrgs is what HolderOrgs lists.
+	holderOrgs []uuid.UUID
 }
 
 func (s *heldViewStore) ListHeld(_ context.Context, _ uuid.UUID) ([]attestation.HeldAttestation, error) {
@@ -72,7 +74,7 @@ func (s *heldViewStore) HeldHistory(context.Context, uuid.UUID, uuid.UUID) ([]au
 	return []audit.Event{}, nil
 }
 
-func (s *heldViewStore) HolderOrgs(context.Context) ([]uuid.UUID, error) { return nil, nil }
+func (s *heldViewStore) HolderOrgs(context.Context) ([]uuid.UUID, error) { return s.holderOrgs, nil }
 
 type heldStatusChange struct {
 	id       uuid.UUID
@@ -91,9 +93,12 @@ type heldViewHolder struct {
 	refreshErr error
 	// refreshedRefs lists the refs a refresh targeted, nil for the whole org.
 	refreshedRefs []string
+	// refreshes counts whole-org refreshes.
+	refreshes int
 }
 
 func (h *heldViewHolder) RefreshStatuses(context.Context, uuid.UUID) (int, error) {
+	h.refreshes++
 	maps.Copy(h.validities, h.refreshed)
 	return len(h.refreshed), h.refreshErr
 }
@@ -392,5 +397,32 @@ func TestRecheckHeldOne(t *testing.T) {
 	changed, err = service.RecheckHeldOne(ctx, uuid.New(), flipped.ID)
 	if err != nil || !changed {
 		t.Fatalf("RecheckHeldOne(flipped) = %v, %v; want true", changed, err)
+	}
+}
+
+// The scheduled sweep re-checks every holder org, and stops between orgs once
+// its context is cancelled: each org's re-check ignores cancellation, so the
+// loop is where a shutdown lands.
+func TestRecheckAllHeldStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	store := &heldViewStore{holderOrgs: []uuid.UUID{uuid.New(), uuid.New()}}
+	holder := &heldViewHolder{validities: map[string]eudiholder.HeldValidity{}}
+	service := attestation.NewService(nil, nil, nil, nil, nil, store, nil, holder, "http://app.test")
+
+	if _, err := service.RecheckAllHeld(context.Background()); err != nil {
+		t.Fatalf("RecheckAllHeld: %v", err)
+	}
+	if holder.refreshes != len(store.holderOrgs) {
+		t.Fatalf("refreshed %d orgs, want all %d", holder.refreshes, len(store.holderOrgs))
+	}
+
+	holder.refreshes = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := service.RecheckAllHeld(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("RecheckAllHeld after cancel = %v, want context.Canceled", err)
+	}
+	if holder.refreshes != 0 {
+		t.Errorf("refreshed %d orgs after cancel, want none", holder.refreshes)
 	}
 }

@@ -863,7 +863,8 @@ export function getAttestationClaim(
   });
 }
 
-// A held credential's trail, oldest first: received, status changes, removal.
+// A held credential's trail, oldest first: received and status changes. A
+// removed credential is not found, so its removal is never in it.
 export function getHeldAttestationHistory(
   slug: string,
   heldId: string,

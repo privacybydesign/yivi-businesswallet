@@ -1070,10 +1070,11 @@ paths:
       summary: Get a held credential's history
       description: >-
         Requires organisation membership. The audit events about the held credential,
-        oldest first: received, each status change its issuer's status list reported,
-        removal. As on the organisation audit log, a member who is not an administrator
-        gets each event with `detailHidden: true` and its actor, actor label and
-        metadata withheld.
+        oldest first: received and each status change its issuer's status list
+        reported. A removed credential is not found. As on the organisation audit log,
+        a member who is not an administrator gets each event with `detailHidden: true`
+        and its actor, actor label and metadata withheld, except a status change: the
+        issuer made it, so it names no actor, and it comes whole, direction included.
       responses:
         '2XX':
           description: Successful response.

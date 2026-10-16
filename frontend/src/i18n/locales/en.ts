@@ -2230,12 +2230,14 @@ export const en = {
       line: {
         revoked: "revoked by the issuer",
         expired: "expired {{date}}",
+        expiring_zero: "expires today",
         expiring_one: "expires in {{count}} day",
         expiring_other: "expires in {{count}} days",
       },
       reason: {
         revoked: "On the issuer's status list",
         revokedChecked: "Found revoked {{date}}",
+        expired_zero: "Expired today",
         expired_one: "Expired {{count}} day ago",
         expired_other: "Expired {{count}} days ago",
         expiring: "Renew before {{date}}",
@@ -2244,7 +2246,7 @@ export const en = {
         revoked: "Revoked by the issuer",
         revokedChecked: "Revoked by the issuer, seen {{date}}",
         revokedBody:
-          "The issuer placed this credential on its status list. It can no longer be presented: any requester checking the status list rejects it. Removing it from the wallet does not undo the revocation.",
+          "The issuer placed this credential on its status list. It can no longer be presented: any requester checking the status list rejects it.",
         expired: "Expired on {{date}}",
         expiredBody:
           "The attributes below are still readable, but requesters reject it until you receive a fresh one from the issuer.",
@@ -2270,9 +2272,6 @@ export const en = {
         checked: "Status list checked",
         checkedRevoked: "revoked",
         checkedValid: "not revoked",
-        removed: "Removed",
-        statusChanged: "Status changed",
-        detailHidden: "details visible to admins only",
       },
       checks: {
         signature: "Signature valid",
@@ -2294,6 +2293,7 @@ export const en = {
       confirmDelete: "Remove credential “{{name}}”?",
       viewDetail: "View {{name}} details",
       search: "Search by name, type or issuer…",
+      reset: "Reset",
       fields: {
         validUntil: "Valid until",
         issuer: "Issued by",
@@ -2313,6 +2313,8 @@ export const en = {
       filters: {
         all: "All",
         status: "Status",
+        source: "Received via",
+        allSources: "All sources",
       },
       sources: {
         qerds: "QERDS",

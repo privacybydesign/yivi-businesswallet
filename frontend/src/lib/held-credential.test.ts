@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import i18next from "i18next";
 import type { HeldAttestation } from "../api/attestations";
 import { HELD_SOURCES } from "../api/attestations";
 import { en } from "../i18n/locales/en";
 import {
   EXPIRING_SOON_DAYS,
+  HELD_SOURCE_FILTERS,
   heldExpiryAt,
   heldExpiryIsPast,
   heldMatchesQuery,
@@ -188,7 +190,7 @@ describe("heldMatchesQuery", () => {
 });
 
 describe("heldSections", () => {
-  const noFilters = { query: "", status: "" } as const;
+  const noFilters = { query: "", status: "", source: "" } as const;
 
   const valid = held({ id: "valid", expiresAt: daysFromNow(90) });
   const soon = held({
@@ -254,21 +256,34 @@ describe("heldSections", () => {
     expect(sections.valid).toEqual([]);
   });
 
+  it("filters by source across both sections", () => {
+    const sections = heldSections(all, { ...noFilters, source: "qerds" }, NOW);
+    expect(ids(sections.attention)).toEqual(["soon"]);
+    expect(sections.valid).toEqual([]);
+  });
+
   it("combines search with the filters", () => {
     const sections = heldSections(
       all,
-      { query: "registration", status: "attention" },
+      { query: "registration", status: "attention", source: "" },
       NOW,
     );
     expect(ids(sections.attention)).toEqual(["revoked", "expired", "soon"]);
 
     const noMatch = heldSections(
       all,
-      { query: "nothing-matches-this", status: "" },
+      { query: "nothing-matches-this", status: "", source: "" },
       NOW,
     );
     expect(noMatch.attention).toEqual([]);
     expect(noMatch.valid).toEqual([]);
+  });
+});
+
+describe("HELD_SOURCE_FILTERS", () => {
+  it("offers every source the list responses can carry, plus no filter", () => {
+    expect(HELD_SOURCE_FILTERS[0]).toBe("");
+    expect([...HELD_SOURCE_FILTERS].slice(1)).toEqual([...HELD_SOURCES]);
   });
 });
 
@@ -348,6 +363,26 @@ describe("the wallet's status chips", () => {
     );
     expect(heldDaysToExpiry(held(), NOW)).toBeNull();
   });
+
+  // heldDaysToExpiry reads 0 on the last day before expiry and on the first day
+  // after it, which the rows word as "today" rather than "in 0 days".
+  it("words zero days as today", async () => {
+    const i18n = i18next.createInstance();
+    await i18n.init({ lng: "en", resources: { en: { translation: en } } });
+    const ahead = heldDaysToExpiry(held({ expiresAt: daysFromNow(0.2) }), NOW);
+    const past = heldDaysToExpiry(held({ expiresAt: daysFromNow(-0.2) }), NOW);
+    expect(
+      i18n.t("attestations.held.line.expiring", { count: ahead ?? 0 }),
+    ).toBe("expires today");
+    expect(
+      i18n.t("attestations.held.reason.expired", {
+        count: Math.abs(past ?? 0),
+      }),
+    ).toBe("Expired today");
+    expect(i18n.t("attestations.held.line.expiring", { count: 1 })).toBe(
+      "expires in 1 day",
+    );
+  });
 });
 
 describe("heldHistory", () => {
@@ -410,23 +445,6 @@ describe("heldHistory", () => {
       "statusChanged",
       "statusChecked",
     ]);
-  });
-
-  it("leaves the direction of a status change open when its detail is hidden", () => {
-    const entries = heldHistory(
-      [
-        {
-          occurredAt: "2026-07-22T06:12:00Z",
-          action: "attestation.held_status_changed",
-          metadata: {},
-          actor: null,
-          detailHidden: true,
-        },
-      ],
-      { receivedAt: "2026-01-09T11:05:00Z" },
-    );
-    expect(entries[1]).toMatchObject({ kind: "statusChanged" });
-    expect(entries[1].revoked).toBeUndefined();
   });
 
   it("adds the receipt of a credential received before the trail recorded it", () => {

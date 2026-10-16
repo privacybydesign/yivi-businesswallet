@@ -1,11 +1,13 @@
 package attestation
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -155,5 +157,27 @@ func TestDecodeSchemaRejectsDuplicateLocalizedLanguage(t *testing.T) {
 		"attributes":[{"key":"name","label":"Name","type":"string"}]}`
 	if _, err := decodeSchemaBody(t, body); err == nil {
 		t.Fatal("expected an error for a duplicate translation language")
+	}
+}
+
+// A member reads a held credential's history as the audit log shows it, except
+// a status change, which names no one and keeps which way it moved.
+func TestHideHeldHistoryDetailKeepsStatusChanges(t *testing.T) {
+	statusChange := json.RawMessage(`{"before":{"revoked":false},"after":{"revoked":true}}`)
+	events := []audit.Event{
+		{
+			Action: audit.AttestationHeldReceived, TargetID: "held-1",
+			Metadata: json.RawMessage(`{"after":{"sender":"Acme"}}`),
+			Actor:    &audit.EventActor{GivenNames: "Piet", LastName: "Jansen"},
+		},
+		{Action: audit.AttestationHeldStatusChanged, TargetID: "held-1", Metadata: statusChange},
+	}
+	hideHeldHistoryDetail(events)
+
+	if received := events[0]; !received.DetailHidden || received.Actor != nil || string(received.Metadata) != "{}" {
+		t.Errorf("received event = %+v, want its actor and metadata withheld", received)
+	}
+	if changed := events[1]; changed.DetailHidden || string(changed.Metadata) != string(statusChange) {
+		t.Errorf("status change = %+v, want it whole", changed)
 	}
 }

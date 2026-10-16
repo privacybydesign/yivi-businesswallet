@@ -460,7 +460,14 @@ one representative instance per batch, so `Validities` aggregates the status fac
 batch (revoked if any copy is; last check is the latest).
 
 - Status lists are fetched through a `safehttp` client (`newStatusClient`): https only
-  (http only with `AllowInsecureHTTP`), no redirects, no private addresses.
+  (http only with `AllowInsecureHTTP`), no private addresses, and redirects followed up
+  to `maxStatusListRedirects` (the Token Status List spec asks for that; an issuer that
+  moves its lists can only redirect), each hop checked like the first. Receiving a
+  credential uses the same client, and irmago's status check at receipt is
+  fail-closed: a credential whose status list is on plain http, on a private address or
+  behind too many redirects is refused when it arrives.
+- Each per-org engine closes idle connections after `engineConnMaxIdleTime`: the
+  sweep opens an engine for every holder org, and engines stay cached.
 - It runs at boot and then every 6 hours for every org holding a credential
   (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
   (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
@@ -483,17 +490,21 @@ batch (revoked if any copy is; last check is the latest).
 **History.** Accepting an offer now also audits `attestation.held_received` on the held
 target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the
 target, oldest first) is the credential's history; the frontend adds the receipt for a
-row received before that event existed, and the last status check. Disclosures are not
-in it: presentations are audited on the transaction and deliberately never name the
-credential or claims (see §12), so "Disclosed to …" from the design is not shown.
+row received before that event existed, and the last status check. A member who is not
+an admin reads it as the audit log shows it (who acted and what changed withheld), except
+a status change: the issuer made it, so it names no one, and it comes whole, direction
+included (`hideHeldHistoryDetail`). Disclosures are not in it: presentations are
+audited on the transaction and deliberately never name the credential or claims (see
+§12), so "Disclosed to …" from the design is not shown.
 
-**Wallet view.** Status chips with counts, "Needs attention" rows (revoked, expired,
-expiring soon, worst first) with the reason, "Valid" cards; the detail page has a status
-banner (Re-check status), attributes, history, provenance, checks and a client-side
-"Export as JSON" of what the page shows (not the signed credential). Not built from the
-design: "Request a new credential" / "Request renewal" / "Contact issuer" (no renewal
-channel to an issuer yet) and the revocation reason and date (a status list carries a
-bit, not a reason).
+**Wallet view.** Status chips with counts and the "Received via" source filter,
+"Needs attention" rows (revoked, expired, expiring soon, worst first) with the reason,
+"Valid" cards; an admin removes a credential from its row or card, or from its page. The
+detail page has a status banner (Re-check status), attributes, history, provenance,
+checks and a client-side "Export as JSON" of what the page shows (not the signed
+credential). Not built from the design: "Request a new credential" / "Request renewal" /
+"Contact issuer" (no renewal channel to an issuer yet) and the revocation reason and date
+(a status list carries a bit, not a reason).
 
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 
