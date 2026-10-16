@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 // Rendering a template is deliberately NOT text/template or html/template
@@ -41,6 +43,9 @@ type Body struct {
 	// a data: URI instead (inlinePreviewLogo), since a sandboxed iframe has no MIME
 	// parts to resolve cid: against.
 	InlineLogo *InlineImage
+	// InlineQR holds one PNG per QR block, referenced as cid:<ContentID> and
+	// attached (or, in a preview, inlined) the same way as the logo.
+	InlineQR []InlineImage
 }
 
 // InlineImage is an image embedded in the message and referenced from the HTML by
@@ -139,6 +144,14 @@ func validateBlock(blk Block, allowed map[string]bool, variables []Variable) err
 		if err := validateButtonURL(blk.URL, variables); err != nil {
 			return fmt.Errorf("url: %w", err)
 		}
+	case BlockQR:
+		// The label is an optional caption; the QR itself is the call to action.
+		if err := requireEmpty("text", "linkFallback"); err != nil {
+			return err
+		}
+		if err := validateButtonURL(blk.URL, variables); err != nil {
+			return fmt.Errorf("url: %w", err)
+		}
 	case BlockLogo, BlockDivider:
 		if err := requireEmpty("text", "label", "url", "linkFallback"); err != nil {
 			return err
@@ -216,7 +229,7 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 			return Body{}, fmt.Errorf("email: kind %q: missing variable %q", kind, v.Name)
 		}
 		if v.IsURL {
-			if err := validateAbsoluteHTTPURL(value); err != nil {
+			if err := v.validateURL(value); err != nil {
 				return Body{}, fmt.Errorf("email: kind %q: variable %q: %w", kind, v.Name, err)
 			}
 		}
@@ -232,18 +245,34 @@ func Render(kind Kind, locale Locale, tpl Template, brand Brand, vars map[string
 	content := resolveContent(tpl, vars)
 	content.locale = locale
 	// The resolved URL is what actually lands in the href, so it is checked here
-	// too rather than only in its two source shapes.
+	// too rather than only in its two source shapes. An app deep link was checked
+	// against its own scheme above, and validateButtonURL lets it in only whole.
+	appLinks := appLinkValues(variables, vars)
+	var qrImages []InlineImage
 	for i, blk := range content.blocks {
-		if blk.typ == BlockButton {
+		if blk.typ != BlockButton && blk.typ != BlockQR {
+			continue
+		}
+		if !appLinks[blk.url] {
 			if err := validateAbsoluteHTTPURL(blk.url); err != nil {
 				return Body{}, fmt.Errorf("email: kind %q: blocks[%d]: url: %w", kind, i, err)
 			}
+		}
+		if blk.typ == BlockQR {
+			png, err := qrcode.Encode(blk.url, qrcode.Medium, qrPixels)
+			if err != nil {
+				return Body{}, fmt.Errorf("email: kind %q: blocks[%d]: qr: %w", kind, i, err)
+			}
+			id := fmt.Sprintf("%s%d", qrContentIDPrefix, len(qrImages))
+			content.blocks[i].contentID = id
+			qrImages = append(qrImages, InlineImage{ContentID: id, ContentType: qrContentType, Bytes: png})
 		}
 	}
 	body := Body{
 		Subject:  content.subject,
 		HTMLBody: renderHTML(content, brand),
 		TextBody: renderText(content),
+		InlineQR: qrImages,
 	}
 	// The logo is attached only when the layout actually references it, so an
 	// unreferenced part never rides along.
@@ -284,13 +313,18 @@ func templateHasLogoBlock(tpl Template) bool {
 // the transport differs, so preview and delivery still show the same image. The
 // returned body carries no attachment, since a preview sends nothing.
 func inlinePreviewLogo(body Body) Body {
-	if body.InlineLogo == nil {
-		return body
+	inline := func(img InlineImage) {
+		dataURI := "data:" + img.ContentType + ";base64," + base64.StdEncoding.EncodeToString(img.Bytes)
+		body.HTMLBody = strings.Replace(body.HTMLBody, "cid:"+img.ContentID, dataURI, 1)
 	}
-	dataURI := "data:" + body.InlineLogo.ContentType + ";base64," +
-		base64.StdEncoding.EncodeToString(body.InlineLogo.Bytes)
-	body.HTMLBody = strings.Replace(body.HTMLBody, "cid:"+body.InlineLogo.ContentID, dataURI, 1)
-	body.InlineLogo = nil
+	if body.InlineLogo != nil {
+		inline(*body.InlineLogo)
+		body.InlineLogo = nil
+	}
+	for _, img := range body.InlineQR {
+		inline(img)
+	}
+	body.InlineQR = nil
 	return body
 }
 
@@ -303,10 +337,41 @@ func declares(variables []Variable, name string) bool {
 	return false
 }
 
+// validateURL checks a URL variable's value: an app deep link of the variable's
+// AppScheme, else an absolute http(s) URL.
+func (v Variable) validateURL(value string) error {
+	if v.AppScheme == "" {
+		return validateAbsoluteHTTPURL(value)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("not a URL: %w", err)
+	}
+	if parsed.Scheme != v.AppScheme {
+		return fmt.Errorf("must be a %s: link", v.AppScheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("must have a host")
+	}
+	return nil
+}
+
+// appLinkValues is the set of app deep links among vars: the resolved block URLs
+// Render has already checked against their own scheme.
+func appLinkValues(variables []Variable, vars map[string]string) map[string]bool {
+	links := map[string]bool{}
+	for _, v := range variables {
+		if v.IsURL && v.AppScheme != "" {
+			links[vars[v.Name]] = true
+		}
+	}
+	return links
+}
+
 // validateAbsoluteHTTPURL requires a parseable absolute http(s) URL with a host.
-// Applied to every URL variable and to the resolved button URL (and, for a
-// literal, at save time via validateButtonURL), so a call to action can never
-// link to a relative path or a javascript:/data: scheme.
+// Applied to every URL variable without an AppScheme and to the resolved button
+// URL (and, for a literal, at save time via validateButtonURL), so a call to
+// action can never link to a relative path or a javascript:/data: scheme.
 func validateAbsoluteHTTPURL(value string) error {
 	if value == "" {
 		return fmt.Errorf("must not be empty")
@@ -338,11 +403,13 @@ type resolvedBlock struct {
 	typ BlockType
 	// text is a heading, paragraph or footer block's prose.
 	text prose
-	// label, url and linkFallback belong to a button block. url is the resolved
-	// href, identical in both parts.
+	// label, url and linkFallback belong to a button block (a QR block uses label
+	// and url). url is the resolved href, identical in both parts.
 	label        prose
 	url          string
 	linkFallback prose
+	// contentID is a QR block's inline image, set by Render.
+	contentID string
 }
 
 // content is a template with its variables resolved, ready for the shell. Blocks
@@ -379,6 +446,9 @@ func resolveContent(tpl Template, vars map[string]string) content {
 		case BlockButton:
 			resolved.label = resolveProse(blk.Label, vars)
 			resolved.linkFallback = resolveProse(blk.LinkFallback, vars)
+			resolved.url = substituteText(blk.URL, vars)
+		case BlockQR:
+			resolved.label = resolveProse(blk.Label, vars)
 			resolved.url = substituteText(blk.URL, vars)
 		case BlockLogo, BlockDivider:
 			// Nothing to resolve.

@@ -6,12 +6,15 @@ import (
 	"time"
 )
 
-// startPruner runs prune on a ticker until ctx is cancelled, logging failures.
-// It backs the expired-row cleanup of the session and presentation stores and
-// other retention sweeps that report a count.
+// startPruner runs prune once at start and then every interval until ctx is
+// cancelled, logging failures. It backs the expired-row cleanup of the session
+// and presentation stores and other retention sweeps that report a count. The
+// run at start matters for retention: a replica restarted more often than
+// every would otherwise never prune at all.
 func startPruner(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
-	ticker := time.NewTicker(every)
 	go func() {
+		runPrune(ctx, name, prune)
+		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
 			select {

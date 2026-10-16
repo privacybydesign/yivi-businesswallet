@@ -74,7 +74,7 @@ func New(db Pinger, staticDir string, features ...Registerer) http.Handler {
 
 	// defaultMiddleware wraps outside StripPrefix so the request logger sees the
 	// full /api/v1/... path, while the feature handlers receive stripped paths.
-	apiHandler := defaultMiddleware()(http.StripPrefix(apiV1Prefix, v1))
+	apiHandler := defaultMiddleware()(http.StripPrefix(apiV1Prefix, recordRoute(v1)))
 	root.Handle(apiV1Prefix+"/", apiHandler)
 
 	// The SPA catches every path not matched by a more specific pattern above.

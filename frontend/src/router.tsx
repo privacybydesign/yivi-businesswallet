@@ -2,11 +2,13 @@ import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
+import type { ProofingCustomer } from "./api/identity-proofing";
 import {
   organizationMemberQueryKey,
   organizationQueryKey,
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
+import { proofingCustomerQueryKey } from "./api/identity-proofing.queries";
 import { fullName } from "./lib/name";
 import type { HeldAttestationClaims } from "./api/attestations";
 import { credentialDisplayName } from "./lib/credential-display";
@@ -26,6 +28,11 @@ import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
+import IdentityProofingFlows from "./routes/identity-proofing-flows";
+import IdentityProofingOverview from "./routes/identity-proofing-overview";
+import Customers from "./routes/customers";
+import CustomerVerify from "./routes/customer-verify";
+import CustomerDetail from "./routes/customer-detail";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -46,6 +53,7 @@ import Settings from "./routes/settings";
 import Signing from "./routes/signing";
 import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
+import Proof from "./routes/proof";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -63,6 +71,26 @@ const orgCrumb: RouteHandle = {
   },
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
+const identityProofingCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.title"),
+};
+const identityProofingFlowsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofingFlows.title"),
+};
+const customersCrumb: RouteHandle = {
+  crumb: ({ t }) => t("customers.title"),
+};
+const customerCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const customer = queryClient.getQueryData<ProofingCustomer>(
+      proofingCustomerQueryKey(params.orgSlug ?? "", params.customerId ?? ""),
+    );
+    return customer?.name ?? t("customers.title");
+  },
+};
+const customerVerifyCrumb: RouteHandle = {
+  crumb: ({ t }) => t("customers.onScreen.title"),
+};
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
@@ -157,6 +185,9 @@ export const router = createBrowserRouter([
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },
+      // A customer's subject verifying from a hosted link: public, keyed by
+      // the link's token, on the subject's own device.
+      { path: "/p/:token", Component: Proof },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,
@@ -185,6 +216,37 @@ export const router = createBrowserRouter([
                 handle: orgCrumb,
                 children: [
                   { index: true, Component: Dashboard },
+                  {
+                    path: "identity-proofing",
+                    handle: identityProofingCrumb,
+                    children: [
+                      { index: true, Component: IdentityProofingOverview },
+                      {
+                        path: "flows",
+                        Component: IdentityProofingFlows,
+                        handle: identityProofingFlowsCrumb,
+                      },
+                      {
+                        path: "customers",
+                        handle: customersCrumb,
+                        children: [
+                          { index: true, Component: Customers },
+                          {
+                            path: ":customerId",
+                            handle: customerCrumb,
+                            children: [
+                              { index: true, Component: CustomerDetail },
+                              {
+                                path: "verify",
+                                Component: CustomerVerify,
+                                handle: customerVerifyCrumb,
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
                   {
                     path: "members",
                     handle: membersCrumb,
