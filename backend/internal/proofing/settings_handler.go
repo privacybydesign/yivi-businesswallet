@@ -1,0 +1,91 @@
+package proofing
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+)
+
+// settingsResponse is what the org set once for all its flows: how long a
+// session runs and how long its data is kept, its branding and the origins its
+// hosted pages may redirect to and be embedded on.
+type settingsResponse struct {
+	// SessionTTLSeconds is how long a mailed session runs; DataRetentionDays how
+	// long an approved external person's proofed name is kept.
+	SessionTTLSeconds int              `json:"sessionTtlSeconds"`
+	DataRetentionDays int              `json:"dataRetentionDays"`
+	Branding          brandingResponse `json:"branding"`
+	// AllowedRedirectOrigins are where a hosted page may send its subject back
+	// to and be embedded on; never null, the admin UI edits it as a list.
+	AllowedRedirectOrigins []string `json:"allowedRedirectOrigins"`
+}
+
+func newSettingsResponse(slug string, s Settings) settingsResponse {
+	return settingsResponse{
+		SessionTTLSeconds:      int(s.Session.SessionTTL.Seconds()),
+		DataRetentionDays:      s.Session.DataRetentionDays,
+		Branding:               newBrandingResponse(slug, s),
+		AllowedRedirectOrigins: append([]string{}, s.RedirectOrigins...),
+	}
+}
+
+func (h *Handler) respondSettings(w http.ResponseWriter, r *http.Request, s Settings) error {
+	respond.JSON(w, r, http.StatusOK, newSettingsResponse(r.PathValue("slug"), s))
+	return nil
+}
+
+func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
+	s, err := h.service.Settings(r.Context(), orgFromRequest(r).ID)
+	if err != nil {
+		return mapError(err)
+	}
+	return h.respondSettings(w, r, s)
+}
+
+// updateSettingsRequest changes the org's session settings and/or its redirect
+// origins; an absent field is left as it is.
+type updateSettingsRequest struct {
+	SessionTTLSeconds *int `json:"sessionTtlSeconds"`
+	DataRetentionDays *int `json:"dataRetentionDays"`
+	// AllowedRedirectOrigins replaces the list; absent leaves it.
+	AllowedRedirectOrigins *[]string `json:"allowedRedirectOrigins"`
+}
+
+func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) error {
+	var body updateSettingsRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if body.SessionTTLSeconds == nil && body.DataRetentionDays == nil && body.AllowedRedirectOrigins == nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
+	}
+
+	orgID := orgFromRequest(r).ID
+	var settings Settings
+	var err error
+	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
+		current, err := h.service.Settings(r.Context(), orgID)
+		if err != nil {
+			return mapError(err)
+		}
+		session := current.Session
+		if body.SessionTTLSeconds != nil {
+			session.SessionTTL = time.Duration(*body.SessionTTLSeconds) * time.Second
+		}
+		if body.DataRetentionDays != nil {
+			session.DataRetentionDays = *body.DataRetentionDays
+		}
+		if settings, err = h.service.SaveSessionSettings(r.Context(), orgID, session); err != nil {
+			return mapError(err)
+		}
+	}
+
+	if body.AllowedRedirectOrigins != nil {
+		if settings, err = h.service.SaveRedirectOrigins(r.Context(), orgID, *body.AllowedRedirectOrigins); err != nil {
+			return mapError(err)
+		}
+	}
+
+	return h.respondSettings(w, r, settings)
+}

@@ -23,31 +23,31 @@ import (
 )
 
 // Handler serves identity proofing: the org routes (any member reads the flows
-// made available to them and the org's customers, and sends requests; defining
-// flows, choosing which members may use, and managing customers and the flows
-// assigned to them is admin-only), the customer API, the hosted page and the
-// wallet's default webhook endpoint. The org is the proofing engine's tenant
-// under its own id; nothing is provisioned first.
+// made available to them and sends requests; defining flows, choosing which
+// members may use, and managing the org's settings, API keys and webhook is
+// admin-only), the API, the hosted page and the wallet's default webhook
+// endpoint. The org is the proofing engine's tenant under its own id; nothing
+// is provisioned first.
 type Handler struct {
 	service     *Service
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
-	// apiCalls and apiSessions rate-limit the public API per customer,
-	// hostedCalls the hosted page per customer, across all its links.
+	// apiCalls and apiSessions rate-limit the public API per org,
+	// hostedCalls the hosted page per org, across all its links.
 	apiCalls    *ratelimit.Limiter
 	apiSessions *ratelimit.Limiter
 	hostedCalls *ratelimit.Limiter
 	// memberFaceFrames holds the on-screen Yivi face check's frames per org:
 	// each one is a Regula call.
 	memberFaceFrames *ratelimit.Limiter
-	// idempotency keeps customer-API POST answers by Idempotency-Key; nil
-	// runs every call.
+	// idempotency keeps API POST answers by Idempotency-Key; nil runs every
+	// call.
 	idempotency *IdempotencyStore
 	// platformAdmins may pause any org's proofing.
 	platformAdmins auth.PlatformAdmins
 }
 
-// SetIdempotencyStore turns on Idempotency-Key handling for the customer API.
+// SetIdempotencyStore turns on Idempotency-Key handling for the API.
 func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
 
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
@@ -92,30 +92,25 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", admin(respond.HandlerFunc(h.dataMatches)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", admin(respond.HandlerFunc(h.adminDataExport)))
-	mux.Handle("GET /orgs/{slug}/customers", member(respond.HandlerFunc(h.listCustomers)))
-	mux.Handle("POST /orgs/{slug}/customers", admin(respond.HandlerFunc(h.createCustomer)))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}", member(respond.HandlerFunc(h.getCustomer)))
-	mux.Handle("PATCH /orgs/{slug}/customers/{customerID}", admin(respond.HandlerFunc(h.updateCustomer)))
-	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}", admin(respond.HandlerFunc(h.removeCustomer)))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
-	mux.Handle("POST /orgs/{slug}/customers/{customerID}/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
-	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
-	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/branding", admin(respond.HandlerFunc(h.saveBranding)))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}/logo", member(respond.HandlerFunc(h.serveCustomerLogo)))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.getWebhook)))
-	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
-	mux.Handle("DELETE /orgs/{slug}/customers/{customerID}/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
-	mux.Handle("POST /orgs/{slug}/customers/{customerID}/webhook/rotate-secret", admin(respond.HandlerFunc(h.rotateWebhookSecret)))
-	mux.Handle("POST /orgs/{slug}/customers/{customerID}/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/settings", member(respond.HandlerFunc(h.getSettings)))
+	mux.Handle("PATCH /orgs/{slug}/identity-proofing/settings", admin(respond.HandlerFunc(h.updateSettings)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/settings/branding", admin(respond.HandlerFunc(h.saveBranding)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/settings/logo", member(respond.HandlerFunc(h.serveLogo)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
+	mux.Handle("DELETE /orgs/{slug}/identity-proofing/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.getWebhook)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
+	mux.Handle("DELETE /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/webhook/rotate-secret", admin(respond.HandlerFunc(h.rotateWebhookSecret)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
-	// The wallet's own webhook deliverer posts here for a customer without an
+	// The wallet's own webhook deliverer posts here for an org without an
 	// endpoint of its own, signed with the default secret; no user session.
 	mux.Handle("POST /identity-proofing/default-webhook", respond.HandlerFunc(h.defaultWebhook))
-	mux.Handle("GET /orgs/{slug}/customers/{customerID}/flows", member(respond.HandlerFunc(h.listCustomerFlows)))
-	mux.Handle("PUT /orgs/{slug}/customers/{customerID}/flow-selection", admin(respond.HandlerFunc(h.assignCustomerFlows)))
 }
 
 func orgFromRequest(r *http.Request) Org {
@@ -129,7 +124,7 @@ type flowResponse struct {
 	// vcmrtd app (see flowCompletable); it cannot be made available to members.
 	Completable bool `json:"completable"`
 	// Allowed is the admin having made the flow available to members; Default
-	// is the one the request form preselects.
+	// is the org's default, the one a request form preselects, whoever may use it.
 	Allowed bool `json:"allowed"`
 	Default bool `json:"default"`
 	// DiplomaMode is whether the flow asks for DUO diploma extracts after the
@@ -137,12 +132,15 @@ type flowResponse struct {
 	// whose answer does not read the wallet's setting.
 	DiplomaMode DiplomaMode `json:"diplomaMode,omitempty"`
 	// flowNeedsReferencePhoto is a flow that matches the face without reading the
-	// chip: only a customer's API can send it, with its own photo.
+	// chip: only the API can send it, with the sender's own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
 	// Kind is what the flow's sessions are for (an identity check, or a
 	// person asking for their data or its erasure); absent on a single
 	// version, as DiplomaMode.
 	Kind FlowKind `json:"kind,omitempty"`
+	// RetentionDays is how many days an external person's data is kept at most
+	// on this flow, as the on-screen page tells them; absent on a single version.
+	RetentionDays int `json:"retentionDays,omitempty"`
 }
 
 func newFlowResponse(f OrgFlow) flowResponse {
@@ -151,7 +149,7 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 	return flowResponse{
 		Flow: f.Flow, Completable: flowCompletable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
+		NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
 	}
 }
 
@@ -245,11 +243,11 @@ type requestResponse struct {
 	RequestedByName string     `json:"requestedByName"`
 	APIKeyName      string     `json:"apiKeyName,omitempty"`
 	SubjectUserID   *uuid.UUID `json:"subjectUserId,omitempty"`
-	CustomerID      *uuid.UUID `json:"customerId,omitempty"`
-	CustomerName    string     `json:"customerName,omitempty"`
-	SubjectName     string     `json:"subjectName"`
-	SubjectEmail    string     `json:"subjectEmail"`
-	// ProofedName is the name read off a customer's subject's approved document,
+	// External is a request for an external person, not a member.
+	External     bool   `json:"external"`
+	SubjectName  string `json:"subjectName"`
+	SubjectEmail string `json:"subjectEmail"`
+	// ProofedName is the name read off an external person's approved document,
 	// until its retention clears it.
 	ProofedName string `json:"proofedName,omitempty"`
 	FlowID      string `json:"flowId"`
@@ -295,7 +293,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
-		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
+		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
@@ -306,21 +304,13 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 }
 
 // listRequests shows an admin every request of the org and a member the ones they
-// sent; ?customerId= narrows either to one customer's, ?subjectUserId= to the
-// ones proofing one member.
+// sent; ?subjectUserId= narrows either to the ones proofing one member.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var filter RequestFilter
 	if !organization.ActsAsAdmin(r.Context()) {
 		id := auth.UserFromContext(r.Context()).ID
 		filter.RequestedBy = &id
-	}
-	if raw := r.URL.Query().Get("customerId"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid customer id"}
-		}
-		filter.CustomerID = &id
 	}
 	if raw := r.URL.Query().Get("subjectUserId"); raw != "" {
 		id, err := uuid.Parse(raw)
@@ -351,7 +341,7 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 }
 
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
-// customer API and webhooks show it (a ps_ id), so either can be looked up.
+// API and webhooks show it (a ps_ id), so either can be looked up.
 func parseRequestID(s string) (uuid.UUID, error) {
 	if id, ok := parsePublicSessionID(s); ok {
 		return id, nil
@@ -520,7 +510,7 @@ func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proo
 }
 
 // memberFaceFrameLimit holds the on-screen Yivi face check's frames per org,
-// as hostedCallLimit holds a customer's hosted links, and per API replica. It
+// as hostedCallLimit holds an org's hosted links, and per API replica. It
 // fits some ten members at a face check at once, a frame every 400 ms each.
 var memberFaceFrameLimit = ratelimit.Limit{Burst: 1500, Per: time.Minute}
 
@@ -608,21 +598,20 @@ func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// createRequestRequest names a member (userId), or a customer and its subject's
+// createRequestRequest names a member (userId), or an external person by
 // e-mail address and optional name (with a birth date: only that person).
 // Method (idem_app, the default, or yivi_app) is the app the subject proofs
 // with, Channel (email, the default, or on_screen) how the session reaches them.
 type createRequestRequest struct {
-	UserID     uuid.UUID               `json:"userId"`
-	CustomerID *uuid.UUID              `json:"customerId"`
-	Email      string                  `json:"email"`
-	Name       string                  `json:"name"`
-	FlowID     string                  `json:"flowId"`
-	Method     proofingprovider.Method `json:"method"`
-	Channel    Channel                 `json:"channel"`
+	UserID  uuid.UUID               `json:"userId"`
+	Email   string                  `json:"email"`
+	Name    string                  `json:"name"`
+	FlowID  string                  `json:"flowId"`
+	Method  proofingprovider.Method `json:"method"`
+	Channel Channel                 `json:"channel"`
 	// Language is the sender's wallet language (en/nl).
 	Language email.Locale `json:"language"`
-	// BirthDate (YYYY-MM-DD) with Name makes a customer's request one for
+	// BirthDate (YYYY-MM-DD) with Name makes an external request one for
 	// that person only.
 	BirthDate string `json:"birthDate"`
 }
@@ -637,7 +626,7 @@ type createRequestResponse struct {
 	DeepLink          string     `json:"deepLink,omitempty"`
 	DeepLinkExpiresAt *time.Time `json:"deepLinkExpiresAt,omitempty"`
 	// HostedURL is a hosted request's link (channel hosted), for the member
-	// to hand the customer's subject; valid hostedLinkTTL.
+	// to hand the external person; valid hostedLinkTTL.
 	HostedURL string `json:"hostedUrl,omitempty"`
 }
 
@@ -648,9 +637,9 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 	}
 	caller := auth.UserFromContext(r.Context())
 	sent, err := h.service.CreateRequest(r.Context(), orgFromRequest(r),
-		Requester{UserID: caller.ID, Name: displayName(caller)}, NewRequest{
-			SubjectUserID: body.UserID, CustomerID: body.CustomerID,
-			SubjectEmail: body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
+		Requester{UserID: caller.ID, Name: displayName(caller), Admin: organization.ActsAsAdmin(r.Context())}, NewRequest{
+			SubjectUserID: body.UserID,
+			SubjectEmail:  body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
 			Method: body.Method, Channel: body.Channel, Language: body.Language,
 		})
 	if err != nil {
@@ -676,208 +665,14 @@ func displayName(u user.User) string {
 	return string(u.Email)
 }
 
-type customerResponse struct {
-	ID            uuid.UUID      `json:"id"`
-	Name          string         `json:"name"`
-	FlowIDs       []string       `json:"flowIds"`
-	DefaultFlowID string         `json:"defaultFlowId,omitempty"`
-	Status        CustomerStatus `json:"status"`
-	PausedAt      *time.Time     `json:"pausedAt,omitempty"`
-	// SessionTTLSeconds is how long a mailed session runs; DataRetentionDays how
-	// long an approved subject's proofed name is kept.
-	SessionTTLSeconds int                   `json:"sessionTtlSeconds"`
-	DataRetentionDays int                   `json:"dataRetentionDays"`
-	Webhook           webhookHealthResponse `json:"webhook"`
-	Branding          brandingResponse      `json:"branding"`
-	// AllowedRedirectOrigins are where a hosted page may send its subject back
-	// to and be embedded on.
-	AllowedRedirectOrigins []string  `json:"allowedRedirectOrigins"`
-	HasAPIKey              bool      `json:"hasApiKey"`
-	CreatedAt              time.Time `json:"createdAt"`
-	UpdatedAt              time.Time `json:"updatedAt"`
-}
-
-// newCustomerResponse shows a customer with its endpoint's health; a customer
-// absent from health has no endpoint.
-func newCustomerResponse(slug string, c Customer, health map[uuid.UUID]WebhookHealth) customerResponse {
-	return customerResponse{
-		ID:                c.ID,
-		Name:              c.Name,
-		FlowIDs:           c.Flows.FlowIDs,
-		DefaultFlowID:     c.Flows.DefaultFlowID,
-		Status:            c.Status(),
-		PausedAt:          c.PausedAt,
-		SessionTTLSeconds: int(c.Settings.SessionTTL.Seconds()),
-		DataRetentionDays: c.Settings.DataRetentionDays,
-		Webhook:           newWebhookHealthResponse(health[c.ID]),
-		Branding:          newBrandingResponse(slug, c),
-		HasAPIKey:         c.HasAPIKey,
-		// Never null: the admin UI edits it as a list.
-		AllowedRedirectOrigins: append([]string{}, c.RedirectOrigins...),
-		CreatedAt:              c.CreatedAt,
-		UpdatedAt:              c.UpdatedAt,
-	}
-}
-
-func customerIDFromPath(r *http.Request) (uuid.UUID, error) {
-	id, err := uuid.Parse(r.PathValue("customerID"))
-	if err != nil {
-		return uuid.Nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid customer id"}
-	}
-	return id, nil
-}
-
-func (h *Handler) listCustomers(w http.ResponseWriter, r *http.Request) error {
-	orgID := orgFromRequest(r).ID
-	customers, err := h.service.Customers(r.Context(), orgID)
-	if err != nil {
-		return mapError(err)
-	}
-	health, err := h.service.WebhookHealth(r.Context(), orgID)
-	if err != nil {
-		return mapError(err)
-	}
-	out := make([]customerResponse, 0, len(customers))
-	for _, c := range customers {
-		out = append(out, newCustomerResponse(r.PathValue("slug"), c, health))
-	}
-	respond.JSON(w, r, http.StatusOK, out)
-	return nil
-}
-
-type customerRequest struct {
-	Name string `json:"name"`
-}
-
-func (h *Handler) createCustomer(w http.ResponseWriter, r *http.Request) error {
-	var body customerRequest
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	caller := auth.UserFromContext(r.Context())
-	c, err := h.service.CreateCustomer(r.Context(), orgFromRequest(r).ID, caller.ID, body.Name)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusCreated, newCustomerResponse(r.PathValue("slug"), c, nil))
-	return nil
-}
-
-func (h *Handler) getCustomer(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	orgID := orgFromRequest(r).ID
-	c, err := h.service.Customer(r.Context(), orgID, id)
-	if err != nil {
-		return mapError(err)
-	}
-	return h.respondCustomer(w, r, c)
-}
-
-// respondCustomer answers with one customer and its endpoint's health.
-func (h *Handler) respondCustomer(w http.ResponseWriter, r *http.Request, c Customer) error {
-	health, err := h.service.WebhookHealth(r.Context(), c.OrganizationID)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, newCustomerResponse(r.PathValue("slug"), c, health))
-	return nil
-}
-
-// updateCustomerRequest renames a customer, pauses or resumes proofing for it,
-// and/or changes its session settings; an absent field is left as it is.
-type updateCustomerRequest struct {
-	Name              *string `json:"name"`
-	Paused            *bool   `json:"paused"`
-	SessionTTLSeconds *int    `json:"sessionTtlSeconds"`
-	DataRetentionDays *int    `json:"dataRetentionDays"`
-	// AllowedRedirectOrigins replaces the list; absent leaves it.
-	AllowedRedirectOrigins *[]string `json:"allowedRedirectOrigins"`
-}
-
-func (h *Handler) updateCustomer(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-
-	var body updateCustomerRequest
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-
-	if body.Name == nil && body.Paused == nil && body.SessionTTLSeconds == nil && body.DataRetentionDays == nil &&
-		body.AllowedRedirectOrigins == nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
-	}
-
-	orgID := orgFromRequest(r).ID
-	var c Customer
-	if body.Name != nil {
-		if c, err = h.service.RenameCustomer(r.Context(), orgID, id, *body.Name); err != nil {
-			return mapError(err)
-		}
-	}
-
-	if body.Paused != nil {
-		status := CustomerActive
-		if *body.Paused {
-			status = CustomerPaused
-		}
-		if c, err = h.service.SetCustomerStatus(r.Context(), orgID, id, status); err != nil {
-			return mapError(err)
-		}
-	}
-
-	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
-		current, err := h.service.Customer(r.Context(), orgID, id)
-		if err != nil {
-			return mapError(err)
-		}
-		settings := current.Settings
-		if body.SessionTTLSeconds != nil {
-			settings.SessionTTL = time.Duration(*body.SessionTTLSeconds) * time.Second
-		}
-		if body.DataRetentionDays != nil {
-			settings.DataRetentionDays = *body.DataRetentionDays
-		}
-		if c, err = h.service.SaveCustomerSettings(r.Context(), orgID, id, settings); err != nil {
-			return mapError(err)
-		}
-	}
-
-	if body.AllowedRedirectOrigins != nil {
-		if c, err = h.service.SaveCustomerRedirectOrigins(r.Context(), orgID, id, *body.AllowedRedirectOrigins); err != nil {
-			return mapError(err)
-		}
-	}
-
-	return h.respondCustomer(w, r, c)
-}
-
-func (h *Handler) removeCustomer(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	if err := h.service.RemoveCustomer(r.Context(), orgFromRequest(r).ID, id); err != nil {
-		return mapError(err)
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
 type statsRowResponse struct {
-	CustomerID  uuid.UUID `json:"customerId"`
-	FlowID      string    `json:"flowId"`
-	Sessions    int       `json:"sessions"`
-	Approved    int       `json:"approved"`
-	Rejected    int       `json:"rejected"`
-	NeedsReview int       `json:"needsReview"`
-	Expired     int       `json:"expired"`
-	Cancelled   int       `json:"cancelled"`
+	FlowID      string `json:"flowId"`
+	Sessions    int    `json:"sessions"`
+	Approved    int    `json:"approved"`
+	Rejected    int    `json:"rejected"`
+	NeedsReview int    `json:"needsReview"`
+	Expired     int    `json:"expired"`
+	Cancelled   int    `json:"cancelled"`
 }
 
 type statsResponse struct {
@@ -885,9 +680,9 @@ type statsResponse struct {
 	Rows  []statsRowResponse `json:"rows"`
 }
 
-// stats counts the customer requests of the last statsWindow per customer and
-// flow: an admin's over every request of the org, a member's over the ones they
-// sent, as listRequests shows them.
+// stats counts the external requests of the last statsWindow per flow: an
+// admin's over every request of the org, a member's over the ones they sent, as
+// listRequests shows them.
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var requestedBy *uuid.UUID
@@ -907,64 +702,6 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type customerFlowResponse struct {
-	proofingprovider.Flow
-	Completable bool `json:"completable"`
-	// Assigned is the admin having assigned the flow to the customer; Default is
-	// the one the request form preselects for it.
-	Assigned    bool        `json:"assigned"`
-	Default     bool        `json:"default"`
-	DiplomaMode DiplomaMode `json:"diplomaMode"`
-	// NeedsReferencePhoto: see flowResponse. flowCompletable counts it as
-	// finishable (customerCompletable), sent through the customer's API.
-	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
-	// Kind: see flowResponse.
-	Kind FlowKind `json:"kind"`
-	// RetentionDays is how many days a subject's data is kept at most on this
-	// flow for the customer, as the on-screen page tells them.
-	RetentionDays int `json:"retentionDays"`
-}
-
-// listCustomerFlows shows an admin every flow of the org with the customer's
-// assignment, and a member only the flows assigned to the customer.
-func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	flows, err := h.service.CustomerFlows(r.Context(), orgFromRequest(r), id, flowView(r))
-	if err != nil {
-		return mapError(err)
-	}
-	out := make([]customerFlowResponse, 0, len(flows))
-	for _, f := range flows {
-		if f.Steps == nil {
-			f.Steps = []string{}
-		}
-		out = append(out, customerFlowResponse{
-			Flow: f.Flow, Completable: customerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
-			NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
-		})
-	}
-	respond.JSON(w, r, http.StatusOK, out)
-	return nil
-}
-
-func (h *Handler) assignCustomerFlows(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	var body flowSelectionRequest
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	if _, err := h.service.AssignCustomerFlows(r.Context(), orgFromRequest(r), id, FlowSelection(body)); err != nil {
-		return mapError(err)
-	}
-	return h.listCustomerFlows(w, r)
-}
-
 func decode(r *http.Request, v any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -978,8 +715,8 @@ func decode(r *http.Request, v any) error {
 // is ids, a status and levels.
 const maxDefaultWebhookBytes = 16 << 10
 
-// defaultWebhook is the wallet's own webhook endpoint, where a customer
-// without one is sent its events; the deliverer is its only caller.
+// defaultWebhook is the wallet's own webhook endpoint, where an org without
+// one is sent its events; the deliverer is its only caller.
 func (h *Handler) defaultWebhook(w http.ResponseWriter, r *http.Request) error {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDefaultWebhookBytes))
 	if err != nil {
@@ -1011,27 +748,15 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}
 	case errors.Is(err, ErrMemberNotFound):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}
-	case errors.Is(err, ErrCustomerNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "customer_not_found", Message: "this customer does not exist"}
-	case errors.Is(err, ErrCustomerExists):
-		return &respond.APIError{Status: http.StatusConflict, Code: "customer_exists", Message: "a customer with this name already exists"}
-	case errors.Is(err, ErrFlowNotAssigned):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_assigned", Message: "this flow is not assigned to the customer"}
-	case errors.Is(err, ErrCustomerPaused):
-		return &respond.APIError{Status: http.StatusConflict, Code: "customer_paused", Message: "proofing is paused for this customer"}
-	case errors.Is(err, ErrCustomerHasOpenReviews):
-		return &respond.APIError{Status: http.StatusConflict, Code: "customer_has_open_reviews", Message: "decide this customer's sessions waiting for review first"}
-	case errors.Is(err, ErrCustomerSessionsLeft):
-		return &respond.APIError{Status: http.StatusConflict, Code: "customer_sessions_left", Message: "sessions were sent for this customer while it was being removed; try again"}
-	case errors.Is(err, ErrCustomerNoAPIKey):
-		return &respond.APIError{Status: http.StatusConflict, Code: "customer_no_api_key", Message: "create a live API key for this customer first"}
 	case errors.Is(err, ErrAPIKeyNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}
 	case errors.Is(err, ErrRequestNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}
 	case errors.Is(err, ErrWebhookNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this customer has no webhook endpoint"}
-	case errors.Is(err, ErrNoCustomerLogo):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}
+	case errors.Is(err, ErrNoDefaultFlow):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "no_default_flow", Message: "name a flow: the organization has no default flow"}
+	case errors.Is(err, ErrNoLogo):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}
 	case errors.Is(err, ErrFlowNotAllowed):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}
@@ -1054,7 +779,7 @@ func mapError(err error) error {
 	case errors.Is(err, ErrDiplomasClosed):
 		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity is approved: " + DiplomaUploadWindow.String()}
 	case errors.Is(err, ErrReferencePhotoRequired):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the customer API"}
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}
 	case errors.Is(err, ErrDiplomasNeedPage):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrHostedDisabled):
@@ -1066,11 +791,11 @@ func mapError(err error) error {
 	case errors.Is(err, ErrFlowNoIdentity):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "a data request flow must read the name and date of birth, which a person's sessions are found by"}
 	case errors.Is(err, ErrDataFlowForMember):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for a customer's subjects, not for members"}
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}
 	case errors.Is(err, ErrExportUnavailable):
 		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
 	case errors.Is(err, ErrRedirectNotAllowed):
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the customer's allowed redirect origins"}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}
 	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
 		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "Yivi app sessions need the Regula face check, which this deployment has not configured"}
 	case errors.As(err, &rejected):

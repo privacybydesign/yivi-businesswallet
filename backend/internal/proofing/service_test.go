@@ -46,7 +46,7 @@ type fakeRequests struct {
 	// stored is the last request created.
 	stored      *Request
 	resultReads int
-	// page is what ListPage answers from; pages records each cursor asked for.
+	// page is what ListExternalPage answers from; pages records each cursor asked for.
 	page     []Request
 	pages    []*RequestCursor
 	created  []NewStoredRequest
@@ -80,7 +80,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 	}
 	f.created = append(f.created, in)
 	req := Request{
-		ID: in.ID, OrganizationID: in.OrgID, SubjectUserID: in.Subject.UserID, CustomerID: in.Subject.CustomerID,
+		ID: in.ID, OrganizationID: in.OrgID, SubjectUserID: in.Subject.UserID, SubjectKind: in.Subject.Kind,
 		SubjectName:  in.Subject.Name,
 		SubjectEmail: in.Subject.Email, FlowID: in.Flow.ID, FlowName: in.Flow.Name, FlowVersion: in.Flow.Version,
 		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method,
@@ -167,11 +167,11 @@ func (f *fakeRequests) Cancel(context.Context, Request) (bool, error) {
 	return true, nil
 }
 
-func (f *fakeRequests) ListPage(_ context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error) {
+func (f *fakeRequests) ListExternalPage(_ context.Context, _ uuid.UUID, after *RequestCursor, limit int) ([]Request, error) {
 	f.pages = append(f.pages, after)
 	out := []Request{}
 	for _, r := range f.page {
-		if len(out) < limit && r.CustomerID != nil && *r.CustomerID == scope.CustomerID {
+		if len(out) < limit && r.External() {
 			out = append(out, r)
 		}
 	}
@@ -192,9 +192,8 @@ func (f *fakeRequests) Purge(context.Context, Request) error {
 
 func (f *fakeRequests) ClearExpiredProofedNames(context.Context) (int64, error) { return 0, nil }
 
-func (f *fakeRequests) ListOpenReviews(_ context.Context, _ uuid.UUID, customerID *uuid.UUID) ([]Request, error) {
-	if f.stored == nil || f.stored.Status != StatusNeedsReview ||
-		customerID != nil && (f.stored.CustomerID == nil || *f.stored.CustomerID != *customerID) {
+func (f *fakeRequests) ListOpenReviews(context.Context, uuid.UUID) ([]Request, error) {
+	if f.stored == nil || f.stored.Status != StatusNeedsReview {
 		return nil, nil
 	}
 	return []Request{*f.stored}, nil
@@ -202,13 +201,6 @@ func (f *fakeRequests) ListOpenReviews(_ context.Context, _ uuid.UUID, customerI
 
 func (f *fakeRequests) LockReview(context.Context, uuid.UUID) (func(), error) {
 	return func() {}, nil
-}
-
-func (f *fakeRequests) ListUnpurgedForCustomer(_ context.Context, _, customerID uuid.UUID) ([]Request, error) {
-	if f.stored == nil || f.stored.PurgedAt != nil || f.stored.CustomerID == nil || *f.stored.CustomerID != customerID {
-		return nil, nil
-	}
-	return []Request{*f.stored}, nil
 }
 
 func (f *fakeRequests) ListPurgeDue(context.Context, int) ([]Request, error) {
@@ -240,8 +232,8 @@ func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, s
 	return nil
 }
 
-func (f *fakeRequests) GetForCustomer(_ context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
-	if f.stored == nil || f.stored.ID != id || f.stored.CustomerID == nil || *f.stored.CustomerID != scope.CustomerID {
+func (f *fakeRequests) GetExternal(_ context.Context, _, id uuid.UUID) (Request, error) {
+	if f.stored == nil || f.stored.ID != id || !f.stored.External() {
 		return Request{}, ErrRequestNotFound
 	}
 	return *f.stored, nil
@@ -287,13 +279,13 @@ func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) 
 // fakeAPIKeys stores nothing: Create answers the key it was asked for.
 type fakeAPIKeys struct{}
 
-func (fakeAPIKeys) Create(_ context.Context, orgID, customerID, _ uuid.UUID, name string, scopes []string) (APIKey, string, error) {
-	return APIKey{ID: uuid.New(), OrganizationID: orgID, CustomerID: customerID, Name: name, Scopes: scopes}, "yp_live_x", nil
+func (fakeAPIKeys) Create(_ context.Context, orgID, _ uuid.UUID, name string, scopes []string) (APIKey, string, error) {
+	return APIKey{ID: uuid.New(), OrganizationID: orgID, Name: name, Scopes: scopes}, "yp_live_x", nil
 }
 
-func (fakeAPIKeys) List(context.Context, uuid.UUID, uuid.UUID) ([]APIKey, error) { return nil, nil }
+func (fakeAPIKeys) List(context.Context, uuid.UUID) ([]APIKey, error) { return nil, nil }
 
-func (fakeAPIKeys) Revoke(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (APIKey, error) {
+func (fakeAPIKeys) Revoke(context.Context, uuid.UUID, uuid.UUID) (APIKey, error) {
 	return APIKey{}, ErrAPIKeyNotFound
 }
 
@@ -301,123 +293,38 @@ func (fakeAPIKeys) Authenticate(context.Context, string) (APIKeyCaller, error) {
 	return APIKeyCaller{}, ErrAPIKeyInvalid
 }
 
-type fakeCustomers struct {
-	byID  map[uuid.UUID]Customer
-	gets  int
-	saved []FlowSelection
-	logo  CustomerLogo
-	// requests is what a pause checks for open reviews, as the store does.
-	requests *fakeRequests
-	// sentDuringRemove is how many removals find a request sent meanwhile
-	// and refuse, each adding one unpurged request first.
-	sentDuringRemove int
+// fakeOrgSettings holds the org's settings in memory.
+type fakeOrgSettings struct {
+	settings Settings
+	logo     Logo
 }
 
-func (f *fakeCustomers) List(context.Context, uuid.UUID) ([]Customer, error) {
-	out := []Customer{}
-	for _, c := range f.byID {
-		out = append(out, c)
-	}
-	return out, nil
+func (f *fakeOrgSettings) Get(context.Context, uuid.UUID) (Settings, error) { return f.settings, nil }
+
+func (f *fakeOrgSettings) SaveSession(_ context.Context, _ uuid.UUID, session SessionSettings) (Settings, error) {
+	f.settings.Session = session
+	return f.settings, nil
 }
 
-func (f *fakeCustomers) Get(_ context.Context, _, id uuid.UUID) (Customer, error) {
-	f.gets++
-	c, ok := f.byID[id]
-	if !ok {
-		return Customer{}, ErrCustomerNotFound
-	}
-	return c, nil
-}
-
-func (f *fakeCustomers) Create(_ context.Context, orgID, _ uuid.UUID, name string) (Customer, error) {
-	c := Customer{ID: uuid.New(), OrganizationID: orgID, Name: name, Flows: FlowSelection{FlowIDs: []string{}}}
-	f.byID[c.ID] = c
-	return c, nil
-}
-
-func (f *fakeCustomers) Rename(_ context.Context, _, id uuid.UUID, name string) (Customer, error) {
-	c := f.byID[id]
-	c.Name = name
-	f.byID[id] = c
-	return c, nil
-}
-
-func (f *fakeCustomers) SaveFlows(_ context.Context, _, id uuid.UUID, sel FlowSelection) (Customer, error) {
-	f.saved = append(f.saved, sel)
-	c := f.byID[id]
-	c.Flows = sel
-	f.byID[id] = c
-	return c, nil
-}
-
-func (f *fakeCustomers) SetStatus(ctx context.Context, orgID, id uuid.UUID, status CustomerStatus) (Customer, error) {
-	if status == CustomerPaused && f.requests != nil {
-		if open, _ := f.requests.ListOpenReviews(ctx, orgID, &id); len(open) > 0 {
-			return Customer{}, ErrCustomerHasOpenReviews
-		}
-	}
-	c := f.byID[id]
-	c.PausedAt = nil
-	if status == CustomerPaused {
-		now := time.Now()
-		c.PausedAt = &now
-	}
-	f.byID[id] = c
-	return c, nil
-}
-
-func (f *fakeCustomers) SaveSettings(_ context.Context, _, id uuid.UUID, settings CustomerSettings) (Customer, error) {
-	c := f.byID[id]
-	c.Settings = settings
-	f.byID[id] = c
-	return c, nil
-}
-
-func (f *fakeCustomers) Remove(_ context.Context, orgID, id uuid.UUID) error {
-	if _, ok := f.byID[id]; !ok {
-		return ErrCustomerNotFound
-	}
-	if f.sentDuringRemove > 0 {
-		f.sentDuringRemove--
-		sent := Request{
-			ID: uuid.New(), OrganizationID: orgID, CustomerID: &id, Status: StatusPending,
-			session: &ipsSession{ID: "ses-sent-meanwhile", Token: "tok"},
-		}
-		f.requests.stored = &sent
-		return ErrCustomerSessionsLeft
-	}
-	if f.requests != nil && f.requests.stored != nil && f.requests.stored.PurgedAt == nil &&
-		f.requests.stored.CustomerID != nil && *f.requests.stored.CustomerID == id {
-		return ErrCustomerSessionsLeft
-	}
-	delete(f.byID, id)
-	return nil
-}
-
-func (f *fakeCustomers) SaveBranding(_ context.Context, _, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error) {
-	c := f.byID[id]
+func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
 	if logo.Replace {
 		b.HasLogo = len(logo.Logo.Bytes) > 0
 		f.logo = logo.Logo
 	} else {
-		b.HasLogo = c.Branding.HasLogo
+		b.HasLogo = f.settings.Branding.HasLogo
 	}
-	c.Branding = b
-	f.byID[id] = c
-	return c, nil
+	f.settings.Branding = b
+	return f.settings, nil
 }
 
-func (f *fakeCustomers) SaveRedirectOrigins(_ context.Context, _, id uuid.UUID, origins []string) (Customer, error) {
-	c := f.byID[id]
-	c.RedirectOrigins = origins
-	f.byID[id] = c
-	return c, nil
+func (f *fakeOrgSettings) SaveRedirectOrigins(_ context.Context, _ uuid.UUID, origins []string) (Settings, error) {
+	f.settings.RedirectOrigins = origins
+	return f.settings, nil
 }
 
-func (f *fakeCustomers) Logo(_ context.Context, _, id uuid.UUID) (CustomerLogo, error) {
-	if !f.byID[id].Branding.HasLogo {
-		return CustomerLogo{}, ErrNoCustomerLogo
+func (f *fakeOrgSettings) Logo(context.Context, uuid.UUID) (Logo, error) {
+	if !f.settings.Branding.HasLogo {
+		return Logo{}, ErrNoLogo
 	}
 	return f.logo, nil
 }
@@ -624,14 +531,11 @@ var (
 	// browserFlow captures the face in a browser a recipient cannot reach.
 	browserFlow = testFlow("f-web", "Web selfie", []string{"selfie"}, selfieLocationBrowser)
 
-	testOrg = Org{ID: uuid.New(), Name: "Acme BV"}
-	alex    = Member{UserID: uuid.New(), Name: "Alex Jansen", Email: "alex@example.org", Role: "admin", MemberType: "employee"}
-	// initech is a customer with chipFlow assigned (a flow members may not use)
-	// as its default.
-	initech     = Customer{ID: uuid.New(), OrganizationID: testOrg.ID, Name: "Initech", Flows: FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}, HasAPIKey: true}
+	testOrg     = Org{ID: uuid.New(), Name: "Acme BV"}
+	alex        = Member{UserID: uuid.New(), Name: "Alex Jansen", Email: "alex@example.org", Role: "admin", MemberType: "employee"}
 	testSession = SessionTTL
-	// initechScope is what an API key of initech reaches.
-	initechScope = CustomerScope{OrgID: testOrg.ID, CustomerID: initech.ID}
+	// sam is an org admin, who may send an external person any flow.
+	sam = Requester{UserID: uuid.New(), Name: "Sam", Admin: true}
 )
 
 // testPinnedVersion is the flow version the fake IPS pins a session to, newer
@@ -639,17 +543,17 @@ var (
 const testPinnedVersion = 2
 
 type fixture struct {
-	svc       *Service
-	settings  *fakeSettings
-	requests  *fakeRequests
-	customers *fakeCustomers
-	ips       *fakeIPS
-	verifier  *fakeVerifier
-	mailer    *fakeMailer
+	svc         *Service
+	settings    *fakeSettings
+	requests    *fakeRequests
+	orgSettings *fakeOrgSettings
+	ips         *fakeIPS
+	verifier    *fakeVerifier
+	mailer      *fakeMailer
 }
 
 // newFixture builds a service over fakes: appFlow is made available to
-// members as the default; alex is a member and initech a customer.
+// members as the org's default; alex is a member.
 func newFixture() fixture {
 	f := fixture{
 		settings: &fakeSettings{selection: FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}},
@@ -658,12 +562,12 @@ func newFixture() fixture {
 			flows: []proofingprovider.Flow{appFlow, chipFlow, browserFlow}, sessionExpires: time.Now().Add(testSession),
 			result: proofingprovider.Result{Status: proofingprovider.StatusCreated},
 		},
-		customers: &fakeCustomers{byID: map[uuid.UUID]Customer{initech.ID: initech}},
-		verifier:  &fakeVerifier{},
-		mailer:    &fakeMailer{},
+		orgSettings: &fakeOrgSettings{settings: defaultSettings(testOrg.ID)},
+		verifier:    &fakeVerifier{},
+		mailer:      &fakeMailer{},
 	}
-	f.customers.requests = f.requests
-	f.svc = NewService(Stores{Settings: f.settings, Requests: f.requests, Customers: f.customers, APIKeys: fakeAPIKeys{}},
+	f.orgSettings.settings.OrgName = testOrg.Name
+	f.svc = NewService(Stores{Settings: f.settings, Requests: f.requests, OrgSettings: f.orgSettings, APIKeys: fakeAPIKeys{}},
 		f.ips, f.verifier, f.mailer)
 	return f
 }
@@ -711,6 +615,19 @@ func TestFlowsAppliesSelection(t *testing.T) {
 	}
 }
 
+// The org's default flow is not one of the flows members may use.
+func TestFlowsDefaultIsIndependent(t *testing.T) {
+	f := newFixture()
+	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: chipFlow.ID}
+	all, err := f.svc.Flows(context.Background(), testOrg, FlowsAll)
+	if err != nil {
+		t.Fatalf("Flows: %v", err)
+	}
+	if all[0].Default || !all[0].Allowed || !all[1].Default || all[1].Allowed {
+		t.Errorf("flows = %+v; want appFlow allowed, chipFlow the default", all)
+	}
+}
+
 func TestConfigureFlowsValidates(t *testing.T) {
 	cases := map[string]struct {
 		sel  FlowSelection
@@ -718,11 +635,13 @@ func TestConfigureFlowsValidates(t *testing.T) {
 	}{
 		"allowed with default": {FlowSelection{FlowIDs: []string{appFlow.ID, chipFlow.ID}, DefaultFlowID: chipFlow.ID}, nil},
 		"none":                 {FlowSelection{}, nil},
-		"no default":           {FlowSelection{FlowIDs: []string{appFlow.ID}}, ErrInvalidInput},
-		"default not allowed":  {FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: chipFlow.ID}, ErrInvalidInput},
-		"default without any":  {FlowSelection{DefaultFlowID: appFlow.ID}, ErrInvalidInput},
-		"unknown flow":         {FlowSelection{FlowIDs: []string{"nope"}, DefaultFlowID: "nope"}, ErrFlowNotFound},
-		"browser selfie":       {FlowSelection{FlowIDs: []string{browserFlow.ID}, DefaultFlowID: browserFlow.ID}, ErrFlowNotCompletable},
+		"no default":           {FlowSelection{FlowIDs: []string{appFlow.ID}}, nil},
+		"default not allowed":  {FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: chipFlow.ID}, nil},
+		"default without any":  {FlowSelection{DefaultFlowID: appFlow.ID}, nil},
+		"unknown flow":         {FlowSelection{FlowIDs: []string{"nope"}}, ErrFlowNotFound},
+		"unknown default":      {FlowSelection{DefaultFlowID: "nope"}, ErrFlowNotFound},
+		"browser selfie":       {FlowSelection{FlowIDs: []string{browserFlow.ID}}, ErrFlowNotCompletable},
+		"browser default":      {FlowSelection{DefaultFlowID: browserFlow.ID}, ErrFlowNotCompletable},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1065,25 +984,25 @@ func TestEditUnknownFlowIsNotFound(t *testing.T) {
 	}
 }
 
-func (f fixture) sendForCustomer(t *testing.T, email, name string) Sent {
+func (f fixture) sendExternal(t *testing.T, email, name string) Sent {
 	t.Helper()
-	sent, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: email, SubjectName: name, FlowID: chipFlow.ID})
+	sent, err := f.svc.CreateRequest(context.Background(), testOrg, sam,
+		NewRequest{SubjectEmail: email, SubjectName: name, FlowID: chipFlow.ID})
 	if err != nil {
-		t.Fatalf("CreateRequest for customer: %v", err)
+		t.Fatalf("CreateRequest for an external person: %v", err)
 	}
 	return sent
 }
 
-// A customer's subject is not a member: it is reached by the address the sender
-// typed, on a flow assigned to the customer even when members may not use it.
-func TestRequestForCustomerSubject(t *testing.T) {
+// An external person is not a member: it is reached by the address the sender
+// typed, on any flow when the sender is an admin, even one members may not use.
+func TestRequestForExternalPerson(t *testing.T) {
 	f := newFixture()
-	sent := f.sendForCustomer(t, "  Anna@Example.ORG ", "  ")
+	sent := f.sendExternal(t, "  Anna@Example.ORG ", "  ")
 
 	stored := f.requests.created[0].Subject
-	if stored.UserID != nil || stored.CustomerID == nil || *stored.CustomerID != initech.ID {
-		t.Errorf("subject = %+v, want initech's subject and no member", stored)
+	if stored.UserID != nil || stored.Kind != SubjectExternal || !sent.Request.External() {
+		t.Errorf("subject = %+v, want an external person and no member", stored)
 	}
 	if stored.Email != "anna@example.org" || stored.Name != "" {
 		t.Errorf("subject = %q <%s>, want no name and the normalised address", stored.Name, stored.Email)
@@ -1093,22 +1012,20 @@ func TestRequestForCustomerSubject(t *testing.T) {
 	}
 }
 
-func TestCustomerRequestValidates(t *testing.T) {
-	unknown := uuid.New()
+func TestExternalRequestValidates(t *testing.T) {
 	cases := map[string]struct {
+		by   Requester
 		in   NewRequest
 		want error
 	}{
-		"unknown customer":   {NewRequest{CustomerID: &unknown, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}, ErrCustomerNotFound},
-		"bad address":        {NewRequest{CustomerID: &initech.ID, SubjectEmail: "not-an-address", FlowID: chipFlow.ID}, ErrInvalidInput},
-		"member and subject": {NewRequest{CustomerID: &initech.ID, SubjectUserID: alex.UserID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}, ErrInvalidInput},
-		"not assigned":       {NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: appFlow.ID}, ErrFlowNotAssigned},
-		"not completable":    {NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: browserFlow.ID}, ErrFlowNotCompletable},
+		"bad address":     {sam, NewRequest{SubjectEmail: "not-an-address", FlowID: chipFlow.ID}, ErrInvalidInput},
+		"unknown flow":    {sam, NewRequest{SubjectEmail: "a@example.org", FlowID: "nope"}, ErrFlowNotFound},
+		"not completable": {sam, NewRequest{SubjectEmail: "a@example.org", FlowID: browserFlow.ID}, ErrFlowNotCompletable},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()}, tc.in)
+			_, err := f.svc.CreateRequest(context.Background(), testOrg, tc.by, tc.in)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
@@ -1116,6 +1033,53 @@ func TestCustomerRequestValidates(t *testing.T) {
 				t.Errorf("a refused request created a session or sent mail")
 			}
 		})
+	}
+}
+
+// A member may send an external person only a flow members may use; an admin
+// and an API key may send any flow a recipient can finish.
+func TestExternalRequestFlowsByRole(t *testing.T) {
+	member := Requester{UserID: uuid.New()}
+	key := Requester{Name: "key", APIKeyID: new(uuid.UUID)}
+	cases := map[string]struct {
+		by   Requester
+		flow string
+		want error
+	}{
+		"member, allowed flow":  {member, appFlow.ID, nil},
+		"member, other flow":    {member, chipFlow.ID, ErrFlowNotAllowed},
+		"admin, other flow":     {sam, chipFlow.ID, nil},
+		"API key, other flow":   {key, chipFlow.ID, nil},
+		"admin, browser selfie": {sam, browserFlow.ID, ErrFlowNotCompletable},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			_, err := f.svc.CreateRequest(context.Background(), testOrg, tc.by,
+				NewRequest{SubjectEmail: "a@example.org", FlowID: tc.flow})
+			if !errors.Is(err, tc.want) {
+				t.Errorf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// A request that names no flow runs the org's default flow, which an admin
+// may send whether or not members may use it; with no default there is none.
+func TestExternalRequestDefaultFlow(t *testing.T) {
+	f := newFixture()
+	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: chipFlow.ID}
+	if _, err := f.svc.CreateRequest(context.Background(), testOrg, sam, NewRequest{SubjectEmail: "a@example.org"}); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if got := f.requests.created[0].Flow.ID; got != chipFlow.ID {
+		t.Errorf("flow = %s, want the org's default %s", got, chipFlow.ID)
+	}
+
+	f = newFixture()
+	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID}}
+	if _, err := f.svc.CreateRequest(context.Background(), testOrg, sam, NewRequest{SubjectEmail: "a@example.org"}); !errors.Is(err, ErrNoDefaultFlow) {
+		t.Errorf("no default flow: err = %v, want %v", err, ErrNoDefaultFlow)
 	}
 }
 
@@ -1152,53 +1116,15 @@ func TestReconcileAuditsAppActor(t *testing.T) {
 	}
 }
 
-// A paused customer takes no new request, and resuming it takes them again.
-func TestPausedCustomerRefused(t *testing.T) {
+// The org's session lifetime is what IPS is asked for and what the mail says.
+func TestExternalRequestLifetime(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	if _, err := f.svc.SetCustomerStatus(ctx, testOrg.ID, initech.ID, CustomerPaused); err != nil {
-		t.Fatalf("SetCustomerStatus: %v", err)
+	short := SessionSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
+	if _, err := f.svc.SaveSessionSettings(ctx, testOrg.ID, short); err != nil {
+		t.Fatalf("SaveSessionSettings: %v", err)
 	}
-	in := NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); !errors.Is(err, ErrCustomerPaused) {
-		t.Fatalf("err = %v, want %v", err, ErrCustomerPaused)
-	}
-	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-		t.Errorf("a refused request created a session or sent mail")
-	}
-	if _, err := f.svc.SetCustomerStatus(ctx, testOrg.ID, initech.ID, CustomerActive); err != nil {
-		t.Fatalf("SetCustomerStatus: %v", err)
-	}
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); err != nil {
-		t.Errorf("CreateRequest after resume: %v", err)
-	}
-}
-
-// A customer without an API key takes no request.
-func TestCustomerRequestNeedsAPIKey(t *testing.T) {
-	f := newFixture()
-	ctx := context.Background()
-	c := f.customers.byID[initech.ID]
-	c.HasAPIKey = false
-	f.customers.byID[initech.ID] = c
-	in := NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()}, in); !errors.Is(err, ErrCustomerNoAPIKey) {
-		t.Fatalf("err = %v, want %v", err, ErrCustomerNoAPIKey)
-	}
-	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-		t.Errorf("a refused request created a session or sent mail")
-	}
-}
-
-// A customer's session lifetime is what IPS is asked for and what the mail says.
-func TestCustomerRequestLifetime(t *testing.T) {
-	f := newFixture()
-	ctx := context.Background()
-	short := CustomerSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
-	if _, err := f.svc.SaveCustomerSettings(ctx, testOrg.ID, initech.ID, short); err != nil {
-		t.Fatalf("SaveCustomerSettings: %v", err)
-	}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	if got := f.ips.sessions[0].TTL; got != short.SessionTTL {
 		t.Errorf("session TTL = %v, want %v", got, short.SessionTTL)
 	}
@@ -1209,37 +1135,37 @@ func TestCustomerRequestLifetime(t *testing.T) {
 
 func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 	f := newFixture()
-	for _, settings := range []CustomerSettings{
+	for _, settings := range []SessionSettings{
 		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
 		{SessionTTL: SessionTTL, DataRetentionDays: 366},
 		{SessionTTL: SessionTTL, DataRetentionDays: 60},
 	} {
-		if _, err := f.svc.SaveCustomerSettings(context.Background(), testOrg.ID, initech.ID, settings); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("SaveCustomerSettings(%+v) = %v, want ErrInvalidInput", settings, err)
+		if _, err := f.svc.SaveSessionSettings(context.Background(), testOrg.ID, settings); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("SaveSessionSettings(%+v) = %v, want ErrInvalidInput", settings, err)
 		}
 	}
 }
 
-// A customer's subject's mail is signed and styled as the customer; a member's
-// stays the org's.
-func TestCustomerMailBranding(t *testing.T) {
+// An external person's mail is signed and styled as the org's branding; a
+// member's stays the org's.
+func TestExternalMailBranding(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	logo := LogoChange{Replace: true, Logo: CustomerLogo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
-	if _, err := f.svc.SaveCustomerBranding(ctx, testOrg.ID, initech.ID, CustomerBranding{
-		DisplayName: " Initech Verzekeringen ", PrimaryColor: "#1F5B4A",
-		SupportContact: "help@initech.example", PrivacyURL: "https://initech.example/privacy",
+	logo := LogoChange{Replace: true, Logo: Logo{Bytes: []byte("\x89PNG"), ContentType: "image/png"}}
+	if _, err := f.svc.SaveBranding(ctx, testOrg.ID, Branding{
+		DisplayName: " Acme Verzekeringen ", PrimaryColor: "#1F5B4A",
+		SupportContact: "help@acme.example", PrivacyURL: "https://acme.example/privacy",
 	}, logo); err != nil {
-		t.Fatalf("SaveCustomerBranding: %v", err)
+		t.Fatalf("SaveBranding: %v", err)
 	}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.send(t)
 
-	customer, member := f.mailer.sent[0].mail, f.mailer.sent[1].mail
-	if customer.OrgName != "Initech Verzekeringen" || customer.RequesterName != "Initech Verzekeringen" ||
-		customer.SupportContact != "help@initech.example" || customer.PrivacyURL != "https://initech.example/privacy" ||
-		customer.Brand == nil || customer.Brand.PrimaryColor != "#1F5B4A" || customer.Brand.Logo.ContentType != "image/png" {
-		t.Errorf("customer mail = %+v; want Initech's name, contact, privacy statement, colour and logo", customer)
+	external, member := f.mailer.sent[0].mail, f.mailer.sent[1].mail
+	if external.OrgName != "Acme Verzekeringen" || external.RequesterName != "Acme Verzekeringen" ||
+		external.SupportContact != "help@acme.example" || external.PrivacyURL != "https://acme.example/privacy" ||
+		external.Brand == nil || external.Brand.PrimaryColor != "#1F5B4A" || external.Brand.Logo.ContentType != "image/png" {
+		t.Errorf("external mail = %+v; want the branded name, contact, privacy statement, colour and logo", external)
 	}
 	if member.OrgName != testOrg.Name || member.Brand != nil || member.SupportContact != "" {
 		t.Errorf("member mail = %+v; want the org's, unbranded", member)
@@ -1248,34 +1174,34 @@ func TestCustomerMailBranding(t *testing.T) {
 
 func TestSaveBrandingValidates(t *testing.T) {
 	f := newFixture()
-	for name, b := range map[string]CustomerBranding{
+	for name, b := range map[string]Branding{
 		"colour":       {PrimaryColor: "green"},
-		"http privacy": {PrivacyURL: "http://initech.example/privacy"},
+		"http privacy": {PrivacyURL: "http://acme.example/privacy"},
 		"relative":     {PrivacyURL: "/privacy"},
 	} {
-		if _, err := f.svc.SaveCustomerBranding(context.Background(), testOrg.ID, initech.ID, b, LogoChange{}); !errors.Is(err, ErrInvalidInput) {
+		if _, err := f.svc.SaveBranding(context.Background(), testOrg.ID, b, LogoChange{}); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: err = %v, want ErrInvalidInput", name, err)
 		}
 	}
 }
 
-// The proofed name is kept for a customer's approved subject only: a member has
+// The proofed name is kept for an approved external person only: a member has
 // a name already, and a rejected document's name is not the subject's.
 func TestReconcileKeepsProofedName(t *testing.T) {
 	cases := map[string]struct {
-		customer bool
+		external bool
 		outcome  proofingprovider.Status
 		want     string
 	}{
-		"customer approved": {true, proofingprovider.StatusApproved, "Anna Jansen"},
-		"customer rejected": {true, proofingprovider.StatusRejected, ""},
+		"external approved": {true, proofingprovider.StatusApproved, "Anna Jansen"},
+		"external rejected": {true, proofingprovider.StatusRejected, ""},
 		"member approved":   {false, proofingprovider.StatusApproved, ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
-			if tc.customer {
-				f.sendForCustomer(t, "anna@example.org", "")
+			if tc.external {
+				f.sendExternal(t, "anna@example.org", "")
 			} else {
 				f.send(t)
 			}
@@ -1285,68 +1211,6 @@ func TestReconcileKeepsProofedName(t *testing.T) {
 				t.Errorf("stored names = %q, shown %q; want %q", f.requests.names, req.ProofedName, tc.want)
 			}
 		})
-	}
-}
-
-// Any flow of the org a recipient can finish may be assigned to a customer,
-// including one members may not use.
-func TestAssignFlowsValidates(t *testing.T) {
-	cases := map[string]struct {
-		sel  FlowSelection
-		want error
-	}{
-		"not a members' flow": {FlowSelection{FlowIDs: []string{chipFlow.ID, appFlow.ID}, DefaultFlowID: appFlow.ID}, nil},
-		"none":                {FlowSelection{}, nil},
-		"no default":          {FlowSelection{FlowIDs: []string{chipFlow.ID}}, ErrInvalidInput},
-		"unknown flow":        {FlowSelection{FlowIDs: []string{"nope"}, DefaultFlowID: "nope"}, ErrFlowNotFound},
-		"browser selfie":      {FlowSelection{FlowIDs: []string{browserFlow.ID}, DefaultFlowID: browserFlow.ID}, ErrFlowNotCompletable},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			_, err := f.svc.AssignCustomerFlows(context.Background(), testOrg, initech.ID, tc.sel)
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("err = %v, want %v", err, tc.want)
-			}
-			if (tc.want == nil) != (len(f.customers.saved) == 1) {
-				t.Errorf("saved = %+v; want a save only when accepted", f.customers.saved)
-			}
-		})
-	}
-	f := newFixture()
-	if _, err := f.svc.AssignCustomerFlows(context.Background(), testOrg, uuid.New(), FlowSelection{}); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("unknown customer err = %v, want ErrCustomerNotFound", err)
-	}
-}
-
-func TestCustomerFlowsAssignment(t *testing.T) {
-	f := newFixture()
-	all, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, FlowsAll)
-	if err != nil {
-		t.Fatalf("CustomerFlows(all): %v", err)
-	}
-	if len(all) != 3 || all[0].Assigned || !all[1].Assigned || !all[1].Default {
-		t.Errorf("admin view = %+v; want every flow with only chipFlow assigned and default", all)
-	}
-	assigned, err := f.svc.CustomerFlows(context.Background(), testOrg, initech.ID, FlowsAllowed)
-	if err != nil {
-		t.Fatalf("CustomerFlows(assigned): %v", err)
-	}
-	if len(assigned) != 1 || assigned[0].ID != chipFlow.ID {
-		t.Errorf("member view = %+v; want only chipFlow", assigned)
-	}
-}
-
-func TestCreateCustomerNeedsAName(t *testing.T) {
-	f := newFixture()
-	for _, name := range []string{"", "   ", strings.Repeat("x", maxCustomerNameLength+1)} {
-		if _, err := f.svc.CreateCustomer(context.Background(), testOrg.ID, uuid.New(), name); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("CreateCustomer(%q) err = %v, want ErrInvalidInput", name, err)
-		}
-	}
-	c, err := f.svc.CreateCustomer(context.Background(), testOrg.ID, uuid.New(), "  Globex  ")
-	if err != nil || c.Name != "Globex" {
-		t.Errorf("CreateCustomer = %+v, %v; want the trimmed name", c, err)
 	}
 }
 
@@ -1361,29 +1225,29 @@ func (f fixture) sendYivi(t *testing.T) Sent {
 	return sent
 }
 
-// A customer's list pages newest first: a full page carries the cursor that
+// The external list pages newest first: a full page carries the cursor that
 // continues after its last row, the last page none, a bad cursor is refused.
-func TestCustomerRequestPage(t *testing.T) {
+func TestExternalRequestPage(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	base := time.Now()
 	for i := range 3 {
-		f.requests.page = append(f.requests.page, Request{ID: uuid.New(), CustomerID: &initech.ID, CreatedAt: base.Add(-time.Duration(i) * time.Minute)})
+		f.requests.page = append(f.requests.page, Request{ID: uuid.New(), SubjectKind: SubjectExternal, CreatedAt: base.Add(-time.Duration(i) * time.Minute)})
 	}
-	page, next, err := f.svc.CustomerRequestPage(ctx, initechScope, "", 2)
+	page, next, err := f.svc.ExternalRequestPage(ctx, testOrg.ID, "", 2)
 	if err != nil || len(page) != 2 || next == "" {
 		t.Fatalf("first page = %d rows, %q, %v; want 2 and a cursor", len(page), next, err)
 	}
-	if _, _, err := f.svc.CustomerRequestPage(ctx, initechScope, next, 2); err != nil {
+	if _, _, err := f.svc.ExternalRequestPage(ctx, testOrg.ID, next, 2); err != nil {
 		t.Fatalf("next page: %v", err)
 	}
 	if got := f.requests.pages[1]; got == nil || got.ID != page[1].ID || !got.CreatedAt.Equal(page[1].CreatedAt) {
 		t.Errorf("next page asked after %+v, want the first page's last row", got)
 	}
-	if _, next, _ := f.svc.CustomerRequestPage(ctx, initechScope, "", 10); next != "" {
+	if _, next, _ := f.svc.ExternalRequestPage(ctx, testOrg.ID, "", 10); next != "" {
 		t.Errorf("last page cursor = %q, want none", next)
 	}
-	if _, _, err := f.svc.CustomerRequestPage(ctx, initechScope, "not-a-cursor", 2); !errors.Is(err, ErrInvalidInput) {
+	if _, _, err := f.svc.ExternalRequestPage(ctx, testOrg.ID, "not-a-cursor", 2); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("bad cursor = %v, want %v", err, ErrInvalidInput)
 	}
 }
@@ -1392,57 +1256,40 @@ func TestCustomerRequestPage(t *testing.T) {
 func TestNoMailNeedsNoAddress(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	in := NewRequest{CustomerID: &initech.ID, FlowID: chipFlow.ID, SkipMail: true}
-	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "key"}, in)
+	in := NewRequest{FlowID: chipFlow.ID, SkipMail: true}
+	key := Requester{Name: "key", APIKeyID: new(uuid.UUID)}
+	sent, err := f.svc.CreateRequest(ctx, testOrg, key, in)
 	if err != nil || sent.DeepLink == "" || sent.MailSent {
 		t.Fatalf("CreateRequest without mail = %+v, %v; want a deep link and no mail", sent, err)
 	}
 	in.SkipMail = false
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "key"}, in); !errors.Is(err, ErrInvalidInput) {
+	if _, err := f.svc.CreateRequest(ctx, testOrg, key, in); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("mailed request without an address = %v, want %v", err, ErrInvalidInput)
 	}
 }
 
-// Removing a customer erases each of its requests first, at the engine too,
-// as a purge does: the rows go, but their audit trail stays.
-func TestRemoveCustomerPurges(t *testing.T) {
-	f := newFixture()
-	ctx := context.Background()
-	if _, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID}); err != nil {
-		t.Fatalf("CreateRequest: %v", err)
-	}
-	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); err != nil {
-		t.Fatalf("RemoveCustomer: %v", err)
-	}
-	if f.requests.stored.PurgedAt == nil || f.requests.stored.SubjectEmail != "" || f.ips.deletes != 1 {
-		t.Errorf("request purged %v, e-mail %q, engine deletes %d; want it erased first",
-			f.requests.stored.PurgedAt, f.requests.stored.SubjectEmail, f.ips.deletes)
-	}
-}
-
-// A customer's result is read from IPS once settled, audited each time, and
-// gone once erased.
+// An external request's result is read from IPS once settled, audited each
+// time, and gone once erased.
 func TestRequestResult(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if _, _, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
+	if _, _, err := f.svc.RequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
 		t.Errorf("RequestResult while pending = %v, want %v", err, ErrResultNotReady)
 	}
 	f.requests.stored.Status = StatusApproved
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
-	_, identity, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID)
+	_, identity, err := f.svc.RequestResult(ctx, testOrg.ID, sent.Request.ID)
 	if err != nil || identity.FamilyName != "Jansen" || f.requests.resultReads != 1 {
 		t.Fatalf("RequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
 	}
 	now := time.Now()
 	f.requests.stored.PurgedAt = &now
-	if _, _, err := f.svc.RequestResult(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
+	if _, _, err := f.svc.RequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("RequestResult after erasure = %v, want %v", err, ErrRequestNotFound)
 	}
 }
@@ -1450,33 +1297,33 @@ func TestRequestResult(t *testing.T) {
 // A new key gets every scope.
 func TestCreateAPIKeyScopes(t *testing.T) {
 	f := newFixture()
-	key, _, err := f.svc.CreateAPIKey(context.Background(), testOrg.ID, initech.ID, uuid.New(), "CI")
+	key, _, err := f.svc.CreateAPIKey(context.Background(), testOrg.ID, uuid.New(), "CI")
 	if err != nil || !slices.Equal(key.Scopes, APIKeyScopes) {
 		t.Errorf("scopes = %v, %v; want every scope", key.Scopes, err)
 	}
 }
 
-// A customer's request without an outcome is cancelled at IPS and here, once;
+// An external request without an outcome is cancelled at IPS and here, once;
 // purging it erases it at IPS and marks it.
 func TestCancelAndPurgeRequest(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	req, err := f.svc.CancelRequest(ctx, initechScope, sent.Request.ID)
+	req, err := f.svc.CancelRequest(ctx, testOrg.ID, sent.Request.ID)
 	if err != nil || req.EffectiveStatus(time.Now()) != StatusCancelled || f.ips.cancels != 1 {
 		t.Fatalf("CancelRequest = %v, %v (%d IPS cancels); want cancelled at IPS once", req.EffectiveStatus(time.Now()), err, f.ips.cancels)
 	}
-	if _, err := f.svc.CancelRequest(ctx, initechScope, sent.Request.ID); !errors.Is(err, ErrSessionOver) || f.ips.cancels != 1 {
+	if _, err := f.svc.CancelRequest(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrSessionOver) || f.ips.cancels != 1 {
 		t.Errorf("second CancelRequest = %v, want %v without IPS", err, ErrSessionOver)
 	}
-	if err := f.svc.PurgeRequest(ctx, initechScope, sent.Request.ID); err != nil || f.ips.deletes != 1 || f.requests.stored.PurgedAt == nil {
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, sent.Request.ID); err != nil || f.ips.deletes != 1 || f.requests.stored.PurgedAt == nil {
 		t.Fatalf("PurgeRequest = %v (%d IPS deletes); want erased at IPS and marked", err, f.ips.deletes)
 	}
-	if err := f.svc.PurgeRequest(ctx, initechScope, sent.Request.ID); err != nil || f.ips.deletes != 1 {
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, sent.Request.ID); err != nil || f.ips.deletes != 1 {
 		t.Errorf("second PurgeRequest = %v (%d deletes); want a no-op", err, f.ips.deletes)
 	}
 }
@@ -1486,8 +1333,8 @@ func TestCancelAndPurgeRequest(t *testing.T) {
 func TestPurgeDue(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
-		NewRequest{CustomerID: &initech.ID, SubjectName: "Anna", SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectName: "Anna", SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
@@ -1672,40 +1519,33 @@ func TestReadRechecksAtMostOnce(t *testing.T) {
 
 func TestCreateRequestResolvesOnce(t *testing.T) {
 	f := newFixture()
-	customer := initech
-	customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
-	f.customers.byID[customer.ID] = customer
-	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
-		NewRequest{CustomerID: &customer.ID, SubjectEmail: "anna@example.org"})
+	_, err := f.svc.CreateRequest(context.Background(), testOrg, sam,
+		NewRequest{SubjectEmail: "anna@example.org"})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if f.ips.flowLists != 1 || f.customers.gets != 1 || len(f.ips.sessions) != 1 {
-		t.Errorf("flow lists = %d, customer reads = %d, sessions = %d; want 1 each",
-			f.ips.flowLists, f.customers.gets, len(f.ips.sessions))
+	if f.ips.flowLists != 1 || len(f.ips.sessions) != 1 {
+		t.Errorf("flow lists = %d, sessions = %d; want 1 each", f.ips.flowLists, len(f.ips.sessions))
 	}
 }
 
 // Reconciling reads the status only; the full result, with personal data, is
-// read just for an approved customer subject, whose name is kept.
+// read just for an approved external person, whose name is kept.
 func TestReconcileFullResultForName(t *testing.T) {
 	for name, tc := range map[string]struct {
-		customer bool
+		external bool
 		status   proofingprovider.Status
 		want     int
 	}{
-		"member approved":           {false, proofingprovider.StatusApproved, 0},
-		"customer subject rejected": {true, proofingprovider.StatusRejected, 0},
-		"customer subject approved": {true, proofingprovider.StatusApproved, 1},
+		"member approved":   {false, proofingprovider.StatusApproved, 0},
+		"external rejected": {true, proofingprovider.StatusRejected, 0},
+		"external approved": {true, proofingprovider.StatusApproved, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
-			if tc.customer {
-				customer := initech
-				customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
-				f.customers.byID[customer.ID] = customer
-				if _, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
-					NewRequest{CustomerID: &customer.ID, SubjectEmail: "anna@example.org"}); err != nil {
+			if tc.external {
+				if _, err := f.svc.CreateRequest(context.Background(), testOrg, sam,
+					NewRequest{SubjectEmail: "anna@example.org"}); err != nil {
 					t.Fatalf("CreateRequest: %v", err)
 				}
 			} else {
@@ -1720,24 +1560,15 @@ func TestReconcileFullResultForName(t *testing.T) {
 	}
 }
 
-// testCustomer is initech with appFlow assigned as its default.
-func (f fixture) testCustomer() Customer {
-	customer := initech
-	customer.Flows = FlowSelection{FlowIDs: []string{appFlow.ID}, DefaultFlowID: appFlow.ID}
-	f.customers.byID[customer.ID] = customer
-	return customer
-}
-
 const testHostedBase = "https://wallet.test/p/"
 
-// sendHosted creates a hosted request for initech's subject and returns its
-// link's token.
+// sendHosted creates a hosted request for an external person, on the org's
+// default flow, and returns its link's token.
 func (f fixture) sendHosted(t *testing.T) (Sent, string) {
 	t.Helper()
-	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	sent, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
-		NewRequest{CustomerID: &customer.ID, Channel: ChannelHosted})
+		NewRequest{Channel: ChannelHosted})
 	if err != nil {
 		t.Fatalf("CreateRequest(hosted): %v", err)
 	}
@@ -1759,8 +1590,8 @@ func TestHostedLinkStartsOneSession(t *testing.T) {
 		t.Errorf("unstarted link status = %s, want pending", got)
 	}
 	view, err := f.svc.HostedRequest(context.Background(), token)
-	if err != nil || view.Flow.ID != appFlow.ID || view.Customer.ID != initech.ID {
-		t.Fatalf("HostedRequest = %+v, %v; want the flow and customer", view, err)
+	if err != nil || view.Flow.ID != appFlow.ID || view.Settings.OrganizationID != testOrg.ID {
+		t.Fatalf("HostedRequest = %+v, %v; want the flow and the org's settings", view, err)
 	}
 	started, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
 	if err != nil || started.DeepLink == "" || len(f.ips.sessions) != 1 {
@@ -1802,7 +1633,7 @@ func TestHostedLinkRunsYiviApp(t *testing.T) {
 	}
 }
 
-func TestHostedRequestNeedsCustomer(t *testing.T) {
+func TestHostedRequestNeedsExternalPerson(t *testing.T) {
 	f := newFixture()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	in := NewRequest{SubjectUserID: alex.UserID, FlowID: appFlow.ID, Channel: ChannelHosted}
@@ -1856,55 +1687,56 @@ func TestReviewReasonCountsChars(t *testing.T) {
 }
 
 // A session is kept for its flow's own retention when the flow set one, else
-// the customer's data retention, plus the grace that lets the wallet purge
-// first.
+// the org's data retention, plus the grace that lets the wallet purge first.
 func TestEngineRetentionPrefersFlow(t *testing.T) {
-	customer := Customer{Settings: CustomerSettings{DataRetentionDays: 30}}
+	settings := Settings{Session: SessionSettings{DataRetentionDays: 30}}
 	week, year := 7*24*time.Hour, 365*24*time.Hour
-	if got := engineRetention(&customer, week); got != week+retentionGrace {
+	if got := engineRetention(&settings, week); got != week+retentionGrace {
 		t.Errorf("a week's override = %v, want a week plus grace", got)
 	}
-	if got := engineRetention(&customer, year); got != year+retentionGrace {
+	if got := engineRetention(&settings, year); got != year+retentionGrace {
 		t.Errorf("a year's override = %v, want a year plus grace", got)
 	}
-	if got := engineRetention(&customer, 0); got != customer.Settings.DataRetention()+retentionGrace {
-		t.Errorf("no override = %v, want the customer's retention plus grace", got)
+	if got := engineRetention(&settings, 0); got != settings.Session.DataRetention()+retentionGrace {
+		t.Errorf("no override = %v, want the org's retention plus grace", got)
+	}
+	if got := engineRetention(nil, week); got != 0 {
+		t.Errorf("a member's request = %v, want the engine's own", got)
 	}
 }
 
 func TestSubjectRetentionDays(t *testing.T) {
-	customer := Customer{Settings: CustomerSettings{DataRetentionDays: 30}}
+	settings := Settings{Session: SessionSettings{DataRetentionDays: 30}}
 	cases := map[string]struct {
 		override time.Duration
 		want     int
 	}{
 		// The engine keeps its copy a day past the wallet's: that day counts.
-		"the customer's": {0, 31},
-		"a week's flow":  {7 * 24 * time.Hour, 8},
+		"the org's":     {0, 31},
+		"a week's flow": {7 * 24 * time.Hour, 8},
 		// Part of a day is told as a whole one.
 		"an hour's flow": {time.Hour, 2},
 	}
 	for name, tc := range cases {
-		if got := subjectRetentionDays(customer, tc.override); got != tc.want {
+		if got := subjectRetentionDays(settings, tc.override); got != tc.want {
 			t.Errorf("%s: %d days, want %d", name, got, tc.want)
 		}
 	}
 }
 
-func TestCustomerFlowsRetention(t *testing.T) {
+func TestFlowsRetention(t *testing.T) {
 	f := newFixture()
-	customer := initech
-	customer.Settings.DataRetentionDays = 30
-	f.customers.byID[customer.ID] = customer
+	f.orgSettings.settings.Session.DataRetentionDays = 30
 	week := 7 * 24 * time.Hour
 	f.ips.flows[1].RetentionOverrideSeconds = int(week.Seconds())
-	flows, err := f.svc.CustomerFlows(context.Background(), testOrg, customer.ID, FlowsAll)
+	flows, err := f.svc.Flows(context.Background(), testOrg, FlowsAll)
 	if err != nil {
-		t.Fatalf("CustomerFlows: %v", err)
+		t.Fatalf("Flows: %v", err)
 	}
+	settings := f.orgSettings.settings
 	want := map[string]int{
-		appFlow.ID:  subjectRetentionDays(customer, 0),
-		chipFlow.ID: subjectRetentionDays(customer, week),
+		appFlow.ID:  subjectRetentionDays(settings, 0),
+		chipFlow.ID: subjectRetentionDays(settings, week),
 	}
 	seen := 0
 	for _, fl := range flows {
@@ -1961,28 +1793,5 @@ func TestLostHostedStartErases(t *testing.T) {
 	_, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
 	if !errors.Is(err, ErrLinkStarted) || !errors.Is(err, f.ips.deleteErr) {
 		t.Errorf("StartHosted with the erase failing = %v, want both errors", err)
-	}
-}
-
-// A request sent while its customer is being removed is purged too before
-// the removal goes through; one that keeps coming refuses the removal.
-func TestRemoveCustomerPurgesLate(t *testing.T) {
-	f := newFixture()
-	ctx := context.Background()
-	f.customers.sentDuringRemove = 1
-	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); err != nil {
-		t.Fatalf("RemoveCustomer: %v", err)
-	}
-	if f.requests.stored == nil || f.requests.stored.PurgedAt == nil || f.ips.deletes != 1 {
-		t.Errorf("late request purged %v, engine deletes %d; want it erased first", f.requests.stored, f.ips.deletes)
-	}
-	if _, err := f.customers.Get(ctx, testOrg.ID, initech.ID); !errors.Is(err, ErrCustomerNotFound) {
-		t.Errorf("customer after removal = %v, want it gone", err)
-	}
-
-	f = newFixture()
-	f.customers.sentDuringRemove = removeCustomerAttempts
-	if err := f.svc.RemoveCustomer(ctx, testOrg.ID, initech.ID); !errors.Is(err, ErrCustomerSessionsLeft) {
-		t.Errorf("RemoveCustomer while requests keep coming = %v, want %v", err, ErrCustomerSessionsLeft)
 	}
 }

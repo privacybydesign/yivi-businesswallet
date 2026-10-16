@@ -22,7 +22,7 @@ const linkTokenBytes = 32
 
 var (
 	ErrLinkStarted = errors.New("proofing: the link was started already")
-	// ErrRedirectNotAllowed is a hosted request's redirect off the customer's
+	// ErrRedirectNotAllowed is a hosted request's redirect off the org's
 	// allowed origins.
 	ErrRedirectNotAllowed = errors.New("proofing: the redirect is not on an allowed origin")
 )
@@ -40,11 +40,12 @@ func newLinkToken() (string, []byte, error) {
 func (s *Service) SetHostedBaseURL(u string) { s.hostedBaseURL = u }
 
 type Hosted struct {
-	Request  Request
-	Customer Customer
+	Request Request
+	// Settings is the org's branding and retention.
+	Settings Settings
 	Flow     proofingprovider.Flow
-	// Settings is the flow's hosted page settings.
-	Settings FlowHosted
+	// FlowSettings is the flow's hosted page settings.
+	FlowSettings FlowHosted
 }
 
 // hostedRequest is the request behind a hosted link; ErrProofingPaused while
@@ -61,16 +62,13 @@ func (s *Service) hostedRequest(ctx context.Context, token string) (Request, err
 	return req, nil
 }
 
-// hostedLimitKey is whose rate limit a hosted link's calls count against:
-// its customer, or its org for a link sent to a member.
+// hostedLimitKey is whose rate limit a hosted link's calls count against: its
+// org, across all its links.
 func (s *Service) hostedLimitKey(ctx context.Context, token string) (uuid.UUID, error) {
 	hash := sha256.Sum256([]byte(token))
 	req, err := s.requests.GetByLinkToken(ctx, hash[:])
 	if err != nil {
 		return uuid.UUID{}, err
-	}
-	if req.CustomerID != nil {
-		return *req.CustomerID, nil
 	}
 	return req.OrganizationID, nil
 }
@@ -80,10 +78,10 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 	if err != nil {
 		return Hosted{}, err
 	}
-	if req.CustomerID == nil {
+	if !req.External() {
 		return Hosted{}, ErrRequestNotFound
 	}
-	customer, err := s.customers.Get(ctx, req.OrganizationID, *req.CustomerID)
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil {
 		return Hosted{}, err
 	}
@@ -91,14 +89,14 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 	if err != nil {
 		return Hosted{}, err
 	}
-	settings, err := s.flowHosted(ctx, req.OrganizationID, flow.ID)
+	flowSettings, err := s.flowHosted(ctx, req.OrganizationID, flow.ID)
 	if err != nil {
 		return Hosted{}, err
 	}
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Hosted{}, err
 	}
-	return Hosted{Request: req, Customer: customer, Flow: flow, Settings: settings}, nil
+	return Hosted{Request: req, Settings: settings, Flow: flow, FlowSettings: flowSettings}, nil
 }
 
 func (s *Service) hostedFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
@@ -130,7 +128,7 @@ func (s *Service) StartHosted(ctx context.Context, token string, method proofing
 	return s.startHosted(ctx, req, method)
 }
 
-// Headless is a hosted request started from the customer's own UI: the app
+// Headless is a hosted request started from the caller's own UI: the app
 // link it shows (AppLink for the Idem app, WalletLink for the Yivi app).
 type Headless struct {
 	Request    Request
@@ -139,12 +137,12 @@ type Headless struct {
 	ExpiresAt  time.Time
 }
 
-// StartHeadless starts a customer's hosted request in method, as the subject
-// picking an app on the hosted page would, for a customer building its own UI.
+// StartHeadless starts an external hosted request in method, as the subject
+// picking an app on the hosted page would, for an org building its own UI.
 // A Yivi one's disclosure starts at once; its face check runs through the
 // hosted link's routes. A request not created hosted is ErrNotHosted.
-func (s *Service) StartHeadless(ctx context.Context, scope CustomerScope, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
-	req, err := s.requests.GetForCustomer(ctx, scope, id)
+func (s *Service) StartHeadless(ctx context.Context, orgID, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
 		return Headless{}, err
 	}
@@ -179,18 +177,15 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if method != proofingprovider.MethodIdem && method != proofingprovider.MethodYivi {
 		return Sent{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
 	}
-	customer, err := s.customers.Get(ctx, req.OrganizationID, *req.CustomerID)
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil {
 		return Sent{}, err
-	}
-	if customer.Paused() {
-		return Sent{}, ErrCustomerPaused
 	}
 	flow, err := s.hostedFlow(ctx, req)
 	if err != nil {
 		return Sent{}, err
 	}
-	if !customerCompletable(flow) {
+	if !externalCompletable(flow) {
 		return Sent{}, ErrFlowNotCompletable
 	}
 	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
@@ -208,13 +203,13 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		}
 	}
 	ttl := SessionTTL
-	if customer.Settings.SessionTTL != 0 {
-		ttl = customer.Settings.SessionTTL
+	if settings.Session.SessionTTL != 0 {
+		ttl = settings.Session.SessionTTL
 	}
 	tenant := orgTenant(req.OrganizationID)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
-		Language: string(req.Language), Retention: engineRetention(&customer, req.RetentionOverride), ReferencePhoto: photo,
+		Language: string(req.Language), Retention: engineRetention(&settings, req.RetentionOverride), ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)
@@ -290,32 +285,32 @@ func (s *Service) HostedFaceFrame(ctx context.Context, token, image string) (pro
 }
 
 // HostedEmbedOrigins are the origins that may frame a hosted link's page: its
-// customer's allowed redirect origins. It reads no the engine state.
+// org's allowed redirect origins. It reads no the engine state.
 func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]string, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
 		return nil, err
 	}
-	if req.CustomerID == nil {
+	if !req.External() {
 		return nil, ErrRequestNotFound
 	}
-	customer, err := s.customers.Get(ctx, req.OrganizationID, *req.CustomerID)
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil {
 		return nil, err
 	}
-	return customer.RedirectOrigins, nil
+	return settings.RedirectOrigins, nil
 }
 
-// HostedLogo is the logo of a hosted request's customer, for its page.
-func (s *Service) HostedLogo(ctx context.Context, token string) (CustomerLogo, error) {
+// HostedLogo is the logo of a hosted request's org, for its page.
+func (s *Service) HostedLogo(ctx context.Context, token string) (Logo, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
-		return CustomerLogo{}, err
+		return Logo{}, err
 	}
-	if req.CustomerID == nil {
-		return CustomerLogo{}, ErrRequestNotFound
+	if !req.External() {
+		return Logo{}, ErrRequestNotFound
 	}
-	return s.customers.Logo(ctx, req.OrganizationID, *req.CustomerID)
+	return s.orgSettings.Logo(ctx, req.OrganizationID)
 }
 
 // hostedSubjectActor names who acts through a hosted link in the audit log:
@@ -352,15 +347,15 @@ func (s *Service) DeclineHosted(ctx context.Context, token string) (Request, err
 	return s.hostedRequest(ctx, token)
 }
 
-// maxRedirectOrigins and maxRedirectLength bound what a customer lists and
-// what a hosted request redirects to.
+// maxRedirectOrigins and maxRedirectLength bound what an org lists and what a
+// hosted request redirects to.
 const (
 	maxRedirectOrigins = 10
 	maxRedirectLength  = 2048
 )
 
-// loopbackHosts may use plain http in a redirect origin, for a customer
-// developing against its own machine.
+// loopbackHosts may use plain http in a redirect origin, for an org developing
+// against its own machine.
 var loopbackHosts = []string{"localhost", "127.0.0.1", "[::1]"}
 
 // parseRedirectOrigin reads raw as an origin: https (or http on a loopback
@@ -378,29 +373,28 @@ func parseRedirectOrigin(raw string) (string, error) {
 	return origin, nil
 }
 
-// SaveCustomerRedirectOrigins replaces the origins a customer's hosted pages
-// may redirect to and be embedded on: each an origin, kept once, in the order
-// given.
-func (s *Service) SaveCustomerRedirectOrigins(ctx context.Context, orgID, id uuid.UUID, origins []string) (Customer, error) {
+// SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
+// to and be embedded on: each an origin, kept once, in the order given.
+func (s *Service) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
 	if len(origins) > maxRedirectOrigins {
-		return Customer{}, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
+		return Settings{}, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
 	}
 	out := make([]string, 0, len(origins))
 	for _, raw := range origins {
 		origin, err := parseRedirectOrigin(raw)
 		if err != nil {
-			return Customer{}, err
+			return Settings{}, err
 		}
 		if !slices.Contains(out, origin) {
 			out = append(out, origin)
 		}
 	}
-	return s.customers.SaveRedirectOrigins(ctx, orgID, id, out)
+	return s.orgSettings.SaveRedirectOrigins(ctx, orgID, out)
 }
 
 // checkRedirect accepts a hosted request's redirect: an absolute URL on one of
-// the customer's origins.
-func checkRedirect(raw string, customer Customer) error {
+// the org's origins.
+func checkRedirect(raw string, settings Settings) error {
 	if len(raw) > maxRedirectLength {
 		return fmt.Errorf("%w: redirectUrl is too long", ErrInvalidInput)
 	}
@@ -408,7 +402,7 @@ func checkRedirect(raw string, customer Customer) error {
 	if err != nil || u.Host == "" || u.User != nil {
 		return fmt.Errorf("%w: redirectUrl must be an absolute URL", ErrInvalidInput)
 	}
-	if !slices.Contains(customer.RedirectOrigins, strings.ToLower(u.Scheme+"://"+u.Host)) {
+	if !slices.Contains(settings.RedirectOrigins, strings.ToLower(u.Scheme+"://"+u.Host)) {
 		return ErrRedirectNotAllowed
 	}
 	return nil

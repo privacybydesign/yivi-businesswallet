@@ -260,15 +260,17 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	proofingStub := proofingprovider.NewStub()
 	proofingService := proofing.NewService(proofing.Stores{
-		Settings:  proofing.NewSettingsStore(pool, audit.NewDBRecorder()),
-		Requests:  proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
-		Customers: proofing.NewCustomerStore(pool, audit.NewDBRecorder()),
-		APIKeys:   proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),
-		Webhooks:  proofing.NewWebhookStore(pool, audit.NewDBRecorder(), proofingCipher),
-		Events:    audit.NewReader(pool),
+		Settings:    proofing.NewSettingsStore(pool, audit.NewDBRecorder()),
+		Requests:    proofing.NewRequestStore(pool, audit.NewDBRecorder(), proofingCipher),
+		OrgSettings: proofing.NewOrgSettingsStore(pool, audit.NewDBRecorder()),
+		APIKeys:     proofing.NewAPIKeyStore(pool, audit.NewDBRecorder()),
+		Webhooks:    proofing.NewWebhookStore(pool, audit.NewDBRecorder(), proofingCipher),
+		Pauses:      proofing.NewPauseStore(pool, audit.NewDBRecorder()),
+		Events:      audit.NewReader(pool),
 	}, proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetPlatformAdmins(admins)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))

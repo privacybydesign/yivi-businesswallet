@@ -38,14 +38,14 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	r.subject_user_id, COALESCE(r.flow_version, 0),
-	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext, c.data_retention_days,
+	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until,
 	r.retention_override_seconds, ` + purgeAtColumn
 
-// purgeAtColumn is when a customer's request is purged: purge_at, which every
+// purgeAtColumn is when an external request is purged: purge_at, which every
 // write to its inputs stores (refreshPurgeAt), shown only once it settled.
 // NULL while it runs or awaits review, and for a member's. One whose session
 // never got attached (CreateRequest failed between the two writes) settles
@@ -62,8 +62,8 @@ const dataRequestReviewDays = 30
 // selects; $2 is dataRequestReviewDays. It is the one rule for when a request
 // is purged, so ListPurgeDue reads an index instead of computing it for every
 // unpurged row:
-//   - its retention (its flow's override, else its customer's
-//     data_retention_days) after it settled: cancelled, its session ended,
+//   - its retention (its flow's override, else the org's data_retention_days,
+//     or the default of an org that saved none) after it settled: cancelled, its session ended,
 //     decided, or else its running session's or unstarted link's cap. A cap is
 //     stored before it passes; the purge asks purge_at <= now(), which holds
 //     only after the cap anyway, since a retention is never zero.
@@ -71,16 +71,18 @@ const dataRequestReviewDays = 30
 //   - NULL for a member's request without a flow retention, and while a review
 //     has no end.
 //
-// The customer's retention is read in the statement: CustomerStore.SaveSettings
-// sets it again for that customer's requests (refreshCustomerPurgeAt).
+// The org's retention is read in the statement: OrgSettingsStore.SaveSession
+// sets it again for the org's requests (refreshOrgPurgeAt). $3 is
+// defaultDataRetentionDays.
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 		COALESCE(r.cancelled_at, r.ips_session_ended_at,
 			CASE WHEN r.status IN ('approved', 'rejected') THEN r.completed_at END,
 			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),
-				make_interval(days => (SELECT c.data_retention_days FROM identity_proofing_customers c
-					WHERE c.id = r.customer_id))),
+				CASE WHEN r.subject_kind = 'external' THEN make_interval(days => COALESCE(
+					(SELECT st.data_retention_days FROM identity_proofing_settings st
+						WHERE st.organization_id = r.organization_id), $3)) END),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
 			THEN r.completed_at + make_interval(days => $2) END)
 	WHERE `
@@ -94,33 +96,35 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays); err != nil {
+	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time requests %v: %w", ids, err)
 	}
 	return nil
 }
 
-// refreshCustomerPurgeAt stores purge_at again for every unpurged request of
-// customer id: its retention changed. The caller holds the customer's row
-// (lockCustomer, customerLockSettings), which a request insert waits on
-// (customerLockCreate), so no request is created against the old retention
+// refreshOrgPurgeAt stores purge_at again for every unpurged external request
+// of org id: its retention changed. The caller holds the org's settings
+// (lockSettings, settingsLockWrite), which a request insert waits on
+// (settingsLockCreate), so no request is created against the old retention
 // while this runs and stays stale. It locks the rows in id order before it
 // writes them, so it never deadlocks another statement that does too.
-func refreshCustomerPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) error {
+func refreshOrgPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) error {
 	if _, err := q.Exec(ctx, `SELECT id FROM identity_proofing_requests
-		WHERE customer_id = $1 AND purged_at IS NULL ORDER BY id FOR NO KEY UPDATE`, id); err != nil {
-		return fmt.Errorf("proofing: lock requests customer %s: %w", id, err)
+		WHERE organization_id = $1 AND subject_kind = 'external' AND purged_at IS NULL
+		ORDER BY id FOR NO KEY UPDATE`, id); err != nil {
+		return fmt.Errorf("proofing: lock requests org %s: %w", id, err)
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.customer_id = $1 AND r.purged_at IS NULL`, id, dataRequestReviewDays); err != nil {
-		return fmt.Errorf("proofing: set purge time customer %s: %w", id, err)
+	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL`,
+		id, dataRequestReviewDays, defaultDataRetentionDays); err != nil {
+		return fmt.Errorf("proofing: set purge time org %s: %w", id, err)
 	}
 	return nil
 }
 
-// requestFrom joins a request to its sender and its customer.
+// requestFrom joins a request to its sender and its org's settings.
 const requestFrom = ` FROM identity_proofing_requests r
 	LEFT JOIN users u ON u.id = r.requested_by
-	LEFT JOIN identity_proofing_customers c ON c.id = r.customer_id
+	LEFT JOIN identity_proofing_settings st ON st.organization_id = r.organization_id
 	LEFT JOIN identity_proofing_api_keys k ON k.id = r.api_key_id`
 
 func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
@@ -134,14 +138,18 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
-		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
+		&r.SubjectKind, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &overrideSeconds, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = proofedNameRetention
-	if retentionDays != nil {
-		r.NameRetention = CustomerSettings{DataRetentionDays: *retentionDays}.DataRetention()
+	if r.External() {
+		days := defaultDataRetentionDays
+		if retentionDays != nil {
+			days = *retentionDays
+		}
+		r.NameRetention = SessionSettings{DataRetentionDays: days}.DataRetention()
 	}
 	if overrideSeconds != nil {
 		r.RetentionOverride = time.Duration(*overrideSeconds) * time.Second
@@ -188,8 +196,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 type NewStoredRequest struct {
 	ID    uuid.UUID
 	OrgID uuid.UUID
-	// RequestedBy is the member who sent it, APIKeyID the customer key that
-	// created it; exactly one is set.
+	// RequestedBy is the member who sent it, APIKeyID the key that created
+	// it; exactly one is set.
 	RequestedBy   *uuid.UUID
 	APIKeyID      *uuid.UUID
 	Subject       Subject
@@ -244,22 +252,22 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// Before the row: a retention change in flight finishes first, and the
-		// next waits for this insert (lockCustomer's lock order).
-		if in.Subject.CustomerID != nil {
-			if err := lockCustomer(ctx, q, in.OrgID, *in.Subject.CustomerID, customerLockCreate); err != nil {
+		// next waits for this insert (lockSettings' lock order).
+		if in.Subject.Kind == SubjectExternal {
+			if err := lockSettings(ctx, q, in.OrgID, settingsLockCreate); err != nil {
 				return err
 			}
 		}
 
 		const insert = `INSERT INTO identity_proofing_requests
-			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
+			(id, organization_id, requested_by, subject_user_id, subject_kind, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
 			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
 				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0))`
-		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
+		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, string(in.Subject.Kind),
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
@@ -288,8 +296,8 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		if in.Subject.UserID != nil {
 			fields["subjectUserId"] = in.Subject.UserID.String()
 		}
-		if in.Subject.CustomerID != nil {
-			fields["customerId"] = in.Subject.CustomerID.String()
+		if in.Subject.Kind == SubjectExternal {
+			fields["external"] = true
 		}
 		if in.APIKeyID != nil {
 			fields["apiKeyId"] = in.APIKeyID.String()
@@ -434,7 +442,7 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 					req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
 				return err
 			}
-			if err := enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+			if err := enqueueRequestWebhook(ctx, q, req, EventSessionExpired,
 				sessionEventData(req, StatusExpired)); err != nil {
 				return err
 			}
@@ -599,12 +607,12 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
-// GetForCustomer returns one of the requests scope reaches, or
-// ErrRequestNotFound.
-func (s *RequestStore) GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+// GetExternal returns one of the org's external requests, or ErrRequestNotFound:
+// what an API key reaches.
+func (s *RequestStore) GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
 	query := `SELECT ` + requestColumns + requestFrom + `
-		WHERE r.id = $1 AND r.organization_id = $2 AND r.customer_id = $3`
-	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, scope.OrgID, scope.CustomerID))
+		WHERE r.id = $1 AND r.organization_id = $2 AND r.subject_kind = 'external'`
+	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrRequestNotFound
 	}
@@ -627,10 +635,9 @@ func (s *RequestStore) get(ctx context.Context, id uuid.UUID) (Request, error) {
 func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
-			AND ($3::uuid IS NULL OR r.customer_id = $3)
-			AND ($5::uuid IS NULL OR r.subject_user_id = $5)
-		ORDER BY r.created_at DESC LIMIT $4`
-	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, filter.CustomerID, maxListedRequests, filter.SubjectUserID)
+			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
+		ORDER BY r.created_at DESC LIMIT $3`
+	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
@@ -649,32 +656,32 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	return out, nil
 }
 
-// ListPage returns up to limit of the requests scope reaches, newest first,
-// after the cursor when one is given: the customer API's paged list.
-func (s *RequestStore) ListPage(ctx context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error) {
+// ListExternalPage returns up to limit of the org's external requests, newest
+// first, after the cursor when one is given: the API's paged list.
+func (s *RequestStore) ListExternalPage(ctx context.Context, orgID uuid.UUID, after *RequestCursor, limit int) ([]Request, error) {
 	var afterAt *time.Time
 	var afterID *uuid.UUID
 	if after != nil {
 		afterAt, afterID = &after.CreatedAt, &after.ID
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2
-			AND ($3::timestamptz IS NULL OR (r.created_at, r.id) < ($3, $4::uuid))
-		ORDER BY r.created_at DESC, r.id DESC LIMIT $5`, scope.OrgID, scope.CustomerID, afterAt, afterID, limit)
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external'
+			AND ($2::timestamptz IS NULL OR (r.created_at, r.id) < ($2, $3::uuid))
+		ORDER BY r.created_at DESC, r.id DESC LIMIT $4`, orgID, afterAt, afterID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: page requests customer %s: %w", scope.CustomerID, err)
+		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	defer rows.Close()
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request customer %s: %w", scope.CustomerID, err)
+			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
 		}
 		out = append(out, req)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: page requests customer %s: %w", scope.CustomerID, err)
+		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	return out, nil
 }
@@ -721,7 +728,7 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 			}))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCreated, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCreated,
 			sessionEventData(req, StatusPending))
 	})
 	return attached, err
@@ -770,7 +777,7 @@ func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID s
 		}
 		started := req
 		started.Method = methodOr(method, req.Method)
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionStarted, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionStarted,
 			sessionEventData(started, StatusInProgress))
 	})
 }
@@ -790,7 +797,7 @@ func (s *RequestStore) RecordHandover(ctx context.Context, req Request, expiresA
 			}, req.Method)))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionHandover, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionHandover,
 			sessionEventData(req, req.Status))
 	})
 }
@@ -831,7 +838,7 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 				req.auditFields(withMethod(map[string]any{"status": string(StatusExpired), "ipsStatus": string(ipsStatus)}, method)))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionExpired,
 			sessionEventData(req, StatusExpired))
 	})
 }
@@ -874,7 +881,7 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request) (bool, error) {
 				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCancelled, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled,
 			sessionEventData(req, StatusCancelled))
 	})
 	return done, err
@@ -942,7 +949,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request) error {
 			audit.Deleted(map[string]any{"status": string(req.Status)})); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionPurged, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionPurged,
 			sessionEventData(req, req.Status))
 	})
 }
@@ -1077,14 +1084,14 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		}
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, event, &req.ID, sessionEventData(decided, status))
+		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
 	})
 }
 
 // ListPurgeDue returns up to limit requests past their purge time, the
 // longest overdue first. It reads the stored purge_at over its partial index
 // (unpurged rows only), so an hourly run touches only what is due;
-// refreshPurgeAt and refreshCustomerPurgeAt keep it.
+// refreshPurgeAt and refreshOrgPurgeAt keep it.
 func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
 		WHERE r.purged_at IS NULL AND r.purge_at <= now()
@@ -1106,8 +1113,8 @@ func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, 
 
 // ClearExpiredProofedNames drops every proofed name past its
 // proofed_name_purge_after (RecordOutcome's proofedNameRetention). It locks
-// the rows in id order, as refreshCustomerPurgeAt does, so the two never
-// deadlock on rows of the same customer.
+// the rows in id order, as refreshOrgPurgeAt does, so the two never deadlock on
+// rows of the same org.
 func (s *RequestStore) ClearExpiredProofedNames(ctx context.Context) (int64, error) {
 	tag, err := s.db.Exec(ctx, `WITH due AS MATERIALIZED (
 			SELECT id FROM identity_proofing_requests WHERE proofed_name_purge_after <= now()
@@ -1122,13 +1129,12 @@ func (s *RequestStore) ClearExpiredProofedNames(ctx context.Context) (int64, err
 	return tag.RowsAffected(), nil
 }
 
-// ListOpenReviews returns the org's requests waiting for a review decision,
-// of one customer when customerID is set: needs_review, not erased, its
-// session not ended.
-func (s *RequestStore) ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error) {
+// ListOpenReviews returns the org's requests waiting for a review decision:
+// needs_review, not erased, its session not ended.
+func (s *RequestStore) ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error) {
 	return s.scanAll(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.customer_id = $2) AND `+openReviewWhere+`
-		ORDER BY r.created_at`, orgID, customerID)
+		WHERE r.organization_id = $1 AND `+openReviewWhere+`
+		ORDER BY r.created_at`, orgID)
 }
 
 // openReviewWhere is a request r waiting for a review decision: needs_review,
@@ -1152,33 +1158,13 @@ func (s *RequestStore) scanAll(ctx context.Context, query string, args ...any) (
 	return out, rows.Err()
 }
 
-// ListUnpurgedForCustomer returns every request of a customer that still holds personal data: what removing the customer erases first.
-func (s *RequestStore) ListUnpurgedForCustomer(ctx context.Context, orgID, customerID uuid.UUID) ([]Request, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.purged_at IS NULL
-		ORDER BY r.created_at`, orgID, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: list unpurged requests customer %s: %w", customerID, err)
-	}
-	defer rows.Close()
-	var out []Request
-	for rows.Next() {
-		req, err := s.scanRequest(rows)
-		if err != nil {
-			return nil, fmt.Errorf("proofing: scan unpurged request customer %s: %w", customerID, err)
-		}
-		out = append(out, req)
-	}
-	return out, rows.Err()
-}
-
-// Stats counts the customer requests sent since since, per customer and
-// flow, by outcome; requestedBy narrows them to the requests one member sent. A row
+// Stats counts the external requests sent since since, per flow, by outcome;
+// requestedBy narrows them to the requests one member sent. A row
 // counts as cancelled when it was cancelled before an outcome, else as expired
 // exactly when Request.EffectiveStatus reads it so, and as last reconciled: an outcome the engine holds but no list read picked up yet is not in
 // it.
 func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error) {
-	const query = `SELECT customer_id, flow_id, count(*),
+	const query = `SELECT flow_id, count(*),
 			count(*) FILTER (WHERE status = $4),
 			count(*) FILTER (WHERE status = $5),
 			count(*) FILTER (WHERE status = $6 AND ips_session_ended_at IS NULL),
@@ -1189,10 +1175,10 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 						AND (ips_session_expires_at IS NULL OR ips_session_expires_at <= now())))))),
 			count(*) FILTER (WHERE status NOT IN ($4, $5) AND cancelled_at IS NOT NULL)
 		FROM identity_proofing_requests
-		WHERE organization_id = $1 AND customer_id IS NOT NULL
+		WHERE organization_id = $1 AND subject_kind = 'external'
 			AND ($2::uuid IS NULL OR requested_by = $2) AND created_at >= $3
-		GROUP BY customer_id, flow_id
-		ORDER BY customer_id, flow_id`
+		GROUP BY flow_id
+		ORDER BY flow_id`
 	rows, err := s.db.Query(ctx, query, orgID, requestedBy, since,
 		StatusApproved, StatusRejected, StatusNeedsReview)
 	if err != nil {
@@ -1200,7 +1186,7 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StatsRow, error) {
 		var r StatsRow
-		err := row.Scan(&r.CustomerID, &r.FlowID, &r.Sessions, &r.Approved, &r.Rejected, &r.NeedsReview, &r.Expired, &r.Cancelled)
+		err := row.Scan(&r.FlowID, &r.Sessions, &r.Approved, &r.Rejected, &r.NeedsReview, &r.Expired, &r.Cancelled)
 		return r, err
 	})
 	if err != nil {

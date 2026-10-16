@@ -20,7 +20,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
-// Webhook events a customer can subscribe to. EventTest is sent on request and
+// Webhook events an org's endpoint can subscribe to. EventTest is sent on request and
 // reaches the endpoint whatever it subscribed to.
 const (
 	// EventSessionCreated is sent when a request's engine session is created: the
@@ -184,22 +184,28 @@ func sessionEventData(req Request, status Status) map[string]any {
 	return data
 }
 
-// enqueueWebhook writes a delivery of event in the caller's transaction, so it
-// is sent exactly when the change it reports commits: to the customer's own
-// endpoint if it has one subscribed to the event, else to the wallet's default
-// endpoint (endpoint_url NULL). A member's request (no customer) sends nothing.
-func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID, customerID *uuid.UUID,
-	event string, requestID *uuid.UUID, data map[string]any,
-) error {
-	if customerID == nil {
+// enqueueRequestWebhook is enqueueWebhook for an event of req. A member's
+// request sends nothing: only external requests are reported.
+func enqueueRequestWebhook(ctx context.Context, q database.Querier, req Request, event string, data map[string]any) error {
+	if !req.External() {
 		return nil
 	}
+	return enqueueWebhook(ctx, q, req.OrganizationID, event, &req.ID, data)
+}
+
+// enqueueWebhook writes a delivery of event in the caller's transaction, so it
+// is sent exactly when the change it reports commits: to the org's own
+// endpoint if it has one subscribed to the event, else to the wallet's default
+// endpoint (endpoint_url NULL).
+func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID,
+	event string, requestID *uuid.UUID, data map[string]any,
+) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("proofing: marshal webhook %s: %w", event, err)
 	}
 	var endpointURL *string
-	hook, err := getWebhook(ctx, q, orgID, *customerID)
+	hook, err := getWebhook(ctx, q, orgID)
 	switch {
 	case errors.Is(err, ErrWebhookNotFound):
 		if event == EventTest {
@@ -213,10 +219,10 @@ func enqueueWebhook(ctx context.Context, q database.Querier, orgID uuid.UUID, cu
 		endpointURL = &hook.URL
 	}
 	if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_webhook_deliveries
-			(organization_id, customer_id, event, request_id, payload, endpoint_url)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		orgID, *customerID, event, requestID, payload, endpointURL); err != nil {
-		return fmt.Errorf("proofing: enqueue webhook %s customer %s: %w", event, *customerID, err)
+			(organization_id, event, request_id, payload, endpoint_url)
+		VALUES ($1, $2, $3, $4, $5)`,
+		orgID, event, requestID, payload, endpointURL); err != nil {
+		return fmt.Errorf("proofing: enqueue webhook %s org %s: %w", event, orgID, err)
 	}
 	// Wakes the deliverer as soon as the change commits.
 	return database.Notify(ctx, q, WebhookChannel)

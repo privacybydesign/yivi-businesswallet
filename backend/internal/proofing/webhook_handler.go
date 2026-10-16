@@ -25,8 +25,8 @@ func newWebhookHealthResponse(h WebhookHealth) webhookHealthResponse {
 	return webhookHealthResponse(h)
 }
 
-// webhookResponse is a customer's endpoint; configured is false (and the rest
-// empty) for a customer without one. Secret is set only in the answer that
+// webhookResponse is the org's endpoint; configured is false (and the rest
+// empty) for an org without one. Secret is set only in the answer that
 // created the endpoint or rotated its secret.
 type webhookResponse struct {
 	Configured  bool                  `json:"configured"`
@@ -52,19 +52,15 @@ func (h *Handler) webhookResponse(r *http.Request, orgID uuid.UUID, w Webhook, s
 	}
 	return webhookResponse{
 		Configured: w.URL != "", URL: w.URL, Events: events, SecretLast4: w.SecretLast4, Secret: secret,
-		Health: newWebhookHealthResponse(health[w.CustomerID]), AvailableEvents: WebhookEvents, MaxAttempts: MaxWebhookAttempts,
+		Health: newWebhookHealthResponse(health), AvailableEvents: WebhookEvents, MaxAttempts: MaxWebhookAttempts,
 	}, nil
 }
 
 func (h *Handler) getWebhook(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
 	orgID := orgFromRequest(r).ID
-	hook, err := h.service.Webhook(r.Context(), orgID, id)
+	hook, err := h.service.Webhook(r.Context(), orgID)
 	if errors.Is(err, ErrWebhookNotFound) {
-		hook, err = Webhook{CustomerID: id}, nil
+		hook, err = Webhook{}, nil
 	}
 	if err != nil {
 		return mapError(err)
@@ -83,16 +79,12 @@ type saveWebhookRequest struct {
 }
 
 func (h *Handler) saveWebhook(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
 	var body saveWebhookRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
 	orgID := orgFromRequest(r).ID
-	hook, secret, err := h.service.SaveWebhook(r.Context(), orgID, id, body.URL, body.Events)
+	hook, secret, err := h.service.SaveWebhook(r.Context(), orgID, body.URL, body.Events)
 	if err != nil {
 		return mapError(err)
 	}
@@ -105,12 +97,8 @@ func (h *Handler) saveWebhook(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) rotateWebhookSecret(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
 	orgID := orgFromRequest(r).ID
-	hook, secret, err := h.service.RotateWebhookSecret(r.Context(), orgID, id)
+	hook, secret, err := h.service.RotateWebhookSecret(r.Context(), orgID)
 	if err != nil {
 		return mapError(err)
 	}
@@ -123,11 +111,7 @@ func (h *Handler) rotateWebhookSecret(w http.ResponseWriter, r *http.Request) er
 }
 
 func (h *Handler) removeWebhook(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	if err := h.service.RemoveWebhook(r.Context(), orgFromRequest(r).ID, id); err != nil {
+	if err := h.service.RemoveWebhook(r.Context(), orgFromRequest(r).ID); err != nil {
 		return mapError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -135,11 +119,7 @@ func (h *Handler) removeWebhook(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) testWebhook(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	if err := h.service.SendTestWebhook(r.Context(), orgFromRequest(r).ID, id); err != nil {
+	if err := h.service.SendTestWebhook(r.Context(), orgFromRequest(r).ID); err != nil {
 		return mapError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -163,11 +143,7 @@ type deliveryResponse struct {
 }
 
 func (h *Handler) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	deliveries, err := h.service.WebhookDeliveries(r.Context(), orgFromRequest(r).ID, id)
+	deliveries, err := h.service.WebhookDeliveries(r.Context(), orgFromRequest(r).ID)
 	if err != nil {
 		return mapError(err)
 	}

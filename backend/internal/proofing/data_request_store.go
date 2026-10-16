@@ -90,28 +90,28 @@ func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, fl
 	return kind, nil
 }
 
-// Candidates is every session of req's customer that still
+// Candidates is every external session of req's org that still
 // holds personal data and has an outcome: what a data request is matched
 // against. The person's earlier data requests are among them, since each
 // holds who asked (an erasure covers them too), but only once decided: one
 // still in review is the wallet's to decide, and is not purged under it.
 func (s *DataRequestStore) Candidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2
 			AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
-			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $4))
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity))
+			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $3))
+		ORDER BY r.created_at`, req.OrganizationID, req.ID, string(FlowIdentity))
 }
 
-// UnfinishedCandidates is every unfinished session of req's customer
+// UnfinishedCandidates is every unfinished external session of req's org
 // (pending, in progress, expired or cancelled) that still holds personal data:
 // what a data request matches by e-mail address (MatchEmail) or typed name
 // (MatchName), there being no proofed identity in them.
 func (s *DataRequestStore) UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2
 			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID)
+		ORDER BY r.created_at`, req.OrganizationID, req.ID)
 }
 
 // SaveMatches replaces req's matches.

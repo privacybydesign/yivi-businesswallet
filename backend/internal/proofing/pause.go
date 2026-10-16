@@ -16,7 +16,7 @@ import (
 
 var (
 	// ErrProofingPaused is any proofing call for an org whose proofing is
-	// paused, by a platform admin or by the org's admin.
+	// paused by a platform admin.
 	ErrProofingPaused = errors.New("proofing: identity proofing is paused for this organisation")
 	// ErrOrgNotFound is a pause for an org that does not exist.
 	ErrOrgNotFound = errors.New("proofing: organisation not found")
@@ -29,26 +29,18 @@ const foreignKeyViolation = "23503"
 // it is an unknown org.
 const pauseOrgForeignKey = "identity_proofing_org_pauses_organization_id_fkey"
 
-// PauseLevel is who paused an org's proofing.
-type PauseLevel string
-
-const (
-	// PausePlatform is a platform admin's pause: the org's admin cannot lift it.
-	PausePlatform PauseLevel = "platform"
-	// PauseOrganization is the org's own admin switching proofing off.
-	PauseOrganization PauseLevel = "organization"
-)
+// pausedByPlatform is the "by" of a pause's audit event: only a platform admin
+// pauses an org's proofing.
+const pausedByPlatform = "platform"
 
 // OrgPause is whether an org's proofing is paused, and by whom. The zero value
 // (apart from the id) is an org proofing as usual.
 type OrgPause struct {
 	OrganizationID   uuid.UUID
 	PlatformPausedAt *time.Time
-	OrgPausedAt      *time.Time
-	// PlatformPausedBy and OrgPausedBy are who set each pause, while it holds:
-	// nil when unknown (set before this was kept, or the user is gone).
+	// PlatformPausedBy is who set the pause, while it holds: nil when unknown
+	// (set before this was kept, or the user is gone).
 	PlatformPausedBy *PausedBy
-	OrgPausedBy      *PausedBy
 }
 
 // PausedBy is the user who set a pause.
@@ -57,8 +49,8 @@ type PausedBy struct {
 	Name   string
 }
 
-// Paused reports whether either pause stops the org's proofing.
-func (p OrgPause) Paused() bool { return p.PlatformPausedAt != nil || p.OrgPausedAt != nil }
+// Paused reports whether the pause stops the org's proofing.
+func (p OrgPause) Paused() bool { return p.PlatformPausedAt != nil }
 
 // PauseStore persists the pauses; every change is audited in its transaction.
 type PauseStore struct {
@@ -70,25 +62,20 @@ func NewPauseStore(db database.DB, recorder audit.Recorder) *PauseStore {
 	return &PauseStore{db: db, audit: recorder}
 }
 
-// pauseColumns reads a pause over pauseFrom, with who set each level.
-const pauseColumns = `p.organization_id, p.platform_paused_at, p.org_paused_at,
-	p.platform_paused_by, COALESCE(NULLIF(TRIM(COALESCE(pu.given_names, '') || ' ' || COALESCE(pu.last_name, '')), ''), pu.email, ''),
-	p.org_paused_by, COALESCE(NULLIF(TRIM(COALESCE(ou.given_names, '') || ' ' || COALESCE(ou.last_name, '')), ''), ou.email, '')`
+// pauseColumns reads a pause over pauseFrom, with who set it.
+const pauseColumns = `p.organization_id, p.platform_paused_at,
+	p.platform_paused_by, COALESCE(NULLIF(TRIM(COALESCE(pu.given_names, '') || ' ' || COALESCE(pu.last_name, '')), ''), pu.email, '')`
 
 const pauseFrom = ` FROM identity_proofing_org_pauses p
-	LEFT JOIN users pu ON pu.id = p.platform_paused_by
-	LEFT JOIN users ou ON ou.id = p.org_paused_by`
+	LEFT JOIN users pu ON pu.id = p.platform_paused_by`
 
 func scanPause(row pgx.Row) (OrgPause, error) {
 	var p OrgPause
-	var platformBy, orgBy *uuid.UUID
-	var platformName, orgName string
-	err := row.Scan(&p.OrganizationID, &p.PlatformPausedAt, &p.OrgPausedAt, &platformBy, &platformName, &orgBy, &orgName)
+	var platformBy *uuid.UUID
+	var platformName string
+	err := row.Scan(&p.OrganizationID, &p.PlatformPausedAt, &platformBy, &platformName)
 	if platformBy != nil && p.PlatformPausedAt != nil {
 		p.PlatformPausedBy = &PausedBy{UserID: *platformBy, Name: platformName}
-	}
-	if orgBy != nil && p.OrgPausedAt != nil {
-		p.OrgPausedBy = &PausedBy{UserID: *orgBy, Name: orgName}
 	}
 	return p, err
 }
@@ -113,7 +100,7 @@ func getPause(ctx context.Context, q database.Querier, orgID uuid.UUID, lock str
 // List returns every org whose proofing is paused.
 func (s *PauseStore) List(ctx context.Context) ([]OrgPause, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+pauseColumns+pauseFrom+`
-		WHERE p.platform_paused_at IS NOT NULL OR p.org_paused_at IS NOT NULL ORDER BY p.organization_id`)
+		WHERE p.platform_paused_at IS NOT NULL ORDER BY p.organization_id`)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list pauses: %w", err)
 	}
@@ -124,49 +111,32 @@ func (s *PauseStore) List(ctx context.Context) ([]OrgPause, error) {
 	return out, nil
 }
 
-// pauseUpserts set one level's pause and who set it, keeping when it started
-// and by whom while it holds.
-var pauseUpserts = map[PauseLevel]string{
-	PausePlatform: `INSERT INTO identity_proofing_org_pauses (organization_id, platform_paused_at, platform_paused_by)
-		VALUES ($1, CASE WHEN $2 THEN now() END, CASE WHEN $2 THEN $3::uuid END)
-		ON CONFLICT (organization_id) DO UPDATE SET
-			platform_paused_at = CASE WHEN $2 THEN COALESCE(identity_proofing_org_pauses.platform_paused_at, now()) END,
-			platform_paused_by = CASE WHEN $2 THEN CASE WHEN identity_proofing_org_pauses.platform_paused_at IS NULL
-				THEN $3::uuid ELSE identity_proofing_org_pauses.platform_paused_by END END,
-			updated_at = now()`,
-	PauseOrganization: `INSERT INTO identity_proofing_org_pauses (organization_id, org_paused_at, org_paused_by)
-		VALUES ($1, CASE WHEN $2 THEN now() END, CASE WHEN $2 THEN $3::uuid END)
-		ON CONFLICT (organization_id) DO UPDATE SET
-			org_paused_at = CASE WHEN $2 THEN COALESCE(identity_proofing_org_pauses.org_paused_at, now()) END,
-			org_paused_by = CASE WHEN $2 THEN CASE WHEN identity_proofing_org_pauses.org_paused_at IS NULL
-				THEN $3::uuid ELSE identity_proofing_org_pauses.org_paused_by END END,
-			updated_at = now()`,
-}
+// pauseUpsert sets the pause and who set it, keeping when it started and by
+// whom while it holds.
+const pauseUpsert = `INSERT INTO identity_proofing_org_pauses (organization_id, platform_paused_at, platform_paused_by)
+	VALUES ($1, CASE WHEN $2 THEN now() END, CASE WHEN $2 THEN $3::uuid END)
+	ON CONFLICT (organization_id) DO UPDATE SET
+		platform_paused_at = CASE WHEN $2 THEN COALESCE(identity_proofing_org_pauses.platform_paused_at, now()) END,
+		platform_paused_by = CASE WHEN $2 THEN CASE WHEN identity_proofing_org_pauses.platform_paused_at IS NULL
+			THEN $3::uuid ELSE identity_proofing_org_pauses.platform_paused_by END END,
+		updated_at = now()`
 
-// Set pauses or resumes the org's proofing at level and audits
-// identity_proofing.paused or .resumed with "by" the level. Setting what
-// already holds changes and audits nothing. An unknown org is ErrOrgNotFound.
-func (s *PauseStore) Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, state PauseState, by *uuid.UUID) (OrgPause, error) {
+// Set pauses or resumes the org's proofing and audits identity_proofing.paused
+// or .resumed. Setting what already holds changes and audits nothing. An
+// unknown org is ErrOrgNotFound.
+func (s *PauseStore) Set(ctx context.Context, orgID uuid.UUID, state PauseState, by *uuid.UUID) (OrgPause, error) {
 	paused := state == PauseOn
-	upsert, ok := pauseUpserts[level]
-	if !ok {
-		return OrgPause{}, fmt.Errorf("%w: unknown pause level %q", ErrInvalidInput, level)
-	}
 	var out OrgPause
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		before, err := getPause(ctx, q, orgID, " FOR UPDATE OF p")
 		if err != nil {
 			return err
 		}
-		held := before.PlatformPausedAt != nil
-		if level == PauseOrganization {
-			held = before.OrgPausedAt != nil
-		}
-		if held == paused {
+		if before.Paused() == paused {
 			out = before
 			return nil
 		}
-		if _, err := q.Exec(ctx, upsert, orgID, paused, by); err != nil {
+		if _, err := q.Exec(ctx, pauseUpsert, orgID, paused, by); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == pauseOrgForeignKey {
 				return ErrOrgNotFound
@@ -182,7 +152,7 @@ func (s *PauseStore) Set(ctx context.Context, orgID uuid.UUID, level PauseLevel,
 		}
 		return s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingSettings, ID: orgID.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"paused": !paused, "by": string(level)}, map[string]any{"paused": paused, "by": string(level)}))
+			audit.Updated(map[string]any{"paused": !paused, "by": pausedByPlatform}, map[string]any{"paused": paused, "by": pausedByPlatform}))
 	})
 	return out, err
 }
@@ -219,9 +189,9 @@ func (s *Service) ProofingPauses(ctx context.Context) ([]OrgPause, error) {
 	return s.pauses.List(ctx)
 }
 
-// SetProofingPaused pauses or resumes the org's proofing at level. Sessions
-// already running still settle and their webhooks still go out; nothing new
-// starts while either level holds.
+// SetProofingPaused pauses or resumes the org's proofing. Sessions already
+// running still settle and their webhooks still go out; nothing new starts
+// while it is paused.
 //
 // A pause leaves no review open, since a paused org can decide none: every
 // open review is rejected with ErrorOrgPaused before the pause is set, and a
@@ -229,7 +199,7 @@ func (s *Service) ProofingPauses(ctx context.Context) ([]OrgPause, error) {
 // rejected again once it holds; from then on a review is rejected as it
 // arrives (rejectIfPaused), and PurgeDue's sweep (rejectPausedReviews) takes
 // any whose rejection failed.
-func (s *Service) SetProofingPaused(ctx context.Context, orgID uuid.UUID, level PauseLevel, state PauseState, by *uuid.UUID) (OrgPause, error) {
+func (s *Service) SetProofingPaused(ctx context.Context, orgID uuid.UUID, state PauseState, by *uuid.UUID) (OrgPause, error) {
 	if s.pauses == nil {
 		return OrgPause{}, errors.New("proofing: no pause store configured")
 	}
@@ -241,7 +211,7 @@ func (s *Service) SetProofingPaused(ctx context.Context, orgID uuid.UUID, level 
 			return OrgPause{}, err
 		}
 	}
-	p, err := s.pauses.Set(ctx, orgID, level, state, by)
+	p, err := s.pauses.Set(ctx, orgID, state, by)
 	if err != nil || state != PauseOn {
 		return p, err
 	}
@@ -257,7 +227,7 @@ func (s *Service) SetProofingPaused(ctx context.Context, orgID uuid.UUID, level 
 // ErrorOrgPaused. Each is tried; the failures come back joined. One decided
 // meanwhile by someone else is no failure.
 func (s *Service) rejectOpenReviews(ctx context.Context, orgID uuid.UUID) error {
-	open, err := s.requests.ListOpenReviews(ctx, orgID, nil)
+	open, err := s.requests.ListOpenReviews(ctx, orgID)
 	if err != nil {
 		return fmt.Errorf("proofing: list open reviews to reject org %s: %w", orgID, err)
 	}

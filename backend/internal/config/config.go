@@ -93,7 +93,7 @@ const (
 
 	// Identity proofing: the wallet's own proofing engine
 	// (internal/proofingengine) runs document + face verification for an org.
-	// Sessions, their evidence and the customer secrets are sealed under
+	// Sessions, their evidence and the webhook secrets are sealed under
 	// IDENTITY_PROOFING_ENCRYPTION_KEY; without it nothing can be sent.
 	envIdentityProofingProvider      = "IDENTITY_PROOFING_PROVIDER"
 	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
@@ -113,7 +113,7 @@ const (
 	// rejected or needs_review), so dev can see outcomes and their webhooks.
 	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
 	// envIdentityProofingDefaultWebhookURL is the wallet's own webhook
-	// endpoint, where a customer without one is sent its events; defaults to
+	// endpoint, where an org without one is sent its events; defaults to
 	// APP_BASE_URL + /api/v1/identity-proofing/default-webhook. Set it when the
 	// backend reaches itself by another address (e.g. inside Docker).
 	envIdentityProofingDefaultWebhookURL = "IDENTITY_PROOFING_DEFAULT_WEBHOOK_URL"
@@ -422,7 +422,7 @@ type Config struct {
 	// IdentityProofingDefaultWebhookURL is the wallet's own webhook endpoint.
 	IdentityProofingDefaultWebhookURL string
 	// IdentityProofingEncryptionKey seals the engine's sessions and the
-	// customer secrets at rest. Empty means nothing can be sent.
+	// webhook secrets at rest. Empty means nothing can be sent.
 	IdentityProofingEncryptionKey string
 	// RegulaFaceAPIURL/-PublicURL are the Regula Face API as the backend and
 	// as the app reach it; RegulaFaceMatchThreshold the similarity a match

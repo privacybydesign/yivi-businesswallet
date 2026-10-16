@@ -134,7 +134,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 // undocumentedPrefixes are /api/v1 routes left out of the spec on purpose, by
 // the package directory that registers them: the Idem (vcmrtd) app's session
 // routes (proofingengine.Engine.Register). Only that app calls them;
-// integrators use the customer API, and the app's client
+// integrators use the public API, and the app's client
 // (ProofingSessionClient) is the contract. The spec must not document them.
 // Another package's route under the same prefix is held to the spec.
 var undocumentedPrefixes = map[string]string{"/app/": "proofingengine"}

@@ -201,24 +201,21 @@ const (
 	// a member's decision on a request under review, before its outcome lands
 	IdentityProofingReviewDecided = "identity_proofing.review_decided"
 	// the data an approved "see my data" request found, downloaded by the
-	// person, an admin or the customer
+	// person, an admin or an API caller
 	IdentityProofingDataExported = "identity_proofing.data_exported"
 	// a flow's kind set: an identity check, or "see my data" / "delete my data"
 	IdentityProofingFlowKindConfigured = "identity_proofing.flow_kind_configured"
 
-	// the org's customers and the flows assigned to each
-	IdentityProofingCustomerCreated         = "identity_proofing.customer_created"
-	IdentityProofingCustomerUpdated         = "identity_proofing.customer_updated"
-	IdentityProofingCustomerFlowsConfigured = "identity_proofing.customer_flows_configured"
-	IdentityProofingCustomerRemoved         = "identity_proofing.customer_removed"
-	IdentityProofingAPIKeyCreated           = "identity_proofing.api_key_created"
-	IdentityProofingAPIKeyRevoked           = "identity_proofing.api_key_revoked"
-	IdentityProofingWebhookConfigured       = "identity_proofing.webhook_configured"
-	IdentityProofingWebhookSecretRotated    = "identity_proofing.webhook_secret_rotated"
-	IdentityProofingWebhookRemoved          = "identity_proofing.webhook_removed"
+	// the org's proofing settings (session lifetime, retention, branding,
+	// redirect origins), its API keys and its webhook endpoint
+	IdentityProofingSettingsUpdated      = "identity_proofing.settings_updated"
+	IdentityProofingAPIKeyCreated        = "identity_proofing.api_key_created"
+	IdentityProofingAPIKeyRevoked        = "identity_proofing.api_key_revoked"
+	IdentityProofingWebhookConfigured    = "identity_proofing.webhook_configured"
+	IdentityProofingWebhookSecretRotated = "identity_proofing.webhook_secret_rotated"
+	IdentityProofingWebhookRemoved       = "identity_proofing.webhook_removed"
 
-	// identity proofing paused or resumed for an org, by a platform admin or the
-	// org's admin (metadata "by")
+	// identity proofing paused or resumed for an org by a platform admin
 	IdentityProofingPaused  = "identity_proofing.paused"
 	IdentityProofingResumed = "identity_proofing.resumed"
 
@@ -290,11 +287,10 @@ const (
 	TargetIdentityProofingSettings = "org_identity_proofing_settings"
 	TargetIdentityProofingFlow     = "identity_proofing_flow"
 	TargetIdentityProofingRequest  = "identity_proofing_request"
-	TargetIdentityProofingCustomer = "identity_proofing_customer"
 )
 
 // Actor is who a request acts for: a user, or a non-user caller named by Label
-// (a customer API key, `api_key:<prefix>`), with UserID uuid.Nil.
+// (an API key, `api_key:<prefix>`), with UserID uuid.Nil.
 type Actor struct {
 	UserID uuid.UUID
 	Label  string

@@ -85,10 +85,10 @@ func newDataFixture(kind FlowKind) (fixture, *fakeDataRequests) {
 	return f, data
 }
 
-// heldSession is a settled customer session holding personal data.
+// heldSession is a settled external session holding personal data.
 func heldSession(proofedName string) Request {
 	return Request{
-		ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusApproved,
+		ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusApproved,
 		ProofedName: proofedName, session: &ipsSession{ID: "s-" + uuid.NewString(), Token: "t"},
 	}
 }
@@ -144,12 +144,12 @@ func TestNameHolds(t *testing.T) {
 }
 
 // A proven person's data request is not approved: it goes to review with the
-// customer's sessions of that person.
+// org's external sessions of that person.
 func TestDataRequestReviewMatches(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	anna, piet := heldSession("Anna Jansen"), heldSession("Piet de Vries")
 	data.candidates = []Request{anna, piet}
-	sent := f.sendForCustomer(t, "anna@example.org", "")
+	sent := f.sendExternal(t, "anna@example.org", "")
 	if sent.Request.FlowKind != FlowDataErasure {
 		t.Fatalf("sent kind = %q; want the flow's data_erasure", sent.Request.FlowKind)
 	}
@@ -178,10 +178,10 @@ func TestDataRequestReviewMatches(t *testing.T) {
 func TestDataRequestMatchesByEmail(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	anna := heldSession("Anna Jansen")
-	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "Anna@Example.org"}
-	other := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "piet@example.org"}
+	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectEmail: "Anna@Example.org"}
+	other := Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectEmail: "piet@example.org"}
 	data.candidates, data.unfinished = []Request{anna}, []Request{pending, other, anna}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 
 	f.reconcile(t)
@@ -197,11 +197,11 @@ func TestDataRequestMatchesByEmail(t *testing.T) {
 func TestDataRequestMatchesByName(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	unfinished := func(name string) Request {
-		return Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectName: name}
+		return Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectName: name}
 	}
 	named, partial, other, unnamed := unfinished("ANNA JANSEN"), unfinished("Jansen"), unfinished("Piet Jansen"), unfinished("")
 	data.unfinished = []Request{named, partial, other, unnamed}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 
 	f.reconcile(t)
@@ -226,7 +226,7 @@ func TestApprovedSkipsEmailMatches(t *testing.T) {
 	}
 }
 
-func TestDataRequestFlowCustomers(t *testing.T) {
+func TestDataRequestFlowsAreNotForMembers(t *testing.T) {
 	f, _ := newDataFixture(FlowDataAccess)
 	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID, chipFlow.ID}, DefaultFlowID: appFlow.ID}
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
@@ -236,6 +236,9 @@ func TestDataRequestFlowCustomers(t *testing.T) {
 	}
 	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}); !errors.Is(err, ErrDataFlowForMember) {
 		t.Errorf("offering a data flow to members = %v; want ErrDataFlowForMember", err)
+	}
+	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{DefaultFlowID: chipFlow.ID}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a data flow as the default = %v; want ErrInvalidInput", err)
 	}
 }
 
@@ -248,6 +251,10 @@ func TestSaveFlowKindNeedsIdentity(t *testing.T) {
 	f.settings.selection = FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}
 	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrDataFlowForMember) {
 		t.Errorf("a flow members may send = %v; want ErrDataFlowForMember", err)
+	}
+	f.settings.selection = FlowSelection{DefaultFlowID: chipFlow.ID}
+	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("the default flow = %v; want ErrInvalidInput", err)
 	}
 	f.settings.selection = FlowSelection{}
 	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, "everything"); !errors.Is(err, ErrInvalidInput) {
@@ -265,7 +272,7 @@ func inReview(t *testing.T, kind FlowKind) (fixture, *fakeDataRequests, Request,
 	first, second := heldSession("Anna Jansen"), heldSession("Anna Jansen")
 	data.candidates = []Request{first, second}
 	data.matched = []Request{first, second}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 	if req := f.reconcile(t); req.Status != StatusNeedsReview {
 		t.Fatalf("status = %q; want needs_review", req.Status)
@@ -357,10 +364,10 @@ func TestErasedAccessExportsNothing(t *testing.T) {
 	}
 	until := time.Now().Add(DataExportWindow)
 	f.requests.stored.DataExportUntil = &until
-	if err := f.svc.PurgeRequest(ctx, initechScope, req.ID); err != nil {
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, req.ID); err != nil {
 		t.Fatalf("PurgeRequest: %v", err)
 	}
-	if _, err := f.svc.CustomerDataExport(ctx, initechScope, req.ID); !errors.Is(err, ErrExportUnavailable) {
+	if _, err := f.svc.ExternalDataExport(ctx, testOrg.ID, req.ID); !errors.Is(err, ErrExportUnavailable) {
 		t.Errorf("export after erasure = %v, want %v", err, ErrExportUnavailable)
 	}
 }

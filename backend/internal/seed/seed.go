@@ -32,7 +32,7 @@ const (
 	roleChangeCount  = 8
 )
 
-// The orgs that run identity proofing for their own customers (proofing.go).
+// The orgs that run identity proofing for external people (proofing.go).
 // use cases examples
 const (
 	radboudSlug = "radboud-universiteit"
@@ -281,7 +281,7 @@ func expandTeams(groups []sdvbTeamGroup, extras []string) []string {
 // run by its own kerkenraad; the wijkgemeente is the unit a member belongs to, so
 // each is a department. SDV Barneveld is the local football club with every youth
 // and senior team as a department (see sdvbTeamGroups).
-// proofingOrganizations run identity proofing for their own customers
+// proofingOrganizations run identity proofing for external people
 // (demoProofingOrgs); Radboud Universiteit, the fourth, is a demo company.
 // Their names say "(Demo)": they are real organisations' names, used only to
 // show the use cases.
@@ -414,8 +414,8 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	// The identity proofing use cases the proofing orgs run for their customers.
-	if err := seedProofing(ctx, pool, orgsBySlug, usersByEmail["admin@yivi.app"].ID); err != nil {
+	// The identity proofing use cases the proofing orgs run for external people.
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
 		return err
 	}
 
