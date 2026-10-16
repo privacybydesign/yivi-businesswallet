@@ -21,6 +21,7 @@ type NavLabelKey =
   | "nav.customers"
   | "nav.qerds"
   | "nav.attestations"
+  | "nav.verifications"
   | "nav.postguard"
   | "nav.signing"
   | "nav.credentialRequests"
@@ -84,6 +85,11 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
       to: `/${slug}/attestations`,
       labelKey: "nav.attestations",
       icon: "valid",
+    },
+    {
+      to: `/${slug}/verifications`,
+      labelKey: "nav.verifications",
+      icon: "scan_qrcode",
     },
     { to: `/${slug}/postguard`, labelKey: "nav.postguard", icon: "lock" },
   );

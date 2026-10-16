@@ -39,6 +39,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/verification"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
 
@@ -72,6 +73,12 @@ type fakeVerifier struct {
 	identityIssuedAt time.Time
 	// vog, when set, adds a pbdf.vog credential to every presentation.
 	vog *fakeVog
+	// queries records every StartQuery (a verification run from a template);
+	// queryClaims, when set, is disclosed under the query credential id and
+	// queryPending makes Result report the presentation as not yet answered.
+	queries      []openid4vpverifier.Query
+	queryClaims  map[string]string
+	queryPending bool
 }
 
 // fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
@@ -88,7 +95,17 @@ func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.
 	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
+// StartQuery records the template-built query a verification asked for; the
+// disclosure Result returns for it is whatever the test put in queryClaims.
+func (f *fakeVerifier) StartQuery(_ context.Context, q openid4vpverifier.Query) (openid4vpverifier.Session, error) {
+	f.queries = append(f.queries, q)
+	return openid4vpverifier.Session{TransactionID: "verifier-query-tx", WalletLink: "openid4vp://?client_id=x509_san_dns%3Averifier.test&request_uri=https%3A%2F%2Fverifier.test%2Freq"}, nil
+}
+
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	if f.queryPending {
+		return openid4vpverifier.Presentation{}, openid4vpverifier.ErrPending
+	}
 	byCredential := map[string]map[string]string{
 		"email": {openid4vpverifier.ClaimEmail: f.email},
 	}
@@ -118,6 +135,10 @@ func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Pr
 	claims := map[string]string{}
 	for _, c := range byCredential {
 		maps.Copy(claims, c)
+	}
+	if f.queryClaims != nil {
+		byCredential[openid4vpverifier.QueryCredentialID] = f.queryClaims
+		maps.Copy(claims, f.queryClaims)
 	}
 	return openid4vpverifier.Presentation{Claims: claims, ByCredential: byCredential, IdentityIssuedAt: f.identityIssuedAt}, nil
 }
@@ -252,6 +273,12 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
 
+	// Verifications (#245) against the same fake verifier the login flow uses,
+	// graded against the attestation store's issuance ledger.
+	verificationStore := verification.NewStore(pool, audit.NewDBRecorder())
+	verificationService := verification.NewService(verificationStore, verificationStore, fake, attestationStore, "http://app.test", sessionTTL)
+	verificationHandler := verification.NewHandler(verificationStore, verificationService, requireUser, orgHandler.Authorize)
+
 	// Identity proofing against the in-process provider stub; nil mailer, like the org
 	// handler's (request e-mail delivery is best-effort and not exercised here).
 	proofingCipher, err := crypto.NewCipher(proofingTestEncryptionKey)
@@ -268,7 +295,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, verificationHandler, proofingHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)

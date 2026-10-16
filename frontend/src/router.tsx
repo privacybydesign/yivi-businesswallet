@@ -47,6 +47,7 @@ import PostguardSend from "./routes/postguard-send";
 import Attestations from "./routes/attestations";
 import AttestationHeldDetail from "./routes/attestations-held";
 import Claim from "./routes/claim";
+import Verifications from "./routes/verifications";
 import OpenID4VP from "./routes/openid4vp";
 import OpenID4VPTransaction from "./routes/openid4vp-transaction";
 import Settings from "./routes/settings";
@@ -142,6 +143,9 @@ const heldCredentialCrumb: RouteHandle = {
       ? cached.displayName || credentialDisplayName(cached.vct)
       : t("attestations.held.detail.title");
   },
+};
+const verificationsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("verifications.title"),
 };
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
@@ -309,6 +313,11 @@ export const router = createBrowserRouter([
                         handle: heldCredentialCrumb,
                       },
                     ],
+                  },
+                  {
+                    path: "verifications",
+                    Component: Verifications,
+                    handle: verificationsCrumb,
                   },
                   {
                     path: "postguard",

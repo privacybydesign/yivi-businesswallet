@@ -238,6 +238,27 @@ func TestKVKRegisterOrgNotConsultable(t *testing.T) {
 	}
 }
 
+// TestNijmegenApvVerificationTemplateAsksOnlySchemaClaims pins the handhaver's
+// template to the permit schema: every claim it requests is an attribute the
+// schema declares, so a request the holder cannot satisfy is never seeded.
+func TestNijmegenApvVerificationTemplateAsksOnlySchemaClaims(t *testing.T) {
+	if nijmegenApvVerificationTemplate.VCT != nijmegenApvSchema.VCT {
+		t.Fatalf("template vct = %q, want %q", nijmegenApvVerificationTemplate.VCT, nijmegenApvSchema.VCT)
+	}
+	if len(nijmegenApvVerificationTemplate.Claims) == 0 {
+		t.Fatal("template must request at least one claim")
+	}
+	declared := map[string]bool{}
+	for _, a := range nijmegenApvSchema.Attributes {
+		declared[a.Key] = true
+	}
+	for _, c := range nijmegenApvVerificationTemplate.Claims {
+		if !declared[c] {
+			t.Errorf("template requests %q, which the schema does not declare", c)
+		}
+	}
+}
+
 // TestNijmegenApvSchemaIsWellFormed guards the fixture seedNijmegenAttestation
 // writes (issue #245): it is an organization-subject schema, every attribute
 // uses a type the store/editor actually support, attribute keys are unique, and
