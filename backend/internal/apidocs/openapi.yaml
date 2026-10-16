@@ -4873,10 +4873,10 @@ paths:
         those sent to members or to external people (any other value is 400 `invalid_input`).
         `external` is true for a request that went to an external person, not a member. At most
         the 200 newest of those asked for, as stored: outcomes land as the engine reports them,
-        and a list read does not re-check it. Only the outcome and assurance level are returned, and for an external person's
-        approved request the name read off the document (`proofedName`), until the
-        organisation's data retention (`dataRetentionDays`, default 30 days) clears it. No
-        other document data.
+        and a list read does not re-check it. Only the outcome and assurance level are
+        returned, and for an external person's approved request the name read off the document
+        (`proofedName`), until the organisation's data retention (`dataRetentionDays`, default
+        30 days) clears it. No other document data.
       parameters:
         - name: subjectUserId
           in: query
