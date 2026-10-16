@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1143,6 +1144,36 @@ func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 		if _, err := f.svc.SaveSessionSettings(context.Background(), testOrg.ID, settings); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("SaveSessionSettings(%+v) = %v, want ErrInvalidInput", settings, err)
 		}
+	}
+}
+
+func TestUpdateSettingsValidatesFirst(t *testing.T) {
+	f := newFixture()
+	before := f.orgSettings.settings
+	retention := 90
+	badRetention := 31
+	validOrigins := []string{"https://portal.example.org"}
+	badOrigins := []string{"https://portal.example.org/a"}
+
+	for name, change := range map[string]SettingsChange{
+		"valid session with a bad origin": {DataRetentionDays: &retention, RedirectOrigins: &badOrigins},
+		"bad session with a valid origin": {DataRetentionDays: &badRetention, RedirectOrigins: &validOrigins},
+	} {
+		if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s: UpdateSettings = %v, want ErrInvalidInput", name, err)
+		}
+		if !reflect.DeepEqual(f.orgSettings.settings, before) {
+			t.Errorf("%s: settings = %+v, want %+v untouched", name, f.orgSettings.settings, before)
+		}
+	}
+
+	saved, err := f.svc.UpdateSettings(context.Background(), testOrg.ID,
+		SettingsChange{DataRetentionDays: &retention, RedirectOrigins: &validOrigins})
+	if err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	if saved.Session.DataRetentionDays != retention || !slices.Equal(saved.RedirectOrigins, validOrigins) {
+		t.Errorf("saved = %+v, want retention %d and origins %v", saved, retention, validOrigins)
 	}
 }
 

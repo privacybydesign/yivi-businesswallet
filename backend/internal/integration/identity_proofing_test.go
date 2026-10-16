@@ -486,6 +486,32 @@ func testLogoPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
+// A settings update that fails validation changes nothing, whichever of its
+// fields is the bad one.
+func TestSettingsPatchChangesNothingOnError(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	base := "/api/v1/orgs/acme/identity-proofing"
+
+	const defaultRetentionDays = 30
+	wantProofingError(t, "valid retention with a bad origin",
+		env.patchSettings("acme", `{"dataRetentionDays":90,"allowedRedirectOrigins":["https://portal.example.org/a"]}`),
+		http.StatusBadRequest, "invalid_input")
+	wantProofingError(t, "bad retention with a valid origin",
+		env.patchSettings("acme", `{"dataRetentionDays":31,"allowedRedirectOrigins":["https://portal.example.org"]}`),
+		http.StatusBadRequest, "invalid_input")
+
+	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
+	if settings.DataRetentionDays != defaultRetentionDays || len(settings.AllowedRedirectOrigins) != 0 {
+		t.Errorf("settings after rejected updates = %+v; want the defaults", settings)
+	}
+	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 0 {
+		t.Errorf("settings_updated audits = %d, want 0", n)
+	}
+}
+
 // The org sets its session lifetime, data retention, branding and redirect
 // origins once, for all its flows.
 func TestOrgSettingsHTTPFlow(t *testing.T) {

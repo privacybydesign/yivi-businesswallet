@@ -376,20 +376,29 @@ func parseRedirectOrigin(raw string) (string, error) {
 // SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
 // to and be embedded on: each an origin, kept once, in the order given.
 func (s *Service) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
+	out, err := normalizeOrigins(origins)
+	if err != nil {
+		return Settings{}, err
+	}
+	return s.orgSettings.SaveRedirectOrigins(ctx, orgID, out)
+}
+
+// normalizeOrigins checks each origin and drops the duplicates.
+func normalizeOrigins(origins []string) ([]string, error) {
 	if len(origins) > maxRedirectOrigins {
-		return Settings{}, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
+		return nil, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
 	}
 	out := make([]string, 0, len(origins))
 	for _, raw := range origins {
 		origin, err := parseRedirectOrigin(raw)
 		if err != nil {
-			return Settings{}, err
+			return nil, err
 		}
 		if !slices.Contains(out, origin) {
 			out = append(out, origin)
 		}
 	}
-	return s.orgSettings.SaveRedirectOrigins(ctx, orgID, out)
+	return out, nil
 }
 
 // checkRedirect accepts a hosted request's redirect: an absolute URL on one of

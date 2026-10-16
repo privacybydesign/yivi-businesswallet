@@ -61,30 +61,14 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "nothing to update"}
 	}
 
-	orgID := orgFromRequest(r).ID
-	var settings Settings
-	var err error
-	if body.SessionTTLSeconds != nil || body.DataRetentionDays != nil {
-		current, err := h.service.Settings(r.Context(), orgID)
-		if err != nil {
-			return mapError(err)
-		}
-		session := current.Session
-		if body.SessionTTLSeconds != nil {
-			session.SessionTTL = time.Duration(*body.SessionTTLSeconds) * time.Second
-		}
-		if body.DataRetentionDays != nil {
-			session.DataRetentionDays = *body.DataRetentionDays
-		}
-		if settings, err = h.service.SaveSessionSettings(r.Context(), orgID, session); err != nil {
-			return mapError(err)
-		}
+	change := SettingsChange{DataRetentionDays: body.DataRetentionDays, RedirectOrigins: body.AllowedRedirectOrigins}
+	if body.SessionTTLSeconds != nil {
+		ttl := time.Duration(*body.SessionTTLSeconds) * time.Second
+		change.SessionTTL = &ttl
 	}
-
-	if body.AllowedRedirectOrigins != nil {
-		if settings, err = h.service.SaveRedirectOrigins(r.Context(), orgID, *body.AllowedRedirectOrigins); err != nil {
-			return mapError(err)
-		}
+	settings, err := h.service.UpdateSettings(r.Context(), orgFromRequest(r).ID, change)
+	if err != nil {
+		return mapError(err)
 	}
 
 	return h.respondSettings(w, r, settings)

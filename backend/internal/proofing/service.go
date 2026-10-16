@@ -1688,13 +1688,69 @@ func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
 // SaveSessionSettings replaces the org's session settings; each must be one of
 // its options.
 func (s *Service) SaveSessionSettings(ctx context.Context, orgID uuid.UUID, session SessionSettings) (Settings, error) {
-	if !slices.Contains(SessionTTLOptions, session.SessionTTL) {
-		return Settings{}, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
-	}
-	if !slices.Contains(DataRetentionDayOptions, session.DataRetentionDays) {
-		return Settings{}, fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	if err := checkSessionSettings(session); err != nil {
+		return Settings{}, err
 	}
 	return s.orgSettings.SaveSession(ctx, orgID, session)
+}
+
+func checkSessionSettings(session SessionSettings) error {
+	if !slices.Contains(SessionTTLOptions, session.SessionTTL) {
+		return fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
+	}
+	if !slices.Contains(DataRetentionDayOptions, session.DataRetentionDays) {
+		return fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	}
+	return nil
+}
+
+// SettingsChange is a partial update of the org's session settings and
+// redirect origins; a nil field is left as it is.
+type SettingsChange struct {
+	SessionTTL        *time.Duration
+	DataRetentionDays *int
+	RedirectOrigins   *[]string
+}
+
+// UpdateSettings applies change once every field in it is valid, so a
+// rejected update leaves the settings, and the audit log, as they were.
+func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change SettingsChange) (Settings, error) {
+	current, err := s.orgSettings.Get(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+
+	session := current.Session
+	if change.SessionTTL != nil {
+		session.SessionTTL = *change.SessionTTL
+	}
+	if change.DataRetentionDays != nil {
+		session.DataRetentionDays = *change.DataRetentionDays
+	}
+	saveSession := change.SessionTTL != nil || change.DataRetentionDays != nil
+	if saveSession {
+		if err := checkSessionSettings(session); err != nil {
+			return Settings{}, err
+		}
+	}
+	var origins []string
+	if change.RedirectOrigins != nil {
+		if origins, err = normalizeOrigins(*change.RedirectOrigins); err != nil {
+			return Settings{}, err
+		}
+	}
+
+	if saveSession {
+		if current, err = s.orgSettings.SaveSession(ctx, orgID, session); err != nil {
+			return Settings{}, err
+		}
+	}
+	if change.RedirectOrigins != nil {
+		if current, err = s.orgSettings.SaveRedirectOrigins(ctx, orgID, origins); err != nil {
+			return Settings{}, err
+		}
+	}
+	return current, nil
 }
 
 // Stats counts the external requests sent within statsWindow, per flow,
