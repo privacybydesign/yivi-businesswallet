@@ -450,11 +450,61 @@ carries no validity columns: both facts live in the engine, so `Holder.Validitie
 reads them per credential-instance ref — the batch's `expires_at` (the `exp` claim) and
 the instance's `last_known_status` (the Token Status List bit, non-VALID/non-UNKNOWN =
 revoked, irmago's own policy). Nothing is fetched over the network on a list read, and
-"expiring soon" is a frontend window over the expiry, not an engine state. Open follow-up:
-irmago seeds the bit at receive and its `RevocationService.RefreshStatuses` sweep
-maintains it, but **we run no sweep yet** — so a credential revoked after it was received
-keeps reading as valid until one is scheduled (a periodic per-org refresh, like the
-provisioning scheduler).
+"expiring soon" is a frontend window over the expiry, not an engine state.
+
+**Status re-check.** `Engine.RefreshStatuses` runs irmago's
+`RevocationService.RefreshStatuses` with the same trust material a receive uses
+(`configuration` + `trustContext`, so a partner's status list verifies like its
+credential), writing `last_known_status` and `last_status_check_at` back. irmago checks
+one representative instance per batch, so `Validities` aggregates the status facts per
+batch (revoked if any copy is; last check is the latest).
+
+- Status lists are fetched through a `safehttp` client (`newStatusClient`): https only
+  (http only with `AllowInsecureHTTP`), no private addresses, and redirects followed up
+  to `maxStatusListRedirects` (the Token Status List spec asks for that; an issuer that
+  moves its lists can only redirect), each hop checked like the first. Receiving a
+  credential uses the same client, and irmago's status check at receipt is
+  fail-closed: a credential whose status list is on plain http, on a private address or
+  behind too many redirects is refused when it arrives.
+- Each per-org engine closes idle connections after `engineConnMaxIdleTime`: the
+  sweep opens an engine for every holder org, and engines stay cached.
+- It runs at boot and then every 6 hours for every org holding a credential
+  (`RecheckAllHeld`, `heldStatusRecheckEvery`), and on `POST /held/{id}/recheck`
+  (admin). That one re-reads only that credential's list (`Engine.RefreshStatus`
+  hands irmago a `batchStatusStore` narrowed to its batch) and answers `changed`
+  for it.
+- After every refresh, also a failed or timed-out one, each held credential with a
+  status list whose current status differs from its last audited one is audited
+  `attestation.held_status_changed` on the held target (`auditHeldStatuses`).
+  `RecordHeldStatusChange` locks the held row and skips a status already on record,
+  so concurrent re-checks audit a move once. One credential's error does not stop
+  the rest.
+- A re-check runs detached from the request's cancellation and actor (the issuer
+  moved the status, not the admin), bounded by `heldRecheckTimeout`, with its own
+  `heldAuditTimeout` for the audit: irmago commits each status it reads as it goes,
+  so the audit reconciles against that state rather than a before/after diff.
+- `Validities` also carries `issuedAt`, `format`, `hasStatusList` and
+  `statusCheckedAt`, which the detail page's Checks card shows. The stub's refresh
+  is a no-op.
+
+**History.** Accepting an offer now also audits `attestation.held_received` on the held
+target (sender, source, offer id), so `GET /held/{id}/history` (the audit trail for the
+target, oldest first) is the credential's history; the frontend adds the receipt for a
+row received before that event existed, and the last status check. A member who is not
+an admin reads it as the audit log shows it (who acted and what changed withheld), except
+a status change: the issuer made it, so it names no one, and it comes whole, direction
+included (`hideHeldHistoryDetail`). Disclosures are not in it: presentations are
+audited on the transaction and deliberately never name the credential or claims (see
+§12), so "Disclosed to …" from the design is not shown.
+
+**Wallet view.** Status chips with counts and the "Received via" source filter,
+"Needs attention" rows (revoked, expired, expiring soon, worst first) with the reason,
+"Valid" cards; an admin removes a credential from its row or card, or from its page. The
+detail page has a status banner (Re-check status), attributes, history, provenance,
+checks and a client-side "Export as JSON" of what the page shows (not the signed
+credential). Not built from the design: "Request a new credential" / "Request renewal" /
+"Contact issuer" (no renewal channel to an issuer yet) and the revocation reason and date
+(a status list carries a bit, not a reason).
 
 ### 6.6 `org_onboarding_attestations` — the onboarding auto-issue set
 
