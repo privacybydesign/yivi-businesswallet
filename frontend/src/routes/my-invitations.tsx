@@ -134,7 +134,7 @@ export default function MyInvitations(): React.JSX.Element {
         title={t("myInvitations.title")}
         subtitle={t("myInvitations.subtitle")}
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {invitations.isPending ? (
           <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
         ) : invitations.isError ? (
@@ -146,7 +146,7 @@ export default function MyInvitations(): React.JSX.Element {
             </p>
           </Card>
         ) : invitations.data.length === 0 ? (
-          <Card className="p-8 text-center">
+          <Card className="p-6 text-center sm:p-8">
             <p className="text-ink-soft text-[14px]">
               {t("myInvitations.empty")}
             </p>
@@ -220,8 +220,8 @@ function InvitationsShell({
         title={t("myInvitations.title")}
         subtitle={t("myInvitations.subtitle")}
       />
-      <div className="flex justify-center p-8">
-        <Card className="w-full max-w-md p-8">{children}</Card>
+      <div className="flex justify-center p-4 sm:p-8">
+        <Card className="w-full max-w-md p-6 sm:p-8">{children}</Card>
       </div>
     </>
   );

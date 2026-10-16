@@ -39,6 +39,25 @@ that invokes the business wallet as a holder (see
 `devverifier` image the Delivery workflow publishes); `signer`, `domibus` and `verid` are
 the signing and QERDS benches.
 
+Identity proofing runs in the backend itself (`internal/proofingengine`): the Idem app
+claims a session and submits its steps to `/api/v1/app/...` on this backend. To test with
+a phone, set `IDENTITY_PROOFING_PUBLIC_URL` in `.env` to an address the phone reaches
+(e.g. `http://<your-LAN-IP>:8080`) and `REGULA_FACE_API_URL` for the face step;
+`IDENTITY_PROOFING_PROVIDER=stub` swaps in an in-memory stand-in no phone can reach.
+Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stub`, set by
+`compose.override.yaml`); set it to `duo` in `.env` to check real DUO extracts.
+
+The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
+
+- The stub settings above work only with it; a deployment refuses them at boot.
+- The first person to log in with Yivi whose e-mail address the wallet does not know
+  becomes the platform admin, whenever that happens: logging in as a seeded account
+  leaves the claim open. Every later unknown address is refused as usual. No
+  `PLATFORM_ADMIN_EMAILS` entry is needed.
+- The backend refuses to start with it unless `APP_BASE_URL` is set to a localhost URL.
+- Outside it, the URLs the phone talks to (`IDENTITY_PROOFING_PUBLIC_URL`,
+  `REGULA_FACE_API_PUBLIC_URL`) must be https, or plain http to localhost.
+
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
 without this file it would abort with `required variable POSTGRES_PASSWORD is
@@ -52,6 +71,42 @@ cp .env.example .env      # then edit POSTGRES_PASSWORD to a strong, unique valu
 
 The Vite dev server proxies health probes and `/api` to the backend container, so
 the frontend talks to the backend out of the box.
+
+### Upgrading the database from PostgreSQL 16 to 17
+
+The `db` service runs `postgres:17-alpine` on the `pgdata17` volume. The old
+PostgreSQL 16 data stays in the `pgdata` volume, which Compose no longer uses, so
+after the upgrade the stack starts with an empty database.
+
+If you don't need the old data (local dev), remove the old volume with
+`docker volume rm yivi-business-wallet_pgdata` and stop here.
+To keep the data, dump it from `pgdata` with a temporary 16 container and restore
+it into `pgdata17`. Run these from the repo root. Replace `postgres` /
+`yivi_business_wallet` if you set `POSTGRES_USER` / `POSTGRES_DB` in `.env`:
+
+```sh
+docker compose down
+
+# 1. Start PostgreSQL 16 on the old volume and dump the database
+docker run -d --name pg16-upgrade -v yivi-business-wallet_pgdata:/var/lib/postgresql postgres:16-alpine
+docker exec pg16-upgrade pg_isready -U postgres          # repeat until "accepting connections"
+docker exec pg16-upgrade pg_dump -U postgres -Fc -f /tmp/wallet.dump yivi_business_wallet
+docker cp pg16-upgrade:/tmp/wallet.dump ./wallet.dump
+docker rm -f pg16-upgrade
+
+# 2. Restore into a fresh PostgreSQL 17 volume
+docker volume rm yivi-business-wallet_pgdata17           # only if it already exists, e.g. from an earlier `npm run dev`
+docker compose up -d --wait db
+docker compose cp ./wallet.dump db:/tmp/wallet.dump
+docker compose exec db pg_restore -U postgres -d yivi_business_wallet --no-owner /tmp/wallet.dump
+
+# 3. Start the stack as usual
+npm run dev
+```
+
+Once you have checked the restored data, delete `wallet.dump` and the old volume
+(`docker volume rm yivi-business-wallet_pgdata`). The dump holds the full
+database, so don't commit it.
 
 ## Login (development)
 

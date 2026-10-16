@@ -1,6 +1,7 @@
 package organization
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -330,4 +331,26 @@ func TestValidateGrant(t *testing.T) {
 			t.Error("validFrom is still zero")
 		}
 	})
+}
+
+// An admin acts as one only while their mandate is not withdrawn; a member
+// never does.
+func TestActsAsAdmin(t *testing.T) {
+	withdrawn := Authority{Granted: 1}
+	for name, c := range map[string]struct {
+		role      string
+		authority Authority
+		want      bool
+	}{
+		"admin":                {RoleAdmin, Authority{}, true},
+		"admin, mandated":      {RoleAdmin, Authority{Granted: 1, Mandated: true}, true},
+		"admin, withdrawn":     {RoleAdmin, withdrawn, false},
+		"legal representative": {RoleAdmin, Authority{Granted: 1, LegalRepresentative: true}, true},
+		"member":               {RoleMember, Authority{}, false},
+	} {
+		ctx := ContextWithAuthority(ContextWithRole(context.Background(), c.role), c.authority)
+		if got := ActsAsAdmin(ctx); got != c.want {
+			t.Errorf("%s: ActsAsAdmin = %v, want %v", name, got, c.want)
+		}
+	}
 }

@@ -30,23 +30,34 @@ import { accessMessage } from "../lib/access-message";
 import { credentialDisplayName } from "../lib/credential-display";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import type {
-  HeldCredentialWithStatus,
   HeldSourceFilter,
   HeldStatus,
   HeldStatusFilter,
 } from "../lib/held-credential";
 import {
+  HELD_CHIP_FILTERS,
   HELD_SOURCE_FILTERS,
   HELD_STATUS_FILTERS,
   HELD_STATUS_TONES,
+  heldDaysToExpiry,
   heldExpiryAt,
-  heldExpiryIsPast,
   heldSections,
   heldSourceLabel,
+  heldStatusCounts,
   heldStatusLabel,
 } from "../lib/held-credential";
 import { useDebouncedValue } from "../lib/use-debounced-value";
-import { Button, Card, ConfirmDialog, Input, Table, Tag, TopBar } from "../ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Icon,
+  Input,
+  Table,
+  Tag,
+  TopBar,
+} from "../ui";
+import type { IconName } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
@@ -159,7 +170,7 @@ export default function Attestations(): React.JSX.Element {
         }
       />
 
-      <div className="border-line bg-surface flex gap-1 border-b px-8">
+      <div className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8">
         {tabs.map((value) => {
           const active = tab === value;
           return (
@@ -168,7 +179,7 @@ export default function Attestations(): React.JSX.Element {
               type="button"
               onClick={() => setTab(value)}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -180,7 +191,7 @@ export default function Attestations(): React.JSX.Element {
         })}
       </div>
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -551,7 +562,7 @@ function IssuedTab({
   );
 }
 
-// Toolbar controls: the two filter dropdowns share the app's form-control styling.
+// Toolbar control: the source filter dropdown shares the app's form-control styling.
 const FILTER_SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 
@@ -693,9 +704,10 @@ function readHeldSourceFilter(params: URLSearchParams): HeldSourceFilter {
   return raw && HELD_SOURCE_FILTERS.includes(raw) ? raw : "";
 }
 
-// The credentials the organization holds, as cards grouped into what needs
-// attention (revoked, expired or expiring soon) and what is valid. A card opens
-// the credential's detail page; the search term and both filters live in the URL
+// The credentials the organization holds, split into what needs attention
+// (revoked, expired or expiring soon: rows that say why) and what is valid
+// (cards). A credential opens its detail page; an admin can also remove it from
+// here. The search term, the status chip and the source filter live in the URL
 // alongside ?tab=held so the view survives a refresh and can be shared.
 function HeldTab({
   slug,
@@ -789,35 +801,18 @@ function HeldTab({
     );
   }
 
-  const filtered = query !== "" || status !== "" || source !== "";
-  // One instant for the whole render, so a card's expiry tense cannot disagree with
-  // the section the same credential was sorted into.
+  // One instant for the whole render, so a row's expiry wording cannot disagree
+  // with the section the same credential was sorted into.
   const now = new Date();
+  const counts = heldStatusCounts(rows, now);
   const sections = heldSections(rows, { query, status, source }, now);
-  const nothingMatches =
-    sections.attention.length === 0 && sections.valid.length === 0;
-
-  const renderCard = ({
-    credential,
-    status: cardStatus,
-  }: HeldCredentialWithStatus): React.JSX.Element => (
-    <HeldCard
-      key={credential.id}
-      slug={slug}
-      credential={credential}
-      status={cardStatus}
-      now={now}
-      isAdmin={isAdmin}
-      formatWhen={formatWhen}
-      formatDate={formatDate}
-      onDelete={() => setPendingDelete(credential)}
-    />
-  );
+  const shown = sections.attention.length + sections.valid.length;
+  const filtered = query !== "" || status !== "" || source !== "";
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="w-full max-w-[320px]">
+        <div className="w-full max-w-[280px]">
           <Input
             icon="search"
             placeholder={t("attestations.held.search")}
@@ -826,27 +821,37 @@ function HeldTab({
             aria-label={t("attestations.held.search")}
           />
         </div>
-        <select
-          className={FILTER_SELECT_CLASS}
-          value={status}
+        <div
+          role="group"
           aria-label={t("attestations.held.filters.status")}
-          onChange={(event) => setFilter("status", event.target.value)}
+          className="flex flex-wrap gap-2"
         >
-          <option value="">{t("attestations.held.filters.allStatuses")}</option>
-          <option value="attention">
-            {t("attestations.held.filters.attention")}
-          </option>
-          <option value="revoked">
-            {t("attestations.held.status.revoked")}
-          </option>
-          <option value="expired">
-            {t("attestations.held.status.expired")}
-          </option>
-          <option value="expiringSoon">
-            {t("attestations.held.status.expiringSoon")}
-          </option>
-          <option value="valid">{t("attestations.held.status.valid")}</option>
-        </select>
+          {HELD_CHIP_FILTERS.map((key) => {
+            const active = status === key;
+            return (
+              <button
+                key={key || "all"}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFilter("status", key)}
+                className={[
+                  "h-8 rounded-full border px-3 text-[12.5px] font-semibold transition-colors",
+                  active
+                    ? "border-ink bg-ink text-surface"
+                    : "border-line-strong bg-surface text-ink-soft hover:text-ink",
+                ].join(" ")}
+              >
+                {t("attestations.held.chip", {
+                  label:
+                    key === ""
+                      ? t("attestations.held.filters.all")
+                      : heldStatusLabel(key, t),
+                  count: counts[key],
+                })}
+              </button>
+            );
+          })}
+        </div>
         <select
           className={FILTER_SELECT_CLASS}
           value={source}
@@ -865,12 +870,18 @@ function HeldTab({
             {t("attestations.held.reset")}
           </Button>
         )}
+        <span className="text-muted ml-auto text-[12.5px]">
+          {t("attestations.held.shown", { shown, count: rows.length })}
+        </span>
       </div>
 
-      {nothingMatches ? (
-        <Card className="p-6">
-          <p className="text-ink-soft text-[14px]">
+      {shown === 0 ? (
+        <Card className="p-8 text-center">
+          <p className="text-ink text-[14px] font-semibold">
             {t("attestations.held.noMatch")}
+          </p>
+          <p className="text-muted mt-1 text-[12.5px]">
+            {t("attestations.held.noMatchHint")}
           </p>
         </Card>
       ) : (
@@ -880,7 +891,22 @@ function HeldTab({
               title={t("attestations.held.sections.attention")}
               count={sections.attention.length}
             >
-              {sections.attention.map(renderCard)}
+              <div className="flex flex-col gap-3">
+                {sections.attention.map(({ credential, status: rowStatus }) =>
+                  rowStatus === "valid" ? null : (
+                    <AttentionRow
+                      key={credential.id}
+                      slug={slug}
+                      credential={credential}
+                      status={rowStatus}
+                      now={now}
+                      isAdmin={isAdmin}
+                      formatDate={formatDate}
+                      onDelete={() => setPendingDelete(credential)}
+                    />
+                  ),
+                )}
+              </div>
             </HeldSection>
           )}
           {sections.valid.length > 0 && (
@@ -888,7 +914,19 @@ function HeldTab({
               title={t("attestations.held.sections.valid")}
               count={sections.valid.length}
             >
-              {sections.valid.map(renderCard)}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {sections.valid.map(({ credential }) => (
+                  <ValidCard
+                    key={credential.id}
+                    slug={slug}
+                    credential={credential}
+                    isAdmin={isAdmin}
+                    formatWhen={formatWhen}
+                    formatDate={formatDate}
+                    onDelete={() => setPendingDelete(credential)}
+                  />
+                ))}
+              </div>
             </HeldSection>
           )}
         </>
@@ -915,7 +953,7 @@ function HeldTab({
   );
 }
 
-// One horizontal section of held-credential cards, headed by its name and count.
+// One section of the wallet, headed by its name and how many it holds.
 function HeldSection({
   title,
   count,
@@ -925,28 +963,148 @@ function HeldSection({
   count: number;
   children: React.ReactNode;
 }): React.JSX.Element {
+  const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-ink text-[14px] font-semibold">{title}</h2>
-        <span className="text-muted text-[12.5px]">{count}</span>
+      <div className="flex items-baseline gap-2">
+        <h2 className="font-display text-ink text-[17px] font-bold">{title}</h2>
+        <span className="text-muted text-[12.5px]">
+          {t("attestations.held.credentialCount", { count })}
+        </span>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {children}
-      </div>
+      {children}
     </section>
   );
 }
 
-// One held credential as a card, matching the template cards: logo, name and mono
-// vct, its status pinned top-right, provenance below. The whole card is the link
-// to the credential's detail page — an overlay stretched over it — so the delete
-// action sits above that overlay to stay clickable in its own right.
-function HeldCard({
+// How each attention state looks: the stripe, the icon and its tile.
+const ATTENTION_LOOK: Record<
+  Exclude<HeldStatus, "valid">,
+  { stripe: string; tile: string; icon: IconName; row: string }
+> = {
+  revoked: {
+    stripe: "bg-error",
+    tile: "bg-surface text-error",
+    icon: "invalid",
+    row: "bg-error-bg border-error/30",
+  },
+  expired: {
+    stripe: "bg-error",
+    tile: "bg-error-bg text-error",
+    icon: "time",
+    row: "bg-surface border-error/30",
+  },
+  expiringSoon: {
+    stripe: "bg-warning",
+    tile: "bg-warning-bg text-warning-fg",
+    icon: "warning",
+    row: "bg-surface border-warning/40",
+  },
+};
+
+const ATTENTION_ICON_SIZE = 18;
+const OPEN_ICON_SIZE = 22;
+
+// A credential that needs attention, as a row that says why: revoked by its
+// issuer, expired so many days ago, or to be renewed before a date. The whole
+// row is the link to its detail page (an overlay stretched over it), so an
+// admin's Remove sits above that overlay to stay clickable in its own right.
+function AttentionRow({
   slug,
   credential,
   status,
   now,
+  isAdmin,
+  formatDate,
+  onDelete,
+}: {
+  slug: string;
+  credential: HeldAttestation;
+  status: Exclude<HeldStatus, "valid">;
+  now: Date;
+  isAdmin: boolean;
+  formatDate: (iso: string) => string;
+  onDelete: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const name = credential.displayName || credentialDisplayName(credential.vct);
+  const look = ATTENTION_LOOK[status];
+  const days = heldDaysToExpiry(credential, now);
+  const expiry = credential.expiresAt ? formatDate(credential.expiresAt) : "";
+  const statusLine =
+    status === "revoked"
+      ? t("attestations.held.line.revoked")
+      : status === "expired"
+        ? t("attestations.held.line.expired", { date: expiry })
+        : t("attestations.held.line.expiring", { count: days ?? 0 });
+  const reason =
+    status === "revoked"
+      ? credential.statusCheckedAt
+        ? t("attestations.held.reason.revokedChecked", {
+            date: formatDate(credential.statusCheckedAt),
+          })
+        : t("attestations.held.reason.revoked")
+      : status === "expired"
+        ? t("attestations.held.reason.expired", { count: Math.abs(days ?? 0) })
+        : t("attestations.held.reason.expiring", { date: expiry });
+
+  return (
+    <div
+      className={`focus-within:ring-ink/10 relative grid grid-cols-[4px_minmax(0,1fr)] overflow-hidden rounded-lg border transition-shadow focus-within:ring-3 hover:shadow-md ${look.row}`}
+    >
+      <Link
+        to={`/${slug}/attestations/held/${credential.id}`}
+        aria-label={t("attestations.held.viewDetail", { name })}
+        className="absolute inset-0 outline-none"
+      />
+      <span aria-hidden="true" className={look.stripe} />
+      <div className="flex items-center gap-4 px-5 py-4">
+        <span
+          aria-hidden="true"
+          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${look.tile}`}
+        >
+          <Icon name={look.icon} size={ATTENTION_ICON_SIZE} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-ink text-[14.5px] font-bold">{name}</span>
+            <Tag tone={HELD_STATUS_TONES[status]} dot>
+              {heldStatusLabel(status, t)}
+            </Tag>
+          </div>
+          <div className="text-muted mt-0.5 text-[12.5px] sm:truncate">
+            {credential.issuerName || credential.issuer} · {statusLine}
+          </div>
+        </div>
+        <span className="text-muted hidden max-w-60 text-right text-[12.5px] sm:block">
+          {reason}
+        </span>
+        {isAdmin && (
+          <Button
+            variant="dangerGhost"
+            size="sm"
+            className="relative z-10 shrink-0"
+            onClick={onDelete}
+          >
+            {t("attestations.held.delete")}
+          </Button>
+        )}
+        <span aria-hidden="true" className="text-muted shrink-0">
+          <Icon name="chevron_right" size={OPEN_ICON_SIZE} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const VALID_ICON_SIZE = 18;
+
+// A valid credential as a card: what it is, from whom, until when, and how it
+// arrived. Like AttentionRow, the whole card opens its detail page through an
+// overlay, and an admin's Remove sits above it.
+function ValidCard({
+  slug,
+  credential,
   isAdmin,
   formatWhen,
   formatDate,
@@ -954,8 +1112,6 @@ function HeldCard({
 }: {
   slug: string;
   credential: HeldAttestation;
-  status: HeldStatus;
-  now: Date;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
   formatDate: (iso: string) => string;
@@ -963,81 +1119,74 @@ function HeldCard({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
-  // The expiry line only renders for a date the view can phrase. A value that does
-  // not parse is dropped rather than echoed verbatim, which is how heldStatus reads
-  // it too: as a credential that does not expire.
   const expiresAt =
     heldExpiryAt(credential) === null ? undefined : credential.expiresAt;
 
   return (
-    <Card className="focus-within:border-ink focus-within:ring-ink/10 hover:border-line-strong relative flex flex-col gap-3 p-4 transition-colors focus-within:ring-3">
+    <div className="rounded-yivi border-line bg-surface shadow-card hover:border-line-strong focus-within:ring-ink/10 relative flex flex-col gap-3.5 border p-[18px] transition-shadow focus-within:ring-3 hover:shadow-md">
       <Link
         to={`/${slug}/attestations/held/${credential.id}`}
         aria-label={t("attestations.held.viewDetail", { name })}
         className="rounded-yivi absolute inset-0 outline-none"
       />
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-3">
-          {credential.logoUri && (
-            <img
-              src={credential.logoUri}
-              alt={t("attestations.credentialImageAlt")}
-              className="border-line bg-surface h-10 w-10 shrink-0 rounded-md border object-contain"
-            />
-          )}
-          <div className="min-w-0">
-            <div className="text-ink truncate font-semibold">{name}</div>
-            <div className="text-ink-soft truncate font-mono text-[12px]">
-              {credential.vct}
-            </div>
+      <div className="flex items-start gap-3">
+        {credential.logoUri ? (
+          <img
+            src={credential.logoUri}
+            alt=""
+            className="border-line bg-surface h-10 w-10 shrink-0 rounded-md border object-contain"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="bg-highlight text-link inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md"
+          >
+            <Icon name="valid" size={VALID_ICON_SIZE} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="text-ink truncate text-[14.5px] font-bold">
+            {name}
+          </div>
+          <div className="text-muted truncate text-[12.5px]">
+            {credential.issuerName || credential.issuer}
           </div>
         </div>
-        <Tag tone={HELD_STATUS_TONES[status]} dot>
-          {heldStatusLabel(status, t)}
+        <Tag tone="green" dot>
+          {heldStatusLabel("valid", t)}
         </Tag>
       </div>
-
-      <div className="flex flex-col gap-0.5 text-[12.5px]">
-        <div className="text-ink-soft truncate">
-          <span className="text-muted">
-            {t("attestations.held.fields.issuer")}
-          </span>{" "}
-          {credential.issuerName || credential.issuer}
-        </div>
-        {expiresAt && (
-          <div className="text-ink-soft">
-            {heldExpiryIsPast(credential, now)
-              ? t("attestations.held.expiredOn", {
-                  date: formatDate(expiresAt),
-                })
-              : t("attestations.held.expires", {
-                  date: formatDate(expiresAt),
-                })}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <div className="flex min-w-0 items-center gap-2">
+      <dl className="border-line grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t pt-3.5 text-[12.5px]">
+        <dt className="text-muted">
+          {t("attestations.held.fields.validUntil")}
+        </dt>
+        <dd className="text-ink text-right font-semibold">
+          {expiresAt
+            ? formatDate(expiresAt)
+            : t("attestations.held.detail.doesNotExpire")}
+        </dd>
+        <dt className="text-muted">{t("attestations.held.fields.received")}</dt>
+        <dd className="text-ink text-right">
+          {formatWhen(credential.receivedAt)}
+        </dd>
+        <dt className="text-muted">{t("attestations.held.fields.source")}</dt>
+        <dd className="text-right">
           <Tag>{heldSourceLabel(credential.source, t)}</Tag>
-          <span className="text-ink-soft truncate text-[12.5px]">
-            {formatWhen(credential.receivedAt)}
-          </span>
-        </div>
-        {isAdmin && (
+        </dd>
+      </dl>
+      {isAdmin && (
+        <div className="mt-auto flex justify-end">
           <Button
             variant="dangerGhost"
             size="sm"
-            // Above the link overlay, so removing a credential is not a click
-            // through to its detail page.
             className="relative z-10"
             onClick={onDelete}
           >
             {t("attestations.held.delete")}
           </Button>
-        )}
-      </div>
-    </Card>
+        </div>
+      )}
+    </div>
   );
 }
 

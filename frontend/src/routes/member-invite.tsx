@@ -344,12 +344,12 @@ export default function MemberInvite(): React.JSX.Element | null {
         id={FORM_ID}
         onSubmit={handleSubmit}
         noValidate
-        className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_340px]"
+        className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_340px]"
       >
         <div className="flex flex-col gap-4">
           <Card className="p-5">
             <div className={EYEBROW}>{t("memberInvite.howTo")}</div>
-            <div className="mt-2.5 flex gap-2.5">
+            <div className="mt-2.5 flex flex-wrap gap-2.5">
               {INVITE_MODES.map((m) => {
                 const active = mode === m.key;
                 return (
@@ -361,7 +361,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                     title={m.enabled ? undefined : t("common.comingSoon")}
                     onClick={() => m.enabled && setMode(m.key)}
                     className={[
-                      "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold transition-colors",
+                      "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors",
                       !m.enabled
                         ? "bg-surface border-line-strong text-muted cursor-not-allowed opacity-60"
                         : active
@@ -452,7 +452,7 @@ export default function MemberInvite(): React.JSX.Element | null {
 
               <div className="flex flex-col gap-2">
                 <div className={SUBHEAD}>{t("memberInvite.groupRoleDept")}</div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field id="invite-role" label={t("common.role")}>
                     <select
                       id="invite-role"
@@ -494,7 +494,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                     />
                   </Field>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field
                     id="invite-member-type"
                     label={t("memberInvite.memberType")}

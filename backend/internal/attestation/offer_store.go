@@ -224,11 +224,20 @@ func (s *Store) AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInp
 			return fmt.Errorf("attestation: record held for offer %s org %s: %w", id, orgID, err)
 		}
 
-		return s.audit.Record(ctx, q, audit.AttestationOfferAccepted,
+		if err := s.audit.Record(ctx, q, audit.AttestationOfferAccepted,
 			audit.Target{Type: audit.TargetCredentialOffer, ID: offer.ID.String(), OrgID: &orgID},
 			audit.Updated(nil, map[string]any{
 				"status": offer.Status, "sender": offer.SenderOrgName,
 				"credentialName": offer.CredentialName, "vct": out.VCT,
+			})); err != nil {
+			return err
+		}
+		// The held credential's own trail starts here, so its history reads from
+		// one target.
+		return s.audit.Record(ctx, q, audit.AttestationHeldReceived,
+			audit.Target{Type: audit.TargetHeldAttestation, ID: out.ID.String(), OrgID: &orgID},
+			audit.Created(map[string]any{
+				"vct": out.VCT, "source": out.Source, "sender": offer.SenderOrgName, "offerId": offer.ID.String(),
 			}))
 	})
 	return out, err

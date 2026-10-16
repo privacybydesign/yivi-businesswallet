@@ -2,10 +2,14 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
 )
 
 const (
@@ -81,6 +85,49 @@ const (
 	// Optional: empty means a screening record is written with no reference hash
 	// at all, never an unkeyed one.
 	envVogReferenceHashKey = "VOG_REFERENCE_HASH_KEY"
+
+	// Diploma extracts (identity proofing): DUO's PAdES signature on an
+	// uploaded extract is checked against the EU Trusted Lists (or the
+	// embedded PKIoverheid and certSIGN roots), with the lists cached in
+	// DIPLOMA_TRUST_CACHE_DIR when set.
+	envDiplomaValidatorProvider = "DIPLOMA_VALIDATOR_PROVIDER"
+	envDiplomaTrustSource       = "DIPLOMA_TRUST_SOURCE"
+	envDiplomaTrustCacheDir     = "DIPLOMA_TRUST_CACHE_DIR"
+	// envDiplomaOCSP ("false" turns it off) checks the signer chain's
+	// revocation online; off, only the revocation information embedded in the
+	// extract counts. Either way an unchecked certificate fails.
+	envDiplomaOCSP = "DIPLOMA_OCSP"
+
+	// Identity proofing: the wallet's own proofing engine
+	// (internal/proofingengine) runs document + face verification for an org.
+	// Sessions, their evidence and the customer secrets are sealed under
+	// IDENTITY_PROOFING_ENCRYPTION_KEY; without it nothing can be sent.
+	envIdentityProofingProvider      = "IDENTITY_PROOFING_PROVIDER"
+	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
+	// envIdentityProofingPublicURL is the origin the Idem app reaches the
+	// engine's /api/v1/app routes at (the api= of every vcmrtd deep link);
+	// defaults to APP_BASE_URL. Set it when the phone reaches the backend by
+	// another address (e.g. the LAN IP in development).
+	envIdentityProofingPublicURL = "IDENTITY_PROOFING_PUBLIC_URL"
+	// The Regula Face API: the native face step's liveness and match, and the
+	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
+	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
+	// to the former). Unset leaves face verification unavailable.
+	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
+	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
+	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// envIdentityProofingStubOutcome makes every stub session decide (approved,
+	// rejected or needs_review), so dev can see outcomes and their webhooks.
+	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
+	// envDevMode ("true") marks a local developer stack: only then may the
+	// stub identity proofing provider, its scripted outcome and the stub
+	// diploma validator run, the phone-facing proofing URLs use plain http to
+	// another host (a phone on the LAN),
+	// and the first Yivi login by an unknown address become its admin. It
+	// refuses to start unless APP_BASE_URL is set, to a localhost URL: set,
+	// because its default is localhost, so a deployment that left it out and
+	// picked up DEV_MODE would otherwise pass.
+	envDevMode = "DEV_MODE"
 
 	// Attestation issuance (OpenID4VCI). The hosted Veramo issuer is addressed per
 	// instance and authenticated with a Bearer admin token; the ping credential is
@@ -161,6 +208,10 @@ const (
 	// STATIC_DIR points at the built frontend; when set the API also serves it as
 	// an SPA on "/". Unset in dev (Vite serves the frontend).
 	envStaticDir = "STATIC_DIR"
+
+	// envTrustedProxies lists the reverse proxies (CIDRs or addresses) whose
+	// X-Forwarded-For is believed; empty trusts none.
+	envTrustedProxies = "TRUSTED_PROXIES"
 
 	defaultAppBaseURL = "http://localhost:5173"
 	defaultMailLocale = "en"
@@ -258,6 +309,23 @@ const (
 	ProviderValidatieNL         = "validatie_nl"
 	defaultVogValidatorProvider = ProviderStub
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
+
+	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
+	// default, as in go-diploma-issuer; ProviderStub accepts every extract's
+	// signature and runs only when set explicitly (the dev stack sets it:
+	// nobody holds a DUO-signed extract of a test person). DiplomaTrustEUTL and
+	// DiplomaTrustPinned are where its trust anchors come from.
+	ProviderDUO                     = "duo"
+	defaultDiplomaValidatorProvider = ProviderDUO
+	DiplomaTrustEUTL                = "eutl"
+	DiplomaTrustPinned              = "pinned"
+	defaultDiplomaTrustSource       = DiplomaTrustEUTL
+
+	// ProviderEngine runs identity proofing in the wallet's own engine (the
+	// default); ProviderStub is an in-memory stand-in whose sessions no phone
+	// can reach.
+	ProviderEngine                  = "engine"
+	defaultIdentityProofingProvider = ProviderEngine
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -360,6 +428,29 @@ type Config struct {
 	VogValidatorURL      string
 	VogReferenceHashKey  string
 
+	DiplomaValidatorProvider string
+	DiplomaTrustSource       string
+	DiplomaTrustCacheDir     string
+	// DiplomaOCSP enables the online revocation check of DUO's signing
+	// certificate (envDiplomaOCSP).
+	DiplomaOCSP bool
+
+	IdentityProofingProvider string
+	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
+	IdentityProofingPublicURL string
+	// IdentityProofingStubOutcome is what every stub session decides; empty
+	// leaves them undecided until they expire.
+	IdentityProofingStubOutcome string
+	// IdentityProofingEncryptionKey seals the engine's sessions and the
+	// customer secrets at rest. Empty means nothing can be sent.
+	IdentityProofingEncryptionKey string
+	// RegulaFaceAPIURL/-PublicURL are the Regula Face API as the backend and
+	// as the app reach it; RegulaFaceMatchThreshold the similarity a match
+	// needs (0 is the engine's default). An empty URL disables Regula.
+	RegulaFaceAPIURL         string
+	RegulaFaceAPIPublicURL   string
+	RegulaFaceMatchThreshold float64
+
 	AttestationIssuer         string
 	AttestationIssuerURL      string
 	AttestationIssuerToken    string
@@ -423,6 +514,11 @@ type Config struct {
 	// static serving (dev serves the frontend via Vite).
 	StaticDir string
 
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For names the
+	// client address that per-source rate limits key on. Empty trusts none:
+	// every request's source is its connection's peer.
+	TrustedProxies clientip.Trusted
+
 	PostGuardSidecarURL    string
 	PostGuardSharedSecret  string
 	PostGuardEncryptionKey string
@@ -438,6 +534,8 @@ type Config struct {
 	PostGuardWebsiteURL string
 
 	PlatformAdminEmails []string
+	// DevMode is a local developer stack (envDevMode).
+	DevMode bool
 }
 
 func Load() (Config, error) {
@@ -520,6 +618,47 @@ func Load() (Config, error) {
 	}
 	vogValidatorURL := envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
 
+	diplomaValidatorProvider := envOrDefault(envDiplomaValidatorProvider, defaultDiplomaValidatorProvider)
+	if diplomaValidatorProvider != ProviderStub && diplomaValidatorProvider != ProviderDUO {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envDiplomaValidatorProvider, ProviderStub, ProviderDUO)
+	}
+	diplomaTrustSource := envOrDefault(envDiplomaTrustSource, defaultDiplomaTrustSource)
+	if diplomaTrustSource != DiplomaTrustEUTL && diplomaTrustSource != DiplomaTrustPinned {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envDiplomaTrustSource, DiplomaTrustEUTL, DiplomaTrustPinned)
+	}
+
+	identityProofingProvider := envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
+	if identityProofingProvider != ProviderEngine && identityProofingProvider != ProviderStub {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderEngine, ProviderStub)
+	}
+	regulaFaceAPIURL := os.Getenv(envRegulaFaceAPIURL)
+	regulaFaceAPIPublicURL := envOrDefault(envRegulaFaceAPIPublicURL, regulaFaceAPIURL)
+	for key, raw := range map[string]string{envRegulaFaceAPIURL: regulaFaceAPIURL, envRegulaFaceAPIPublicURL: regulaFaceAPIPublicURL} {
+		if raw == "" {
+			continue
+		}
+		if err := requireAbsoluteHTTPURL(key, raw); err != nil {
+			return Config{}, err
+		}
+	}
+	var regulaFaceMatchThreshold float64
+	if raw := os.Getenv(envRegulaFaceMatchThreshold); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v <= 0 || v > 1 {
+			return Config{}, fmt.Errorf("config: %s must be a number in (0, 1]", envRegulaFaceMatchThreshold)
+		}
+		regulaFaceMatchThreshold = v
+	}
+	identityProofingStubOutcome := os.Getenv(envIdentityProofingStubOutcome)
+	switch identityProofingStubOutcome {
+	case "", "approved", "rejected", "needs_review":
+	default:
+		return Config{}, fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
+	}
+	if identityProofingStubOutcome != "" && identityProofingProvider != ProviderStub {
+		return Config{}, fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
+	}
+
 	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
 	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
 	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
@@ -561,6 +700,37 @@ func Load() (Config, error) {
 	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, requesterPublicURL); err != nil {
 		return Config{}, err
 	}
+	identityProofingPublicURL := envOrDefault(envIdentityProofingPublicURL, appBaseURL)
+	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, identityProofingPublicURL); err != nil {
+		return Config{}, err
+	}
+	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
+	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
+		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
+			envDevMode, envAppBaseURL, os.Getenv(envAppBaseURL))
+	}
+	if !devMode {
+		// The Idem app sends chip data, selfies and liveness frames to these:
+		// over the network only with https. Plain http to this machine never
+		// leaves it.
+		for key, raw := range map[string]string{
+			envIdentityProofingPublicURL: identityProofingPublicURL,
+			envRegulaFaceAPIPublicURL:    regulaFaceAPIPublicURL,
+		} {
+			if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
+				return Config{}, fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+			}
+		}
+		for key, stubbed := range map[string]bool{
+			envIdentityProofingProvider:    identityProofingProvider == ProviderStub,
+			envIdentityProofingStubOutcome: identityProofingStubOutcome != "",
+			envDiplomaValidatorProvider:    diplomaValidatorProvider == ProviderStub,
+		} {
+			if stubbed {
+				return Config{}, fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
+			}
+		}
+	}
 
 	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
 	// but a set value is concatenated into the QTSP authorize URL and the token
@@ -571,6 +741,11 @@ func Load() (Config, error) {
 		if err := requireAbsoluteHTTPURL(envSigningRedirectURI, signingRedirectURI); err != nil {
 			return Config{}, err
 		}
+	}
+
+	trustedProxies, err := clientip.ParseTrusted(parseList(os.Getenv(envTrustedProxies)))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: %s: %w", envTrustedProxies, err)
 	}
 
 	return Config{
@@ -623,6 +798,20 @@ func Load() (Config, error) {
 		VogValidatorURL:      vogValidatorURL,
 		VogReferenceHashKey:  os.Getenv(envVogReferenceHashKey),
 
+		DiplomaValidatorProvider: diplomaValidatorProvider,
+		DiplomaTrustSource:       diplomaTrustSource,
+		DiplomaOCSP:              !strings.EqualFold(os.Getenv(envDiplomaOCSP), "false"),
+		DiplomaTrustCacheDir:     os.Getenv(envDiplomaTrustCacheDir),
+
+		IdentityProofingProvider:      identityProofingProvider,
+		IdentityProofingStubOutcome:   identityProofingStubOutcome,
+		IdentityProofingPublicURL:     identityProofingPublicURL,
+		DevMode:                       devMode,
+		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
+		RegulaFaceAPIURL:              regulaFaceAPIURL,
+		RegulaFaceAPIPublicURL:        regulaFaceAPIPublicURL,
+		RegulaFaceMatchThreshold:      regulaFaceMatchThreshold,
+
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,
 		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
@@ -653,6 +842,7 @@ func Load() (Config, error) {
 		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
+		TrustedProxies:             trustedProxies,
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
@@ -769,4 +959,19 @@ func parseDuration(key, fallback string) (time.Duration, error) {
 		return 0, fmt.Errorf("config: %s %q: %w", key, raw, err)
 	}
 	return d, nil
+}
+
+// localhostURL reports whether raw is an absolute URL on this machine:
+// localhost or a loopback address.
+func localhostURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
