@@ -206,7 +206,6 @@ function ProofingPauseCell({
     );
   }
   const byPlatform = pause?.platformPausedAt !== undefined;
-  const byOrganization = pause?.orgPausedAt !== undefined;
 
   return (
     <div
@@ -221,10 +220,6 @@ function ProofingPauseCell({
                 name: pause.platformPausedBy.name,
               })
             : t("identityProofing.pause.pausedByPlatformAdmin")}
-        </Tag>
-      ) : byOrganization ? (
-        <Tag tone="default">
-          {t("identityProofing.pause.pausedByOrganization")}
         </Tag>
       ) : (
         <Tag tone="green">{t("identityProofing.pause.active")}</Tag>

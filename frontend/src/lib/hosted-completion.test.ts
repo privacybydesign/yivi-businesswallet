@@ -35,7 +35,7 @@ describe("hostedLanguage", () => {
 describe("completionRedirect", () => {
   const done = completedMessage("ps_abc", "approved");
 
-  it("adds the session and status, keeping the customer's query", () => {
+  it("adds the session and status, keeping the redirect's query", () => {
     expect(completionRedirect("https://portal.example/done?ref=42", done)).toBe(
       "https://portal.example/done?ref=42&session=ps_abc&status=approved",
     );
@@ -57,7 +57,7 @@ describe("completionRedirect", () => {
 });
 
 describe("postCompletion", () => {
-  it("posts only to the customer's origins, never to any origin", () => {
+  it("posts only to the org's origins, never to any origin", () => {
     const posted: [unknown, string][] = [];
     const parent: MessageTarget = {
       postMessage: (message, origin) => posted.push([message, origin]),

@@ -2,7 +2,6 @@ import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
-import type { ProofingCustomer } from "./api/identity-proofing";
 import type { HeldAttestationClaims } from "./api/attestations";
 import { credentialDisplayName } from "./lib/credential-display";
 import {
@@ -10,7 +9,6 @@ import {
   organizationQueryKey,
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
-import { proofingCustomerQueryKey } from "./api/identity-proofing.queries";
 import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
@@ -30,9 +28,9 @@ import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
 import IdentityProofingFlows from "./routes/identity-proofing-flows";
 import IdentityProofingOverview from "./routes/identity-proofing-overview";
-import Customers from "./routes/customers";
-import CustomerVerify from "./routes/customer-verify";
-import CustomerDetail from "./routes/customer-detail";
+import ProofingVerify from "./routes/proofing-verify";
+import ProofingSessions from "./routes/proofing-sessions";
+import Developers from "./routes/developers";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -77,19 +75,14 @@ const identityProofingCrumb: RouteHandle = {
 const identityProofingFlowsCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofingFlows.title"),
 };
-const customersCrumb: RouteHandle = {
-  crumb: ({ t }) => t("customers.title"),
+const proofingSessionsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.sessions.title"),
 };
-const customerCrumb: RouteHandle = {
-  crumb: ({ params, queryClient, t }: CrumbContext) => {
-    const customer = queryClient.getQueryData<ProofingCustomer>(
-      proofingCustomerQueryKey(params.orgSlug ?? "", params.customerId ?? ""),
-    );
-    return customer?.name ?? t("customers.title");
-  },
+const developersCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.developers.title"),
 };
-const customerVerifyCrumb: RouteHandle = {
-  crumb: ({ t }) => t("customers.onScreen.title"),
+const proofingVerifyCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.onScreen.title"),
 };
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
@@ -185,7 +178,7 @@ export const router = createBrowserRouter([
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },
-      // A customer's subject verifying from a hosted link: public, keyed by
+      // An external person verifying from a hosted link: public, keyed by
       // the link's token, on the subject's own device.
       { path: "/p/:token", Component: Proof },
       { path: "*", Component: NotFound },
@@ -227,23 +220,19 @@ export const router = createBrowserRouter([
                         handle: identityProofingFlowsCrumb,
                       },
                       {
-                        path: "customers",
-                        handle: customersCrumb,
-                        children: [
-                          { index: true, Component: Customers },
-                          {
-                            path: ":customerId",
-                            handle: customerCrumb,
-                            children: [
-                              { index: true, Component: CustomerDetail },
-                              {
-                                path: "verify",
-                                Component: CustomerVerify,
-                                handle: customerVerifyCrumb,
-                              },
-                            ],
-                          },
-                        ],
+                        path: "sessions",
+                        Component: ProofingSessions,
+                        handle: proofingSessionsCrumb,
+                      },
+                      {
+                        path: "developers",
+                        Component: Developers,
+                        handle: developersCrumb,
+                      },
+                      {
+                        path: "verify",
+                        Component: ProofingVerify,
+                        handle: proofingVerifyCrumb,
                       },
                     ],
                   },

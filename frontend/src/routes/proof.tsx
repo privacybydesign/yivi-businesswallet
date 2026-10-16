@@ -31,7 +31,7 @@ import {
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper } from "../ui";
-import { CustomerMark } from "./proofing-customer-ui";
+import { BrandMark } from "./proofing-ui";
 import { MethodChoice, Overview, Session } from "./proofing-verify-steps";
 
 const HINT = "text-ink-soft text-[13px]";
@@ -39,15 +39,14 @@ const NOT_FOUND = "session_not_found";
 
 type Step = "overview" | "method" | "session";
 
-// A customer's subject on their own device, from a hosted link: what the
-// customer collects (declining cancels the link), the app to use, then that
-// app's session. Public like /vog/:token; the token in the link is the whole
+// An external person on their own device, from a hosted link: what the org
+// collects (declining cancels the link), the app to use, then that app's
+// session. Public like /vog/:token; the token in the link is the whole
 // authorization, and a link starts one session. Once settled, the page posts
-// the outcome to an embedding page on one of the customer's origins, and
-// redirects to the session's redirect when it has one. A session on a data
-// request flow is the person asking the customer for their data or its
-// erasure: the page says so, and an approved "see my data" request's data
-// downloads from it.
+// the outcome to an embedding page on one of the org's origins, and redirects
+// to the session's redirect when it has one. A session on a data request flow
+// is the person asking the org for their data or its erasure: the page says
+// so, and an approved "see my data" request's data downloads from it.
 export default function Proof(): React.JSX.Element {
   const { t } = useTranslation();
   // Guaranteed by the "/p/:token" route this mounts under.
@@ -63,7 +62,7 @@ export default function Proof(): React.JSX.Element {
         {page.data !== undefined ? (
           <>
             <HostedFlow token={token} page={page.data} />
-            {!page.data.customer.branding.hidePoweredBy && (
+            {!page.data.organization.branding.hidePoweredBy && (
               <p className="text-muted mt-4 text-center text-[12px]">
                 {t("proofLink.poweredBy")}
               </p>
@@ -93,7 +92,7 @@ function HostedFlow({
   page: HostedProofing;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const { customer, flow } = page;
+  const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const choice = flow.yiviAvailable;
   const stages = verifyStages({
@@ -123,8 +122,8 @@ function HostedFlow({
     );
   }, [page.language, page.locales]);
 
-  // The customer's colour for as long as the page shows.
-  const { primaryColor } = customer.branding;
+  // The org's colour for as long as the page shows.
+  const { primaryColor } = organization.branding;
   useEffect(() => {
     applyOrgTheme(hostedTheme(primaryColor));
     return clearOrgTheme;
@@ -178,23 +177,29 @@ function HostedFlow({
   return (
     <Card className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-3">
-        <CustomerMark customer={customer} size="lg" />
-        <span className="text-ink text-[16px] font-bold">{customer.name}</span>
+        <BrandMark
+          name={organization.name}
+          branding={organization.branding}
+          size="lg"
+        />
+        <span className="text-ink text-[16px] font-bold">
+          {organization.name}
+        </span>
       </div>
       {dataRequest && (
         <p className="text-ink text-[13.5px]">
           {t(`proofLink.dataRequest.${flow.kind as DataKind}.intro`, {
-            customer: customer.name,
+            organization: organization.name,
           })}
         </p>
       )}
       <Stepper
-        steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+        steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
         current={stages.indexOf(inDiplomas ? "diplomas" : step)}
       />
       {step === "overview" && (
         <Overview
-          customer={customer}
+          org={organization}
           flow={flow}
           onContinue={choice ? () => setStep("method") : begin}
           starting={start.isPending}
@@ -243,7 +248,7 @@ function HostedFlow({
             ) : dataRequest ? (
               <DataRequestOutcome
                 token={token}
-                customer={customer.name}
+                organization={organization.name}
                 kind={flow.kind as DataKind}
                 status={settledStatus ?? page.status}
                 exportUntil={page.dataExportUntil}
@@ -259,17 +264,17 @@ function HostedFlow({
 type DataKind = Exclude<FlowKind, "identity">;
 
 // What a data request's person sees once their identity check settled: that
-// the request awaits the customer's review, its outcome, and an approved "see
+// the request awaits the org's review, its outcome, and an approved "see
 // my data" request's download while it lasts.
 function DataRequestOutcome({
   token,
-  customer,
+  organization,
   kind,
   status,
   exportUntil,
 }: {
   token: string;
-  customer: string;
+  organization: string;
   kind: DataKind;
   status: string;
   exportUntil: string | undefined;
@@ -280,7 +285,7 @@ function DataRequestOutcome({
     case "needs_review":
       return (
         <p className={HINT}>
-          {t(`proofLink.dataRequest.${kind}.inReview`, { customer })}
+          {t(`proofLink.dataRequest.${kind}.inReview`, { organization })}
         </p>
       );
     case "approved":

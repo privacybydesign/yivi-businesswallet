@@ -8,25 +8,28 @@ import {
 } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useCreateRequestMutation,
-  useProofingCustomerFlowsQuery,
-  useProofingCustomerQuery,
+  useProofingFlowsQuery,
+  useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
-  ProofingCustomer,
-  ProofingCustomerFlow,
+  ProofingFlow,
   ProofingMethod,
   ProofingSent,
+  ProofingSettings,
 } from "../api/identity-proofing";
 import {
+  externalFlows,
   proofingErrorMessage,
   verifyStages,
   yiviAppAvailable,
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper, TopBar } from "../ui";
-import { CustomerMark } from "./proofing-customer-ui";
+import { BrandMark } from "./proofing-ui";
 import { MethodChoice, Overview, Session } from "./proofing-verify-steps";
+import type { VerifyOrg } from "./proofing-verify-steps";
 
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
@@ -53,15 +56,14 @@ function verifyState(state: unknown): VerifyState {
   };
 }
 
-// A customer's subject verified on the sender's screen: what the customer
-// collects, the app they pick, then that app's QR code for as long as the
-// session runs. Nothing is mailed; the session starts when the app is picked.
-export default function CustomerVerify(): React.JSX.Element {
+// An external person verified on the sender's screen: what the org collects,
+// the app they pick, then that app's QR code for as long as the session runs.
+// Nothing is mailed; the session starts when the app is picked.
+export default function ProofingVerify(): React.JSX.Element {
   const { t } = useTranslation();
-  const { orgSlug, customerId } = useParams();
-  // Guaranteed by the ":orgSlug/…/:customerId/verify" route this mounts under.
+  const { orgSlug } = useParams();
+  // Guaranteed by the ":orgSlug/…/verify" route this mounts under.
   const slug = orgSlug!;
-  const id = customerId!;
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -74,30 +76,33 @@ export default function CustomerVerify(): React.JSX.Element {
       { replace: true, state: null },
     );
   }, [hasState, navigate, location.pathname, location.search]);
-  const customer = useProofingCustomerQuery(slug, id);
-  const flows = useProofingCustomerFlowsQuery(slug, id);
-  const flowId = searchParams.get("flow") ?? customer.data?.defaultFlowId;
-  const flow = flows.data?.find((f) => f.assigned && f.id === flowId);
+  const org = useOrganizationQuery(slug);
+  const settings = useProofingSettingsQuery(slug);
+  const flows = useProofingFlowsQuery(slug);
+  const { sendable, initial } = externalFlows(flows.data ?? []);
+  const flowId = searchParams.get("flow") ?? initial?.id;
+  const flow = sendable.find((f) => f.id === flowId);
 
   return (
     <>
-      <TopBar
-        title={t("customers.onScreen.title")}
-        subtitle={customer.data?.name}
-      />
+      <TopBar title={t("identityProofing.onScreen.title")} />
       <div className="mx-auto w-full max-w-xl px-4 py-6">
-        {customer.isPending || flows.isPending ? (
+        {settings.isPending || flows.isPending || org.isPending ? (
           <p className={HINT}>{t("common.loading")}</p>
-        ) : customer.isError || flows.isError ? (
+        ) : settings.isError || flows.isError || org.isError ? (
           <p className={ERROR}>
-            {proofingErrorMessage(customer.error ?? flows.error, t)}
+            {proofingErrorMessage(
+              settings.error ?? flows.error ?? org.error,
+              t,
+            )}
           </p>
         ) : flow === undefined ? (
-          <p className={ERROR}>{t("customers.onScreen.missingFlow")}</p>
+          <p className={ERROR}>{t("identityProofing.onScreen.missingFlow")}</p>
         ) : (
           <VerifyFlow
             slug={slug}
-            customer={customer.data}
+            org={{ name: org.data.name, branding: settings.data.branding }}
+            settings={settings.data}
             flow={flow}
             subject={subject}
           />
@@ -109,13 +114,15 @@ export default function CustomerVerify(): React.JSX.Element {
 
 function VerifyFlow({
   slug,
-  customer,
+  org,
+  settings,
   flow,
   subject,
 }: {
   slug: string;
-  customer: ProofingCustomer;
-  flow: ProofingCustomerFlow;
+  org: VerifyOrg;
+  settings: ProofingSettings;
+  flow: ProofingFlow;
   subject: VerifyState;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -130,12 +137,11 @@ function VerifyFlow({
   const [inDiplomas, setInDiplomas] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateRequestMutation(slug);
-  const name = customer.branding.displayName || customer.name;
+  const name = org.branding.displayName || org.name;
 
   function start(): void {
     create.mutate(
       {
-        customerId: customer.id,
         email: subject.email ?? "",
         name: subject.name ?? "",
         birthDate: subject.birthDate,
@@ -161,17 +167,20 @@ function VerifyFlow({
   return (
     <Card className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-3">
-        <CustomerMark customer={customer} size="lg" />
+        <BrandMark name={org.name} branding={org.branding} size="lg" />
         <span className="text-ink text-[16px] font-bold">{name}</span>
       </div>
       <Stepper
-        steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+        steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
         current={stages.indexOf(inDiplomas ? "diplomas" : step)}
       />
       {step === "overview" && (
         <Overview
-          customer={customer}
-          flow={flow}
+          org={org}
+          flow={{
+            ...flow,
+            retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
+          }}
           onContinue={choice ? () => setStep("method") : start}
           starting={create.isPending}
           error={
@@ -183,7 +192,7 @@ function VerifyFlow({
               relative="path"
               className="text-ink-soft self-center text-[13px] font-semibold hover:underline"
             >
-              {t("customers.onScreen.overview.cancel")}
+              {t("identityProofing.onScreen.overview.cancel")}
             </Link>
           }
         />
@@ -218,10 +227,10 @@ function VerifyFlow({
                 relative="path"
                 className="text-ink-soft self-center text-[13px] font-semibold hover:underline"
               >
-                {t("customers.onScreen.outcome.back", { name: customer.name })}
+                {t("identityProofing.onScreen.outcome.back")}
               </Link>
               <Button variant="secondary" onClick={restart}>
-                {t("customers.onScreen.outcome.again")}
+                {t("identityProofing.onScreen.outcome.again")}
               </Button>
             </div>
           }

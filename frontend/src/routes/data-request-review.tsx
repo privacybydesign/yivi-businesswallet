@@ -45,7 +45,7 @@ export function DataRequestTag({
 }
 
 // A data request's part of its session's panel: what the person asks for,
-// the customer's sessions of that person, and, while it awaits review, the
+// the org's sessions of that person, and, while it awaits review, the
 // decision. Who the person is and how surely they were proven (name, date of
 // birth, document, face match, liveness, eIDAS level) are the panel's own rows.
 // Approving takes the ticked sessions: a "delete my data" request erases them,
@@ -66,10 +66,10 @@ export function DataRequestPanel({
     <div className="border-line mt-4 flex flex-col gap-3 border-t pt-4">
       <div>
         <h3 className="text-ink text-[14px] font-bold">
-          {t(`customers.sessions.dataRequest.${kind}.title`)}
+          {t(`identityProofing.sessions.dataRequest.${kind}.title`)}
         </h3>
         <p className="text-ink-soft text-[13px]">
-          {t(`customers.sessions.dataRequest.${kind}.hint`)}
+          {t(`identityProofing.sessions.dataRequest.${kind}.hint`)}
         </p>
       </div>
       {matches.isPending ? (
@@ -154,16 +154,16 @@ function Review({
       {confirmingErasure && (
         <ConfirmDialog
           title={t(
-            "customers.sessions.dataRequest.data_erasure.confirm.title",
+            "identityProofing.sessions.dataRequest.data_erasure.confirm.title",
             {
               count: ticked.length,
             },
           )}
           message={t(
-            "customers.sessions.dataRequest.data_erasure.confirm.message",
+            "identityProofing.sessions.dataRequest.data_erasure.confirm.message",
           )}
           confirmLabel={t(
-            "customers.sessions.dataRequest.data_erasure.approve",
+            "identityProofing.sessions.dataRequest.data_erasure.approve",
             {
               count: ticked.length,
             },
@@ -177,22 +177,26 @@ function Review({
         htmlFor={fieldId}
         className="text-ink-soft text-[12px] font-semibold"
       >
-        {t("customers.sessions.review.reason")}
+        {t("identityProofing.sessions.review.reason")}
       </label>
       <textarea
         id={fieldId}
         value={reason}
         aria-invalid={(touched && missing) || tooLong}
-        placeholder={t("customers.sessions.dataRequest.reasonPlaceholder")}
+        placeholder={t(
+          "identityProofing.sessions.dataRequest.reasonPlaceholder",
+        )}
         onChange={(event) => setReason(event.target.value)}
         className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
       />
       {touched && missing && (
-        <p className={ERROR}>{t("customers.sessions.review.reasonRequired")}</p>
+        <p className={ERROR}>
+          {t("identityProofing.sessions.review.reasonRequired")}
+        </p>
       )}
       {tooLong && (
         <p className={ERROR}>
-          {t("customers.sessions.review.reasonTooLong", {
+          {t("identityProofing.sessions.review.reasonTooLong", {
             max: REVIEW_REASON_MAX_CHARS,
           })}
         </p>
@@ -210,7 +214,7 @@ function Review({
           disabled={decide.isPending}
           onClick={() => submit("approve")}
         >
-          {t(`customers.sessions.dataRequest.${kind}.approve`, {
+          {t(`identityProofing.sessions.dataRequest.${kind}.approve`, {
             count: ticked.length,
           })}
         </Button>
@@ -222,7 +226,7 @@ function Review({
           disabled={decide.isPending}
           onClick={() => submit("reject")}
         >
-          {t("customers.sessions.review.reject")}
+          {t("identityProofing.sessions.review.reject")}
         </Button>
       </div>
     </>
@@ -248,7 +252,7 @@ function MatchList({
   if (matches.length === 0) {
     return (
       <p className="text-ink-soft text-[13px]">
-        {t("customers.sessions.dataRequest.noMatches")}
+        {t("identityProofing.sessions.dataRequest.noMatches")}
       </p>
     );
   }
@@ -261,14 +265,14 @@ function MatchList({
       {identified.length > 0 && (
         <>
           <p className="text-ink text-[13px] font-semibold">
-            {t("customers.sessions.dataRequest.matches", {
+            {t("identityProofing.sessions.dataRequest.matches", {
               count: identified.length,
             })}
           </p>
           <MatchRows matches={identified} selection={selection} />
           {selection && (
             <p className={HINT}>
-              {t("customers.sessions.dataRequest.untickHint")}
+              {t("identityProofing.sessions.dataRequest.untickHint")}
             </p>
           )}
         </>
@@ -276,14 +280,14 @@ function MatchList({
       {typed.length > 0 && (
         <>
           <p className="text-ink mt-2 text-[13px] font-semibold">
-            {t("customers.sessions.dataRequest.emailMatches", {
+            {t("identityProofing.sessions.dataRequest.emailMatches", {
               count: typed.length,
             })}
           </p>
           <MatchRows matches={typed} selection={selection} />
           {selection && (
             <p className={HINT}>
-              {t("customers.sessions.dataRequest.emailMatchesHint")}
+              {t("identityProofing.sessions.dataRequest.emailMatchesHint")}
             </p>
           )}
         </>
@@ -330,7 +334,7 @@ function MatchRows({
               <span className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-[12px]">{m.sessionId}</span>
                 <Tag tone={LEVEL_TONES[m.level]}>
-                  {t(`customers.sessions.dataRequest.levels.${m.level}`)}
+                  {t(`identityProofing.sessions.dataRequest.levels.${m.level}`)}
                 </Tag>
                 {!selection && <MatchDecision match={m} />}
               </span>
@@ -359,7 +363,7 @@ function MatchDecision({
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   if (match.purgedAt) {
-    return <Tag>{t("customers.sessions.dataRequest.erased")}</Tag>;
+    return <Tag>{t("identityProofing.sessions.dataRequest.erased")}</Tag>;
   }
   if (match.approved === undefined) {
     return null;
@@ -367,8 +371,8 @@ function MatchDecision({
   return (
     <Tag tone={match.approved ? "blue" : "default"}>
       {match.approved
-        ? t("customers.sessions.dataRequest.approved")
-        : t("customers.sessions.dataRequest.kept")}
+        ? t("identityProofing.sessions.dataRequest.approved")
+        : t("identityProofing.sessions.dataRequest.kept")}
     </Tag>
   );
 }
@@ -409,7 +413,7 @@ function Download({
   if (closed) {
     return (
       <p className={HINT}>
-        {t("customers.sessions.dataRequest.downloadClosed", {
+        {t("identityProofing.sessions.dataRequest.downloadClosed", {
           date: formatWhen(until),
         })}
       </p>
@@ -422,10 +426,10 @@ function Download({
         download
         className={LINK_BUTTON}
       >
-        {t("customers.sessions.dataRequest.download")}
+        {t("identityProofing.sessions.dataRequest.download")}
       </a>
       <span className={HINT}>
-        {t("customers.sessions.dataRequest.downloadUntil", {
+        {t("identityProofing.sessions.dataRequest.downloadUntil", {
           date: formatWhen(until),
         })}
       </span>

@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { request } from "./http";
-import {
-  getHostedProofing,
-  getProofingCustomerFlows,
-} from "./identity-proofing";
+import { getHostedProofing, getProofingFlows } from "./identity-proofing";
 
 // The subject is told the retention the server works out (the flow's, else
-// the customer's): the pages read it from these two responses, so their
-// schemas must carry it and refuse an answer without it.
+// the org's): the pages read it from these two responses, so their schemas
+// must carry it. The hosted page refuses an answer without it; the flow list's
+// schema leaves it optional, as a single version has none.
 
 vi.mock("./http", () => ({ request: vi.fn(), absoluteApiUrl: vi.fn() }));
 
@@ -28,7 +26,7 @@ const hostedPage = {
   sessionId: "ps_b7k2mq4xz6rt3vnw5hc2jd7fae",
   embedOrigins: [],
   locales: [],
-  customer: {
+  organization: {
     name: "Acme",
     branding: {
       displayName: "",
@@ -51,7 +49,7 @@ const hostedPage = {
   diplomas: [],
 };
 
-const customerFlow = {
+const listedFlow = {
   id: "f-1",
   version: 1,
   active: true,
@@ -59,7 +57,7 @@ const customerFlow = {
   steps: [],
   createdAt: "2026-09-14T08:12:00Z",
   completable: true,
-  assigned: true,
+  allowed: true,
   default: true,
   retentionDays: RETENTION_DAYS,
 };
@@ -80,14 +78,11 @@ describe("the retention a subject is told", () => {
     expect(() => schema.parse({ ...hostedPage, flow })).toThrow();
   });
 
-  it("comes with each of a customer's flows", async () => {
-    await getProofingCustomerFlows("acme", "c-1");
+  it("comes with each of the org's flows", async () => {
+    await getProofingFlows("acme");
     const schema = lastSchema();
-    expect(schema.parse([customerFlow])).toMatchObject([
+    expect(schema.parse([listedFlow])).toMatchObject([
       { retentionDays: RETENTION_DAYS },
     ]);
-    const flow: Record<string, unknown> = { ...customerFlow };
-    delete flow.retentionDays;
-    expect(() => schema.parse([flow])).toThrow();
   });
 });

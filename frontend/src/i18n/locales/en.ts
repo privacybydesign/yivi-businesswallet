@@ -32,7 +32,8 @@ export const en = {
     members: "Members",
     identityProofing: "Identity proofing",
     identityProofingOverview: "Overview",
-    customers: "Customers",
+    flows: "Flows",
+    developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -414,36 +415,27 @@ export const en = {
       pausedTitle: "Identity proofing is paused",
       byPlatform:
         "The platform administrator paused identity proofing for this organisation. Contact them to resume it.",
-      byOrganization:
-        "An administrator of this organisation switched identity proofing off.",
       whatStops:
-        "While paused, nothing new starts: no requests, no customer API calls and no hosted links. Sessions waiting for review are rejected, and their subjects told to try again later. Sessions already running still finish, and their webhooks still go out.",
-      turnOn: "Switch identity proofing on",
-      turnOff: "Switch off",
-      switchTitle: "Switch off identity proofing",
-      switchHint:
-        "Stops identity proofing for this organisation until an administrator switches it back on.",
-      confirmTitle: "Switch off identity proofing?",
+        "While paused, nothing new starts: no requests, no API calls and no hosted links. Sessions waiting for review are rejected, and their subjects told to try again later. Sessions already running still finish, and their webhooks still go out.",
       platformColumn: "Identity proofing",
       active: "Active",
       unknown: "Unknown",
       pausedByPlatform: "Paused by {{name}}",
       pausedByPlatformAdmin: "Paused by a platform admin",
       platformConfirmTitle: "Pause identity proofing for {{name}}?",
-      byOrganizationMember:
-        "{{name}}, an administrator of this organisation, switched identity proofing off.",
-      pausedByOrganization: "Switched off by the organisation",
+      byPlatformAdmin:
+        "{{name}}, a platform administrator, paused identity proofing for this organisation. Contact them to resume it.",
       platformPause: "Pause",
       platformResume: "Resume",
     },
     overview: {
       apiDocs: "API docs",
       title: "Overview",
-      subtitle: "Identity checks you run for your customers. Last 30 days.",
+      subtitle: "Identity checks you run. Last 30 days.",
       stats: {
         sessions: "Sessions",
-        sessionsHint_one: "across {{count}} customer",
-        sessionsHint_other: "across {{count}} customers",
+        sessionsHint_one: "across {{count}} flow",
+        sessionsHint_other: "across {{count}} flows",
         verified: "Verified",
         verifiedHint: "{{share}} of sessions",
         failed: "Failed",
@@ -458,32 +450,33 @@ export const en = {
       },
       recent: {
         title: "Recent sessions",
-        scope: "all customers",
+        scope: "the whole organisation",
         scopeOwn: "sent by you",
-        customer: "Customer",
+        viewAll: "View all",
+        person: "Person",
+        noName: "No name given",
         flow: "Flow",
         result: "Result",
         started: "Started",
         empty: "No sessions yet.",
-        emptyCustomer: "No sessions for this customer yet.",
-        filterLabel: "Show sessions of",
-        allCustomers: "All customers",
       },
-      customers: {
-        title: "Customers",
+      flows: {
+        title: "Flows",
         viewAll: "View all",
-        empty: "No customers yet.",
+        empty: "No flows yet.",
         summary: "{{count}} sessions · {{share}} verified",
         noSessions: "No sessions in 30 days",
-        webhookAlertNoAnswer_one:
-          "{{name}}: webhook has not answered since {{since}}. {{count}} result is queued for retry.",
-        webhookAlertNoAnswer_other:
-          "{{name}}: webhook has not answered since {{since}}. {{count}} results are queued for retry.",
-        webhookAlert_one:
-          "{{name}}: webhook returns {{code}} since {{since}}. {{count}} result is queued for retry.",
-        webhookAlert_other:
-          "{{name}}: webhook returns {{code}} since {{since}}. {{count}} results are queued for retry.",
+        default: "Default",
       },
+      webhookAlertNoAnswer_one:
+        "The webhook endpoint has not answered since {{since}}. {{count}} result is queued for retry.",
+      webhookAlertNoAnswer_other:
+        "The webhook endpoint has not answered since {{since}}. {{count}} results are queued for retry.",
+      webhookAlert_one:
+        "The webhook endpoint returns {{code}} since {{since}}. {{count}} result is queued for retry.",
+      webhookAlert_other:
+        "The webhook endpoint returns {{code}} since {{since}}. {{count}} results are queued for retry.",
+      webhookAlertLink: "Open webhook",
     },
     requests: {
       empty: "No requests yet.",
@@ -533,29 +526,18 @@ export const en = {
       flowNotAllowed:
         "That flow is no longer available to members. Pick another one.",
       memberNotFound: "That person is not a member of this organization.",
-      customerNotFound: "That customer does not exist.",
-      customerExists:
-        "Your organization already has a customer with this name.",
-      flowNotAssigned:
-        "That flow is no longer assigned to this customer. Pick another one.",
-      customerPaused:
-        "Proofing is paused for this customer. An admin can resume it on the customer's page.",
-      customerHasOpenReviews:
-        "This customer has sessions waiting for review. Decide them before pausing.",
-      customerSessionsLeft:
-        "Sessions were sent for this customer while it was being removed. Try removing it again.",
+      noDefaultFlow:
+        "Your organisation has no default flow. Pick a flow, or set a default on the Flows page.",
       proofingPaused: "Identity proofing is paused for this organisation.",
-      customerNoApiKey:
-        "This customer has no API key yet. An admin can create one on the customer's API keys tab.",
       apiKeyNotFound: "That API key no longer exists.",
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
       referencePhotoRequired:
-        "This flow compares the face with your own photo of the person, which can only be sent through the customer API. Pick another flow.",
+        "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
       webhookNotFound:
-        "This customer's webhook no longer exists: someone may have removed it. Reload the page.",
+        "The webhook endpoint no longer exists: someone may have removed it. Reload the page.",
       linkStarted:
         "This link was already opened somewhere else. Carry on there.",
       sessionOver: "This session has ended. Start a new one.",
@@ -573,7 +555,7 @@ export const en = {
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
-        "A data request flow is for a customer's subjects. Take it off the members' flows first.",
+        "A data request flow is for external people. Take it off the members' flows first.",
       exportUnavailable: "This data can no longer be downloaded.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
@@ -612,99 +594,9 @@ export const en = {
         duplicate: "This diploma was added already.",
       },
     },
-  },
-  customers: {
-    title: "Customers",
-    subtitle:
-      "Organisations you verify people for. Each has its own flows and sessions.",
-    add: "Add customer",
-    status: {
-      active: "Active",
-      paused: "Paused",
-      needsAttention: "Needs attention",
-      setupNeeded: "Setup needed",
-    },
-    list: {
-      search: "Search customers",
-      count_one: "{{count}} customer",
-      count_other: "{{count}} customers",
-      name: "Customer",
-      flows: "Flows",
-      sessions: "Sessions 30d",
-      verified: "Verified",
-      status: "Status",
-      added: "Added {{date}}",
-      empty: "No customers yet.",
-      noMatch: "No customer matches your search.",
-      webhook: "Webhook",
-    },
-    new: {
-      title: "New customer",
-      name: "Name",
-      namePlaceholder: "Initech BV",
-      nameRequired: "Enter a name.",
-      create: "Add customer",
-      cancel: "Cancel",
-    },
-    detail: {
-      since_one:
-        "{{id}} · customer since {{date}} · {{count}} session in the last 30 days",
-      since_other:
-        "{{id}} · customer since {{date}} · {{count}} sessions in the last 30 days",
-      notFound: "This customer does not exist.",
-      verify: "Verify a person",
-      pause: "Pause proofing",
-      resume: "Resume proofing",
-      pausedNotice:
-        "Proofing is paused for this customer: no new request can be sent until an admin resumes it.",
-      noApiKeyNotice:
-        "This customer has no API key yet: create one before sending requests.",
-      noApiKeyNoticeMember:
-        "This customer has no API key yet, so no request can be sent. Ask an admin to create one.",
-      createApiKey: "Create API key",
-      pauseConfirm: {
-        title: "Pause proofing for {{name}}?",
-        message:
-          "No new request can be sent for this customer until you resume it. Requests already sent run out as usual.",
-        confirm: "Pause proofing",
-      },
-    },
-    tabs: {
-      flows: "Flows",
-      sessions: "Sessions",
-      settings: "Settings",
-      branding: "Branding",
-      apiKeys: "API keys",
-      webhooks: "Webhooks",
-    },
     flows: {
-      live: "Live",
       eidas: "eIDAS {{level}}",
-      intro:
-        "A flow sets which data is requested and the minimum assurance level. Requests for this customer can use the flows assigned here.",
-      sharedEditNote:
-        "Flows are shared: this change applies to every customer and member that uses this flow.",
-      newFlowNote: "The new flow is assigned to {{name}} straight away.",
-      newFlow: "New flow",
-      assignExisting: "Assign existing flows",
-      assignFailed:
-        "The flow was saved, but not assigned to this customer: {{reason}}",
-      noneAssignedAdmin:
-        "No flows are assigned to this customer yet. Create one with New flow, or assign one your organisation already has.",
-      done: "Done",
-      noneAssigned: "No flows are assigned to this customer yet.",
-      sessions_one: "{{count}} session in 30 days",
-      sessions_other: "{{count}} sessions in 30 days",
-      requestedData: "Requested data",
-      assuranceSteps: "Assurance · steps",
       noAssurance: "No minimum level",
-      noData: "Nothing requested",
-      edit: "Edit flow",
-      title: "Assigned flows",
-      hint: "Requests for this customer can use the flows ticked here, whether or not members may use them; the default is preselected.",
-      empty: "Your organization has no flows yet.",
-      default: "Default",
-      save: "Save assigned flows",
     },
     send: {
       title: "Verify a person",
@@ -723,14 +615,14 @@ export const en = {
         },
         link: {
           title: "Copy a link",
-          hint: "A link to the customer's page, which you send the person yourself. Valid 72 hours.",
+          hint: "A link to a hosted page, which you send the person yourself. Valid 72 hours.",
         },
       },
       emailOptional: "E-mail address (optional)",
       submitOnScreen: "Open page",
       submitLink: "Create link",
       hintLink:
-        "You get a link to a page in the customer's branding. The person opens it on their own device, reads what is collected, picks the app and starts there; the session runs from then. Nothing is mailed.",
+        "You get a link to a page in your organisation's branding. The person opens it on their own device, reads what is collected, picks the app and starts there; the session runs from then. Nothing is mailed.",
       linkTitle: "Link created",
       linkHint:
         "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears under Sessions.",
@@ -749,16 +641,16 @@ export const en = {
       flow: "Flow",
       submit: "Send request",
       cancel: "Cancel",
-      noFlowsAdmin: "Assign a flow to this customer first, on the Flows tab.",
+      noFlowsAdmin: "Create a flow first, on the Flows page.",
       noFlowsMember:
-        "An admin has to assign a flow to this customer before you can send a request.",
+        "An admin has to make a flow available to members before you can send a request.",
       referencePhotoFlows:
-        "Flows that match the face against the customer's own photo are not listed: the customer's system sends those through the API, with the photo.",
+        "Flows that match the face against your own photo of the person are not listed: your software sends those through the API, with the photo.",
     },
     onScreen: {
       title: "Verify a person",
       missingFlow:
-        "This flow is no longer assigned to the customer. Go back and pick another one.",
+        "This flow no longer exists or cannot be sent from here. Go back and pick another one.",
       steps: {
         overview: "What is collected",
         method: "Choose an app",
@@ -869,14 +761,16 @@ export const en = {
           title: "Check stopped",
           message: "No identity check was done, and nothing was shared.",
         },
-        back: "Back to {{name}}",
+        back: "Back to the overview",
         again: "Verify again",
       },
     },
     sessions: {
+      title: "Sessions",
+      subtitle: "Identity checks you sent to people outside your organisation.",
       review: {
         title: "Decide this review",
-        hint: "The checks could not decide on their own. Your decision settles the session and is sent to the customer.",
+        hint: "The checks could not decide on their own. Your decision settles the session and is sent to your webhook endpoint.",
         reason: "Reason",
         reasonPlaceholder: "What you checked, and why you decided so",
         reasonRequired: "Give a reason: it is kept in the audit log.",
@@ -893,7 +787,7 @@ export const en = {
         },
         data_erasure: {
           title: "This person asks for their data to be deleted",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and the customer is told per session.",
+          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and your webhook endpoint is told per session.",
           approve_one: "Approve: erase {{count}} session",
           approve_other: "Approve: erase {{count}} sessions",
           confirm: {
@@ -906,7 +800,7 @@ export const en = {
         reasonPlaceholder:
           "What you checked, and why, e.g. a legal duty to keep the data",
         noMatches:
-          "No other sessions of this person were found at this customer.",
+          "No other sessions of this person were found in your organisation.",
         matches_one: "{{count}} session of this person found",
         matches_other: "{{count}} sessions of this person found",
         emailMatches_one:
@@ -936,8 +830,9 @@ export const en = {
       identity: {
         audited: "Opening a settled session is recorded in the audit log.",
         photo: "Document photo",
-        referencePhoto: "Customer's photo",
-        noDocument: "None: the face was matched against the customer's photo",
+        referencePhoto: "Photo sent with the request",
+        noDocument:
+          "None: the face was matched against the photo sent with the request",
         selfie: "Selfie",
         documentImage: "Front of the document",
         documentImageBack: "Back of the document",
@@ -1010,21 +905,10 @@ export const en = {
         "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay.",
       days_one: "{{count}} day",
       days_other: "{{count}} days",
-      nameTitle: "Name",
-      nameHint: "Shown to your members and in the audit log.",
       redirectOriginsTitle: "Redirect origins",
       redirectOriginsHint:
         "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
-      removeTitle: "Remove customer",
-      removeHint:
-        "Revokes its API keys, removes its webhook and deletes its sessions. Audit log entries are kept.",
-      remove: "Remove customer",
-      removeConfirm: {
-        title: "Remove {{name}}?",
-        message:
-          "Its API keys stop working, its webhook is removed and every session sent for it is deleted, including its subjects' addresses and names. The audit log keeps what happened. This cannot be undone.",
-      },
     },
     webhookState: {
       delivering: "Delivering",
@@ -1040,10 +924,10 @@ export const en = {
     },
     branding: {
       title: "Mail branding",
-      hint: "The proofing mail your customer's subjects receive is signed with and styled as the customer.",
+      hint: "The proofing mail and the hosted page that people outside your organisation see are signed with and styled as set here.",
       displayName: "Display name",
       displayNameHint:
-        "Signs the proofing mail and its subject line. Empty uses the customer's name.",
+        "Signs the proofing mail and its subject line. Empty uses your organisation's name.",
       logo: "Logo",
       logoSet: "Current logo",
       noLogo: "No logo: the display name is shown instead",
@@ -1075,7 +959,20 @@ export const en = {
         footer: "Identity check by Yivi",
       },
     },
+    developers: {
+      title: "Developers",
+      subtitle:
+        "What your own software and the proofing pages use: API keys, the webhook endpoint, branding and session settings.",
+      adminOnly: "Only an administrator can see this page.",
+      tabs: {
+        apiKeys: "API keys",
+        webhook: "Webhook",
+        branding: "Branding",
+        settings: "Session settings",
+      },
+    },
     apiKeys: {
+      nameRequired: "Enter a name.",
       intro:
         "Your backend uses these keys to create sessions and read their outcome through the proofing API. Only active keys work.",
       create: "Create API key",
@@ -1138,7 +1035,7 @@ export const en = {
       recent: "Recent deliveries",
       defaultTag: "Wallet default",
       defaultBody:
-        "Session results are delivered to the Yivi Business Wallet's own endpoint. They show on the Sessions tab, through the API, and in the audit log under this customer.",
+        "Session results are delivered to the Yivi Business Wallet's own endpoint. They show on the Sessions page, through the API, and in the audit log.",
       defaultHint:
         "Hosting your own receiver? Add its URL and the wallet also POSTs each signed event there.",
       useOwn: "Use own endpoint",
@@ -1161,14 +1058,14 @@ export const en = {
     edit: "Edit",
     selection: {
       title: "Flows",
-      hint: "Members send requests on the flows ticked here; the default is the one preselected for every member. Editing a flow saves a new version, which new requests use from then on.",
+      hint: "Members send requests on the flows ticked here. The default is the flow a request form starts on, for members and for the API; members need not be allowed to use it. Editing a flow saves a new version, which new requests use from then on.",
       empty: "No flows yet. Create one with New flow.",
       default: "Default",
       save: "Save available flows",
     },
     hosted: {
       title: "Hosted page",
-      enabled: "Customers may send links to a hosted page for this flow",
+      enabled: "Links to a hosted page may be sent for this flow",
       locales: "Languages",
       localesHint:
         "Tick none to offer every language. The page opens in the session's language, then the subject's browser language.",
@@ -1179,9 +1076,7 @@ export const en = {
         done: "Always show the thank-you page (sessions may not carry a redirect URL)",
       },
       save: "Save hosted page",
-      previewAs: "Preview as customer",
       preview: "Preview of the hosted page",
-      noCustomer: "Add a customer to preview the page in its branding.",
     },
     versions: {
       title: "Versions",
@@ -1237,15 +1132,15 @@ export const en = {
     kinds: {
       identity: {
         title: "Identity check",
-        hint: "The person proves who they are; the customer gets the outcome.",
+        hint: "The person proves who they are; you get the outcome.",
       },
       data_access: {
         title: "See my data",
-        hint: "A person asks the customer what data is held about them. After the identity check the session goes to review with their other sessions; approving lets them download that data.",
+        hint: "A person asks your organisation what data is held about them. After the identity check the session goes to review with their other sessions; approving lets them download that data.",
       },
       data_erasure: {
         title: "Delete my data",
-        hint: "A person asks the customer to delete their data. After the identity check the session goes to review with their other sessions; approving erases them.",
+        hint: "A person asks your organisation to delete their data. After the identity check the session goes to review with their other sessions; approving erases them.",
       },
     },
     new: {
@@ -1277,7 +1172,7 @@ export const en = {
       faceProviderHint:
         "Regula checks liveness in the app and the wallet matches the face against the chip photo; in the Yivi app Regula matches the camera against the credential's photo.",
       faceWithoutChip:
-        "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
+        "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
       dataHint:
         "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
@@ -1309,7 +1204,7 @@ export const en = {
       bsnPolicy: "BSN policy override",
       retentionSeconds: "Retention override (seconds)",
       retentionSecondsHint:
-        "Set, it replaces the customer's retention for this flow's sessions; blank or 0 keeps the customer's.",
+        "Set, it replaces the organisation's retention for this flow's sessions; blank or 0 keeps the organisation's.",
       blurFace: "Blur face override",
       blurBsn: "Blur BSN override",
       errors: {
@@ -1332,15 +1227,15 @@ export const en = {
     dataRequest: {
       data_access: {
         intro:
-          "You are asking {{customer}} what data is held about you. First confirm who you are.",
+          "You are asking {{organization}} what data is held about you. First confirm who you are.",
         inReview:
-          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+          "Your request was sent to {{organization}} for review. Open this link again later to see the outcome.",
       },
       data_erasure: {
         intro:
-          "You are asking {{customer}} to delete your data. First confirm who you are.",
+          "You are asking {{organization}} to delete your data. First confirm who you are.",
         inReview:
-          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+          "Your request was sent to {{organization}} for review. Open this link again later to see the outcome.",
       },
       erased: "Your data was deleted.",
       download: "Download my data",
@@ -1536,19 +1431,13 @@ export const en = {
     identityProofingMailNotSent:
       "Request created, but the mail could not be sent. Check this organization's mail settings.",
     identityProofingRequestSent: "Request sent",
-    identityProofingCustomerCreated: "Customer added",
-    identityProofingCustomerRenamed: "Customer renamed",
-    identityProofingCustomerSettingsSaved: "Settings saved",
-    identityProofingCustomerPaused: "Proofing paused",
-    identityProofingCustomerResumed: "Proofing resumed",
-    identityProofingCustomerRemoved: "Customer removed",
+    identityProofingSettingsSaved: "Settings saved",
     identityProofingBrandingSaved: "Branding saved",
     identityProofingHostedSettingsSaved: "Hosted page settings saved",
     identityProofingApiKeyRevoked: "API key revoked",
     identityProofingWebhookSaved: "Webhook saved",
     identityProofingWebhookRemoved: "Webhook removed",
     identityProofingWebhookTestQueued: "Test event queued",
-    identityProofingCustomerFlowsSaved: "Assigned flows saved",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -1849,11 +1738,12 @@ export const en = {
       identityProofingCustomerFlowsConfigured:
         "Changed the identity proofing flows assigned to a customer",
       identityProofingCustomerRemoved: "Removed identity proofing customer",
-      identityProofingApiKeyCreated: "Created customer API key",
-      identityProofingApiKeyRevoked: "Revoked customer API key",
-      identityProofingWebhookConfigured: "Configured customer webhook",
-      identityProofingWebhookSecretRotated: "Rotated customer webhook secret",
-      identityProofingWebhookRemoved: "Removed customer webhook",
+      identityProofingSettingsUpdated: "Updated identity proofing settings",
+      identityProofingApiKeyCreated: "Created API key",
+      identityProofingApiKeyRevoked: "Revoked API key",
+      identityProofingWebhookConfigured: "Configured webhook endpoint",
+      identityProofingWebhookSecretRotated: "Rotated webhook secret",
+      identityProofingWebhookRemoved: "Removed webhook endpoint",
       identityProofingPaused: "Paused identity proofing",
       identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
       identityProofingFlowDiplomasConfigured:
