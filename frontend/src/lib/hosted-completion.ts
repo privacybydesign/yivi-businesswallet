@@ -51,8 +51,7 @@ export function completedMessage(
 
 // The redirect with the session and its status added, keeping the redirect's
 // own query. The backend accepted the redirect's origin when the session was
-// created; an unparsable one is undefined, so the page shows its own done
-// screen.
+// created; an unparsable one is undefined, so the page shows its own done screen.
 export function completionRedirect(
   redirectUrl: string,
   message: HostedCompletedMessage,

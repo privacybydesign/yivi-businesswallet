@@ -48,6 +48,7 @@ func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, 
 		if _, err := q.Exec(ctx, allow, orgID, sel.FlowIDs); err != nil {
 			return fmt.Errorf("proofing: save allowed flows org %s: %w", orgID, err)
 		}
+
 		if sel.DefaultFlowID != "" {
 			const setDefault = `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, is_default)
 				VALUES ($1, $2, true)

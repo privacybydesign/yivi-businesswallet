@@ -1230,7 +1230,8 @@ func (s *Service) PurgeRequest(ctx context.Context, orgID, id uuid.UUID) error {
 // purgeBatch is how many overdue requests PurgeDue takes at a time.
 const purgeBatch = 100
 
-// PurgeDue purges every request past its retention, for the pruner. One that the engine fails to erase is left for the next run. It
+// PurgeDue purges every request past its retention, for the
+// pruner. One that the engine fails to erase is left for the next run. It
 // first rejects the reviews left open in a paused org (rejectPausedReviews),
 // whose failure is reported once the purge ran.
 func (s *Service) PurgeDue(ctx context.Context) (int64, error) {

@@ -196,12 +196,14 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o
 	if err != nil {
 		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
 	}
-	if current.UpdatedAt.IsZero() {
-		session := current.Session
-		session.DataRetentionDays = o.retentionDays
-		if _, err := settings.SaveSession(ctx, orgID, session); err != nil {
-			return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
-		}
+	if !current.UpdatedAt.IsZero() {
+		return nil
+	}
+
+	session := current.Session
+	session.DataRetentionDays = o.retentionDays
+	if _, err := settings.SaveSession(ctx, orgID, session); err != nil {
+		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
 	}
 	return nil
 }

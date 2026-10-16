@@ -21,6 +21,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
+const (
+	headerContentType = "Content-Type"
+	contentTypePNG    = "image/png"
+)
+
 type proofingFlowResp struct {
 	ID          string `json:"id"`
 	Version     int    `json:"version"`
@@ -443,6 +448,7 @@ func (e *testEnv) putBranding(slug string, fields map[string]string, logo []byte
 			e.t.Fatalf("write form field %q: %v", name, err)
 		}
 	}
+
 	if logo != nil {
 		part, err := form.CreateFormFile("logo", "logo.png")
 		if err != nil {
@@ -452,14 +458,17 @@ func (e *testEnv) putBranding(slug string, fields map[string]string, logo []byte
 			e.t.Fatalf("write logo part: %v", err)
 		}
 	}
+
 	if err := form.Close(); err != nil {
 		e.t.Fatalf("close form: %v", err)
 	}
+
 	req, err := http.NewRequest(http.MethodPut, e.server.URL+"/api/v1/orgs/"+slug+"/identity-proofing/settings/branding", &body)
 	if err != nil {
 		e.t.Fatalf("new request: %v", err)
 	}
-	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set(headerContentType, form.FormDataContentType())
+
 	resp, err := e.client.Do(req)
 	if err != nil {
 		e.t.Fatalf("put branding: %v", err)
@@ -553,8 +562,8 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	resp = env.do(http.MethodGet, base+"/settings/logo", nil)
 	served, err := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" || !bytes.Equal(served, logo) {
-		t.Errorf("logo = %d %q (%d bytes, err %v), want the uploaded PNG", resp.StatusCode, resp.Header.Get("Content-Type"), len(served), err)
+	if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get(headerContentType) != contentTypePNG || !bytes.Equal(served, logo) {
+		t.Errorf("logo = %d %q (%d bytes, err %v), want the uploaded PNG", resp.StatusCode, resp.Header.Get(headerContentType), len(served), err)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 3 {
 		t.Errorf("settings_updated audits = %d, want 3 after the branding", n)
@@ -1292,10 +1301,10 @@ func TestPausedByPlatformAdmin(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	platformPause := func(paused bool) *http.Response {
-		return env.putJSON(fmt.Sprintf("/api/v1/admin/organizations/%s/identity-proofing/pause", orgID), map[string]any{"paused": paused})
+	platformPause := func(state proofing.PauseState) *http.Response {
+		return env.putJSON(fmt.Sprintf("/api/v1/admin/organizations/%s/identity-proofing/pause", orgID), map[string]any{"paused": state == proofing.PauseOn})
 	}
-	resp = platformPause(true)
+	resp = platformPause(proofing.PauseOn)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("the org's admin pausing through the platform route = %d, want 403", resp.StatusCode)
 	}
@@ -1310,7 +1319,7 @@ func TestPausedByPlatformAdmin(t *testing.T) {
 	}
 
 	env.loginAs(root)
-	resp = platformPause(true)
+	resp = platformPause(proofing.PauseOn)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("platform pause = %d, want 200", resp.StatusCode)
 	}
@@ -1335,7 +1344,7 @@ func TestPausedByPlatformAdmin(t *testing.T) {
 		http.StatusForbidden, "proofing_paused")
 
 	env.loginAs(root)
-	resp = platformPause(false)
+	resp = platformPause(proofing.PauseOff)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("platform resume = %d, want 200", resp.StatusCode)
 	}

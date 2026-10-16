@@ -124,7 +124,7 @@ function proofingStatsQueryKey(slug: string): readonly string[] {
   return [...proofingRequestsQueryKey(slug), "stats"];
 }
 
-export function proofingSettingsQueryKey(slug: string): readonly string[] {
+function proofingSettingsQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "settings"];
 }
 

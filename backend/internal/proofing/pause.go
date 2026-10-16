@@ -132,6 +132,7 @@ func (s *PauseStore) Set(ctx context.Context, orgID uuid.UUID, state PauseState,
 		if err != nil {
 			return err
 		}
+
 		if before.Paused() == paused {
 			out = before
 			return nil
