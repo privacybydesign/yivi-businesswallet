@@ -296,6 +296,11 @@ func validateColors(in SettingsInput) error {
 	return nil
 }
 
+// ValidFontFamily reports whether s is a font-family list a theme may store.
+func ValidFontFamily(s string) bool {
+	return utf8.RuneCountInString(s) <= maxFontFamilyLen && fontFamilyPattern.MatchString(s)
+}
+
 func apiError(status int, code, msg string) error {
 	return &respond.APIError{Status: status, Code: code, Message: msg}
 }

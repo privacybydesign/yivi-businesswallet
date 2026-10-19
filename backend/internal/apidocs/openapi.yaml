@@ -53,7 +53,7 @@ tags:
       /.well-known/oauth-authorization-server live outside /api/v1.
   - name: idem-app
     description: >-
-      The Idem (vcmrtd) app's proofing session routes. The path token names the
+      The Idem app's proofing session routes. The path token names the
       session and the X-Device-Token header authorizes the device holding one of
       its slots; there is no wallet login. Only the app calls them: integrators
       use the customer proofing API.
@@ -414,6 +414,40 @@ paths:
           $ref: '#/components/responses/IdemConflict'
         '410':
           $ref: '#/components/responses/IdemSessionExpired'
+        '500':
+          $ref: '#/components/responses/IdemInternalError'
+  /api/v1/app/{token}/branding/logo:
+    parameters:
+      - $ref: '#/components/parameters/IdemSessionToken'
+    get:
+      tags: [idem-app]
+      summary: Get the session's branding logo
+      description: >-
+        The logo of the session's `branding`, served with a locked-down content security policy.
+        Only a device holding the session can read it.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdemDeviceToken'
+      responses:
+        '200':
+          description: The logo image.
+          content:
+            'image/*':
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/IdemDeviceUnauthorized'
+        '403':
+          $ref: '#/components/responses/IdemDeviceHandedOver'
+        '404':
+          description: No such session, or it has no logo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdemAppError'
+        '409':
+          $ref: '#/components/responses/IdemConflict'
         '500':
           $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/events:
@@ -5003,7 +5037,7 @@ paths:
         in its proofing engine. An administrator sees every flow, a member only the flows an
         administrator made available (`allowed`); `default` is the one the request form
         preselects, `completable` is false for a flow a recipient cannot finish with only the
-        vcmrtd app, `needsReferencePhoto` marks a flow that matches the face against a reference
+        Idem app, `needsReferencePhoto` marks a flow that matches the face against a reference
         photo (only a customer's API can send one), and `diplomaMode` is whether the flow asks
         for DUO diploma extracts. The organisation is the proofing engine's tenant under its own
         id: nothing is provisioned first.
@@ -5448,7 +5482,7 @@ paths:
         `flowId` a flow an administrator made available to members, or `customerId` (one of the
         organisation's customers) with `email` and an optional `name` of that customer's
         subject, an external person, and `flowId` a flow assigned to that customer (its default
-        when absent). Creates the proofing session and e-mails the subject its vcmrtd deep link
+        when absent). Creates the proofing session and e-mails the subject its Idem deep link
         as a QR code and a button; after the session ends, a new request means a new mail. The
         session runs 10 minutes, or the customer's session length, from the send; once the
         subject opens it the engine may extend it by up to 10 minutes, never past 15 minutes
@@ -5460,7 +5494,7 @@ paths:
         session starts when the person picks an app there, and a flow whose hosted page is
         off is 409 `hosted_disabled`). An on-screen request
         mails nothing and needs no `email` for a customer's subject; an on-screen Idem request
-        answers the vcmrtd link as `deepLink` (scannable until `deepLinkExpiresAt`), and a Yivi
+        answers the Idem link as `deepLink` (scannable until `deepLinkExpiresAt`), and a Yivi
         one must be on-screen (an e-mailed one is 400), its disclosure started through
         `yivi/start`. A Yivi request needs Regula on the deployment (else 409
         `method_unavailable`), and a flow that takes no document photos and is not matched
@@ -6755,6 +6789,7 @@ paths:
                       branding:
                         displayName: Acme Verzekeringen
                         primaryColor: "#1f6feb"
+                        secondaryColor: "#5412c7"
                         supportContact: support@acme.example
                         privacyUrl: https://acme.example/privacy
                         logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
@@ -6808,6 +6843,7 @@ paths:
                     branding:
                       displayName: ""
                       primaryColor: ""
+                      secondaryColor: ""
                       supportContact: ""
                       privacyUrl: ""
                       logoUri: ""
@@ -6874,6 +6910,7 @@ paths:
                     branding:
                       displayName: Acme Verzekeringen
                       primaryColor: "#1f6feb"
+                      secondaryColor: ""
                       supportContact: support@acme.example
                       privacyUrl: https://acme.example/privacy
                       logoUri: /api/v1/orgs/acme/customers/8c2d1e4f-3a5b-4c6d-9e8f-7a6b5c4d3e2f/logo?v=1759397400
@@ -7142,7 +7179,11 @@ paths:
       description: >-
         Requires an administrator role in the organisation. A multipart form:
         `displayName` (the name the proofing mail signs with; empty is the customer's
-        name), `primaryColor` (`#rrggbb`; empty is the organisation's), `supportContact`
+        name), `primaryColor` (`#rrggbb`; empty is the organisation's), `secondaryColor`
+        (`#rrggbb`, the Idem app's second colour; empty is the organisation's accent colour), the rest of
+        the white-label as the organisation theme has it (`textColor`, `surfaceColor`, `borderColor`,
+        `linkColor`, `successColor`, `warningColor`, `errorColor`, `topbarColor` and `fontFamily`;
+        setting any colour or the font gives the customer a look of its own), `supportContact`
         and `privacyUrl` (an https URL), each added to the mail and left out when empty,
         and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
         render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
@@ -7566,7 +7607,7 @@ paths:
         page's language, and `locales` the languages the flow's page offers (empty is every
         one). No identity data; `diplomas` lists each extract the person added by
         `qualification`, `institution`, `dateAwarded` and `nlqfLevel` only, never its document
-        number, since whoever holds the link can read it. A flow no longer in the organisation is 422 `flow_not_found`.
+        number, since whoever holds the link can read it. `theme` is the look the page takes. A flow no longer in the organisation is 422 `flow_not_found`.
       responses:
         '200':
           description: What the page shows.
@@ -7591,6 +7632,7 @@ paths:
                       branding:
                         displayName: Acme Verzekeringen
                         primaryColor: "#1f6feb"
+                        secondaryColor: "#5412c7"
                         supportContact: support@acme.example
                         privacyUrl: https://acme.example/privacy
                         logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
@@ -7675,7 +7717,7 @@ paths:
       description: >-
         Body `{method}`: `idem_app` or `yivi_app` (only when the flow's `yiviAvailable`;
         otherwise, or for another method, 400 `invalid_input`). Creates the session once and
-        answers 201 with the progress, plus the vcmrtd `deepLink` for an Idem session.
+        answers 201 with the progress, plus the Idem `deepLink` for an Idem session.
       requestBody:
         required: true
         content:
@@ -8158,7 +8200,7 @@ paths:
         `name` of the subject, `flowId` (absent is the customer's default flow) and
         `sendMail` (absent or true mails the subject as a member's request would), and
         `language` (`en` or `nl`: the mail's and the Idem app's; absent is the deployment
-        default for the mail and the phone's language in the app). The answer carries the session's vcmrtd `deepLink`, for a caller that shows the QR code
+        default for the mail and the phone's language in the app). The answer carries the session's Idem `deepLink`, for a caller that shows the QR code
         itself, and `mailSent`. Refused while the customer is paused.
         With `hosted: true` no session is created yet: the answer carries `hostedUrl`,
         a link to the public page the subject opens on their own device (valid 72 hours)
@@ -11794,6 +11836,28 @@ components:
         primaryColor:
           type: string
           example: '#1f6feb'
+        secondaryColor:
+          type: string
+          example: '#5412c7'
+        textColor:
+          type: string
+        surfaceColor:
+          type: string
+        borderColor:
+          type: string
+        linkColor:
+          type: string
+        successColor:
+          type: string
+        warningColor:
+          type: string
+        errorColor:
+          type: string
+        topbarColor:
+          type: string
+        fontFamily:
+          type: string
+          description: A CSS font-family list; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
@@ -11803,7 +11867,7 @@ components:
           description: Empty without a logo; carries a version so a replaced logo is fetched again.
         hidePoweredBy:
           type: boolean
-      required: [displayName, primaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy]
+      required: [displayName, primaryColor, secondaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy]
     ProofingCustomer:
       type: object
       properties:
@@ -11893,6 +11957,36 @@ components:
         primaryColor:
           type: string
           description: '`#rrggbb`; empty is the organisation''s.'
+        secondaryColor:
+          type: string
+          description: '`#rrggbb`, the Idem app''s second colour; empty is the organisation''s accent colour.'
+        textColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        surfaceColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        borderColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        linkColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        successColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        warningColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        errorColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        topbarColor:
+          type: string
+          description: '`#rrggbb`; empty keeps the design''s.'
+        fontFamily:
+          type: string
+          description: A CSS font-family list, as the organisation theme takes it; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
@@ -12128,6 +12222,36 @@ components:
               description: The extracts the subject added, as the page lists them.
               items:
                 $ref: '#/components/schemas/ProofingHostedDiploma'
+            theme:
+              type: object
+              description: >-
+                The look the page takes, the one the Idem app shows the session in: the
+                organisation's theme with the customer's own colours on top. Colours are `#rrggbb`,
+                `fontFamily` a CSS font-family list; "" keeps the page's own. Absent when neither
+                the organisation nor the customer set any.
+              properties:
+                primaryColor:
+                  type: string
+                secondaryColor:
+                  type: string
+                textColor:
+                  type: string
+                surfaceColor:
+                  type: string
+                borderColor:
+                  type: string
+                linkColor:
+                  type: string
+                successColor:
+                  type: string
+                warningColor:
+                  type: string
+                errorColor:
+                  type: string
+                headerColor:
+                  type: string
+                fontFamily:
+                  type: string
           required: [sessionId, embedOrigins, locales, customer, flow, diplomas]
     ProofingHostedStart:
       type: object
@@ -12254,6 +12378,54 @@ components:
             document_capture: documentType, allChecksValid; face steps: livenessPassed and, after a match,
             faceVerified.
       required: [step, completed]
+    IdemBranding:
+      type: object
+      description: >-
+        The look of the organisation, or the organisation's customer, that requested the session, so the
+        app looks like their own: resolved from the session itself, from the organisation's theme with a
+        customer's name, colours and logo on top. Colours are `#rrggbb`; an absent one keeps the app's
+        own. Absent altogether when neither set any.
+      properties:
+        name:
+          type: string
+          description: The customer's display name, or the organisation's name.
+        primaryColor:
+          type: string
+          description: 'Buttons, links and progress.'
+        secondaryColor:
+          type: string
+          description: 'Labels and badges: the theme''s accent colour.'
+        textColor:
+          type: string
+          description: 'Body text.'
+        surfaceColor:
+          type: string
+          description: 'Screen background.'
+        borderColor:
+          type: string
+          description: 'Borders and dividers.'
+        linkColor:
+          type: string
+          description: 'Links.'
+        successColor:
+          type: string
+          description: 'Completed and verified states.'
+        warningColor:
+          type: string
+          description: 'Warnings.'
+        errorColor:
+          type: string
+          description: 'Errors.'
+        headerColor:
+          type: string
+          description: 'The dark top of the screens: the theme''s top bar colour.'
+        fontFamily:
+          type: string
+          description: A CSS font-family list, as the organisation's theme stores it.
+        hasLogo:
+          type: boolean
+          description: Whether `GET /api/v1/app/{token}/branding/logo` serves a logo.
+      required: [name, hasLogo]
     IdemAppSession:
       type: object
       description: The session as the app sees it; the org by display name only.
@@ -12266,6 +12438,8 @@ components:
         relyingParty:
           type: string
           description: The asking organisation's display name.
+        branding:
+          $ref: '#/components/schemas/IdemBranding'
         status:
           $ref: '#/components/schemas/IdemSessionStatus'
         language:

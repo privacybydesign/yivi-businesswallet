@@ -35,7 +35,7 @@ const BANNER_ICON_SIZE = 22;
 const CHECK_ICON_SIZE = 16;
 const NOTE_ICON_SIZE = 14;
 const CAPTION =
-  "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
+  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const CARD_TITLE = "font-display text-ink text-[17px] font-bold";
 
 // formatClaimValue renders a disclosed SD-JWT claim value for display. Primitives
@@ -146,7 +146,7 @@ export default function AttestationHeldDetail(): React.JSX.Element {
               <Button
                 variant="dangerGhost"
                 icon="delete"
-                className="border-error border"
+                className="border-error bg-surface border"
                 onClick={() => setConfirmingRemove(true)}
               >
                 {t("attestations.held.delete")}

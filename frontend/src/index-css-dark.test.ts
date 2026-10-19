@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { AA_CONTRAST, contrastRatio } from "./lib/theme";
 
-// The dark palette lives as a `@media (prefers-color-scheme: dark)` override of
+// The dark palette lives as a `[data-color-scheme="dark"]` override of
 // the --yb-* tokens in index.css (values from the Yivi Business design system).
 // Every utility resolves through those tokens, so a foreground token that does
 // not clear WCAG 2.2 AA on the background it lands on ships an unreadable dark
@@ -15,15 +15,20 @@ const cssPath = fileURLToPath(new URL("./index.css", import.meta.url));
 const css = readFileSync(cssPath, "utf8");
 
 const darkBlock = css.match(
-  /@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([^}]*)\}/,
+  /:root:where\(\[data-color-scheme="dark"\]\)\s*\{([^}]*)\}/,
 );
 
-const tokens: Record<string, string> = {};
-for (const [, name, value] of (darkBlock?.[1] ?? "").matchAll(
-  /(--yb-[\w-]+):\s*([^;]+);/g,
-)) {
-  tokens[name] = value.trim();
+function blockTokens(block: RegExpMatchArray | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [, name, value] of (block?.[1] ?? "").matchAll(
+    /(--yb-[\w-]+):\s*([^;]+);/g,
+  )) {
+    out[name] = value.trim();
+  }
+  return out;
 }
+
+const tokens = blockTokens(darkBlock);
 
 // The fg → bg pairings the components render (tone classes pair these tokens).
 const CONTRAST_PAIRS: ReadonlyArray<[fg: string, bg: string, label: string]> = [
@@ -39,7 +44,7 @@ const CONTRAST_PAIRS: ReadonlyArray<[fg: string, bg: string, label: string]> = [
 ];
 
 describe("dark palette (index.css)", () => {
-  it("defines a prefers-color-scheme: dark override", () => {
+  it("defines a dark colour scheme override", () => {
     expect(darkBlock).not.toBeNull();
     expect(Object.keys(tokens).length).toBeGreaterThan(0);
   });

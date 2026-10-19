@@ -208,6 +208,45 @@ type hostedViewResponse struct {
 	} `json:"flow"`
 	// Diplomas are the extracts the subject added, as the page lists them.
 	Diplomas []hostedDiplomaResponse `json:"diplomas"`
+	// Theme is the look the page takes: the one the Idem app shows the
+	// session in. Absent when neither the org nor the customer set one.
+	Theme *hostedThemeResponse `json:"theme,omitempty"`
+}
+
+// hostedThemeResponse is AppBranding as the hosted page applies it: #rrggbb
+// colours and a CSS font-family list, "" keeping the page's own. The logo is
+// the customer's, already in Customer.Branding.
+type hostedThemeResponse struct {
+	PrimaryColor   string `json:"primaryColor"`
+	SecondaryColor string `json:"secondaryColor"`
+	TextColor      string `json:"textColor"`
+	SurfaceColor   string `json:"surfaceColor"`
+	BorderColor    string `json:"borderColor"`
+	LinkColor      string `json:"linkColor"`
+	SuccessColor   string `json:"successColor"`
+	WarningColor   string `json:"warningColor"`
+	ErrorColor     string `json:"errorColor"`
+	HeaderColor    string `json:"headerColor"`
+	FontFamily     string `json:"fontFamily"`
+}
+
+// hostedTheme is the request's app branding as the hosted page's theme, and
+// whether that branding has a logo; nil without a resolver or without any
+// branding.
+func (h *Handler) hostedTheme(r *http.Request, req Request) (*hostedThemeResponse, bool, error) {
+	if h.appBranding == nil {
+		return nil, false, nil
+	}
+	b, err := h.appBranding.Branding(r.Context(), req.OrganizationID, req.ID)
+	if err != nil || b == nil {
+		return nil, false, err
+	}
+	return &hostedThemeResponse{
+		PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor, TextColor: b.TextColor,
+		SurfaceColor: b.SurfaceColor, BorderColor: b.BorderColor, LinkColor: b.LinkColor,
+		SuccessColor: b.SuccessColor, WarningColor: b.WarningColor, ErrorColor: b.ErrorColor,
+		HeaderColor: b.HeaderColor, FontFamily: b.FontFamily,
+	}, b.HasLogo, nil
 }
 
 // hostedDiplomaResponse is an extract as the hosted page lists it: only what
@@ -249,10 +288,18 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Customer.Name = c.SignedAs()
 	out.Customer.Branding = brandingResponse{
 		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
+		SecondaryColor: c.Branding.SecondaryColor,
 		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
 		HidePoweredBy: c.Branding.HidePoweredBy,
 	}
-	if c.Branding.HasLogo {
+	// The logo is the one the theme comes with: the customer's, or the org's
+	// for a customer without white-labeling of its own.
+	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
+	if err != nil {
+		return fmt.Errorf("proofing: hosted page theme: %w", err)
+	}
+	out.Theme = theme
+	if hasLogo || (h.appBranding == nil && c.Branding.HasLogo) {
 		out.Customer.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), c.UpdatedAt.Unix())
 	}
 	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
@@ -325,7 +372,7 @@ func (h *Handler) hostedDecline(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) hostedLogo(w http.ResponseWriter, r *http.Request) error {
-	logo, err := h.service.HostedLogo(r.Context(), r.PathValue("token"))
+	logo, err := h.hostedLogoOf(r)
 	if err != nil {
 		return mapError(err)
 	}
@@ -336,6 +383,23 @@ func (h *Handler) hostedLogo(w http.ResponseWriter, r *http.Request) error {
 		slog.ErrorContext(r.Context(), "proofing: write hosted logo", slog.Any("error", err))
 	}
 	return nil
+}
+
+// hostedLogoOf is the logo the page's theme comes with (see hostedView).
+func (h *Handler) hostedLogoOf(r *http.Request) (CustomerLogo, error) {
+	token := r.PathValue("token")
+	if h.appBranding == nil {
+		return h.service.HostedLogo(r.Context(), token)
+	}
+	hosted, err := h.service.HostedRequest(r.Context(), token)
+	if err != nil {
+		return CustomerLogo{}, err
+	}
+	logo, err := h.appBranding.Logo(r.Context(), hosted.Request.OrganizationID, hosted.Request.ID)
+	if errors.Is(err, ErrNoAppLogo) {
+		return CustomerLogo{}, ErrNoCustomerLogo
+	}
+	return logo, err
 }
 
 func (h *Handler) hostedStartYivi(w http.ResponseWriter, r *http.Request) error {

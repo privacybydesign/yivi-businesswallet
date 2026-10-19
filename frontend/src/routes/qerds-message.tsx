@@ -22,7 +22,7 @@ import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 
 // Matches the Button component's secondary/md classes so the deep-link to the
 // Attestations page reads as a regular action while staying a real navigation

@@ -87,7 +87,7 @@ export function Modal({
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         className={[
-          "rounded-yivi bg-surface shadow-card my-8 flex w-full flex-col border",
+          "rounded-card bg-surface shadow-card my-8 flex w-full flex-col border",
           "border-line",
           wide ? "max-w-2xl" : "max-w-lg",
         ].join(" ")}

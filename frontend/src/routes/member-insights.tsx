@@ -26,7 +26,7 @@ type Tone = "default" | "green" | "amber" | "red" | "blue";
 
 // The bar segment colours, matching Tag's tones so the bar and its legend agree.
 const SEGMENT_CLASSES: Record<Tone, string> = {
-  default: "bg-ink-soft",
+  default: "bg-tag-fg",
   green: "bg-success",
   amber: "bg-warning-fg",
   red: "bg-error",
@@ -55,7 +55,7 @@ function StatusBar({
   const segments = statusSegments(counts, order);
   return (
     <div>
-      <h3 className="text-muted font-mono text-[11px] font-medium tracking-[0.08em] uppercase">
+      <h3 className="text-muted font-label text-[11px] font-medium tracking-[0.08em] uppercase">
         {title}
       </h3>
       <div

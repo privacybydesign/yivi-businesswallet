@@ -30,7 +30,10 @@ func NewCustomerStore(db database.DB, recorder audit.Recorder) *CustomerStore {
 }
 
 const customerColumns = `id, organization_id, name, paused_at, session_ttl_seconds, data_retention_days, erasure_handling,
-	COALESCE(display_name, ''), COALESCE(primary_color, ''), COALESCE(support_contact, ''), COALESCE(privacy_url, ''),
+	COALESCE(display_name, ''), COALESCE(primary_color, ''), COALESCE(secondary_color, ''), COALESCE(support_contact, ''), COALESCE(privacy_url, ''),
+	COALESCE(text_color, ''), COALESCE(surface_color, ''), COALESCE(border_color, ''), COALESCE(link_color, ''),
+	COALESCE(success_color, ''), COALESCE(warning_color, ''), COALESCE(error_color, ''), COALESCE(topbar_color, ''),
+	COALESCE(font_family, ''),
 	logo_bytes IS NOT NULL, hide_powered_by, created_at, updated_at, allowed_redirect_origins,
 	EXISTS (SELECT 1 FROM identity_proofing_api_keys k WHERE k.customer_id = identity_proofing_customers.id
 		AND k.revoked_at IS NULL)`
@@ -131,7 +134,9 @@ func scanCustomer(row pgx.CollectableRow) (Customer, error) {
 	var ttlSeconds int
 	b := &c.Branding
 	err := row.Scan(&c.ID, &c.OrganizationID, &c.Name, &c.PausedAt, &ttlSeconds, &c.Settings.DataRetentionDays, &c.Settings.ErasureHandling,
-		&b.DisplayName, &b.PrimaryColor, &b.SupportContact, &b.PrivacyURL, &b.HasLogo, &b.HidePoweredBy, &c.CreatedAt, &c.UpdatedAt, &c.RedirectOrigins, &c.HasAPIKey)
+		&b.DisplayName, &b.PrimaryColor, &b.SecondaryColor, &b.SupportContact, &b.PrivacyURL,
+		&b.TextColor, &b.SurfaceColor, &b.BorderColor, &b.LinkColor, &b.SuccessColor, &b.WarningColor, &b.ErrorColor,
+		&b.TopbarColor, &b.FontFamily, &b.HasLogo, &b.HidePoweredBy, &c.CreatedAt, &c.UpdatedAt, &c.RedirectOrigins, &c.HasAPIKey)
 	c.Settings.SessionTTL = time.Duration(ttlSeconds) * time.Second
 	return c, err
 }
@@ -327,10 +332,16 @@ func (s *CustomerStore) SaveBranding(ctx context.Context, orgID, id uuid.UUID, b
 				support_contact = NULLIF($5, ''), privacy_url = NULLIF($6, ''),
 				logo_bytes = CASE WHEN $7 THEN $8 ELSE logo_bytes END,
 				logo_content_type = CASE WHEN $7 THEN NULLIF($9, '') ELSE logo_content_type END,
-				hide_powered_by = $10, updated_at = now()
+				hide_powered_by = $10, secondary_color = NULLIF($11, ''),
+				text_color = NULLIF($12, ''), surface_color = NULLIF($13, ''), border_color = NULLIF($14, ''),
+				link_color = NULLIF($15, ''), success_color = NULLIF($16, ''), warning_color = NULLIF($17, ''),
+				error_color = NULLIF($18, ''), topbar_color = NULLIF($19, ''), font_family = NULLIF($20, ''),
+				updated_at = now()
 			WHERE organization_id = $1 AND id = $2`,
 			orgID, id, b.DisplayName, b.PrimaryColor, b.SupportContact, b.PrivacyURL,
-			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType, b.HidePoweredBy); err != nil {
+			logo.Replace, nilIfEmpty(logo.Logo.Bytes), logo.Logo.ContentType, b.HidePoweredBy, b.SecondaryColor,
+			b.TextColor, b.SurfaceColor, b.BorderColor, b.LinkColor, b.SuccessColor, b.WarningColor,
+			b.ErrorColor, b.TopbarColor, b.FontFamily); err != nil {
 			return fmt.Errorf("proofing: save customer branding %s: %w", id, err)
 		}
 		changed := after.auditFields()

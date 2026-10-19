@@ -11,7 +11,7 @@ import (
 // HTML in this package.
 //
 // Mail clients are not browsers. The app's --yb-* custom properties, its
-// `:root:root` override block and its `prefers-color-scheme: dark` half all rely
+// `:root:root` override block and its dark-mode half all rely
 // on a real CSS engine, and Gmail strips <style> entirely. So the shell obeys the
 // mail-client baseline instead:
 //

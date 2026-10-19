@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Breadcrumbs } from "./breadcrumb";
+import { ColorSchemeSwitcher } from "./color-scheme-switcher";
 import { Icon } from "./icon";
 import { LanguageSwitcher } from "./language-switcher";
 import { useMobileNav } from "./mobile-nav";
@@ -49,7 +50,9 @@ export function TopBar({
           <div className="min-w-0">
             <Breadcrumbs />
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h1 className="text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
+              {/* text-topbar-fg: the base h1 colour is the page's ink, which
+                  a coloured top bar would hide it in. */}
+              <h1 className="text-topbar-fg text-[22px] leading-[1.15] font-bold tracking-[-0.01em] sm:text-[26px]">
                 {title}
               </h1>
               {badges}
@@ -66,7 +69,8 @@ export function TopBar({
             {actions}
           </div>
         )}
-        <div className="order-2 shrink-0 sm:order-3">
+        <div className="order-2 flex shrink-0 gap-2 sm:order-3">
+          <ColorSchemeSwitcher />
           <LanguageSwitcher />
         </div>
       </div>

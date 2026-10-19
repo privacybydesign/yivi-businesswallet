@@ -628,6 +628,15 @@ post-review outcome stay the system's.
   replaces the org's primary seed, the logo replaces the org's (none shows the
   name as wordmark, never the org's logo), and the `supportContact` /
   `privacyUrl` paragraphs appear only when set (an all-empty paragraph collapses).
+- **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`): the
+  app session view carries `branding`, so the app looks like the requester's
+  own: the org theme's colours (accent as secondary, top bar as header), font
+  and logo, and `GET /app/{token}/branding/logo` serves the logo to a device
+  holding the session. It is resolved from the session alone (tenant = org,
+  client reference = request), never from the request: a customer's request
+  gets the org theme with the customer's display name, primary and secondary
+  colour (each falling back to the org's) and logo (never the org's) on top. Nothing set at either level is no `branding`. `relyingParty` stays the
+  org's own name next to it.
 - **Settings**: `session_ttl_seconds` (120/300/600), `data_retention_days`
   (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention)
   and `erasure_handling` (`review`/`automatic`/`keep`, §15). A change sets

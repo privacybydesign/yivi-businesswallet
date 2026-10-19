@@ -91,6 +91,9 @@ type Config struct {
 	// DeviceTrail records which devices took part in a session in the org's
 	// audit log (deviceTrailEvents); nil keeps the trail in the server log only.
 	DeviceTrail DeviceTrail
+	// Branding resolves the look the Idem app gives a session; nil gives every
+	// session the app's own.
+	Branding BrandingLookup
 }
 
 // DeviceTrail is where the engine reports a session's device events: the
@@ -269,6 +272,7 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/{token}", s.handleAppSession)
 	mux.HandleFunc("GET /app/{token}/events", s.handleAppSessionEvents)
+	mux.HandleFunc("GET /app/{token}/branding/logo", s.handleBrandingLogo)
 	mux.HandleFunc("POST /app/{token}/result", s.handleAppSessionResult)
 	mux.HandleFunc("POST /app/{token}/steps/selfie", s.handleSubmitSelfieStep)
 	mux.HandleFunc("POST /app/{token}/steps/nfc", s.handleSubmitNFCStep)

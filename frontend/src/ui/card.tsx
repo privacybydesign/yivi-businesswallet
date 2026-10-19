@@ -21,7 +21,7 @@ export function Card({
   return (
     <div
       className={[
-        "rounded-yivi shadow-card",
+        "rounded-card shadow-card",
         VARIANT_CLASSES[variant],
         className ?? "",
       ].join(" ")}

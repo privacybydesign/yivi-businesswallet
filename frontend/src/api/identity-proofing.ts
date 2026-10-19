@@ -242,10 +242,38 @@ const webhookHealthSchema = z.object({
 
 export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
 
+// The rest of a customer's white-label, the same colours as the org theme
+// has (bar its sidebar); empty keeps the design's own.
+export const CUSTOMER_THEME_COLOR_FIELDS = [
+  "textColor",
+  "surfaceColor",
+  "borderColor",
+  "linkColor",
+  "successColor",
+  "warningColor",
+  "errorColor",
+  "topbarColor",
+] as const;
+
+export type CustomerThemeColorField =
+  (typeof CUSTOMER_THEME_COLOR_FIELDS)[number];
+
 // Empty strings fall back: the customer's name, the org's colour, no logo.
 const proofingCustomerBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
+  // The Idem app's second colour; empty is the org's accent colour.
+  secondaryColor: z.string(),
+  textColor: z.string(),
+  surfaceColor: z.string(),
+  borderColor: z.string(),
+  linkColor: z.string(),
+  successColor: z.string(),
+  warningColor: z.string(),
+  errorColor: z.string(),
+  topbarColor: z.string(),
+  // A CSS font-family list, as the org theme's.
+  fontFamily: z.string(),
   supportContact: z.string(),
   privacyUrl: z.string(),
   logoUri: z.string(),
@@ -367,9 +395,14 @@ export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>;
 
 // A branding save: the text fields, and a new logo file or its removal
 // (neither keeps it).
-export interface ProofingBrandingInput {
+export interface ProofingBrandingInput extends Record<
+  CustomerThemeColorField,
+  string
+> {
   displayName: string;
   primaryColor: string;
+  secondaryColor: string;
+  fontFamily: string;
   supportContact: string;
   privacyUrl: string;
   hidePoweredBy: boolean;
@@ -756,6 +789,11 @@ export function saveProofingCustomerBranding(
   const form = new FormData();
   form.set("displayName", input.displayName);
   form.set("primaryColor", input.primaryColor);
+  form.set("secondaryColor", input.secondaryColor);
+  for (const field of CUSTOMER_THEME_COLOR_FIELDS) {
+    form.set(field, input[field]);
+  }
+  form.set("fontFamily", input.fontFamily);
   form.set("supportContact", input.supportContact);
   form.set("privacyUrl", input.privacyUrl);
   form.set("hidePoweredBy", String(input.hidePoweredBy));
@@ -1182,6 +1220,22 @@ export type HostedProgress = z.infer<typeof hostedProgressSchema>;
 
 // The hosted page: who asks, what the flow collects, the progress, and how
 // the page hands its subject back once settled.
+const hostedThemeSchema = z.object({
+  primaryColor: z.string(),
+  secondaryColor: z.string(),
+  textColor: z.string(),
+  surfaceColor: z.string(),
+  borderColor: z.string(),
+  linkColor: z.string(),
+  successColor: z.string(),
+  warningColor: z.string(),
+  errorColor: z.string(),
+  headerColor: z.string(),
+  fontFamily: z.string(),
+});
+
+export type HostedTheme = z.infer<typeof hostedThemeSchema>;
+
 const hostedProofingSchema = hostedProgressSchema.extend({
   // The customer's id for the session, handed back on completion.
   sessionId: z.string(),
@@ -1210,6 +1264,9 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   }),
   // The diploma extracts the subject added.
   diplomas: z.array(hostedDiplomaSchema),
+  // The look the page takes, the one the Idem app shows the session in: the
+  // org's theme with the customer's colours on top. "" keeps the page's own.
+  theme: hostedThemeSchema.optional(),
 });
 
 export type HostedProofing = z.infer<typeof hostedProofingSchema>;
