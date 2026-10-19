@@ -45,16 +45,17 @@ func TestDisclosureCompliance(t *testing.T) {
 		doc  documentInfo
 		want string
 	}{
-		"no flow":                {nil, documentInfo{}, ""},
-		"unrestricted":           {&flow.FlowDefinition{}, documentInfo{}, ""},
-		"type not disclosed":     {nldPassports, documentInfo{IssuingState: "NLD"}, errCodeDocTypeRefused},
-		"country not disclosed":  {nldPassports, documentInfo{Type: "P"}, errCodeCountryRefused},
-		"other country":          {nldPassports, documentInfo{Type: "P", IssuingState: "DEU"}, errCodeCountryRefused},
-		"compliant":              {nldPassports, documentInfo{Type: "P", IssuingState: "NLD"}, ""},
-		"expired":                {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-04"}, errCodeDocExpired},
-		"expired, dd-mm-yyyy":    {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "04-10-2026"}, errCodeDocExpired},
-		"valid today":            {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-05"}, ""},
-		"expiry in other format": {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "20261004"}, ""},
+		"no flow":                 {nil, documentInfo{}, ""},
+		"unrestricted":            {&flow.FlowDefinition{}, documentInfo{}, ""},
+		"type not disclosed":      {nldPassports, documentInfo{IssuingState: "NLD"}, errCodeDocTypeRefused},
+		"country not disclosed":   {nldPassports, documentInfo{Type: "P"}, errCodeCountryRefused},
+		"other country":           {nldPassports, documentInfo{Type: "P", IssuingState: "DEU"}, errCodeCountryRefused},
+		"compliant":               {nldPassports, documentInfo{Type: "P", IssuingState: "NLD"}, ""},
+		"uppercased licence type": {&flow.FlowDefinition{AcceptedDocumentTypes: []string{"DRIVERS_LICENSE"}}, documentInfo{Type: flow.DocumentTypeDrivingLicence}, ""},
+		"expired":                 {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-04"}, errCodeDocExpired},
+		"expired, dd-mm-yyyy":     {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "04-10-2026"}, errCodeDocExpired},
+		"valid today":             {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-05"}, ""},
+		"expiry in other format":  {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "20261004"}, ""},
 	} {
 		if _, code := disclosureComplianceFailure(c.fd, c.doc, now); code != c.want {
 			t.Errorf("%s: error code %q, want %q", name, code, c.want)

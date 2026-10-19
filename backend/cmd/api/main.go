@@ -215,6 +215,12 @@ func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.P
 			return nil, nil, fmt.Errorf("loading driving licence CSCAs: %w", err)
 		}
 		engineCfg.DrivingLicenceCertPool = drivingLicenceCertPool
+		// An environment without the ops repo's mount refuses every licence chip.
+		if len(cfg.IdentityProofingEDLCSCAPaths) == 0 {
+			slog.WarnContext(ctx, "IDENTITY_PROOFING_EDL_CSCA_PATHS not set; driving licence chips cannot verify")
+		} else {
+			slog.InfoContext(ctx, "driving licence CSCAs loaded", "paths", cfg.IdentityProofingEDLCSCAPaths)
+		}
 		// Without a cipher the session store refuses every session
 		// (proofingprovider.ErrNoEncryptionKey); flows still work.
 		sessions := proofingsession.NewPostgresStore(pool, cipher)

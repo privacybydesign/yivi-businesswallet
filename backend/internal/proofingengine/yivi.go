@@ -373,7 +373,7 @@ func disclosureComplianceFailure(fd *flow.FlowDefinition, doc documentInfo, now 
 	if fd == nil {
 		return false, ""
 	}
-	if len(fd.AcceptedDocumentTypes) > 0 && !slices.Contains(fd.AcceptedDocumentTypes, doc.Type) {
+	if !fd.AcceptsDocumentType(doc.Type) {
 		return true, errCodeDocTypeRefused
 	}
 	if len(fd.AcceptedIssuingCountries) > 0 &&

@@ -161,7 +161,7 @@ func flowComplianceFailure(fd *flow.FlowDefinition, sess session.Session, req ap
 		return false, ""
 	}
 	if req.Document != nil {
-		if len(fd.AcceptedDocumentTypes) > 0 && !slices.Contains(fd.AcceptedDocumentTypes, req.Document.Type) {
+		if !fd.AcceptsDocumentType(req.Document.Type) {
 			return true, errCodeDocTypeRefused
 		}
 		if len(fd.AcceptedIssuingCountries) > 0 && !slices.Contains(fd.AcceptedIssuingCountries, flow.IssuingStateCode(req.Document.IssuingState)) {

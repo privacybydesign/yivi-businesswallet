@@ -413,6 +413,14 @@ func DrivingLicence(t string) bool {
 	return t == DocumentTypeDrivingLicence || t == DocumentTypeEUDrivingLicence
 }
 
+// AcceptsDocumentType is whether fd accepts a document of type t; empty
+// AcceptedDocumentTypes accepts any. Case-insensitive: the flow editor
+// uppercases every type, drivers_license included.
+func (fd *FlowDefinition) AcceptsDocumentType(t string) bool {
+	return len(fd.AcceptedDocumentTypes) == 0 ||
+		slices.ContainsFunc(fd.AcceptedDocumentTypes, func(a string) bool { return strings.EqualFold(a, t) })
+}
+
 // ValidationError is Validate refusing a flow definition, as opposed to a
 // store failure: the message says which rule.
 type ValidationError struct{ err error }
@@ -479,7 +487,7 @@ func validate(fd FlowDefinition) error {
 	if err := noDuplicateStrings("accepted document type", fd.AcceptedDocumentTypes); err != nil {
 		return err
 	}
-	if slices.Contains(fd.AcceptedDocumentTypes, DocumentTypeEUDrivingLicence) {
+	if slices.ContainsFunc(fd.AcceptedDocumentTypes, func(t string) bool { return strings.EqualFold(t, DocumentTypeEUDrivingLicence) }) {
 		return fmt.Errorf("flow: accepted document type %q is the chip evidence's type, never a document's: accept %q for a driving licence", DocumentTypeEUDrivingLicence, DocumentTypeDrivingLicence)
 	}
 	for _, c := range fd.AcceptedIssuingCountries {
