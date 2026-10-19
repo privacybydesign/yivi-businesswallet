@@ -258,11 +258,11 @@ export const CUSTOMER_THEME_COLOR_FIELDS = [
 export type CustomerThemeColorField =
   (typeof CUSTOMER_THEME_COLOR_FIELDS)[number];
 
-// Empty strings fall back: the customer's name, the org's colour, no logo.
+// Empty strings fall back: in the mail, the customer's name, the org's colour, no logo.
 const proofingCustomerBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
-  // The Idem app's second colour; empty is the org's accent colour.
+  // The Idem app's second colour; empty keeps the design's.
   secondaryColor: z.string(),
   textColor: z.string(),
   surfaceColor: z.string(),
@@ -1265,7 +1265,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   // The diploma extracts the subject added.
   diplomas: z.array(hostedDiplomaSchema),
   // The look the page takes, the one the Idem app shows the session in: the
-  // org's theme with the customer's colours on top. "" keeps the page's own.
+  // customer's own look when it has one, else the org's theme. "" keeps the
+  // page's own.
   theme: hostedThemeSchema.optional(),
 });
 

@@ -1,5 +1,11 @@
 import type { OrgTheme } from "../api/theme";
-import { setWhiteLabelScheme } from "./color-scheme";
+import {
+  DEFAULT_DESIGN,
+  DESIGN_ATTRIBUTE,
+  WHITE_LABEL_DESIGN,
+  setWhiteLabelScheme,
+  type Design,
+} from "./color-scheme";
 
 // Runtime theming. The app's colours resolve through the --yb-* custom
 // properties on :root (see index.css); overriding those re-colours every
@@ -58,12 +64,6 @@ const THEMED_PROPERTIES = [
   FONT_SANS,
   FONT_DISPLAY,
 ] as const;
-
-// The attribute that switches the app to the white-label design (see the
-// [data-design="white-label"] blocks in index.css): set while an org with a
-// theme of its own, or a hosted customer page, is shown.
-const DESIGN_ATTRIBUTE = "data-design";
-const WHITE_LABEL_DESIGN = "white-label";
 
 // How a chrome seed derives its companions: the soft foreground fades the
 // readable foreground toward the background; the active/hover fill and the
@@ -627,13 +627,18 @@ export function usesWhiteLabelDesign(
 
 // setWhiteLabelDesign switches the white-label design on or off, and with it
 // the light scheme it is always shown in.
-function setWhiteLabelDesign(on: boolean): void {
-  if (on) {
+function setWhiteLabelDesign(design: Design): void {
+  if (design === WHITE_LABEL_DESIGN) {
     document.documentElement.setAttribute(DESIGN_ATTRIBUTE, WHITE_LABEL_DESIGN);
   } else {
     document.documentElement.removeAttribute(DESIGN_ATTRIBUTE);
   }
-  setWhiteLabelScheme(on);
+  setWhiteLabelScheme(design);
+}
+
+// themeDesign is the design a theme is shown in.
+function themeDesign(theme: OrgTheme | null | undefined): Design {
+  return usesWhiteLabelDesign(theme) ? WHITE_LABEL_DESIGN : DEFAULT_DESIGN;
 }
 
 // shouldApplyOrgTheme reports whether the runtime theme effect should push
@@ -665,7 +670,7 @@ export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
     }
   }
   setThemeStyle(buildThemeCss(theme));
-  setWhiteLabelDesign(usesWhiteLabelDesign(theme));
+  setWhiteLabelDesign(themeDesign(theme));
 }
 
 // clearOrgTheme restores every token to its default (used when leaving an org).
@@ -675,7 +680,7 @@ export function clearOrgTheme(): void {
     root.removeProperty(property);
   }
   setThemeStyle("");
-  setWhiteLabelDesign(false);
+  setWhiteLabelDesign(DEFAULT_DESIGN);
 }
 
 // Cached theme, keyed by org slug, so a full page reload can paint the tenant's
@@ -741,7 +746,9 @@ export function applyCachedOrgTheme(slug: string): boolean {
       root.setProperty(property, value);
     }
     setThemeStyle(payload.css ?? "");
-    setWhiteLabelDesign(payload.whiteLabel === true);
+    setWhiteLabelDesign(
+      payload.whiteLabel === true ? WHITE_LABEL_DESIGN : DEFAULT_DESIGN,
+    );
     return true;
   } catch {
     return false;

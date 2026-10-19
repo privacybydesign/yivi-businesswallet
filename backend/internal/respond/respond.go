@@ -10,6 +10,10 @@ import (
 
 const contentTypeJSON = "application/json"
 
+// HeaderContentLength is the header a handler sets when it writes a body of
+// known size itself.
+const HeaderContentLength = "Content-Length"
+
 type errorBody struct {
 	Error string `json:"error"`
 	Code  string `json:"code"`

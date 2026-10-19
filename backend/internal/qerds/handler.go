@@ -293,7 +293,7 @@ func (h *Handler) downloadAttachment(w http.ResponseWriter, r *http.Request) err
 
 	w.Header().Set("Content-Type", att.ContentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", att.Filename))
-	w.Header().Set("Content-Length", strconv.Itoa(len(att.Content)))
+	w.Header().Set(respond.HeaderContentLength, strconv.Itoa(len(att.Content)))
 	// Content is opaque and provider-supplied; never let the browser sniff it.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)

@@ -76,8 +76,7 @@ var cmTheme = &demoTheme{
 	logo: cmLogoPNG,
 }
 
-// The other demo orgs' marks, as their own sites serve them (Unibet's from
-// Wikimedia Commons, CC BY-SA 4.0).
+// The other demo orgs' marks; assets/README.md has each source and licence.
 var (
 	//go:embed assets/radboud-logo.png
 	radboudLogoPNG []byte

@@ -141,7 +141,7 @@ export function originLines(text: string): string[] {
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 // The hosted page's theme: the white-label design in the look the Idem app
-// shows the session in (the org's theme with the customer's colours on top),
+// shows the session in (the customer's own look, else the org's theme),
 // its header as the page's header. Without one, the customer's own colour as
 // the brand colour when it has a valid one. Applied through applyOrgTheme,
 // which keeps text on it readable and drops what is not a valid colour.

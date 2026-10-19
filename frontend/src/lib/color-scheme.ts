@@ -9,11 +9,29 @@ import { useSyncExternalStore } from "react";
 // index.html resolves it the same way before first paint — keep the two in
 // step.
 
-export const COLOR_SCHEME_PREFERENCES = ["system", "light", "dark"] as const;
+const SYSTEM_PREFERENCE = "system";
+
+export const COLOR_SCHEME_PREFERENCES = [
+  SYSTEM_PREFERENCE,
+  "light",
+  "dark",
+] as const;
 
 export type ColorSchemePreference = (typeof COLOR_SCHEME_PREFERENCES)[number];
 
 export type ColorScheme = "light" | "dark";
+
+// The OS appearance, which Auto follows.
+export type SystemAppearance = "os-dark" | "os-light";
+
+// The attribute that switches the app to the white-label design (see the
+// [data-design="white-label"] blocks in index.css): set while an org with a
+// theme of its own, or a hosted customer page, is shown.
+export const DESIGN_ATTRIBUTE = "data-design";
+export const DEFAULT_DESIGN = "default";
+export const WHITE_LABEL_DESIGN = "white-label";
+
+export type Design = typeof DEFAULT_DESIGN | typeof WHITE_LABEL_DESIGN;
 
 export const COLOR_SCHEME_STORAGE_KEY = "bw.colorScheme";
 
@@ -33,40 +51,50 @@ function isColorSchemePreference(
 // light; otherwise an explicit choice wins and Auto follows the OS.
 export function resolveColorScheme(
   preference: ColorSchemePreference,
-  systemDark: boolean,
-  whiteLabel: boolean,
+  appearance: SystemAppearance,
+  design: Design,
 ): ColorScheme {
-  if (whiteLabel) {
+  if (design === WHITE_LABEL_DESIGN) {
     return "light";
   }
-  if (preference !== "system") {
+  if (preference !== SYSTEM_PREFERENCE) {
     return preference;
   }
-  return systemDark ? "dark" : "light";
+  return appearance === "os-dark" ? "dark" : "light";
 }
 
 function readStoredPreference(): ColorSchemePreference {
   try {
     const stored = window.localStorage.getItem(COLOR_SCHEME_STORAGE_KEY);
-    return isColorSchemePreference(stored) ? stored : "system";
+    return isColorSchemePreference(stored) ? stored : SYSTEM_PREFERENCE;
   } catch {
     // Storage can be unavailable (private mode); Auto is the default anyway.
-    return "system";
+    return SYSTEM_PREFERENCE;
   }
 }
 
+// readInitialDesign starts from the design the pre-paint script in index.html
+// already set, so the first apply does not undo its light scheme.
+function readInitialDesign(): Design {
+  return typeof document !== "undefined" &&
+    document.documentElement.getAttribute(DESIGN_ATTRIBUTE) ===
+      WHITE_LABEL_DESIGN
+    ? WHITE_LABEL_DESIGN
+    : DEFAULT_DESIGN;
+}
+
 let preference: ColorSchemePreference = readStoredPreference();
-let whiteLabel = false;
+let design: Design = readInitialDesign();
 const listeners = new Set<() => void>();
 
-function systemDark(): boolean {
-  return window.matchMedia(SYSTEM_DARK_QUERY).matches;
+function systemAppearance(): SystemAppearance {
+  return window.matchMedia(SYSTEM_DARK_QUERY).matches ? "os-dark" : "os-light";
 }
 
 function applyColorScheme(): void {
   document.documentElement.setAttribute(
     COLOR_SCHEME_ATTRIBUTE,
-    resolveColorScheme(preference, systemDark(), whiteLabel),
+    resolveColorScheme(preference, systemAppearance(), design),
   );
 }
 
@@ -90,11 +118,11 @@ export function setColorSchemePreference(next: ColorSchemePreference): void {
 // setWhiteLabelScheme keeps the scheme light while the white-label design is
 // shown (lib/theme.ts switches it), and hands it back to the user's choice when
 // it is not. The stored choice itself is kept.
-export function setWhiteLabelScheme(on: boolean): void {
-  if (whiteLabel === on) {
+export function setWhiteLabelScheme(next: Design): void {
+  if (design === next) {
     return;
   }
-  whiteLabel = on;
+  design = next;
   applyColorScheme();
   notify();
 }
@@ -120,5 +148,5 @@ export function useColorSchemePreference(): ColorSchemePreference {
 // useColorSchemeLocked reports whether the white-label design holds the scheme
 // at light, so the switch has nothing to offer.
 export function useColorSchemeLocked(): boolean {
-  return useSyncExternalStore(subscribe, () => whiteLabel);
+  return useSyncExternalStore(subscribe, () => design === WHITE_LABEL_DESIGN);
 }

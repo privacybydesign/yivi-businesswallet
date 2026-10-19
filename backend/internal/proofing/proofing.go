@@ -74,10 +74,11 @@ var DataRetentionDayOptions = []int{7, 30, 90, 180, 365}
 // CustomerBranding is how the proofing mail to a customer's subjects looks:
 // DisplayName signs it ("" is the customer's name), PrimaryColor colours it
 // ("" is the org's), and SupportContact and PrivacyURL are added to it ("" leaves
-// each out). SecondaryColor is the Idem app's second colour ("" is the org's
-// accent colour). HasLogo reports a stored logo, read with CustomerStore.Logo.
-// The other colours and FontFamily are the rest of its white-label, the same as
-// the org theme's ("" keeps the design's own); TopbarColor is the app's header.
+// each out). HasLogo reports a stored logo, read with CustomerStore.Logo.
+// SecondaryColor (the Idem app's second colour), the other colours and
+// FontFamily are the rest of its white-label, the same as the org theme's: any
+// one set is a look of its own, and "" in it keeps the design's, not the org's
+// (see AppBrandingResolver); TopbarColor is the app's header.
 type CustomerBranding struct {
 	DisplayName    string
 	PrimaryColor   string

@@ -18,17 +18,12 @@ const darkBlock = css.match(
   /:root:where\(\[data-color-scheme="dark"\]\)\s*\{([^}]*)\}/,
 );
 
-function blockTokens(block: RegExpMatchArray | null): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [, name, value] of (block?.[1] ?? "").matchAll(
-    /(--yb-[\w-]+):\s*([^;]+);/g,
-  )) {
-    out[name] = value.trim();
-  }
-  return out;
+const tokens: Record<string, string> = {};
+for (const [, name, value] of (darkBlock?.[1] ?? "").matchAll(
+  /(--yb-[\w-]+):\s*([^;]+);/g,
+)) {
+  tokens[name] = value.trim();
 }
-
-const tokens = blockTokens(darkBlock);
 
 // The fg → bg pairings the components render (tone classes pair these tokens).
 const CONTRAST_PAIRS: ReadonlyArray<[fg: string, bg: string, label: string]> = [
