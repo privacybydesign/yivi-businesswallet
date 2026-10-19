@@ -170,15 +170,15 @@ func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.Flo
 
 // Flow names, also how a customer below names its flows.
 const (
-	flowRadboudEnrol      = "Aanmelden cursist"
-	flowRadboudPassword   = "Wachtwoord herstellen"
-	flowASRKnownPerson    = "Identificatie bekende persoon"
-	flowASRAccountChange  = "Rekeningnummer wijzigen"
-	flowUnibetOnboarding  = "Nieuwe klant (AMLR)"
-	flowCMAgeCheck        = "Ticket: echte persoon en leeftijd"
-	flowAddressOnboarding = "Nieuwe klant met woonadres"
-	flowDataAccess        = "Mijn gegevens inzien"
-	flowDataErasure       = "Mijn gegevens verwijderen"
+	flowRadboudEnrol     = "Aanmelden cursist"
+	flowRadboudPassword  = "Wachtwoord herstellen"
+	flowASRKnownPerson   = "Identificatie bekende persoon"
+	flowASRAccountChange = "Rekeningnummer wijzigen"
+	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
+	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
+	flowOdixusOnboarding = "Nieuwe klant met woonadres"
+	flowDataAccess       = "Mijn gegevens inzien"
+	flowDataErasure      = "Mijn gegevens verwijderen"
 )
 
 // purposeDataRequest is the processing purpose of the data request flows.
@@ -270,10 +270,10 @@ var demoProofingOrgs = []demoProofingOrg{
 		flows: []demoProofingFlow{
 			// A new customer identifies themselves, then enters the postal
 			// address they live at.
-			{def: chipAndFace(flowAddressOnboarding, privacy.LegalBasisContract, "Onboarding nieuwe klant"), address: proofing.AddressRequired},
+			{def: chipAndFace(flowOdixusOnboarding, privacy.LegalBasisContract, "Onboarding nieuwe klant"), address: proofing.AddressRequired},
 		},
 		customers: []demoProofingCustomer{
-			{name: "odixus Onboarding (Demo)", flows: []string{flowAddressOnboarding}, retentionDays: demoRetentionDays},
+			{name: "odixus Onboarding (Demo)", flows: []string{flowOdixusOnboarding}, retentionDays: demoRetentionDays},
 		},
 	},
 }
