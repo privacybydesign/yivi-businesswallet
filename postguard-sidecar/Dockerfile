@@ -15,7 +15,7 @@ ENV NODE_ENV=production
 # built. The Grype scan in delivery.yml gates the image on fixable critical
 # CVEs, and the stock base image lags the distro's patched packages (perl-base).
 RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json* ./
