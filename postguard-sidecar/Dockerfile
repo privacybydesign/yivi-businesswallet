@@ -11,6 +11,12 @@ RUN npm run build
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production
+# Pull in the security fixes Debian has published since the base image was
+# built. The Grype scan in delivery.yml gates the image on fixable critical
+# CVEs, and the stock base image lags the distro's patched packages (perl-base).
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json* ./
 # The runtime only ever runs `node dist/server.js`, never npm. npm ships its own
