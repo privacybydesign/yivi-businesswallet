@@ -85,6 +85,8 @@ var (
 	asrLogoPNG []byte
 	//go:embed assets/unibet-logo.png
 	unibetLogoPNG []byte
+	//go:embed assets/odixus-logo.png
+	odixusLogoPNG []byte
 )
 
 // The demo themes set only what the Idem app shows a session in (its
@@ -93,9 +95,10 @@ var (
 // error, top bar (the app's header, ignored below 3:1 against white text), font
 // and logo. Each font is a stack the theme settings page offers.
 const (
-	fontOpenSans  = `"Open Sans", system-ui, sans-serif`
-	fontSystemUI  = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
-	fontHelvetica = `"Helvetica Neue", Arial, sans-serif`
+	fontOpenSans   = `"Open Sans", system-ui, sans-serif`
+	fontMontserrat = `"Montserrat", system-ui, sans-serif`
+	fontSystemUI   = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
+	fontHelvetica  = `"Helvetica Neue", Arial, sans-serif`
 )
 
 // radboudTheme is Radboud's house style: Red Impact, Maroon, Lady Bug and
@@ -133,6 +136,19 @@ var unibetTheme = &demoTheme{
 		FontFamily: fontSystemUI,
 	},
 	logo: unibetLogoPNG,
+}
+
+// odixusTheme is odixus.nl's look: its logo blue, the darker blue its
+// gradients end in as accent (the logo's orange does not read on white), its
+// body text, light background, input border, success and danger colours.
+// Its Poppins is not a font the wallet ships; Montserrat is the closest.
+var odixusTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#0056AD", AccentColor: "#0A4286", TextColor: "#2F281E", SurfaceColor: "#F0F4F9",
+		BorderColor: "#E0E0E0", LinkColor: "#0056AD", SuccessColor: "#79B93C", ErrorColor: "#DF6951",
+		TopbarColor: "#0056AD", FontFamily: fontMontserrat,
+	},
+	logo: odixusLogoPNG,
 }
 
 // The engine's names for what a flow reads and checks.
@@ -275,6 +291,7 @@ var demoProofingOrgs = []demoProofingOrg{
 		customers: []demoProofingCustomer{
 			{name: "odixus Onboarding (Demo)", flows: []string{flowOdixusOnboarding}, retentionDays: demoRetentionDays},
 		},
+		theme: odixusTheme,
 	},
 }
 
