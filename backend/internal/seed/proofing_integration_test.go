@@ -101,14 +101,14 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 	odixusID := orgsBySlug[odixusSlug].ID
 	odixusFlows, err := flow.NewPostgresStore(pool).List(ctx, odixusID.String())
 	if err != nil {
-		t.Fatalf("odixus flows: %v", err)
+		t.Fatalf("address flows: %v", err)
 	}
 	for _, f := range odixusFlows {
-		if f.Name != flowOdixusOnboarding {
+		if f.Name != flowAddressOnboarding {
 			continue
 		}
 		if mode, err := proofing.NewFlowAddressStore(pool, audit.NopRecorder{}).Get(ctx, odixusID, f.ID); err != nil || mode != proofing.AddressRequired {
-			t.Errorf("odixus onboarding address = %q, %v; want required", mode, err)
+			t.Errorf("address onboarding flow address = %q, %v; want required", mode, err)
 		}
 	}
 }
