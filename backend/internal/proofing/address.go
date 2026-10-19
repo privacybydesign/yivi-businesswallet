@@ -69,14 +69,15 @@ func (a Address) normalized() (Address, error) {
 		Street: strings.TrimSpace(a.Street), HouseNumber: strings.TrimSpace(a.HouseNumber),
 		PostalCode: strings.TrimSpace(a.PostalCode), City: strings.TrimSpace(a.City), Country: strings.TrimSpace(a.Country),
 	}
-	for name, v := range map[string]string{
-		"street": out.Street, "houseNumber": out.HouseNumber, "postalCode": out.PostalCode, "city": out.City, "country": out.Country,
+	for _, f := range []struct{ name, value string }{
+		{"street", out.Street}, {"houseNumber", out.HouseNumber}, {"postalCode", out.PostalCode},
+		{"city", out.City}, {"country", out.Country},
 	} {
-		if v == "" {
-			return Address{}, fmt.Errorf("%w: %s is required", ErrInvalidInput, name)
+		if f.value == "" {
+			return Address{}, fmt.Errorf("%w: %s is required", ErrInvalidInput, f.name)
 		}
-		if utf8.RuneCountInString(v) > maxAddressFieldRunes {
-			return Address{}, fmt.Errorf("%w: %s is at most %d characters", ErrInvalidInput, name, maxAddressFieldRunes)
+		if utf8.RuneCountInString(f.value) > maxAddressFieldRunes {
+			return Address{}, fmt.Errorf("%w: %s is at most %d characters", ErrInvalidInput, f.name, maxAddressFieldRunes)
 		}
 	}
 	return out, nil

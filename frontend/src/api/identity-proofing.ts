@@ -33,7 +33,7 @@ const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
 // Whether a flow has the address step: once their identity is approved, its
 // subject enters their postal address. It is what they declare, not read off
 // a document.
-export const ADDRESS_MODES = ["off", "required"] as const;
+const ADDRESS_MODES = ["off", "required"] as const;
 // An unknown mode reads as required, as diplomaModeSchema.
 const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;

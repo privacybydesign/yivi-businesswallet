@@ -722,7 +722,7 @@ const ADDRESS_FIELDS = [
 
 const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddress, string> = {
   street: "address-line1",
-  houseNumber: "address-line2",
+  houseNumber: "off",
   postalCode: "postal-code",
   city: "address-level2",
   country: "country-name",
@@ -794,6 +794,9 @@ function AddressStep({
                   autoComplete={ADDRESS_AUTOCOMPLETE[field]}
                   value={address[field]}
                   aria-invalid={invalid}
+                  aria-describedby={
+                    invalid ? `proofing-address-${field}-error` : undefined
+                  }
                   onChange={(event) =>
                     setAddress((current) => ({
                       ...current,
@@ -802,7 +805,7 @@ function AddressStep({
                   }
                 />
                 {invalid && (
-                  <p className={ERROR}>
+                  <p id={`proofing-address-${field}-error`} className={ERROR}>
                     {t("identityProofing.address.required")}
                   </p>
                 )}
