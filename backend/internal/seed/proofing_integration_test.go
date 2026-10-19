@@ -97,6 +97,20 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 			t.Errorf("Radboud enrol diplomas = %q, %v; want required", mode, err)
 		}
 	}
+
+	odixusID := orgsBySlug[odixusSlug].ID
+	odixusFlows, err := flow.NewPostgresStore(pool).List(ctx, odixusID.String())
+	if err != nil {
+		t.Fatalf("odixus flows: %v", err)
+	}
+	for _, f := range odixusFlows {
+		if f.Name != flowOdixusOnboarding {
+			continue
+		}
+		if mode, err := proofing.NewFlowAddressStore(pool, audit.NopRecorder{}).Get(ctx, odixusID, f.ID); err != nil || mode != proofing.AddressRequired {
+			t.Errorf("odixus onboarding address = %q, %v; want required", mode, err)
+		}
+	}
 }
 
 // The staging proofing demo seeds the demo proofing orgs with their flows and

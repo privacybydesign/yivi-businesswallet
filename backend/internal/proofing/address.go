@@ -70,8 +70,11 @@ func (a Address) normalized() (Address, error) {
 		PostalCode: strings.TrimSpace(a.PostalCode), City: strings.TrimSpace(a.City), Country: strings.TrimSpace(a.Country),
 	}
 	for _, f := range []struct{ name, value string }{
-		{"street", out.Street}, {"houseNumber", out.HouseNumber}, {"postalCode", out.PostalCode},
-		{"city", out.City}, {"country", out.Country},
+		{"street", out.Street},
+		{"houseNumber", out.HouseNumber},
+		{"postalCode", out.PostalCode},
+		{"city", out.City},
+		{"country", out.Country},
 	} {
 		if f.value == "" {
 			return Address{}, fmt.Errorf("%w: %s is required", ErrInvalidInput, f.name)

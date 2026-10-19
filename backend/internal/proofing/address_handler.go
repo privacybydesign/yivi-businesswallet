@@ -7,6 +7,10 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
+// maxFormBodyBytes caps a small JSON form a page posts, such as an address:
+// far above what its fields allow, read before they are checked.
+const maxFormBodyBytes = 16 << 10
+
 type flowAddressBody struct {
 	AddressMode AddressMode `json:"addressMode"`
 }
@@ -59,6 +63,7 @@ func (h *Handler) addAddress(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
 	var body Address
 	if err := decode(r, &body); err != nil {
 		return err
@@ -73,6 +78,7 @@ func (h *Handler) addAddress(w http.ResponseWriter, r *http.Request) error {
 // hostedAddAddress keeps the address a hosted link's subject entered. The
 // answer carries no address: the link's token alone opens the page.
 func (h *Handler) hostedAddAddress(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
 	var body Address
 	if err := decode(r, &body); err != nil {
 		return err

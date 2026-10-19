@@ -356,6 +356,7 @@ type hostedStartResponse struct {
 }
 
 func (h *Handler) hostedStart(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
 	var body hostedStartRequest
 	if err := decode(r, &body); err != nil {
 		return err
