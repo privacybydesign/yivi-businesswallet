@@ -135,8 +135,10 @@ services:
       - backend-go-build:/root/.cache/go-build
       - backend-go-mod:/go/pkg/mod
       - diploma-trust-cache:/var/cache/diploma-trust
-      # eDL CSCAs straight from a sibling ops checkout, at the path prod mounts.
-      - ${EDL_CSCA_DIR:-../yivi-businesswallet-ops/certificates/edl}:/certificates/edl:ro
+      # eDL CSCAs at the path prod mounts. The default is an empty in-repo
+      # directory, so Docker never creates one outside the repo; point
+      # EDL_CSCA_DIR at an ops checkout's certificates/edl to use real ones.
+      - ${EDL_CSCA_DIR:-./dev-setup/certificates/edl}:/certificates/edl:ro
 
   migrate:
     build:

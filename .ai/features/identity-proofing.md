@@ -264,8 +264,15 @@ documented under the `idem-app` tag, though only the app calls them), and the de
         (copied from go-passport-issuer-ops), a ConfigMap mounted at
         `/certificates/edl`; ops builds the env var from the files, so a new
         generation is one more file.
-      - Local: `compose.override.yaml` mounts a sibling ops checkout
-        (`EDL_CSCA_DIR` to override) at the same `/certificates/edl`.
+      - Local: `compose.override.yaml` mounts `EDL_CSCA_DIR` at the same
+        `/certificates/edl`.
+        - Default: the empty, committed `dev-setup/certificates/edl`, so
+          Docker never creates a root-owned directory outside the repo.
+        - Real CSCAs: set `EDL_CSCA_DIR` to an ops checkout's
+          `certificates/edl`, plus `IDENTITY_PROOFING_EDL_CSCA_PATHS`.
+      - Tests: `mrtdtestfixtures.NewLicenceChip` signs a licence EF.SOD per
+        call under a fresh test CSCA (no RDW test vector exists);
+        `TestDrivingLicenceChip` runs it through `nfc_read` and submit.
     - Passive Authentication: `mrtdverify.VerifyPassiveDrivingLicence`, as
       go-passport-issuer's `PassiveAuthenticationEDL`: DG1 required, and a DG13
       the EF.SOD lists but was not sent is `DOC_TAMPERED`.
