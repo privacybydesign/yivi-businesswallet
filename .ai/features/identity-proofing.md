@@ -405,8 +405,17 @@ request reads as expired. A new request means a new mail.
 
 **Mail URLs.** A mail URL is otherwise absolute http(s) only. The proofing
 link variable (`proofingUrl`) is declared with `AppScheme: "vcmrtd"`
-(`internal/email/catalog.go`): its value must be a `vcmrtd:` link with a host,
-checked at render, and only that variable may carry the scheme.
+(`internal/email/catalog.go`): its value must be a `vcmrtd:` link with a host or
+an absolute http(s) URL, checked at render, and only that variable may carry the
+scheme.
+
+**App Link.** With `IDENTITY_PROOFING_APP_LINK_URL` set (e.g.
+`https://idem.yivi.app/verify`), every claim link, in the mail, its QR and the
+on-screen and hosted pages, is that https URL with the same `handover=` and
+`api=` (`grantResponse` in `internal/proofingengine`). Mail clients and in-app
+browsers keep it tappable, a phone camera opens it, and without the app it lands
+on a fallback page. idem.yivi.app is served by open-yivi-ops; the Idem app
+handles it from privacybydesign/vcmrtd#224 on. Empty keeps `vcmrtd://verify`.
 
 The `api` host in the deep link is `IDENTITY_PROOFING_PUBLIC_URL`, which must
 be reachable from the phone. A mail that fails to send leaves the request standing

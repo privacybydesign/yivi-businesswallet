@@ -194,7 +194,7 @@ func TestComposePassesProofing(t *testing.T) {
 
 	for _, key := range []string{
 		envIdentityProofingProvider, envIdentityProofingEncryptionKey, envIdentityProofingPublicURL,
-		envIdentityProofingStubOutcome,
+		envIdentityProofingAppLinkURL, envIdentityProofingStubOutcome,
 		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
 		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaTrustCacheDir, envDiplomaOCSP,
 	} {
