@@ -227,7 +227,7 @@ func TestLoadCertPool(t *testing.T) {
 
 // A licence's DG1 is mandatory, and leaving out the DG13 its EF.SOD lists
 // (to dodge Active Authentication) makes the document incomplete.
-func TestVerifyPassiveDrivingLicence(t *testing.T) {
+func TestPassiveDrivingLicence(t *testing.T) {
 	sent := map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex}
 	result, err := VerifyPassiveDrivingLicence(mrtdtestfixtures.TestSodHex, sent, trustedTestCertPool(t))
 	if err != nil {
@@ -262,7 +262,7 @@ func TestVerifyPassiveDrivingLicence(t *testing.T) {
 }
 
 // Without configured CSCAs no licence verifies.
-func TestEmptyLicenceCertPoolRefusesSigner(t *testing.T) {
+func TestEmptyPoolRefusesLicence(t *testing.T) {
 	pool, err := LoadCertPool(nil)
 	if err != nil {
 		t.Fatalf("LoadCertPool: %v", err)

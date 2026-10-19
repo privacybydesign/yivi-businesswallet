@@ -104,15 +104,18 @@ func VerifyPassiveDrivingLicence(efSODHex string, dataGroupsHex map[string]strin
 	if _, ok := dataGroupsHex[drivingLicenceDG1]; !ok {
 		return PassiveResult{}, fmt.Errorf("mrtdverify: %s is mandatory for driving licence passive authentication but was not provided", drivingLicenceDG1)
 	}
+
 	result, err := VerifyPassive(efSODHex, dataGroupsHex, trustedCerts)
 	if err != nil {
 		return result, err
 	}
+
 	// VerifyPassive parsed the same EF.SOD without error.
 	sod, err := parseSOD(efSODHex)
 	if err != nil {
 		return result, err
 	}
+
 	if _, sent := dataGroupsHex[drivingLicenceAAKey]; !sent && sod.HasDgHash(drivingLicenceAAKeyNumber) {
 		result.DocumentComplete = false
 		result.DocumentVerifyErr = fmt.Sprintf("EF.SOD lists %s (the Active Authentication key) but it was not provided", drivingLicenceAAKey)

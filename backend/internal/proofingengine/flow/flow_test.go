@@ -215,17 +215,20 @@ func TestValidateLicence(t *testing.T) {
 }
 
 // The flow editor uppercases every accepted type, a licence's included.
-func TestAcceptsDocumentTypeIgnoresCase(t *testing.T) {
+func TestAcceptsTypeIgnoresCase(t *testing.T) {
 	fd := &FlowDefinition{AcceptedDocumentTypes: []string{"P", "DRIVERS_LICENSE"}}
 	if !fd.AcceptsDocumentType(DocumentTypeDrivingLicence) || !fd.AcceptsDocumentType("P") {
 		t.Error("an accepted type was refused")
 	}
+
 	if fd.AcceptsDocumentType("I") {
 		t.Error("an unlisted type was accepted")
 	}
+
 	if !(&FlowDefinition{}).AcceptsDocumentType("I") {
 		t.Error("an unrestricted flow refused a type")
 	}
+
 	refused := validFlow()
 	refused.AcceptedDocumentTypes = []string{"EU_DRIVING_LICENCE"}
 	wantRefused(t, refused, "never a document's")
