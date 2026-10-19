@@ -118,6 +118,8 @@ services:
       REGULA_FACE_API_URL: ${REGULA_FACE_API_URL:-}
       REGULA_FACE_API_PUBLIC_URL: ${REGULA_FACE_API_PUBLIC_URL:-}
       REGULA_FACE_MATCH_THRESHOLD: ${REGULA_FACE_MATCH_THRESHOLD:-}
+      # Comma-separated eDL CSCA files (from the ops repo); empty trusts no licence.
+      IDENTITY_PROOFING_EDL_CSCA_PATHS: ${IDENTITY_PROOFING_EDL_CSCA_PATHS:-}
       # Diploma verification: the validator (`stub` or the real PDF check) and
       # the source of the trusted signing roots; empty keeps the config defaults.
       DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-}

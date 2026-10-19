@@ -105,10 +105,10 @@ func TestVerifyICAOValid(t *testing.T) {
 const aaKeyDataGroupNumber = 15
 
 // unsignedSODHex rebuilds the fixture's EF.SOD around its own hash list, plus
-// a DG15 hash when withDG15. Without a CSCA private key it carries no signer,
+// a hash for each of extraDataGroups. Without a CSCA private key it carries no signer,
 // so the signature never verifies: the completeness check runs regardless,
 // which is all it is for.
-func unsignedSODHex(t *testing.T, withDG15 bool) string {
+func unsignedSODHex(t *testing.T, extraDataGroups ...int) string {
 	t.Helper()
 	fixture, err := parseSOD(mrtdtestfixtures.TestSodHex)
 	if err != nil {
@@ -146,8 +146,8 @@ func unsignedSODHex(t *testing.T, withDG15 bool) string {
 	for _, h := range fixture.LdsSecurityObject.DataGroupHashValues {
 		lds.Hashes = append(lds.Hashes, dataGroupHash{h.DataGroupNumber, h.DataGroupHashValue})
 	}
-	if withDG15 {
-		lds.Hashes = append(lds.Hashes, dataGroupHash{aaKeyDataGroupNumber, make([]byte, sha256.Size)})
+	for _, n := range extraDataGroups {
+		lds.Hashes = append(lds.Hashes, dataGroupHash{n, make([]byte, sha256.Size)})
 	}
 	ldsBytes, err := asn1.Marshal(lds)
 	if err != nil {
@@ -168,15 +168,15 @@ func unsignedSODHex(t *testing.T, withDG15 bool) string {
 func TestOmittedDG15IsIncomplete(t *testing.T) {
 	sent := map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex}
 	for _, tc := range []struct {
-		name     string
-		withDG15 bool
-		want     bool
+		name  string
+		extra []int
+		want  bool
 	}{
-		{"SOD lists DG15", true, false},
-		{"SOD lists no DG15", false, true},
+		{"SOD lists DG15", []int{aaKeyDataGroupNumber}, false},
+		{"SOD lists no DG15", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := VerifyPassiveICAO(unsignedSODHex(t, tc.withDG15), sent, trustedTestCertPool(t))
+			result, err := VerifyPassiveICAO(unsignedSODHex(t, tc.extra...), sent, trustedTestCertPool(t))
 			if err != nil {
 				t.Fatalf("VerifyPassiveICAO: %v", err)
 			}

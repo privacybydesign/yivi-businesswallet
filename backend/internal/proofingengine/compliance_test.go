@@ -51,6 +51,7 @@ func TestDisclosureCompliance(t *testing.T) {
 		"country not disclosed":  {nldPassports, documentInfo{Type: "P"}, errCodeCountryRefused},
 		"other country":          {nldPassports, documentInfo{Type: "P", IssuingState: "DEU"}, errCodeCountryRefused},
 		"compliant":              {nldPassports, documentInfo{Type: "P", IssuingState: "NLD"}, ""},
+		"uppercased licence":     {&flow.FlowDefinition{AcceptedDocumentTypes: []string{"DRIVERS_LICENSE"}}, documentInfo{Type: flow.DocumentTypeDrivingLicence}, ""},
 		"expired":                {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-04"}, errCodeDocExpired},
 		"expired, dd-mm-yyyy":    {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "04-10-2026"}, errCodeDocExpired},
 		"valid today":            {&flow.FlowDefinition{}, documentInfo{DateOfExpiry: "2026-10-05"}, ""},

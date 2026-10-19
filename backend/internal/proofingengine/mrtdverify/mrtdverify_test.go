@@ -3,6 +3,9 @@ package mrtdverify
 import (
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -197,17 +200,78 @@ func TestVerifyActiveWrongSig(t *testing.T) {
 	}
 }
 
-func TestLicenceCertPoolIsEmpty(t *testing.T) {
-	// Unlike PassportCertPool, gmrtd bundles nothing for EU driving licences
-	// (see DrivingLicenceCertPool's doc comment): this stays empty until
-	// this project has an actual source of trust-anchor certs to point at.
-	// CSCATrustChainValid always comes back false for driving licences as a
-	// result, rather than silently skipping the check.
-	pool, err := DrivingLicenceCertPool()
-	if err != nil {
-		t.Fatalf("DrivingLicenceCertPool: %v", err)
+// A licence CSCA loads from PEM (generation 01) and from DER (02 and 03), as
+// go-passport-issuer-ops ships them.
+func TestLoadCertPool(t *testing.T) {
+	dir := t.TempDir()
+	pemPath, derPath := filepath.Join(dir, "gen1.cer"), filepath.Join(dir, "gen2.cer")
+	if err := os.WriteFile(pemPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: mrtdtestfixtures.TestCsca}), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := len(pool.All()); got != 0 {
-		t.Errorf("expected an empty pool, got %d certs", got)
+	if err := os.WriteFile(derPath, mrtdtestfixtures.TestCsca, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{pemPath, derPath} {
+		pool, err := LoadCertPool([]string{path})
+		if err != nil {
+			t.Fatalf("LoadCertPool(%s): %v", path, err)
+		}
+		if got := len(pool.All()); got != 1 {
+			t.Errorf("LoadCertPool(%s) holds %d certificates, want 1", path, got)
+		}
+	}
+	if _, err := LoadCertPool([]string{filepath.Join(dir, "missing.cer")}); err == nil {
+		t.Error("LoadCertPool of a missing file: want an error")
+	}
+}
+
+// A licence's DG1 is mandatory, and leaving out the DG13 its EF.SOD lists
+// (to dodge Active Authentication) makes the document incomplete.
+func TestPassiveDrivingLicence(t *testing.T) {
+	sent := map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex}
+	result, err := VerifyPassiveDrivingLicence(mrtdtestfixtures.TestSodHex, sent, trustedTestCertPool(t))
+	if err != nil {
+		t.Fatalf("VerifyPassiveDrivingLicence: %v", err)
+	}
+	if !result.SODSignatureValid || !result.CSCATrustChainValid || !result.DataGroupHashesValid || !result.DocumentComplete {
+		t.Errorf("result = %+v, want every check to hold", result)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		extra []int
+		want  bool
+	}{
+		{"SOD lists DG13", []int{drivingLicenceAAKeyNumber}, false},
+		{"SOD lists no DG13", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := VerifyPassiveDrivingLicence(unsignedSODHex(t, tc.extra...), sent, trustedTestCertPool(t))
+			if err != nil {
+				t.Fatalf("VerifyPassiveDrivingLicence: %v", err)
+			}
+			if result.DocumentComplete != tc.want {
+				t.Errorf("DocumentComplete = %v, want %v (DocumentVerifyErr=%q)", result.DocumentComplete, tc.want, result.DocumentVerifyErr)
+			}
+		})
+	}
+
+	if _, err := VerifyPassiveDrivingLicence(mrtdtestfixtures.TestSodHex, map[string]string{"DG2": mrtdtestfixtures.Dg2Hex}, trustedTestCertPool(t)); err == nil {
+		t.Error("VerifyPassiveDrivingLicence without DG1: want an error")
+	}
+}
+
+// Without configured CSCAs no licence verifies.
+func TestEmptyPoolRefusesLicence(t *testing.T) {
+	pool, err := LoadCertPool(nil)
+	if err != nil {
+		t.Fatalf("LoadCertPool: %v", err)
+	}
+	result, err := VerifyPassiveDrivingLicence(mrtdtestfixtures.TestSodHex, map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex}, pool)
+	if err != nil {
+		t.Fatalf("VerifyPassiveDrivingLicence: %v", err)
+	}
+	if result.CSCATrustChainValid {
+		t.Errorf("result = %+v, want the signer refused", result)
 	}
 }

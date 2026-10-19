@@ -9,7 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gmrtd/gmrtd/cms"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify/mrtdtestfixtures"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -113,8 +116,8 @@ func TestFailedLivenessRetries(t *testing.T) {
 }
 
 // The chip read is refused where the flow has none and without the photo a
-// face match needs; an EU driving licence is refused at both document steps
-// (422 document_unsupported) while a passport goes through.
+// face match needs; a non-Dutch driving licence is refused at document_capture
+// (422 document_unsupported) while a Dutch one and a passport go through.
 func TestNFCStepRefusals(t *testing.T) {
 	h := newHarness(t, func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9} })
 	ctx := context.Background()
@@ -178,9 +181,92 @@ func TestNFCStepRefusals(t *testing.T) {
 	unsupported("document_capture with a licence document", code, step)
 	licence := map[string]any{"documentType": "eu_driving_licence", "efSod": evidence["efSod"], "dataGroups": evidence["dataGroups"]}
 	code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": licence})
-	unsupported("nfc with licence evidence", code, step)
+	if msg, _ := step["error"].(string); code != http.StatusBadRequest || !strings.Contains(msg, "no driving licence personal data") {
+		t.Errorf("nfc with a passport's chip as a licence = %d %v, want 400 no driving licence personal data", code, step)
+	}
 	capture(token, device, "passport")
 	if code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": evidence}); code != http.StatusOK {
 		t.Errorf("nfc with a passport's chip = %d %v, want 200", code, step)
+	}
+
+	token, device = start(chipFlow, pp.SessionInput{})
+	code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
+		"document":   map[string]any{"type": "drivers_license", "number": "5012345678", "issuingState": "NLD"},
+		"chipAccess": map[string]any{"documentType": "drivers_license", "documentNumber": "5012345678", "countryCode": "NLD", "version": "1", "randomData": "ABCDEFGHIJK", "configuration": "1"},
+	})
+	if code != http.StatusOK {
+		t.Errorf("document_capture with a Dutch licence = %d %v, want 200", code, step)
+	}
+}
+
+// A Dutch licence chip passes nfc_read and the session approves with the
+// chip's identity, its EF.SOD anchored in the configured CSCA; a licence chip
+// from another state is refused at nfc_read (422 document_unsupported).
+func TestDrivingLicenceChip(t *testing.T) {
+	dutch, err := mrtdtestfixtures.NewLicenceChip(mrtdverify.DrivingLicenceIssuingState)
+	if err != nil {
+		t.Fatalf("NewLicenceChip(NLD): %v", err)
+	}
+	german, err := mrtdtestfixtures.NewLicenceChip("DEU")
+	if err != nil {
+		t.Fatalf("NewLicenceChip(DEU): %v", err)
+	}
+	var trusted cms.GenericCertPool
+	for _, csca := range [][]byte{dutch.CSCA, german.CSCA} {
+		if err := trusted.Add(csca); err != nil {
+			t.Fatalf("trust CSCA: %v", err)
+		}
+	}
+	h := newHarness(t, func(c *proofingengine.Config) { c.DrivingLicenceCertPool = &trusted })
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, chipFlow)
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	start := func() (pp.Session, string, string) {
+		t.Helper()
+		sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID})
+		if err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		token, device := h.claimApp(t, sess)
+		code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
+			"document":   map[string]any{"type": "drivers_license", "number": mrtdtestfixtures.LicenceDocumentNumber, "issuingState": "NLD"},
+			"chipAccess": map[string]any{"documentType": "drivers_license", "documentNumber": mrtdtestfixtures.LicenceDocumentNumber, "countryCode": "NLD", "version": "1", "randomData": "ABCDEFGHIJK", "configuration": "1"},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("document_capture = %d %v", code, step)
+		}
+		return sess, token, device
+	}
+	nfc := func(token, device string, chip mrtdtestfixtures.LicenceChip) (int, map[string]any) {
+		t.Helper()
+		return h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": map[string]any{
+			"documentType": "eu_driving_licence", "efSod": chip.SODHex, "dataGroups": map[string]string{"DG1": chip.DG1Hex},
+		}})
+	}
+
+	sess, token, device := start()
+	if code, step := nfc(token, device, dutch); code != http.StatusOK || step["readyToSubmit"] != true {
+		t.Fatalf("nfc with a Dutch licence chip = %d %v; want ready to submit", code, step)
+	}
+	if code, step := h.do(t, http.MethodPost, "/app/"+token+"/submit", device, nil); code != http.StatusOK || step["lifecycle"] != "COMPLETE" {
+		t.Fatalf("submit = %d %v; want the session complete", code, step)
+	}
+	res, err := h.engine.SessionResult(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil || res.Status != pp.StatusApproved {
+		t.Errorf("result = %+v, %v; want approved", res, err)
+	}
+	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil || id.Evidence == nil || id.Evidence.PassiveAuth == pp.CheckNotPerformed {
+		t.Errorf("identity = %+v, %v; want chip evidence with passive authentication run", id, err)
+	}
+	if id.FamilyName != mrtdtestfixtures.LicenceSurname || id.GivenName != mrtdtestfixtures.LicenceOtherNames || id.BirthDate != mrtdtestfixtures.LicenceDateOfBirth {
+		t.Errorf("identity = %s %s, %s; want the licence chip's holder", id.GivenName, id.FamilyName, id.BirthDate)
+	}
+
+	_, token, device = start()
+	if code, step := nfc(token, device, german); code != http.StatusUnprocessableEntity || step["code"] != "document_unsupported" {
+		t.Errorf("nfc with a German licence chip = %d %v, want 422 document_unsupported", code, step)
 	}
 }

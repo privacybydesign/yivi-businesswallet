@@ -112,6 +112,10 @@ const (
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
 	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
 	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// envIdentityProofingEDLCSCAPaths is a comma-separated list of the RDW's
+	// eDL CSCA certificate files (PEM or DER), mounted from the ops repo.
+	// Unset trusts no driving licence chip.
+	envIdentityProofingEDLCSCAPaths = "IDENTITY_PROOFING_EDL_CSCA_PATHS"
 	// envIdentityProofingStubOutcome makes every stub session decide (approved,
 	// rejected or needs_review), so dev can see outcomes and their webhooks.
 	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
@@ -439,6 +443,9 @@ type Config struct {
 	RegulaFaceAPIURL         string
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
+	// IdentityProofingEDLCSCAPaths are the driving-licence CSCA files the
+	// engine trusts; empty trusts no licence.
+	IdentityProofingEDLCSCAPaths []string
 
 	AttestationIssuer         string
 	AttestationIssuerURL      string
@@ -794,6 +801,7 @@ func Load() (Config, error) {
 		RegulaFaceAPIURL:              regulaFaceAPIURL,
 		RegulaFaceAPIPublicURL:        regulaFaceAPIPublicURL,
 		RegulaFaceMatchThreshold:      regulaFaceMatchThreshold,
+		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
 
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,

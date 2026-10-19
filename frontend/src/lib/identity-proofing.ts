@@ -474,7 +474,8 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     requiredChecks,
     requestedAttributes:
       requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
-    // The engine compares both exactly, against the MRZ's capitals.
+    // Uppercased to match the MRZ's capitals; the engine ignores case for
+    // document types (drivers_license), compares countries exactly.
     acceptedDocumentTypes: list(draft.acceptedDocumentTypes).map((type) =>
       type.toUpperCase(),
     ),

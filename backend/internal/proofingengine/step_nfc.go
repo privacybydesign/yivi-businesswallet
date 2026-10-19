@@ -37,11 +37,7 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "mrtdEvidence is required")
 		return
 	}
-	if flow.DrivingLicence(req.MrtdEvidence.DocumentType) {
-		writeDocumentUnsupported(w)
-		return
-	}
-	checks, err := verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
+	checks, err := s.verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: "+err.Error())
 		return
@@ -58,11 +54,15 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid mrtdEvidence: "+err.Error())
 		return
 	}
+	if !drivingLicenceSupported(chipDoc.Type, chipDoc.IssuingState) {
+		writeDocumentUnsupported(w)
+		return
+	}
 	req.Document = chipDoc
 	// The photo is the face_match reference (faceMatchReference), so it must
 	// be the chip's own portrait: see photoFromChip.
 	if req.Photo != nil && !photoFromChip(req.Photo, req.MrtdEvidence) {
-		writeError(w, http.StatusBadRequest, "photo is not the portrait in mrtdEvidence's DG2")
+		writeError(w, http.StatusBadRequest, "photo is not the portrait in mrtdEvidence's "+portraitDataGroup(req.MrtdEvidence))
 		return
 	}
 	// Without it a flow that matches the face against the chip could never
@@ -135,16 +135,25 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
 }
 
-// photoFromChip reports whether photo's bytes are inside ev's DG2. Passive
-// Authentication covers DG2 but not the separately sent photo; without this a
-// genuine chip could be paired with any face.
+// photoFromChip reports whether photo's bytes are inside ev's portrait data
+// group. Passive Authentication covers it but not the separately sent photo;
+// without this a genuine chip could be paired with any face.
 func photoFromChip(photo *photoInfo, ev *mrtdEvidenceRequest) bool {
 	raw, _, err := decodeImageBase64(photo.ImageBase64, photo.MimeType)
 	if err != nil || len(raw) == 0 {
 		return false
 	}
-	dg2, err := hex.DecodeString(ev.DataGroups[dataGroupPortrait])
-	return err == nil && bytes.Contains(dg2, raw)
+	portrait, err := hex.DecodeString(ev.DataGroups[portraitDataGroup(ev)])
+	return err == nil && bytes.Contains(portrait, raw)
+}
+
+// portraitDataGroup is where ev's chip keeps the holder's portrait: DG2, or a
+// driving licence's DG6.
+func portraitDataGroup(ev *mrtdEvidenceRequest) string {
+	if ev.DocumentType == documentTypeEUDrivingLicence {
+		return dataGroupDLPortrait
+	}
+	return dataGroupPortrait
 }
 
 func decodeNFCStepRequest(raw map[string]any) (submitNFCStepRequest, error) {
