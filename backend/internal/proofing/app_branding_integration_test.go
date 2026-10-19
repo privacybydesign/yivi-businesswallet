@@ -202,7 +202,7 @@ func TestAppBrandingResolverNone(t *testing.T) {
 
 // A customer with only colours of its own has no logo: the org's is not mixed
 // into the customer's white-labeling.
-func TestAppBrandingResolverCustomerColoursOnly(t *testing.T) {
+func TestAppBrandingColoursOnly(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
 	recorder := audit.NopRecorder{}

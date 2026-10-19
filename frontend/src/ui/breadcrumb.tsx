@@ -83,9 +83,9 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
   );
 }
 
-// Builds the trail automatically from the matched route chain. It sits in the
-// top bar, so it takes the top bar's colours. Each match that
+// Builds the trail automatically from the matched route chain. Each match that
 // declares `handle.crumb` contributes one item; its pathname is the link.
+// It sits in the top bar, so it takes the top bar's colours.
 export function Breadcrumbs(): React.JSX.Element | null {
   const matches = useMatches();
   const { t } = useTranslation();

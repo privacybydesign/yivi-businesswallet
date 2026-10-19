@@ -40,7 +40,7 @@ export function MemberProofing({
   const requests = useMemberRequestsQuery(slug, userId);
   const create = useCreateRequestMutation(slug);
   // A member is only ever mailed, so a flow that needs the browser page for
-  // the address or diploma uploads is not offered (nor started on as the default).
+  // diploma uploads is not offered (nor started on as the default).
   const { sendable, initial } = sendableFlows(
     (flows.data ?? []).filter(sendableByMail),
   );

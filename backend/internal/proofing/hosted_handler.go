@@ -292,7 +292,6 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
 		HidePoweredBy: c.Branding.HidePoweredBy,
 	}
-	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
 	// The logo is the one the theme comes with: the customer's, or the org's
 	// for a customer without white-labeling of its own.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
@@ -303,6 +302,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	if hasLogo || (h.appBranding == nil && c.Branding.HasLogo) {
 		out.Customer.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), c.UpdatedAt.Unix())
 	}
+	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
 
 	f := hosted.Flow
 	out.Flow.Name, out.Flow.RequiredAssuranceLevel = f.Name, f.RequiredAssuranceLevel
