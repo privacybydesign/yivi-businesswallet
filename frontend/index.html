@@ -52,8 +52,9 @@
           return Boolean(payload && payload.whiteLabel);
         }
 
-        var segment = location.pathname.split("/")[1];
-        var whiteLabel = segment === HOSTED_SEGMENT;
+        var parts = location.pathname.split("/").filter(Boolean);
+        var segment = parts[0];
+        var whiteLabel = segment === HOSTED_SEGMENT && parts.length === 2;
         if (!whiteLabel) {
           try {
             whiteLabel = applyCachedTheme(segment);
