@@ -633,10 +633,12 @@ post-review outcome stay the system's.
   own: the org theme's colours (accent as secondary, top bar as header), font
   and logo, and `GET /app/{token}/branding/logo` serves the logo to a device
   holding the session. It is resolved from the session alone (tenant = org,
-  client reference = request), never from the request: a customer's request
-  gets the org theme with the customer's display name, primary and secondary
-  colour (each falling back to the org's) and logo (never the org's) on top. Nothing set at either level is no `branding`. `relyingParty` stays the
-  org's own name next to it.
+  client reference = request), never from the request: a customer with a
+  colour or a font of its own gets only that white-label (its colours, font and
+  logo; what it leaves out keeps the design's own, not the org's). A customer
+  with neither gets the org theme under its display name, with its own logo or
+  else the org's. Nothing set at either level is no `branding`. `relyingParty`
+  stays the org's own name next to it.
 - **Settings**: `session_ttl_seconds` (120/300/600), `data_retention_days`
   (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention)
   and `erasure_handling` (`review`/`automatic`/`keep`, §15). A change sets

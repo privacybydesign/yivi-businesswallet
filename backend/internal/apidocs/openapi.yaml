@@ -7179,11 +7179,13 @@ paths:
       description: >-
         Requires an administrator role in the organisation. A multipart form:
         `displayName` (the name the proofing mail signs with; empty is the customer's
-        name), `primaryColor` (`#rrggbb`; empty is the organisation's), `secondaryColor`
-        (`#rrggbb`, the Idem app's second colour; empty is the organisation's accent colour), the rest of
+        name), `primaryColor` (`#rrggbb`; empty is the organisation's in the mail), `secondaryColor`
+        (`#rrggbb`, the Idem app's second colour), the rest of
         the white-label as the organisation theme has it (`textColor`, `surfaceColor`, `borderColor`,
         `linkColor`, `successColor`, `warningColor`, `errorColor`, `topbarColor` and `fontFamily`;
-        setting any colour or the font gives the customer a look of its own), `supportContact`
+        setting any colour or the font gives the customer a look of its own in the Idem app and
+        hosted page, where what it leaves empty keeps the design's, not the organisation's; without
+        one they show the organisation's theme), `supportContact`
         and `privacyUrl` (an https URL), each added to the mail and left out when empty,
         and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
         render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
@@ -11956,10 +11958,10 @@ components:
           type: string
         primaryColor:
           type: string
-          description: '`#rrggbb`; empty is the organisation''s.'
+          description: '`#rrggbb`; empty is the organisation''s in the mail, and the design''s in a look of the customer''s own.'
         secondaryColor:
           type: string
-          description: '`#rrggbb`, the Idem app''s second colour; empty is the organisation''s accent colour.'
+          description: '`#rrggbb`, the Idem app''s second colour; empty keeps the design''s in a look of the customer''s own.'
         textColor:
           type: string
           description: '`#rrggbb`; empty keeps the design''s.'
@@ -12226,7 +12228,8 @@ components:
               type: object
               description: >-
                 The look the page takes, the one the Idem app shows the session in: the
-                organisation's theme with the customer's own colours on top. Colours are `#rrggbb`,
+                customer's own look when it has a colour or a font of its own, else the
+                organisation's theme. Colours are `#rrggbb`,
                 `fontFamily` a CSS font-family list; "" keeps the page's own. Absent when neither
                 the organisation nor the customer set any.
               properties:
@@ -12382,9 +12385,10 @@ components:
       type: object
       description: >-
         The look of the organisation, or the organisation's customer, that requested the session, so the
-        app looks like their own: resolved from the session itself, from the organisation's theme with a
-        customer's name, colours and logo on top. Colours are `#rrggbb`; an absent one keeps the app's
-        own. Absent altogether when neither set any.
+        app looks like their own: resolved from the session itself. A customer with a colour or a font of
+        its own gets only that look (its colours, font and logo); a customer with neither gets the
+        organisation's theme under its name, with its own logo or else the organisation's. Colours are
+        `#rrggbb`; an absent one keeps the app's own. Absent altogether when neither set any.
       properties:
         name:
           type: string

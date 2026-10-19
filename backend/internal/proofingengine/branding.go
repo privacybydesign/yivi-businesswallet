@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
@@ -88,7 +89,7 @@ func (s *Server) handleBrandingLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	themesettings.SetLogoResponseHeaders(w.Header(), logo.ContentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(logo.Bytes)))
+	w.Header().Set(respond.HeaderContentLength, strconv.Itoa(len(logo.Bytes)))
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(logo.Bytes); err != nil {
 		slog.ErrorContext(r.Context(), "proofing: write branding logo", slog.Any("error", err))

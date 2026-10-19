@@ -93,7 +93,7 @@ describe("resolveThemeTokens", () => {
 // stay legible on every surface it renders on, so it must clear WCAG-AA against
 // the worst-case background (and therefore against all of them). This list
 // mirrors the --yb-surface*/--yb-highlight tokens in index.css.
-const LINK_BACKGROUNDS = ["#ffffff", "#faf8f6", "#f5f2ef", "#eaf3f9"];
+const LINK_BACKGROUNDS = ["#ffffff", "#fbfbfc", "#f5f5f6", "#eaf3f9"];
 
 describe("resolveLinkColor", () => {
   it("returns null when the accent seed is missing or malformed", () => {
