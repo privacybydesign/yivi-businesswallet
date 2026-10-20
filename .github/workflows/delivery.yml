@@ -18,6 +18,12 @@ permissions:
 jobs:
   publish-docker-image:
     runs-on: ubuntu-latest
+    # id-token: write lets the Endor Labs container scan authenticate with the
+    # GitHub OIDC token instead of a stored API key.
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     # One image per custom (non-stock) Dockerfile in the repo. Stock images
     # (postgres, mailpit, domibus, ...) are pulled from their registries and are
     # not built here; the development Dockerfiles are live-reload dev tooling and
@@ -93,6 +99,21 @@ jobs:
           # by the postguard-sidecar and devverifier builds.
           secret-envs: |
             wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
+
+      # Records the image's OS and language packages in Endor Labs as its own
+      # project per component. Whether a finding fails this step (and so blocks
+      # the push) is decided by the action policies in the Endor Labs tenant.
+      # The source itself is scanned in endorlabs.yml.
+      - name: Endor Labs container scan
+        uses: endorlabs/github-action@f46ffb04c928a9c9c356f9627bd60b710ed0963e # v1.1.13
+        with:
+          namespace: ${{ secrets.ENDOR_LABS_NAMESPACE }}
+          pr: false
+          scan_dependencies: false
+          scan_container: true
+          image: local/${{ matrix.component }}:scan
+          project_name: ${{ github.repository }}/${{ matrix.component }}
+          scan_summary_output_type: table
 
       # The scan gates delivery directly: fail-build fails the job when a fixable
       # critical vulnerability is present. Results are not uploaded to GitHub code
