@@ -32,6 +32,13 @@ const (
 	maxHouseNumber = 99999
 	// postalCodeDigits is how many digits a postal code starts with.
 	postalCodeDigits = 4
+	// endpointSuggest completes what was typed so far; endpointFree takes a
+	// filter query.
+	endpointSuggest = "suggest"
+	endpointFree    = "free"
+	// headerAccept and mediaTypeJSON ask for a JSON answer.
+	headerAccept  = "Accept"
+	mediaTypeJSON = "application/json"
 )
 
 var (
@@ -89,14 +96,14 @@ func NewPDOK(baseURL string, httpClient *http.Client) *PDOK {
 
 // Ping is the boot check: one search that asks for no rows.
 func (c *PDOK) Ping(ctx context.Context) error {
-	_, err := c.search(ctx, "free", url.Values{"q": {"*:*"}, "fq": {addressType}, "rows": {"0"}})
+	_, err := c.search(ctx, endpointFree, url.Values{"q": {"*:*"}, "fq": {addressType}, "rows": {"0"}})
 	return err
 }
 
 // Suggest returns the addresses that best match what someone typed so far;
 // one without a postal code is left out.
 func (c *PDOK) Suggest(ctx context.Context, query string) ([]Address, error) {
-	return c.search(ctx, "suggest", url.Values{
+	return c.search(ctx, endpointSuggest, url.Values{
 		"q": {query}, "fq": {addressType}, "fl": {addressFields}, "rows": {strconv.Itoa(suggestRows)},
 	})
 }
@@ -107,7 +114,7 @@ func (c *PDOK) Find(ctx context.Context, postalCode string, houseNumber int) ([]
 	if _, ok := PostalCode(postalCode); !ok {
 		return nil, fmt.Errorf("addresslookup: %q is not a Dutch postal code", postalCode)
 	}
-	return c.search(ctx, "free", url.Values{
+	return c.search(ctx, endpointFree, url.Values{
 		"q":  {"*:*"},
 		"fq": {addressType, "postcode:" + postalCode, "huisnummer:" + strconv.Itoa(houseNumber)},
 		"fl": {addressFields}, "rows": {strconv.Itoa(findRows)},
@@ -130,7 +137,7 @@ func (c *PDOK) search(ctx context.Context, endpoint string, params url.Values) (
 	if err != nil {
 		return nil, fmt.Errorf("addresslookup: build %s request: %w", endpoint, err)
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set(headerAccept, mediaTypeJSON)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("addresslookup: %s: %w", endpoint, err)

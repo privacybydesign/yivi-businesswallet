@@ -814,10 +814,12 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	if _, err := orgs.UpdateMemberType(actorCtx(pickAdmin()), orgID, members.vog, organization.MemberTypeExternal, nil); err != nil {
 		return fmt.Errorf("seed: vog member type: %w", err)
 	}
+
 	policy, err := orgs.GetScreeningSettings(ctx, orgID)
 	if err != nil {
 		return fmt.Errorf("seed: screening settings: %w", err)
 	}
+
 	if _, err := orgs.SaveScreeningSettings(actorCtx(pickAdmin()), orgID, organization.ScreeningSettingsInput{
 		RequiredFor:                 organization.ScreeningRequiredForExternals,
 		RequiredCodes:               policy.RequiredCodes,
@@ -829,6 +831,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	}); err != nil {
 		return fmt.Errorf("seed: screening policy: %w", err)
 	}
+
 	vogRequester := pickAdmin()
 	if _, err := orgs.RequestVog(actorCtx(vogRequester), orgID, []uuid.UUID{members.vog}, vogRequester, ""); err != nil {
 		return fmt.Errorf("seed: request vog: %w", err)

@@ -661,7 +661,7 @@ func TestDocumentKindOf(t *testing.T) {
 	}
 }
 
-func TestAcceptsDocumentTypeByCodeOrKind(t *testing.T) {
+func TestAcceptsTypeByCodeOrKind(t *testing.T) {
 	accepts := func(accepted []string, code, kind string) bool {
 		return (&FlowDefinition{AcceptedDocumentTypes: accepted}).AcceptsDocumentType(code, kind)
 	}

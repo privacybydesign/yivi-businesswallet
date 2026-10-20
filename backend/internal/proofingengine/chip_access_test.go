@@ -32,7 +32,7 @@ func TestChipAccessWhileReading(t *testing.T) {
 }
 
 // A residence permit's chip access key names it as a permit, not an identity card.
-func TestChipAccessAcceptsResidencePermit(t *testing.T) {
+func TestValidChipAccessTypes(t *testing.T) {
 	for _, typ := range []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard, flow.DocumentKindResidencePermit, flow.DocumentTypeDrivingLicence} {
 		if !validChipAccessDocumentType(typ) {
 			t.Errorf("validChipAccessDocumentType(%q) = false", typ)

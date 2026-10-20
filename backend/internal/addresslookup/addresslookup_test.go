@@ -107,7 +107,7 @@ func TestFind(t *testing.T) {
 	}
 }
 
-func TestFindRefusesOtherPostalCodes(t *testing.T) {
+func TestFindRefusesBadPostalCode(t *testing.T) {
 	c, seen := newPDOK(t, http.StatusOK)
 	if _, err := c.Find(context.Background(), "1015CP OR *:*", 12); err == nil {
 		t.Fatal("Find took a postal code that is none")

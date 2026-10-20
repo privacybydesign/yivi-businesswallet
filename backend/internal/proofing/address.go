@@ -178,6 +178,7 @@ func (s *FlowAddressStore) All(ctx context.Context, orgID uuid.UUID) (map[string
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list address settings org %s: %w", orgID, err)
 	}
+
 	out := map[string]AddressMode{}
 	var flowID string
 	var mode AddressMode
@@ -228,10 +229,12 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	if err != nil {
 		return false, fmt.Errorf("proofing: marshal address request %s: %w", req.ID, err)
 	}
+
 	sealed, err := s.cipher.Encrypt(plain)
 	if err != nil {
 		return false, fmt.Errorf("proofing: encrypt address request %s: %w", req.ID, err)
 	}
+
 	added := false
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
@@ -244,11 +247,13 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 			return nil
 		}
 		added = true
+
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingAddressAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(map[string]any{}))); err != nil {
 			return err
 		}
+
 		data := sessionEventData(req, req.Status)
 		data[webhookAddressKey] = addr
 		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionAddressAdded, &req.ID, data)
@@ -354,14 +359,17 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	if err := s.addressOpen(req); err != nil {
 		return Request{}, err
 	}
+
 	addr, err := addr.normalized()
 	if err != nil {
 		return Request{}, err
 	}
+
 	addr, err = s.verifyAddress(ctx, addr)
 	if err != nil {
 		return Request{}, err
 	}
+
 	added, err := s.requests.AddAddress(ctx, req, addr)
 	if err != nil {
 		return Request{}, err
@@ -370,6 +378,7 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	if !added {
 		return Request{}, ErrAddressClosed
 	}
+
 	now := s.now()
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
 	return req, nil
@@ -386,14 +395,17 @@ func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, err
 		addr.Verification = AddressUnsupported
 		return addr, nil
 	}
+
 	number, ok := addresslookup.HouseNumber(addr.HouseNumber)
 	if !ok {
 		return Address{}, fmt.Errorf("%w: the house number must start with a number", ErrAddressNotFound)
 	}
+
 	if s.addressLookup == nil {
 		addr.Verification = AddressUnchecked
 		return addr, nil
 	}
+
 	lookupCtx, cancel := context.WithTimeout(ctx, addressLookupTimeout)
 	defer cancel()
 	found, err := s.addressLookup.Find(lookupCtx, postalCode, number)
@@ -402,6 +414,7 @@ func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, err
 		addr.Verification = AddressUnchecked
 		return addr, nil
 	}
+
 	for _, f := range found {
 		if addressKey(f.HouseNumber) == addressKey(addr.HouseNumber) && addressKey(f.Street) == addressKey(addr.Street) {
 			addr.Street, addr.HouseNumber, addr.PostalCode, addr.City = f.Street, f.HouseNumber, f.PostalCode, f.City
@@ -450,15 +463,20 @@ func (s *Service) addressSuggestions(ctx context.Context, req Request, query str
 	if err := s.addressOpen(req); err != nil {
 		return nil, err
 	}
+
 	query = strings.TrimSpace(query)
-	if n := utf8.RuneCountInString(query); n > maxAddressFieldRunes {
+	n := utf8.RuneCountInString(query)
+	if n > maxAddressFieldRunes {
 		return nil, fmt.Errorf("%w: q is at most %d characters", ErrInvalidInput, maxAddressFieldRunes)
-	} else if n < minSuggestQueryRunes {
+	}
+	if n < minSuggestQueryRunes {
 		return []addresslookup.Address{}, nil
 	}
+
 	if s.addressLookup == nil {
 		return nil, ErrAddressLookupUnavailable
 	}
+
 	lookupCtx, cancel := context.WithTimeout(ctx, addressLookupTimeout)
 	defer cancel()
 	found, err := s.addressLookup.Suggest(lookupCtx, query)

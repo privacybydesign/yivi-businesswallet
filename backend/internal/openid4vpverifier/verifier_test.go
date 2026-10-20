@@ -83,7 +83,7 @@ func TestLoginQueryIsEmailOnly(t *testing.T) {
 	}
 }
 
-func TestIdentityQueryOffersPassportIDCardOrResidencePermit(t *testing.T) {
+func TestIdentityQueryDocuments(t *testing.T) {
 	q := identityQuery()
 	if len(q.Credentials) != 5 {
 		t.Fatalf("credentials = %d, want 5 (passport, idcard, residencepermit, email, phone)", len(q.Credentials))

@@ -66,9 +66,22 @@ type Scope int
 const (
 	// ScopeLogin discloses only the email — enough to identify the account.
 	ScopeLogin Scope = iota
+	// ScopeIdentity additionally discloses a verified identity (passport,
+	// id-card OR residence permit) and phone, for flows that must match a real
+	// person (invitation accept, and later the KVK-facing wallet bootstrap).
 	ScopeIdentity
+	// ScopeVog discloses the pbdf.vog credential (#242 §4), for the opt-in
+	// credential-disclosure screening path. Its claim list is dynamic (only the
+	// org's required aspect flags), so callers pass it via claims.
 	ScopeVog
+	// ScopeIdentityVog discloses everything ScopeIdentity does plus the pbdf.vog
+	// credential, in one presentation: for a member who has never identified
+	// and is asked for a VOG, one scan establishes the identity the VOG is then
+	// matched against. Its vog claim list is dynamic like ScopeVog's.
 	ScopeIdentityVog
+	// ScopeProofing discloses a passport, id-card OR residence permit with its
+	// photo, for the identity proofing Yivi method: the photo is the reference
+	// the subject's live face is checked against (internal/proofing).
 	ScopeProofing
 )
 
@@ -149,9 +162,8 @@ func identityVogQuery(aspectClaims []string) dcqlQuery {
 }
 
 // proofingQuery discloses a verified identity (passport, id-card OR residence
-// permit) with the
-// credential's photo, and nothing else: no email or phone, which proofing a
-// person does not need.
+// permit) with the credential's photo, and nothing else: no email or phone,
+// which proofing a person does not need.
 func proofingQuery() dcqlQuery {
 	claims := claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality, ClaimPhoto)
 	return dcqlQuery{

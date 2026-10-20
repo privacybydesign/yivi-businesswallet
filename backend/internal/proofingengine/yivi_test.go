@@ -107,7 +107,7 @@ func TestConcurrentFramesBudget(t *testing.T) {
 }
 
 // The disclosed credential, not its claims, tells a residence permit apart.
-func TestDocumentFromDisclosureKind(t *testing.T) {
+func TestDisclosureDocumentKind(t *testing.T) {
 	for credential, want := range map[string]string{
 		"pbdf-staging.pbdf.passport":        flow.DocumentKindPassport,
 		"pbdf-staging.pbdf.idcard":          flow.DocumentKindIdentityCard,

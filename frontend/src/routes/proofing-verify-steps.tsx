@@ -807,13 +807,15 @@ function AddressStep({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          {search.trim() !== "" && (
-            <AddressSuggestions
-              suggestions={suggestions.data}
-              unavailable={suggestions.isError}
-              onPick={pick}
-            />
-          )}
+          <div aria-live="polite">
+            {search.trim() !== "" && (
+              <AddressSuggestions
+                suggestions={suggestions.data}
+                unavailable={suggestions.isError}
+                onPick={pick}
+              />
+            )}
+          </div>
           <p className={HINT}>{t("identityProofing.address.search.hint")}</p>
         </div>
       )}
@@ -858,7 +860,9 @@ function AddressStep({
         <p className={HINT}>{t("identityProofing.address.closed")}</p>
       )}
       {submit.isError && (
-        <p className={ERROR}>{proofingErrorMessage(submit.error, t)}</p>
+        <p role="alert" className={ERROR}>
+          {proofingErrorMessage(submit.error, t)}
+        </p>
       )}
 
       <div className="border-line flex items-center justify-between gap-3 border-t pt-4">
