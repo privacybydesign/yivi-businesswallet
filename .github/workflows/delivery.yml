@@ -112,7 +112,6 @@ jobs:
           scan_dependencies: false
           scan_container: true
           image: local/${{ matrix.component }}:scan
-          project_name: ${{ github.repository }}/${{ matrix.component }}
           scan_summary_output_type: table
 
       # The scan gates delivery directly: fail-build fails the job when a fixable
