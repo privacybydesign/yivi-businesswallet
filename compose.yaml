@@ -114,6 +114,8 @@ services:
       # Where the Idem app reaches /api/v1/app; empty is APP_BASE_URL. A phone
       # needs an address it can reach, e.g. http://<LAN-IP>:8080.
       IDENTITY_PROOFING_PUBLIC_URL: ${IDENTITY_PROOFING_PUBLIC_URL:-}
+      # The https App Link a claim opens the Idem app with; empty is vcmrtd://verify.
+      IDENTITY_PROOFING_APP_LINK_URL: ${IDENTITY_PROOFING_APP_LINK_URL:-}
       # The Regula Face API for face verification; empty disables it.
       REGULA_FACE_API_URL: ${REGULA_FACE_API_URL:-}
       REGULA_FACE_API_PUBLIC_URL: ${REGULA_FACE_API_PUBLIC_URL:-}

@@ -105,6 +105,12 @@ const (
 	// defaults to APP_BASE_URL. Set it when the phone reaches the backend by
 	// another address (e.g. the LAN IP in development).
 	envIdentityProofingPublicURL = "IDENTITY_PROOFING_PUBLIC_URL"
+	// envIdentityProofingAppLinkURL is the https App Link / Universal Link a
+	// claim opens the Idem app with (https://idem.yivi.app/verify), carrying the
+	// same handover= and api= as the vcmrtd://verify link it replaces. Empty
+	// keeps vcmrtd://verify, which mail clients and in-app browsers often do not
+	// open; set it once the app version that handles the https link is out.
+	envIdentityProofingAppLinkURL = "IDENTITY_PROOFING_APP_LINK_URL"
 	// The Regula Face API: the native face step's liveness and match, and the
 	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
 	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
@@ -431,6 +437,9 @@ type Config struct {
 	IdentityProofingProvider string
 	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
 	IdentityProofingPublicURL string
+	// IdentityProofingAppLinkURL is the https link a claim opens the Idem app
+	// with (envIdentityProofingAppLinkURL); empty is vcmrtd://verify.
+	IdentityProofingAppLinkURL string
 	// IdentityProofingStubOutcome is what every stub session decides; empty
 	// leaves them undecided until they expire.
 	IdentityProofingStubOutcome string
@@ -695,6 +704,10 @@ func Load() (Config, error) {
 	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, identityProofingPublicURL); err != nil {
 		return Config{}, err
 	}
+	identityProofingAppLinkURL := os.Getenv(envIdentityProofingAppLinkURL)
+	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, identityProofingAppLinkURL); err != nil {
+		return Config{}, err
+	}
 	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
 	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
 		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
@@ -796,6 +809,7 @@ func Load() (Config, error) {
 		IdentityProofingProvider:      identityProofingProvider,
 		IdentityProofingStubOutcome:   identityProofingStubOutcome,
 		IdentityProofingPublicURL:     identityProofingPublicURL,
+		IdentityProofingAppLinkURL:    identityProofingAppLinkURL,
 		DevMode:                       devMode,
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 		RegulaFaceAPIURL:              regulaFaceAPIURL,
@@ -917,6 +931,23 @@ func requireAbsoluteHTTPURL(key, raw string) error {
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("config: %s %q must be an absolute http(s) URL", key, raw)
+	}
+	return nil
+}
+
+// requireAppLinkURL accepts an empty value, or an https URL with a host and no
+// query or fragment: an App Link / Universal Link is https only, even on a
+// local stack, and the engine appends the claim's own query to it.
+func requireAppLinkURL(key, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: %s %q: %w", key, raw, err)
+	}
+	if u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return fmt.Errorf("config: %s %q must be an https URL with no query or fragment", key, raw)
 	}
 	return nil
 }

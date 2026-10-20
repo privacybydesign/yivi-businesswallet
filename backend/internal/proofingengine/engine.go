@@ -68,6 +68,10 @@ type Config struct {
 	// PublicBaseURL is the origin the Idem app reaches /api/v1/app at: the
 	// api= of every vcmrtd deep link.
 	PublicBaseURL string
+	// AppLinkURL is the https App Link / Universal Link a claim opens the Idem
+	// app with (e.g. https://idem.yivi.app/verify), before its handover= and
+	// api=; empty is the app's own vcmrtdClaimLink scheme.
+	AppLinkURL string
 
 	// Now is the clock a document's expiry date is judged against; nil is
 	// time.Now. A test sets it to read a fixture document while it was valid.

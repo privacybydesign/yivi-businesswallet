@@ -531,11 +531,12 @@ func TestRenderQRBlockInlinesImage(t *testing.T) {
 	}
 }
 
-// The proofing link is a vcmrtd deep link and nothing else: an http(s) URL or
-// another scheme in its place is refused, not delivered.
+// The proofing link is a vcmrtd deep link or an absolute http(s) URL (its
+// https App Link form) and nothing else: another scheme, or a vcmrtd link
+// without a host, is refused, not delivered.
 func TestRenderAppLinkKeepsScheme(t *testing.T) {
 	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
-	for _, link := range []string{"https://wallet.example.org/proof/abc", "javascript:alert(1)", "vcmrtd:verify"} {
+	for _, link := range []string{"javascript:alert(1)", "vcmrtd:verify", "https:/no-host"} {
 		_, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
 			varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
 			varSupportContact: "", varPrivacyURL: "",
@@ -543,6 +544,23 @@ func TestRenderAppLinkKeepsScheme(t *testing.T) {
 		if err == nil {
 			t.Errorf("Render accepted %q as the proofing link", link)
 		}
+	}
+}
+
+// The https App Link a deployment with IDENTITY_PROOFING_APP_LINK_URL sends is
+// delivered as the proofing link, in the button and the QR alike.
+func TestRenderAcceptsHTTPSAppLink(t *testing.T) {
+	tpl, _ := DefaultTemplate(KindIdentityProofingRequested, LocaleEN)
+	const link = "https://idem.yivi.app/verify?handover=abc&api=https%3A%2F%2Fproofing.example.org"
+	body, err := Render(KindIdentityProofingRequested, LocaleEN, tpl, resolveBrand(Seeds{}), map[string]string{
+		varOrgName: "Acme BV", varRequesterName: "Sam", varProofingURL: link, varValidMinutes: "10",
+		varSupportContact: "", varPrivacyURL: "",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(body.InlineQR) != 1 || !strings.Contains(body.TextBody, link) {
+		t.Errorf("the mail does not carry the https App Link as its QR and link:\n%s", body.TextBody)
 	}
 }
 

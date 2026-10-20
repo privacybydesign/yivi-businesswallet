@@ -194,6 +194,7 @@ func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.P
 	case config.ProviderEngine:
 		engineCfg := proofingengine.DefaultConfig()
 		engineCfg.PublicBaseURL = cfg.IdentityProofingPublicURL
+		engineCfg.AppLinkURL = cfg.IdentityProofingAppLinkURL
 		engineCfg.DeviceTrail = trail
 		engineCfg.Branding = branding
 		if cfg.RegulaFaceAPIURL != "" {
