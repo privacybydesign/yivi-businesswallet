@@ -15,7 +15,7 @@ originele taal. Een bronnenlijst met URL's staat onderaan; `[Bn]` verwijst daarn
 - Bezit en binding worden op Low dus **verondersteld, niet geverifieerd**. Binding (is dit de persoon
   van het document?) hoeft op Low niet gecontroleerd te worden. Een gezichtscheck is niet vereist.
 - Onze definitie (chip lezen, Passive Authentication slaagt, verlopen documenten geweigerd) **voldoet
-  aan Low** voor het identiteitsvaststellingsdeel. Op echtheid zit ze er ruim boven: het
+  aan Low** voor het identiteitsvaststellingsdeel. Op echtheid zit ze er ruim boven: de
   handtekeningcontrole van de uitgever is volgens de officiële LoA-guidance "best practice", en een
   "elaborate check" is op Low niet nodig [B10]. Ze schiet nergens tekort.
 - De restrisico's zijn precies wat Low toestaat. Passive Authentication "does not prevent exact copying
@@ -343,7 +343,7 @@ tegen die tekst gecontroleerd.
 - Code (op `origin/main`): `backend/internal/proofingengine/flow/flow.go` (`LevelRequirements`,
   `checkStepBindings`), `backend/internal/proofingengine/sessions.go` (`flowComplianceFailure`,
   `DOC_EXPIRED`), `frontend/src/lib/identity-proofing.ts` (`LEVEL_REQUIREMENTS`),
-  `.ai/features/identity-proofing.md`, `.ai/plans/identity-proofing.md`.
+  `.ai/features/identity-proofing.md`.
 
 Niet geverifieerd: of de wijziging van de Regeling betrouwbaarheidsniveaus [B14] ongewijzigd is
 vastgesteld (de DigiD-beschrijvingen komen uit de toelichting bij de consultatieversie). De werking van de
