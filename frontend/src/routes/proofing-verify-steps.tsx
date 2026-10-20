@@ -12,10 +12,12 @@ import {
   useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
   useSubmitAddressMutation,
+  useAddressSuggestionsQuery,
 } from "../api/identity-proofing.queries";
 import type {
   AddressMode,
-  ProofingAddress,
+  AddressSuggestion,
+  ProofingAddressInput,
   DiplomaMode,
   DiplomaVerdict,
   ProofingCustomer,
@@ -41,6 +43,7 @@ import {
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
+import { useDebouncedValue } from "../lib/use-debounced-value";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
@@ -84,6 +87,8 @@ export interface VerifyFlowInfo {
 
 // Where a subject logs in with DigiD to download the extract of a diploma.
 const MIJN_DUO_URL = "https://mijn.duo.nl";
+// How long typing in the address search pauses before addresses are asked for.
+const ADDRESS_SEARCH_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
@@ -718,9 +723,9 @@ const ADDRESS_FIELDS = [
   "postalCode",
   "city",
   "country",
-] as const satisfies readonly (keyof ProofingAddress)[];
+] as const satisfies readonly (keyof ProofingAddressInput)[];
 
-const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddress, string> = {
+const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddressInput, string> = {
   street: "address-line1",
   houseNumber: "off",
   postalCode: "postal-code",
@@ -728,7 +733,7 @@ const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddress, string> = {
   country: "country-name",
 };
 
-const EMPTY_ADDRESS: ProofingAddress = {
+const EMPTY_ADDRESS: ProofingAddressInput = {
   street: "",
   houseNumber: "",
   postalCode: "",
@@ -750,8 +755,11 @@ function AddressStep({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const submit = useSubmitAddressMutation(target);
-  const [address, setAddress] = useState<ProofingAddress>(EMPTY_ADDRESS);
+  const [address, setAddress] = useState<ProofingAddressInput>(EMPTY_ADDRESS);
   const [touched, setTouched] = useState(false);
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search.trim(), ADDRESS_SEARCH_DEBOUNCE_MS);
+  const suggestions = useAddressSuggestionsQuery(target, query);
   const secondsLeft = useSecondsLeft(until);
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
@@ -761,6 +769,15 @@ function AddressStep({
     setTouched(true);
     if (missing.length > 0) return;
     submit.mutate(address, { onSuccess: onDone });
+  }
+
+  // A picked address fills the form as the register writes it.
+  function pick(suggestion: AddressSuggestion): void {
+    setAddress({
+      ...suggestion,
+      country: t("identityProofing.address.netherlands"),
+    });
+    setSearch("");
   }
 
   return (
@@ -776,6 +793,30 @@ function AddressStep({
         </h2>
         <p className={HINT}>{t("identityProofing.address.intro")}</p>
       </div>
+
+      {open && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="proofing-address-search" className={LABEL}>
+            {t("identityProofing.address.search.label")}
+          </label>
+          <Input
+            id="proofing-address-search"
+            icon="search"
+            autoComplete="off"
+            placeholder={t("identityProofing.address.search.placeholder")}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          {search.trim() !== "" && (
+            <AddressSuggestions
+              suggestions={suggestions.data}
+              unavailable={suggestions.isError}
+              onPick={pick}
+            />
+          )}
+          <p className={HINT}>{t("identityProofing.address.search.hint")}</p>
+        </div>
+      )}
 
       {open ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
@@ -833,6 +874,46 @@ function AddressStep({
         )}
       </div>
     </form>
+  );
+}
+
+// What the address search found for what was typed: the addresses to pick,
+// or why there are none. Nothing shows while the first answer is on its way.
+function AddressSuggestions({
+  suggestions,
+  unavailable,
+  onPick,
+}: {
+  suggestions: AddressSuggestion[] | undefined;
+  unavailable: boolean;
+  onPick: (suggestion: AddressSuggestion) => void;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (unavailable) {
+    return (
+      <p className={HINT}>{t("identityProofing.address.search.unavailable")}</p>
+    );
+  }
+  if (suggestions === undefined) {
+    return null;
+  }
+  if (suggestions.length === 0) {
+    return <p className={HINT}>{t("identityProofing.address.search.none")}</p>;
+  }
+  return (
+    <ul className="border-line rounded-yivi divide-line flex flex-col divide-y border">
+      {suggestions.map((s) => (
+        <li key={`${s.postalCode} ${s.houseNumber}`}>
+          <button
+            type="button"
+            className="text-ink hover:bg-surface-3 w-full px-3 py-2 text-left text-[13px]"
+            onClick={() => onPick(s)}
+          >
+            {`${s.street} ${s.houseNumber}, ${s.postalCode} ${s.city}`}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -61,7 +61,7 @@ func TestAddressSealedUntilPurge(t *testing.T) {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 
-	addr := Address{Street: "Kerkstraat", HouseNumber: "12a", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland"}
+	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
 	if added, err := requests.AddAddress(ctx, req, addr); err != nil || !added {
 		t.Fatalf("AddAddress = %v, %v; want added", added, err)
 	}

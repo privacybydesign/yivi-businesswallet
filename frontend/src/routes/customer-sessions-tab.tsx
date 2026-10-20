@@ -22,6 +22,7 @@ import {
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
 import {
+  addressVerificationNote,
   assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
@@ -421,7 +422,7 @@ function AddressTag({
   return null;
 }
 
-// The postal address the subject entered, as they declared it.
+// The postal address the subject entered, and how it was checked.
 function SessionAddress({
   request,
 }: {
@@ -445,7 +446,7 @@ function SessionAddress({
           {a.country}
         </address>
       )}
-      <p className={HINT}>{t("customers.sessions.address.declared")}</p>
+      <p className={HINT}>{addressVerificationNote(a?.verification, t)}</p>
     </div>
   );
 }

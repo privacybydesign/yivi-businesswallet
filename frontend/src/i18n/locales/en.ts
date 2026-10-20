@@ -587,6 +587,8 @@ export const en = {
       addressClosed:
         "The address can only be entered once, for a while after the identity check succeeded.",
       addressNotAsked: "This check does not ask for an address.",
+      addressNotFound:
+        "This address is not in the Dutch address register. Check the postal code, house number and street, or search for your address above.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -605,7 +607,16 @@ export const en = {
       identityDone: "Your identity is verified.",
       heading: "Now enter your address",
       intro:
-        "Enter the address where you live. It is kept with your verified identity, as you enter it.",
+        "Enter the address where you live. It is kept with your verified identity. A Dutch address is checked against the Dutch address register.",
+      search: {
+        label: "Find your address",
+        placeholder: "Postal code and house number, or street and city",
+        hint: "Pick your address to fill in the fields below. Living outside the Netherlands? Fill in the fields yourself.",
+        none: "No Dutch address found. Fill in the fields below.",
+        unavailable:
+          "Searching for addresses is not possible right now. Fill in the fields below.",
+      },
+      netherlands: "Netherlands",
       fields: {
         street: "Street",
         houseNumber: "House number",
@@ -1047,6 +1058,11 @@ export const en = {
         none: "No address entered.",
         missing: "No address",
         declared: "As the person entered it; not checked against a document.",
+        verified: "Found in the Dutch address register (BAG).",
+        unchecked:
+          "As the person entered it; the Dutch address register could not be reached to check it.",
+        unsupported:
+          "As the person entered it; only Dutch addresses are checked against a register.",
       },
       diplomas: {
         title: "Diplomas",
@@ -1362,7 +1378,7 @@ export const en = {
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",
       addressHint:
-        "After the identity check, in the browser rather than the Idem app: the person enters their postal address, kept as they declare it and not checked against a document. Such a flow is shown on screen or sent as a hosted link, never mailed.",
+        "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       diplomaUploadHint:
         "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       faceLocationNative:

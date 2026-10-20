@@ -174,6 +174,8 @@ type Service struct {
 	// dataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	dataRequests dataRequestStore
+	// addressLookup is the Dutch address register; nil checks no address.
+	addressLookup addressLookup
 }
 
 // Stores are the service's persistence, one store per concern.

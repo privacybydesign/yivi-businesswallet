@@ -3,10 +3,13 @@ package proofing
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 )
 
 type fakeFlowAddresses struct{ modes map[string]AddressMode }
@@ -79,8 +82,10 @@ func TestAddAddressTrimsAndKeeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddAddress: %v", err)
 	}
-	if *got.SubjectAddress != testAddress || *f.requests.stored.SubjectAddress != testAddress {
-		t.Errorf("address = %+v, stored %+v; want %+v", *got.SubjectAddress, *f.requests.stored.SubjectAddress, testAddress)
+	want := testAddress
+	want.Verification = AddressUnchecked
+	if *got.SubjectAddress != want || *f.requests.stored.SubjectAddress != want {
+		t.Errorf("address = %+v, stored %+v; want %+v", *got.SubjectAddress, *f.requests.stored.SubjectAddress, want)
 	}
 }
 
@@ -113,5 +118,127 @@ func TestAddAddressRefused(t *testing.T) {
 				t.Errorf("AddAddress = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// fakeAddressLookup is the register: found at every postal code and number,
+// err when it cannot be asked.
+type fakeAddressLookup struct {
+	found   []addresslookup.Address
+	err     error
+	queries []string
+}
+
+func (f *fakeAddressLookup) Suggest(_ context.Context, query string) ([]addresslookup.Address, error) {
+	f.queries = append(f.queries, query)
+	return f.found, f.err
+}
+
+func (f *fakeAddressLookup) Find(_ context.Context, postalCode string, houseNumber int) ([]addresslookup.Address, error) {
+	f.queries = append(f.queries, postalCode+" "+strconv.Itoa(houseNumber))
+	return f.found, f.err
+}
+
+var registerAddress = addresslookup.Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen"}
+
+func TestAddAddressVerification(t *testing.T) {
+	abroad := Address{Street: "Rue de la Loi", HouseNumber: "16", PostalCode: "1000", City: "Bruxelles", Country: "België"}
+	cases := []struct {
+		name    string
+		lookup  *fakeAddressLookup
+		address Address
+		want    Address
+		query   string
+	}{
+		{
+			"found, kept as the register writes it", &fakeAddressLookup{found: []addresslookup.Address{registerAddress}},
+			Address{Street: "kerkstraat", HouseNumber: "12 a", PostalCode: "6511ab", City: "Nijmegen", Country: "NL"},
+			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressVerified},
+			"6511AB 12",
+		},
+		{
+			"register down", &fakeAddressLookup{err: errors.New("pdok down")}, testAddress,
+			Address{Street: "Kerkstraat", HouseNumber: "12a", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressUnchecked},
+			"6511AB 12",
+		},
+		{
+			"not Dutch", &fakeAddressLookup{}, abroad,
+			Address{Street: "Rue de la Loi", HouseNumber: "16", PostalCode: "1000", City: "Bruxelles", Country: "België", Verification: AddressUnsupported},
+			"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAddressFixture(AddressRequired)
+			f.svc.SetAddressLookup(tc.lookup)
+			req := sendApprovedAddress(t, f, time.Minute)
+			in := tc.address
+			in.Verification = AddressVerified
+			if tc.want.Verification == AddressVerified {
+				in.Verification = ""
+			}
+			got, err := f.svc.AddAddress(context.Background(), testOrg.ID, req.ID, nil, in)
+			if err != nil {
+				t.Fatalf("AddAddress: %v", err)
+			}
+			if *got.SubjectAddress != tc.want {
+				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
+			}
+			if tc.query == "" && len(tc.lookup.queries) != 0 || tc.query != "" && (len(tc.lookup.queries) != 1 || tc.lookup.queries[0] != tc.query) {
+				t.Errorf("register asked %q, want %q", tc.lookup.queries, tc.query)
+			}
+		})
+	}
+}
+
+func TestAddAddressNotInRegister(t *testing.T) {
+	cases := []struct {
+		name    string
+		address Address
+	}{
+		{"other street", Address{Street: "Molenstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
+		{"other letter", Address{Street: "Kerkstraat", HouseNumber: "12B", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
+		{"no number", Address{Street: "Kerkstraat", HouseNumber: "A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAddressFixture(AddressRequired)
+			f.svc.SetAddressLookup(&fakeAddressLookup{found: []addresslookup.Address{registerAddress}})
+			req := sendApprovedAddress(t, f, time.Minute)
+			if _, err := f.svc.AddAddress(context.Background(), testOrg.ID, req.ID, nil, tc.address); !errors.Is(err, ErrAddressNotFound) {
+				t.Fatalf("AddAddress = %v, want ErrAddressNotFound", err)
+			}
+			if f.requests.stored.SubjectAddress != nil {
+				t.Errorf("address kept: %+v", *f.requests.stored.SubjectAddress)
+			}
+		})
+	}
+}
+
+func TestAddressSuggestions(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	lookup := &fakeAddressLookup{found: []addresslookup.Address{registerAddress}}
+	f.svc.SetAddressLookup(lookup)
+	req := sendApprovedAddress(t, f, time.Minute)
+
+	short, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, " ke ")
+	if err != nil || len(short) != 0 || len(lookup.queries) != 0 {
+		t.Fatalf("short query = %v, %v, asked %q; want nothing asked", short, err, lookup.queries)
+	}
+	got, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, " kerkstraat 12 ")
+	if err != nil || len(got) != 1 || got[0] != registerAddress || lookup.queries[0] != "kerkstraat 12" {
+		t.Fatalf("suggestions = %v, %v, asked %q", got, err, lookup.queries)
+	}
+
+	lookup.err = errors.New("pdok down")
+	if _, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, "kerkstraat"); !errors.Is(err, ErrAddressLookupUnavailable) {
+		t.Errorf("register down = %v, want ErrAddressLookupUnavailable", err)
+	}
+
+	completed := time.Now().Add(-AddressWindow - time.Minute)
+	f.requests.stored.CompletedAt = &completed
+	lookup.queries = nil
+	if _, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, "kerkstraat"); !errors.Is(err, ErrAddressClosed) || len(lookup.queries) != 0 {
+		t.Errorf("window passed = %v, asked %q; want ErrAddressClosed and nothing asked", err, lookup.queries)
 	}
 }

@@ -3,6 +3,7 @@ import { ApiError } from "../api/http";
 import { isDataRequest } from "../api/identity-proofing";
 import type {
   AddressMode,
+  AddressVerification,
   DiplomaMode,
   FlowKind,
   ProofingChannel,
@@ -618,6 +619,24 @@ function serverMessage(error: unknown): string | null {
   return null;
 }
 
+// How a kept address was checked, under it in a session's detail; one kept
+// before addresses were checked reads as declared.
+export function addressVerificationNote(
+  verification: AddressVerification | undefined,
+  t: TFunction,
+): string {
+  switch (verification) {
+    case "verified":
+      return t("customers.sessions.address.verified");
+    case "unchecked":
+      return t("customers.sessions.address.unchecked");
+    case "unsupported":
+      return t("customers.sessions.address.unsupported");
+    case undefined:
+      return t("customers.sessions.address.declared");
+  }
+}
+
 // Why the proofing service did not approve a session, from its errorCode. An
 // unknown code is shown as is, so a new one still says something.
 export function proofingRejectionReason(code: string, t: TFunction): string {
@@ -870,6 +889,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.addressClosed");
     case "address_not_asked":
       return t("identityProofing.errors.addressNotAsked");
+    case "address_not_found":
+      return t("identityProofing.errors.addressNotFound");
     case "flow_no_identity":
       return t("identityProofing.errors.flowNoIdentity");
     case "data_flow_for_member":

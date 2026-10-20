@@ -38,6 +38,12 @@ const ADDRESS_MODES = ["off", "required"] as const;
 const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;
 
+// How an address was checked when it was kept: found in the Dutch address
+// register, Dutch but the register could not be asked, or outside the
+// Netherlands. An address kept before addresses were checked has none.
+const ADDRESS_VERIFICATIONS = ["verified", "unchecked", "unsupported"] as const;
+export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
+
 // The postal address a subject entered.
 const proofingAddressSchema = z.object({
   street: z.string(),
@@ -45,9 +51,22 @@ const proofingAddressSchema = z.object({
   postalCode: z.string(),
   city: z.string(),
   country: z.string(),
+  verification: z.enum(ADDRESS_VERIFICATIONS).optional().catch(undefined),
 });
 
 export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
+// What the address step sends; the backend sets the verification.
+export type ProofingAddressInput = Omit<ProofingAddress, "verification">;
+
+// An address the Dutch address register suggests for what was typed.
+const addressSuggestionSchema = z.object({
+  street: z.string(),
+  houseNumber: z.string(),
+  postalCode: z.string(),
+  city: z.string(),
+});
+
+export type AddressSuggestion = z.infer<typeof addressSuggestionSchema>;
 
 // What a flow's sessions are for: an identity check, or a customer's subject
 // asking for the data held of them ("see my data") or for its erasure
@@ -1411,11 +1430,28 @@ export function uploadProofingDiplomas(
   });
 }
 
+// The Dutch addresses that best match what was typed on a verify page, while
+// it takes the address. Not retried: the next keystroke asks again.
+export function getAddressSuggestions(
+  target: VerifyTarget,
+  query: string,
+  signal?: AbortSignal,
+): Promise<AddressSuggestion[]> {
+  return request(
+    `${verifyPath(target)}/address/suggestions?q=${encodeURIComponent(query)}`,
+    {
+      schema: z.object({ suggestions: z.array(addressSuggestionSchema) }),
+      maxRetries: 0,
+      signal,
+    },
+  ).then((r) => r.suggestions);
+}
+
 // Keeps the postal address entered on a verify page, after an approved
 // identity; the backend answers 204.
 export async function submitProofingAddress(
   target: VerifyTarget,
-  address: ProofingAddress,
+  address: ProofingAddressInput,
   signal?: AbortSignal,
 ): Promise<void> {
   await request(`${verifyPath(target)}/address`, {

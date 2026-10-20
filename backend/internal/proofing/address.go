@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
@@ -51,6 +54,46 @@ var (
 	// ErrAddressNeedsPage is an address flow sent where its subject gets no
 	// page to enter it on: by mail, or as a bare deep link.
 	ErrAddressNeedsPage = errors.New("proofing: a flow that asks for the address runs on a page: show it on screen or send a hosted link")
+	// ErrAddressNotFound is an address with a Dutch postal code that the
+	// register does not have: no such house number there, or another street.
+	ErrAddressNotFound = errors.New("proofing: the address is not in the Dutch address register")
+	// ErrAddressLookupUnavailable is a suggestion the register could not give.
+	ErrAddressLookupUnavailable = errors.New("proofing: the Dutch address register cannot be reached")
+)
+
+// addressLookup is the Dutch address register (addresslookup.PDOK).
+type addressLookup interface {
+	Suggest(ctx context.Context, query string) ([]addresslookup.Address, error)
+	Find(ctx context.Context, postalCode string, houseNumber int) ([]addresslookup.Address, error)
+}
+
+// SetAddressLookup sets the register addresses are checked against and
+// suggested from; call before serving. Without one, a Dutch address is kept
+// AddressUnchecked and nothing is suggested.
+func (s *Service) SetAddressLookup(l addressLookup) { s.addressLookup = l }
+
+// AddressVerification is how an address was checked when it was entered.
+type AddressVerification string
+
+const (
+	// AddressVerified is found in the Dutch address register, its fields
+	// written as the register writes them.
+	AddressVerified AddressVerification = "verified"
+	// AddressUnchecked has a Dutch postal code, but the register could not be
+	// asked.
+	AddressUnchecked AddressVerification = "unchecked"
+	// AddressUnsupported is outside the Netherlands, which has the only
+	// register addresses are checked against.
+	AddressUnsupported AddressVerification = "unsupported"
+)
+
+const (
+	// minSuggestQueryRunes is how much must be typed before addresses are
+	// suggested.
+	minSuggestQueryRunes = 3
+	// addressLookupTimeout bounds one question to the register, so the page
+	// never waits long on it.
+	addressLookupTimeout = 5 * time.Second
 )
 
 // Address is the postal address a subject entered.
@@ -60,6 +103,9 @@ type Address struct {
 	PostalCode  string `json:"postalCode"`
 	City        string `json:"city"`
 	Country     string `json:"country"`
+	// Verification is set when the address is kept; what a page sends is
+	// ignored. An address kept before it was checked has none.
+	Verification AddressVerification `json:"verification,omitempty"`
 }
 
 // normalized trims every field and refuses an address with one empty or too
@@ -312,6 +358,10 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	if err != nil {
 		return Request{}, err
 	}
+	addr, err = s.verifyAddress(ctx, addr)
+	if err != nil {
+		return Request{}, err
+	}
 	added, err := s.requests.AddAddress(ctx, req, addr)
 	if err != nil {
 		return Request{}, err
@@ -323,4 +373,98 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	now := s.now()
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
 	return req, nil
+}
+
+// verifyAddress checks a normalized address with a Dutch postal code against
+// the register: one it has is kept as the register writes it, one it lacks is
+// ErrAddressNotFound. The street must match, so a mistyped postal code that
+// happens to exist is not taken for another address. Any other address is
+// kept as entered.
+func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, error) {
+	postalCode, dutch := addresslookup.PostalCode(addr.PostalCode)
+	if !dutch {
+		addr.Verification = AddressUnsupported
+		return addr, nil
+	}
+	number, ok := addresslookup.HouseNumber(addr.HouseNumber)
+	if !ok {
+		return Address{}, fmt.Errorf("%w: the house number must start with a number", ErrAddressNotFound)
+	}
+	if s.addressLookup == nil {
+		addr.Verification = AddressUnchecked
+		return addr, nil
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, addressLookupTimeout)
+	defer cancel()
+	found, err := s.addressLookup.Find(lookupCtx, postalCode, number)
+	if err != nil {
+		slog.WarnContext(ctx, "proofing: address kept unchecked, the register could not be asked", slog.String("error", err.Error()))
+		addr.Verification = AddressUnchecked
+		return addr, nil
+	}
+	for _, f := range found {
+		if addressKey(f.HouseNumber) == addressKey(addr.HouseNumber) && addressKey(f.Street) == addressKey(addr.Street) {
+			addr.Street, addr.HouseNumber, addr.PostalCode, addr.City = f.Street, f.HouseNumber, f.PostalCode, f.City
+			addr.Verification = AddressVerified
+			return addr, nil
+		}
+	}
+	return Address{}, ErrAddressNotFound
+}
+
+// addressKey is a street or house number as compared with the register's:
+// case, spaces and punctuation left out, so "12 a" is "12A" and "1-2" is "1 2".
+func addressKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, s)
+}
+
+// AddressSuggestions suggests addresses from the register for what was typed
+// on the on-screen page of a request the caller may reach (requestedBy as in
+// Request), while it takes an address.
+func (s *Service) AddressSuggestions(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, query string) ([]addresslookup.Address, error) {
+	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
+	if err != nil {
+		return nil, err
+	}
+	return s.addressSuggestions(ctx, req, query)
+}
+
+// HostedAddressSuggestions is AddressSuggestions for a hosted request.
+func (s *Service) HostedAddressSuggestions(ctx context.Context, token, query string) ([]addresslookup.Address, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return s.addressSuggestions(ctx, req, query)
+}
+
+// addressSuggestions asks the register only for a request that takes an
+// address now, so the route is no open way into it; too short a query
+// suggests nothing.
+func (s *Service) addressSuggestions(ctx context.Context, req Request, query string) ([]addresslookup.Address, error) {
+	if err := s.addressOpen(req); err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if n := utf8.RuneCountInString(query); n > maxAddressFieldRunes {
+		return nil, fmt.Errorf("%w: q is at most %d characters", ErrInvalidInput, maxAddressFieldRunes)
+	} else if n < minSuggestQueryRunes {
+		return []addresslookup.Address{}, nil
+	}
+	if s.addressLookup == nil {
+		return nil, ErrAddressLookupUnavailable
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, addressLookupTimeout)
+	defer cancel()
+	found, err := s.addressLookup.Suggest(lookupCtx, query)
+	if err != nil {
+		slog.WarnContext(ctx, "proofing: no address suggestions, the register could not be asked", slog.String("error", err.Error()))
+		return nil, ErrAddressLookupUnavailable
+	}
+	return found, nil
 }

@@ -6496,7 +6496,12 @@ paths:
       description: >-
         Requires organisation membership (an admin, or the member who sent it). Once, within an
         hour of an approved identity on a request that asks for the address. Every field is
-        required, at most 200 characters, trimmed; a missing one is 400 `invalid_input`. The
+        required, at most 200 characters, trimmed; a missing one is 400 `invalid_input`. An
+        address with a Dutch postal code (`1234 AB`) is checked against the Dutch address
+        register (the BAG): one it has is kept as the register writes its street, house number,
+        postal code and city (`verification: verified`), one it lacks is 422
+        `address_not_found`; while the register cannot be reached it is kept as entered
+        (`unchecked`). Any other address is kept as entered (`unsupported`). The
         address is kept sealed and shown with the request; audited
         `identity_proofing.address_added` without the address (webhook
         `session.address_added`, which carries it).
@@ -6528,6 +6533,68 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The request asks for no address (`address_not_asked`), it holds one already or the window is closed (`address_closed`), or the request was cancelled or erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The address has a Dutch postal code but is not in the Dutch address register (`address_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/address/suggestions:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 200
+        description: What the subject typed so far; under 3 characters suggests nothing.
+    get:
+      tags: [identity-proofing]
+      summary: Suggest Dutch addresses on an on-screen request
+      description: >-
+        Requires organisation membership (an admin, or the member who sent it). While the
+        request takes its address (as the POST), the addresses in the Dutch address register
+        (the BAG, through PDOK) that best match `q`, at most 6. Picking one fills the address
+        form; the POST checks it again.
+      responses:
+        '200':
+          description: The suggested addresses.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingAddressSuggestions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request takes no address now (`address_not_asked`, `address_closed`, `session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The Dutch address register cannot be reached (`address_lookup_unavailable`); the address is entered in full.
           content:
             application/json:
               schema:
@@ -8249,6 +8316,60 @@ paths:
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
           description: The session asks for no address (`address_not_asked`), it holds one already or the window is closed (`address_closed`), or the link was cancelled or erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The address has a Dutch postal code but is not in the Dutch address register (`address_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/address/suggestions:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 200
+        description: What the subject typed so far; under 3 characters suggests nothing.
+    get:
+      tags: [identity-proofing]
+      summary: Suggest Dutch addresses on a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link, by its subject.
+      responses:
+        '200':
+          description: The suggested addresses.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingAddressSuggestions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: The session takes no address now (`address_not_asked`, `address_closed`, `session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The Dutch address register cannot be reached (`address_lookup_unavailable`); the address is entered in full.
           content:
             application/json:
               schema:
@@ -11660,7 +11781,37 @@ components:
         country:
           type: string
           maxLength: 200
+        verification:
+          type: string
+          readOnly: true
+          enum: [verified, unchecked, unsupported]
+          description: >-
+            How the address was checked when it was kept: `verified` is in the Dutch address
+            register and written as the register writes it, `unchecked` has a Dutch postal code
+            but the register could not be reached, `unsupported` is outside the Netherlands.
+            Absent on an address kept before addresses were checked; ignored in a request body.
       required: [street, houseNumber, postalCode, city, country]
+    ProofingAddressSuggestions:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            type: object
+            description: An address as the Dutch address register writes it.
+            properties:
+              street:
+                type: string
+              houseNumber:
+                type: string
+                description: With its letter and addition, as `12A` or `1-2`.
+              postalCode:
+                type: string
+                description: Written `1015 CP`.
+              city:
+                type: string
+            required: [street, houseNumber, postalCode, city]
+      required: [suggestions]
     ProofingFlowDiplomas:
       type: object
       additionalProperties: false

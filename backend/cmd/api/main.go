@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
@@ -83,6 +84,9 @@ const (
 	// validatie.nl retries internally up to three times with backoff (#242); the
 	// client timeout has to outlast that whole sequence, not one attempt.
 	vogHTTPTimeout = 2 * time.Minute
+
+	addressLookupProbeTimeout = 10 * time.Second
+	addressLookupHTTPTimeout  = 10 * time.Second
 
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
@@ -973,6 +977,14 @@ func run() error {
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
+	// The address step checks a Dutch address against the BAG.
+	addressLookup := addresslookup.NewPDOK(cfg.AddressLookupURL, &http.Client{Timeout: addressLookupHTTPTimeout})
+	addressProbeCtx, addressProbeCancel := context.WithTimeout(ctx, addressLookupProbeTimeout)
+	defer addressProbeCancel()
+	if err := addressLookup.Ping(addressProbeCtx); err != nil {
+		return fmt.Errorf("address lookup ping: %w", err)
+	}
+	proofingService.SetAddressLookup(addressLookup)
 	// A customer's session keeps its personal data for its customer's data retention.
 	startPruner(proofingJobs, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session

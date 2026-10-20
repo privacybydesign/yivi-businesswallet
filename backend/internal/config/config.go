@@ -111,6 +111,9 @@ const (
 	// keeps vcmrtd://verify, which mail clients and in-app browsers often do not
 	// open; set it once the app version that handles the https link is out.
 	envIdentityProofingAppLinkURL = "IDENTITY_PROOFING_APP_LINK_URL"
+	// envAddressLookupURL is PDOK's Locatieserver, where the address step
+	// checks a Dutch address against the BAG and suggests addresses from it.
+	envAddressLookupURL = "ADDRESS_LOOKUP_URL"
 	// The Regula Face API: the native face step's liveness and match, and the
 	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
 	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
@@ -329,6 +332,7 @@ const (
 	// can reach.
 	ProviderEngine                  = "engine"
 	defaultIdentityProofingProvider = ProviderEngine
+	defaultAddressLookupURL         = "https://api.pdok.nl/bzk/locatieserver/search/v3_1"
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -440,6 +444,9 @@ type Config struct {
 	// IdentityProofingAppLinkURL is the https link a claim opens the Idem app
 	// with (envIdentityProofingAppLinkURL); empty is vcmrtd://verify.
 	IdentityProofingAppLinkURL string
+	// AddressLookupURL is the Dutch address register's search API
+	// (envAddressLookupURL).
+	AddressLookupURL string
 	// IdentityProofingStubOutcome is what every stub session decides; empty
 	// leaves them undecided until they expire.
 	IdentityProofingStubOutcome string
@@ -708,6 +715,10 @@ func Load() (Config, error) {
 	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, identityProofingAppLinkURL); err != nil {
 		return Config{}, err
 	}
+	addressLookupURL := envOrDefault(envAddressLookupURL, defaultAddressLookupURL)
+	if err := requireAbsoluteHTTPURL(envAddressLookupURL, addressLookupURL); err != nil {
+		return Config{}, err
+	}
 	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
 	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
 		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
@@ -810,6 +821,7 @@ func Load() (Config, error) {
 		IdentityProofingStubOutcome:   identityProofingStubOutcome,
 		IdentityProofingPublicURL:     identityProofingPublicURL,
 		IdentityProofingAppLinkURL:    identityProofingAppLinkURL,
+		AddressLookupURL:              addressLookupURL,
 		DevMode:                       devMode,
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 		RegulaFaceAPIURL:              regulaFaceAPIURL,

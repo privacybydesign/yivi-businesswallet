@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -87,5 +88,34 @@ func (h *Handler) hostedAddAddress(w http.ResponseWriter, r *http.Request) error
 		return mapError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// addressSuggestionsBody is the register's addresses for what was typed.
+type addressSuggestionsBody struct {
+	Suggestions []addresslookup.Address `json:"suggestions"`
+}
+
+// addressSuggestions suggests addresses for ?q= on a request's on-screen page.
+func (h *Handler) addressSuggestions(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	found, err := h.service.AddressSuggestions(r.Context(), orgFromRequest(r).ID, id, requestedBy, r.URL.Query().Get("q"))
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, addressSuggestionsBody{Suggestions: found})
+	return nil
+}
+
+// hostedAddressSuggestions suggests addresses for ?q= on a hosted link's page.
+func (h *Handler) hostedAddressSuggestions(w http.ResponseWriter, r *http.Request) error {
+	found, err := h.service.HostedAddressSuggestions(r.Context(), r.PathValue("token"), r.URL.Query().Get("q"))
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, addressSuggestionsBody{Suggestions: found})
 	return nil
 }

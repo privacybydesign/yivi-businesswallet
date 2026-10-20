@@ -1316,7 +1316,7 @@ editor's Type, and the hosted page.
 
 For onboarding that needs where the person lives. Wallet-side only, like the
 diplomas (§12): the engine knows nothing of it. The address is what the subject
-declares, never read off a document or checked.
+declares, never read off a document; a Dutch one is checked against the BAG.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
   `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
@@ -1335,6 +1335,27 @@ declares, never read off a document or checked.
     the hosted progress says `addressGiven`, never the address).
   - Street, house number, postal code, city and country, each required, trimmed,
     at most 200 characters.
+  - The step offers a search (`GET .../address/suggestions?q=`, both routes,
+    only while the address is open, 3+ characters): PDOK's Locatieserver
+    suggests up to 6 BAG addresses, and a pick fills the form. The form stays
+    for any other address.
+- **Checked** on entry (`verifyAddress`, `internal/addresslookup`), the result
+  in the address as `verification`:
+  - A Dutch postal code (`1234 AB`, which no other country writes) is looked up
+    by postal code and house number; the house number (letter and addition
+    included) and street must match, case and punctuation aside.
+    - Found: kept as the BAG writes it, `verified`.
+    - Not found: 422 `address_not_found`, nothing kept. The BAG has an address
+      from its building permit on, so a real one is never missing.
+    - Register unreachable: kept as entered, `unchecked`, logged.
+  - Any other postal code: kept as entered, `unsupported`.
+  - An address kept before this has no `verification`; the page shows it as
+    declared.
+- **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
+  at boot. A suggestion the register cannot give is 503
+  `address_lookup_unavailable`; the page then just shows the form.
+- The address window keeps a hosted link live (`linkLive`), so typing in the
+  search runs on the live link's rate limit, not the stale one's.
   - The page shows it after the approval and before the diplomas; it hands back
     (`onSettled`) once the address is kept or the window closed.
 - **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on

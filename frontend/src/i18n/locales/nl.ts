@@ -604,6 +604,8 @@ export const nl: Translation<typeof en> = {
       addressClosed:
         "Het adres kan maar één keer worden ingevuld, kort na een geslaagde identiteitscontrole.",
       addressNotAsked: "Deze controle vraagt niet om een adres.",
+      addressNotFound:
+        "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat, of zoek je adres hierboven.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -622,7 +624,16 @@ export const nl: Translation<typeof en> = {
       identityDone: "Je identiteit is geverifieerd.",
       heading: "Vul nu je adres in",
       intro:
-        "Vul het adres in waar je woont. Het wordt bij je geverifieerde identiteit bewaard, zoals je het invult.",
+        "Vul het adres in waar je woont. Het wordt bij je geverifieerde identiteit bewaard. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie.",
+      search: {
+        label: "Zoek je adres",
+        placeholder: "Postcode en huisnummer, of straat en plaats",
+        hint: "Kies je adres om de velden hieronder in te vullen. Woon je buiten Nederland? Vul de velden dan zelf in.",
+        none: "Geen Nederlands adres gevonden. Vul de velden hieronder in.",
+        unavailable:
+          "Adressen zoeken lukt nu niet. Vul de velden hieronder in.",
+      },
+      netherlands: "Nederland",
       fields: {
         street: "Straat",
         houseNumber: "Huisnummer",
@@ -1071,6 +1082,11 @@ export const nl: Translation<typeof en> = {
         missing: "Geen adres",
         declared:
           "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
+        verified: "Gevonden in de Nederlandse adresregistratie (BAG).",
+        unchecked:
+          "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
+        unsupported:
+          "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
       },
       diplomas: {
         title: "Diploma's",
@@ -1391,7 +1407,7 @@ export const nl: Translation<typeof en> = {
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
       addressHint:
-        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in, bewaard zoals hij het opgeeft en niet gecontroleerd tegen een document. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
+        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       diplomaUploadHint:
         "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       faceLocationNative:

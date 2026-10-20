@@ -7,6 +7,7 @@ import type { ProofingFlow } from "../api/identity-proofing";
 import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
   PROOFING_REJECTION_CODES,
+  addressVerificationNote,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -558,6 +559,7 @@ describe("proofingErrorMessage", () => {
     [404, "organization_not_found", "organizationNotFound"],
     [404, "webhook_not_found", "webhookNotFound"],
     [409, "link_started", "linkStarted"],
+    [422, "address_not_found", "addressNotFound"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -570,6 +572,19 @@ describe("proofingErrorMessage", () => {
     expect(proofingErrorMessage(new Error("boom"), t)).toBe(
       t("identityProofing.errors.generic"),
     );
+  });
+});
+
+describe("addressVerificationNote", () => {
+  it.each([
+    ["verified", "verified"],
+    ["unchecked", "unchecked"],
+    ["unsupported", "unsupported"],
+    [undefined, "declared"],
+  ] as const)("says how a %s address was checked", (verification, key) => {
+    const copy = t(`customers.sessions.address.${key}`);
+    expect(copy).not.toBe(`customers.sessions.address.${key}`);
+    expect(addressVerificationNote(verification, t)).toBe(copy);
   });
 });
 

@@ -55,6 +55,7 @@ import {
   submitProofingFaceFrame,
   uploadProofingDiplomas,
   submitProofingAddress,
+  getAddressSuggestions,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -90,7 +91,8 @@ import type {
   DiplomaMode,
   DiplomaVerdict,
   AddressMode,
-  ProofingAddress,
+  AddressSuggestion,
+  ProofingAddressInput,
   FlowKind,
   ProofingDataMatch,
 } from "./identity-proofing";
@@ -118,6 +120,9 @@ const REVIEW_POLL_INTERVAL_MS = 15_000;
 // lingering there for the default five minutes.
 const SECRET_MUTATION_GC_TIME_MS = 0;
 const IDENTITY_RESULT_GC_TIME_MS = 0;
+// How much must be typed before addresses are suggested; the backend suggests
+// nothing for less.
+const ADDRESS_SUGGEST_MIN_CHARS = 3;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -1016,11 +1021,24 @@ export function useUploadDiplomasMutation(
   });
 }
 
+// The Dutch addresses suggested for query; asked once it is long enough.
+export function useAddressSuggestionsQuery(
+  target: VerifyTarget,
+  query: string,
+): UseQueryResult<AddressSuggestion[], Error> {
+  return useQuery<AddressSuggestion[]>({
+    queryKey: [...verifyQueryKey(target), "address-suggestions", query],
+    queryFn: ({ signal }) => getAddressSuggestions(target, query, signal),
+    enabled: query.length >= ADDRESS_SUGGEST_MIN_CHARS,
+    staleTime: Infinity,
+  });
+}
+
 // Keeps the postal address entered on a verify page; the page's progress is
 // refetched, so the step closes.
 export function useSubmitAddressMutation(
   target: VerifyTarget,
-): UseMutationResult<void, Error, ProofingAddress> {
+): UseMutationResult<void, Error, ProofingAddressInput> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (address) => submitProofingAddress(target, address),
