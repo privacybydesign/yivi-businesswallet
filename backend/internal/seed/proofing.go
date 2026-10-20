@@ -138,15 +138,18 @@ var unibetTheme = &demoTheme{
 	logo: unibetLogoPNG,
 }
 
+// odixusBlue is odixus.nl's logo blue.
+const odixusBlue = "#0056AD"
+
 // odixusTheme is odixus.nl's look: its logo blue, the darker blue its
 // gradients end in as accent (the logo's orange does not read on white), its
 // body text, light background, input border, success and danger colours.
 // Its Poppins is not a font the wallet ships; Montserrat is the closest.
 var odixusTheme = &demoTheme{
 	settings: themesettings.SettingsInput{
-		PrimaryColor: "#0056AD", AccentColor: "#0A4286", TextColor: "#2F281E", SurfaceColor: "#F0F4F9",
-		BorderColor: "#E0E0E0", LinkColor: "#0056AD", SuccessColor: "#79B93C", ErrorColor: "#DF6951",
-		TopbarColor: "#0056AD", FontFamily: fontMontserrat,
+		PrimaryColor: odixusBlue, AccentColor: "#0A4286", TextColor: "#2F281E", SurfaceColor: "#F0F4F9",
+		BorderColor: "#E0E0E0", LinkColor: odixusBlue, SuccessColor: "#79B93C", ErrorColor: "#DF6951",
+		TopbarColor: odixusBlue, FontFamily: fontMontserrat,
 	},
 	logo: odixusLogoPNG,
 }

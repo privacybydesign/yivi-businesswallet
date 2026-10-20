@@ -448,7 +448,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		slog.Info("activity already seeded")
 		return nil
 	}
-	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, usersByEmail[identityTestEmail].ID, usersByEmail[vogTestEmail].ID, demoDeptIDs); err != nil {
+	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, testMembers{identity: usersByEmail[identityTestEmail].ID, vog: usersByEmail[vogTestEmail].ID}, demoDeptIDs); err != nil {
 		return err
 	}
 	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
@@ -740,11 +740,17 @@ func ensureMembership(ctx context.Context, orgs *organization.Store, orgID, user
 	return nil
 }
 
+// testMembers are the members seedActivity asks an identification and a VOG
+// of.
+type testMembers struct {
+	identity, vog uuid.UUID
+}
+
 // seedActivity performs real, audited operations — invitations, revocations and
 // the test members' identification and VOG requests — each attributed to a
 // random admin, so the audit log reflects genuine history (every entry
 // corresponds to real data) with varied actors.
-func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins []uuid.UUID, identityMember, vogMember uuid.UUID, deptIDs []uuid.UUID) error {
+func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins []uuid.UUID, members testMembers, deptIDs []uuid.UUID) error {
 	actorCtx := func(actor uuid.UUID) context.Context {
 		return audit.ContextWithActor(ctx, audit.Actor{UserID: actor})
 	}
@@ -799,13 +805,13 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	}
 
 	identityRequester := pickAdmin()
-	if _, err := orgs.RequestIdentification(actorCtx(identityRequester), orgID, []uuid.UUID{identityMember}, identityRequester, ""); err != nil {
+	if _, err := orgs.RequestIdentification(actorCtx(identityRequester), orgID, []uuid.UUID{members.identity}, identityRequester, ""); err != nil {
 		return fmt.Errorf("seed: request identification: %w", err)
 	}
 
 	// The VOG test member is an external, and the policy asks a VOG of
 	// externals only, so the admins' own rows stay "not required".
-	if _, err := orgs.UpdateMemberType(actorCtx(pickAdmin()), orgID, vogMember, organization.MemberTypeExternal, nil); err != nil {
+	if _, err := orgs.UpdateMemberType(actorCtx(pickAdmin()), orgID, members.vog, organization.MemberTypeExternal, nil); err != nil {
 		return fmt.Errorf("seed: vog member type: %w", err)
 	}
 	policy, err := orgs.GetScreeningSettings(ctx, orgID)
@@ -824,7 +830,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		return fmt.Errorf("seed: screening policy: %w", err)
 	}
 	vogRequester := pickAdmin()
-	if _, err := orgs.RequestVog(actorCtx(vogRequester), orgID, []uuid.UUID{vogMember}, vogRequester, ""); err != nil {
+	if _, err := orgs.RequestVog(actorCtx(vogRequester), orgID, []uuid.UUID{members.vog}, vogRequester, ""); err != nil {
 		return fmt.Errorf("seed: request vog: %w", err)
 	}
 

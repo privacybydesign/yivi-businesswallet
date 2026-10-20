@@ -748,11 +748,11 @@ function AddressStep({
   target,
   until,
   onDone,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   until: string;
   onDone: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const submit = useSubmitAddressMutation(target);
   const [address, setAddress] = useState<ProofingAddressInput>(EMPTY_ADDRESS);
@@ -883,11 +883,11 @@ function AddressSuggestions({
   suggestions,
   unavailable,
   onPick,
-}: {
+}: Readonly<{
   suggestions: AddressSuggestion[] | undefined;
   unavailable: boolean;
   onPick: (suggestion: AddressSuggestion) => void;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (unavailable) {
     return (

@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -85,10 +87,18 @@ func TestAddressSealedUntilPurge(t *testing.T) {
 		t.Errorf("deliveries = %+v, %v; want one session.address_added", deliveries, err)
 	}
 
-	if err := requests.Purge(ctx, got, nil); err != nil {
+	assertAddressPurged(t, pool, requests, got)
+}
+
+// assertAddressPurged purges req and checks that neither it nor a webhook
+// delivery about it still carries the address.
+func assertAddressPurged(t *testing.T, pool *pgxpool.Pool, requests *RequestStore, req Request) {
+	t.Helper()
+	ctx := context.Background()
+	if err := requests.Purge(ctx, req, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	purged, err := requests.Get(ctx, orgID, req.ID)
+	purged, err := requests.Get(ctx, req.OrganizationID, req.ID)
 	if err != nil || purged.SubjectAddress != nil {
 		t.Errorf("after purge address = %+v, %v; want none", purged.SubjectAddress, err)
 	}

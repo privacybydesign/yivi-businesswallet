@@ -407,9 +407,9 @@ function SessionRow({
 // For an approved session that requires the address, that none was entered.
 function AddressTag({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (
     request.addressMode === "required" &&
@@ -425,9 +425,9 @@ function AddressTag({
 // The postal address the subject entered, and how it was checked.
 function SessionAddress({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const a = request.address;
   return (

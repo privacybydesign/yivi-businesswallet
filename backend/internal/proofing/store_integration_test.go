@@ -75,6 +75,16 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, action string) int {
 	return n
 }
 
+// assertAuditCounts checks how often each action was audited.
+func assertAuditCounts(t *testing.T, pool *pgxpool.Pool, want map[string]int) {
+	t.Helper()
+	for action, n := range want {
+		if got := auditCount(t, pool, action); got != n {
+			t.Errorf("%s audits = %d, want %d", action, got, n)
+		}
+	}
+}
+
 func TestSettingsReplacesFlows(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewSettingsStore(pool, audit.NewDBRecorder())
@@ -373,15 +383,11 @@ func TestCustomerStoreLifecycle(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ID != c.ID {
 		t.Errorf("List = %+v, %v; want only this org's customer", list, err)
 	}
-	for action, want := range map[string]int{
+	assertAuditCounts(t, pool, map[string]int{
 		audit.IdentityProofingCustomerCreated:         2,
 		audit.IdentityProofingCustomerUpdated:         1,
 		audit.IdentityProofingCustomerFlowsConfigured: 2,
-	} {
-		if n := auditCount(t, pool, action); n != want {
-			t.Errorf("%s audits = %d, want %d", action, n, want)
-		}
-	}
+	})
 }
 
 // A rejection is audited as its own action, with IPS's error code as the reason

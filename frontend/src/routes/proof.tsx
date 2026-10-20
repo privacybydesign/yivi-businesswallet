@@ -26,6 +26,7 @@ import {
 } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import {
+  currentStage,
   dataRequestRefusal,
   hostedErrorMessage,
   isProofingLive,
@@ -186,6 +187,7 @@ function HostedFlow({
   const actionError = start.isError
     ? hostedErrorMessage(start.error, t)
     : undefined;
+  const stage = currentStage({ step, inAddress, inDiplomas });
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -205,13 +207,9 @@ function HostedFlow({
         )}
         <Stepper
           steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-          current={stages.indexOf(
-            inAddress ? "address" : inDiplomas ? "diplomas" : step,
-          )}
+          current={stages.indexOf(stage)}
         />
-        <StepRegion
-          step={inAddress ? "address" : inDiplomas ? "diplomas" : step}
-        >
+        <StepRegion step={stage}>
           {step === "overview" && (
             <Overview
               customer={customer}

@@ -20,6 +20,7 @@ import type {
   ProofingSent,
 } from "../api/identity-proofing";
 import {
+  currentStage,
   proofingErrorMessage,
   verifyStages,
   yiviAppAvailable,
@@ -168,9 +169,7 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={stages.indexOf(
-          inAddress ? "address" : inDiplomas ? "diplomas" : step,
-        )}
+        current={stages.indexOf(currentStage({ step, inAddress, inDiplomas }))}
       />
       {step === "overview" && (
         <Overview

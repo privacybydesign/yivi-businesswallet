@@ -99,21 +99,25 @@ func TestDemoOrgsMatchRegister(t *testing.T) {
 			t.Errorf("demo org %q identity = %q/%q, register has %q/%q", o.slug, o.name, o.euid, reg.LegalName, reg.EUID)
 		}
 
-		want := identity.Name{GivenNames: o.repGiven, LastName: o.repFamily}
-		matched := false
-		for _, rep := range reg.Representatives {
-			stored := identity.Name{GivenNames: rep.GivenNames, LastName: rep.FamilyName}
-			if identity.Reconcile(want, &stored) != identity.Review &&
-				rep.DateOfBirth == o.repDOB && rep.Kind == o.repKind && rep.Authority == o.repAuth {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if !hasPrimaryRepresentative(o, reg) {
 			t.Errorf("demo org %q primary representative %s %s (%s/%s, dob %s) has no matching register entry",
 				o.slug, o.repGiven, o.repFamily, o.repKind, o.repAuth, o.repDOB)
 		}
 	}
+}
+
+// hasPrimaryRepresentative reports whether the register lists o's primary
+// representative: the same name, birth date, kind and authority.
+func hasPrimaryRepresentative(o demoOrganization, reg registryprovider.Registration) bool {
+	want := identity.Name{GivenNames: o.repGiven, LastName: o.repFamily}
+	for _, rep := range reg.Representatives {
+		stored := identity.Name{GivenNames: rep.GivenNames, LastName: rep.FamilyName}
+		if identity.Reconcile(want, &stored) != identity.Review &&
+			rep.DateOfBirth == o.repDOB && rep.Kind == o.repKind && rep.Authority == o.repAuth {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRegisterOnlyCompanyIsOpenable is the regression for the unreachable

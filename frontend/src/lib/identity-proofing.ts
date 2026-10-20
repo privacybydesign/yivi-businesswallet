@@ -727,6 +727,26 @@ export function verifyStages({
   ];
 }
 
+// The stage a verify page is at: the address or diploma step while it is
+// open, else the page's own step.
+export function currentStage({
+  step,
+  inAddress,
+  inDiplomas,
+}: {
+  step: "overview" | "method" | "session";
+  inAddress: boolean;
+  inDiplomas: boolean;
+}): VerifyStage {
+  if (inAddress) {
+    return "address";
+  }
+  if (inDiplomas) {
+    return "diplomas";
+  }
+  return step;
+}
+
 // What a verify page's running session shows: once an approved session asks
 // for them, the address step and then the diploma step until the subject is
 // done with each, else the outcome once settled, the expiry once an unstarted

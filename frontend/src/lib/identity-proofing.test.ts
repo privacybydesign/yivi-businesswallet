@@ -20,6 +20,7 @@ import {
   sendableByMail,
   sessionView,
   verifyStages,
+  currentStage,
   progressPollContinues,
   reviewPollContinues,
   reviewSubmitStep,
@@ -1048,6 +1049,19 @@ describe("address step", () => {
     expect(
       verifyStages({ appChoice: false, address: true, diplomas: true }),
     ).toEqual(["overview", "session", "address", "diplomas"]);
+  });
+
+  it("is at the address or diploma step while it is open", () => {
+    const at = {
+      step: "session",
+      inAddress: false,
+      inDiplomas: false,
+    } as const;
+    expect(currentStage(at)).toBe("session");
+    expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
+      "address",
+    );
+    expect(currentStage({ ...at, inDiplomas: true })).toBe("diplomas");
   });
 
   it("mails only a flow that asks for no address", () => {
