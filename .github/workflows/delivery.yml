@@ -107,7 +107,7 @@ jobs:
       - name: Endor Labs container scan
         uses: endorlabs/github-action@f46ffb04c928a9c9c356f9627bd60b710ed0963e # v1.1.13
         with:
-          namespace: 'caesar-groep-nfr.yivi'
+          namespace: caesar-groep-nfr.yivi
           pr: false
           scan_dependencies: false
           scan_container: true
