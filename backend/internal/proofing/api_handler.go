@@ -480,6 +480,7 @@ type apiIdentity struct {
 type apiEvidenceEntry struct {
 	Type         string   `json:"type"`
 	DocumentType string   `json:"documentType,omitempty"`
+	DocumentKind string   `json:"documentKind,omitempty"`
 	IssuingState string   `json:"issuingState,omitempty"`
 	ExpiryDate   string   `json:"expiryDate,omitempty"`
 	PassiveAuth  string   `json:"passiveAuth"`
@@ -586,7 +587,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	}
 	if ev := identity.Evidence; ev != nil {
 		out.Evidence = append(out.Evidence, apiEvidenceEntry{
-			Type: ev.Type, DocumentType: ev.DocumentType, IssuingState: ev.IssuingState, ExpiryDate: ev.ExpiryDate,
+			Type: ev.Type, DocumentType: ev.DocumentType, DocumentKind: ev.DocumentKind, IssuingState: ev.IssuingState, ExpiryDate: ev.ExpiryDate,
 			PassiveAuth: ev.PassiveAuth, ActiveAuth: ev.ActiveAuth, FaceMatch: ev.FaceMatch, Liveness: ev.Liveness,
 		})
 	}

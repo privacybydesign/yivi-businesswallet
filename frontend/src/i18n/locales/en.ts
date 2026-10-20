@@ -294,7 +294,7 @@ export const en = {
     identityIntro:
       "Confirm your identity with your EU Digital Identity wallet. Here's exactly what you'll share:",
     disclosure: {
-      identityLabel: "Passport or ID card",
+      identityLabel: "Passport, ID card or residence permit",
       identityDetail:
         "Confirms your name, date of birth and nationality, so we can match you to the company's registered representatives at the KVK.",
       emailLabel: "Email address",
@@ -521,7 +521,7 @@ export const en = {
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
       referenceNoFace: "no face was found in the shared photo",
-      photoMissing: "the passport or ID card was shared without its photo",
+      photoMissing: "the identity document was shared without its photo",
       livenessFailed: "liveness check failed",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
@@ -838,7 +838,7 @@ export const en = {
         yivi: {
           title: "Yivi app",
           detail:
-            "Share the passport or ID card already in your Yivi app, then look into the camera here.",
+            "Share the passport, ID card or residence permit already in your Yivi app, then look into the camera here.",
         },
         idem: {
           title: "Idem app",
@@ -1386,7 +1386,7 @@ export const en = {
       documentsTitle: "Accepted documents",
       documentTypes: "Accepted document types",
       documentTypesHint:
-        "Comma-separated: P (passport), I (ID card), drivers_license (Dutch driving licence). Blank accepts any.",
+        "Comma-separated: P (passport), I (ID card), residence_permit, drivers_license (Dutch driving licence). Blank accepts any.",
       issuingCountries: "Accepted issuing countries",
       issuingCountriesHint:
         "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",
@@ -2414,7 +2414,7 @@ export const en = {
   identitySettings: {
     heading: "Re-identification",
     description:
-      "Members prove their identity with a passport or ID card when they join. Set how often they have to prove it again, and what happens when they do not.",
+      "Members prove their identity with a passport, ID card or residence permit when they join. Set how often they have to prove it again, and what happens when they do not.",
     intervals: "How often",
     employeeInterval: "Employees",
     externalInterval: "Externals",
@@ -2442,7 +2442,7 @@ export const en = {
     credentialMaxAgeDays: "Accept a credential obtained at most",
     credentialMaxAgeOff: "Any age",
     credentialMaxAgeHint:
-      "Refuses a re-identification whose passport or ID-card credential was obtained from its issuer longer ago than this. The member has to get a fresh one in their wallet first. Off by default.",
+      "Refuses a re-identification whose passport, ID-card or residence-permit credential was obtained from its issuer longer ago than this. The member has to get a fresh one in their wallet first. Off by default.",
     consequence: "When a member is overdue",
     consequenceFlag: "Flag only",
     consequenceFlagHint:

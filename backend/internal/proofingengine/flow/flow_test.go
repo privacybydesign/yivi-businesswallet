@@ -217,15 +217,15 @@ func TestValidateLicence(t *testing.T) {
 // The flow editor uppercases every accepted type, a licence's included.
 func TestAcceptsTypeIgnoresCase(t *testing.T) {
 	fd := &FlowDefinition{AcceptedDocumentTypes: []string{"P", "DRIVERS_LICENSE"}}
-	if !fd.AcceptsDocumentType(DocumentTypeDrivingLicence) || !fd.AcceptsDocumentType("P") {
+	if !fd.AcceptsDocumentType(DocumentTypeDrivingLicence, DocumentTypeDrivingLicence) || !fd.AcceptsDocumentType("P", DocumentKindPassport) {
 		t.Error("an accepted type was refused")
 	}
 
-	if fd.AcceptsDocumentType("I") {
+	if fd.AcceptsDocumentType("I", DocumentKindIdentityCard) {
 		t.Error("an unlisted type was accepted")
 	}
 
-	if !(&FlowDefinition{}).AcceptsDocumentType("I") {
+	if !(&FlowDefinition{}).AcceptsDocumentType("I", DocumentKindIdentityCard) {
 		t.Error("an unrestricted flow refused a type")
 	}
 
@@ -637,5 +637,45 @@ func TestMeetsLevel(t *testing.T) {
 		if got := MeetsLevel(tc.achieved, tc.required); got != tc.want {
 			t.Errorf("MeetsLevel(%q, %q) = %v, want %v", tc.achieved, tc.required, got, tc.want)
 		}
+	}
+}
+
+func TestDocumentKindOf(t *testing.T) {
+	for _, c := range []struct{ code, issuer, holder, want string }{
+		{"P<", "NLD", "NLD", DocumentKindPassport},
+		{"PT", "NLD", "SYR", DocumentKindPassport},
+		{"I<", "NLD", "NLD", DocumentKindIdentityCard},
+		{"ID", "D<<", "D", DocumentKindIdentityCard},
+		{"IR", "NLD", "TUR", DocumentKindResidencePermit},
+		{"AR", "DEU", "", DocumentKindResidencePermit},
+		// An ID code on a foreigner's card does not tell: a Belgian permit, an
+		// Estonian identity card of an EU resident.
+		{"ID", "BEL", "MAR", ""},
+		{"ID", "EST", "FIN", ""},
+		{"I<", "NLD", "", ""},
+		{DocumentTypeDrivingLicence, "NLD", "", DocumentTypeDrivingLicence},
+	} {
+		if got := DocumentKindOf(c.code, c.issuer, c.holder); got != c.want {
+			t.Errorf("DocumentKindOf(%q, %q, %q) = %q, want %q", c.code, c.issuer, c.holder, got, c.want)
+		}
+	}
+}
+
+func TestAcceptsDocumentTypeByCodeOrKind(t *testing.T) {
+	accepts := func(accepted []string, code, kind string) bool {
+		return (&FlowDefinition{AcceptedDocumentTypes: accepted}).AcceptsDocumentType(code, kind)
+	}
+	if !accepts([]string{"IR"}, "IR", DocumentKindResidencePermit) {
+		t.Error("a listed code is accepted")
+	}
+	// The flow editor uppercases a kind too.
+	if !accepts([]string{"RESIDENCE_PERMIT"}, "ID", DocumentKindResidencePermit) {
+		t.Error("a listed kind is accepted whatever the code")
+	}
+	if accepts([]string{DocumentKindIdentityCard}, "ID", DocumentKindResidencePermit) {
+		t.Error("a residence permit is not an identity card")
+	}
+	if accepts([]string{DocumentKindIdentityCard}, "I<", "") {
+		t.Error("a document of unknown kind matches no kind")
 	}
 }

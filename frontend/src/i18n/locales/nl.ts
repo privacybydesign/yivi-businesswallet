@@ -308,7 +308,7 @@ export const nl: Translation<typeof en> = {
     identityIntro:
       "Bevestig je identiteit met je EU Digital Identity-wallet. Dit is precies wat je deelt:",
     disclosure: {
-      identityLabel: "Paspoort of identiteitskaart",
+      identityLabel: "Paspoort, identiteitskaart of verblijfsvergunning",
       identityDetail:
         "Bevestigt je naam, geboortedatum en nationaliteit, zodat we je kunnen koppelen aan de bij de KVK geregistreerde vertegenwoordigers van het bedrijf.",
       emailLabel: "E-mailadres",
@@ -539,7 +539,7 @@ export const nl: Translation<typeof en> = {
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
       referenceNoFace: "er is geen gezicht gevonden op de gedeelde foto",
-      photoMissing: "het paspoort of de ID-kaart is gedeeld zonder foto",
+      photoMissing: "het identiteitsdocument is gedeeld zonder foto",
       livenessFailed: "levendheidscontrole mislukt",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
@@ -857,7 +857,7 @@ export const nl: Translation<typeof en> = {
         yivi: {
           title: "Yivi-app",
           detail:
-            "Deel het paspoort of de identiteitskaart die al in je Yivi-app staat en kijk daarna hier in de camera.",
+            "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat en kijk daarna hier in de camera.",
         },
         idem: {
           title: "Idem-app",
@@ -1415,7 +1415,7 @@ export const nl: Translation<typeof en> = {
       documentsTitle: "Geaccepteerde documenten",
       documentTypes: "Geaccepteerde documenttypen",
       documentTypesHint:
-        "Gescheiden door komma's: P (paspoort), I (ID-kaart), drivers_license (Nederlands rijbewijs). Leeg accepteert alles.",
+        "Gescheiden door komma's: P (paspoort), I (ID-kaart), residence_permit (verblijfsvergunning), drivers_license (Nederlands rijbewijs). Leeg accepteert alles.",
       issuingCountries: "Geaccepteerde landen van uitgifte",
       issuingCountriesHint:
         "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",
@@ -2468,7 +2468,7 @@ export const nl: Translation<typeof en> = {
   identitySettings: {
     heading: "Heridentificatie",
     description:
-      "Leden bewijzen hun identiteit met een paspoort of ID-kaart als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
+      "Leden bewijzen hun identiteit met een paspoort, ID-kaart of verblijfsvergunning als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
     intervals: "Hoe vaak",
     employeeInterval: "Medewerkers",
     externalInterval: "Externen",
@@ -2496,7 +2496,7 @@ export const nl: Translation<typeof en> = {
     credentialMaxAgeDays: "Accepteer een credential van maximaal",
     credentialMaxAgeOff: "Elke leeftijd",
     credentialMaxAgeHint:
-      "Weigert een heridentificatie waarvan de paspoort- of ID-kaartcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
+      "Weigert een heridentificatie waarvan de paspoort-, ID-kaart- of verblijfsvergunningcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
     consequence: "Als een lid over de termijn is",
     consequenceFlag: "Alleen markeren",
     consequenceFlagHint:

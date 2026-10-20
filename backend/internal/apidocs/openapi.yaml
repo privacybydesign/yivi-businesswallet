@@ -11051,6 +11051,12 @@ components:
                   `document_photo`: the document was photographed, its chip not read.
               documentType:
                 type: string
+              documentKind:
+                type: string
+                enum: [passport, identity_card, residence_permit]
+                description: >-
+                  What the document is, which `documentType` (the MRZ code) alone does not say.
+                  Absent when the document does not tell.
               issuingState:
                 type: string
               expiryDate:
@@ -11298,9 +11304,9 @@ components:
             type: string
           description: >-
             Document codes accepted (the MRZ document code, such as `P`, or `drivers_license` for a Dutch
-            driving licence); empty accepts any. `eu_driving_licence`, the chip evidence's type, is refused
-            (422 `rejected_by_provider`). Only Dutch driving licences are verified: the engine holds the RDW's
-            licence CSCAs and no other state's.
+            driving licence) or kinds (`passport`, `identity_card`, `residence_permit`); empty accepts any.
+            `eu_driving_licence`, the chip evidence's type, is refused (422 `rejected_by_provider`). Only Dutch
+            driving licences are verified: the engine holds the RDW's licence CSCAs and no other state's.
         acceptedIssuingCountries:
           type: array
           items:
@@ -12601,7 +12607,7 @@ components:
       properties:
         documentType:
           type: string
-          enum: [passport, identity_card, drivers_license]
+          enum: [passport, identity_card, residence_permit, drivers_license]
         documentNumber:
           type: string
         countryCode:

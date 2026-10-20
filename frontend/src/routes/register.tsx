@@ -106,7 +106,7 @@ export default function Register(): React.JSX.Element {
     error: 2,
   };
   // What the wallet discloses on the "Prove your identity" step — mirrors the
-  // backend's identity scope (passport OR id-card + email + phone).
+  // backend's identity scope (passport OR id-card OR residence permit + email + phone).
   const disclosureItems: DataDisclosureItem[] = [
     {
       icon: "personal",

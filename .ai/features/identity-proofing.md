@@ -23,8 +23,8 @@ The send form can instead **show the session on this screen**
 `customers/{id}/verify?flow=`, a page in the customer's branding that shows what
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
-vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport or
-ID card with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
+vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport,
+ID card or residence permit with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
 `ScopeProofing`, the `openid4vp://` request shown as an `open.yivi.app` universal
 link and QR; the transaction id stays in `yivi_transaction_id`), polls
 `yivi/disclosure`, which on DONE hands the photo and claims to the engine as the
@@ -976,6 +976,21 @@ Everything this feature does not do yet, in one place.
     says to scan it from inside the app.
 - **Only Dutch driving licences** (§ Whose identity): no other state's
   licence CSCAs are embedded, and there is no EU licence masterlist to load.
+- **Residence permits** are their own document kind, never an identity card:
+  - The chip access key names `residence_permit`; Passive Authentication runs
+    the ICAO path (`mrtdEvidence.documentType: icao`) against the same
+    master lists. The NL list holds `CSCA NL, OU=Ministry of Security and
+    Justice` (the IND's ministry).
+  - `flow.DocumentKindOf` derives the kind from DG1/MRZ, as vcmrtd's
+    `td1DocumentType` does: same nationality and issuing state is an identity
+    card; a permit code (`IR`, `AR`, ...) is a permit.
+  - A foreigner's card with a plain ID code (`I<`, `ID`) has no kind: BE, DK
+    and PL put `ID` on permits, Estonia on resident EU citizens' identity
+    cards. The app keeps the user's pick there; the server does not take it.
+  - On the Yivi path the credential (`pbdf.residencepermit`) gives the kind.
+  - `AcceptedDocumentTypes` takes codes or kinds, case-insensitively; the
+    result's evidence carries `documentKind`.
+  - Not yet read from a real permit chip.
 - **Hosted page:** no full-theme endpoint; no automated accessibility test
   (axe, WCAG 2.2 AA), which needs a rendered DOM the frontend tests do not have.
 - **Manual review:** when an identity session goes to review is a product
@@ -1030,8 +1045,7 @@ Everything this feature does not do yet, in one place.
   render test.
 - **Planned features:** who sees what (member, admin, platform admin,
   customer); audit log filter and export (the buttons exist); DigiD for the
-  address, compared with what the person gave (Idem route); residence permits
-  over NFC; anti-glare for document capture; `high` assurance, only with a
+  address, compared with what the person gave (Idem route); anti-glare for document capture; `high` assurance, only with a
   certified liveness vendor.
 - **Before launch:**
   - The DPA and the controller and processor chain with each customer.

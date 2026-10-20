@@ -1000,6 +1000,7 @@ const proofingResultSchema = z.object({
     z.object({
       type: z.string(),
       documentType: z.string().optional(),
+      documentKind: z.string().optional(),
       issuingState: z.string().optional(),
       expiryDate: z.string().optional(),
       passiveAuth: z.string().optional(),

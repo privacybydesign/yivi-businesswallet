@@ -132,10 +132,11 @@ Format `dc+sd-jwt`, identified by `vct_values`, claims by `path`. From the demo'
 |---|---|---|
 | Identity (passport) | `pbdf-staging.pbdf.passport` | firstName, lastName, dateOfBirth, nationality, gender, documentNumber, dateOfExpiry |
 | Identity (id-card) | `pbdf-staging.pbdf.idcard` | same set as passport |
+| Identity (residence permit) | `pbdf-staging.pbdf.residencepermit` | same set as passport |
 | Email (account key) | `pbdf-staging.sidn-pbdf.email` | email, domain |
 | Phone | `pbdf-staging.sidn-pbdf.mobilenumber` | mobilenumber |
 
-**Login DCQL** = one identity credential (passport **OR** id-card, via
+**Login DCQL** = one identity credential (passport **OR** id-card **OR** residence permit, via
 `credential_sets.options`, demo `verifiers.ts:139`) **AND** email **AND** mobilenumber:
 ```jsonc
 { "credentials": [
@@ -143,10 +144,12 @@ Format `dc+sd-jwt`, identified by `vct_values`, claims by `path`. From the demo'
      "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
     {"id":"idcard","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.pbdf.idcard"]},
      "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
+    {"id":"residencepermit","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.pbdf.residencepermit"]},
+     "claims":[{"path":["firstName"]},{"path":["lastName"]},{"path":["dateOfBirth"]},{"path":["nationality"]}]},
     {"id":"email","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.sidn-pbdf.email"]},"claims":[{"path":["email"]}]},
     {"id":"phone","format":"dc+sd-jwt","meta":{"vct_values":["pbdf-staging.sidn-pbdf.mobilenumber"]},"claims":[{"path":["mobilenumber"]}]} ],
   "credential_sets": [
-    {"options":[["passport"],["idcard"]]}, {"options":[["email"]]}, {"options":[["phone"]]} ] }
+    {"options":[["passport"],["idcard"],["residencepermit"]]}, {"options":[["email"]]}, {"options":[["phone"]]} ] }
 ```
 DCQL definitions live in config/constants (no magic strings), one per request purpose
 (login; and, for the wallet bootstrap, the identity-for-KVK request).

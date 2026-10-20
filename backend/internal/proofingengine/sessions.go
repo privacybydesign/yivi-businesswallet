@@ -161,7 +161,7 @@ func flowComplianceFailure(fd *flow.FlowDefinition, sess session.Session, req ap
 		return false, ""
 	}
 	if req.Document != nil {
-		if !fd.AcceptsDocumentType(req.Document.Type) {
+		if !fd.AcceptsDocumentType(req.Document.Type, req.Document.Kind) {
 			return true, errCodeDocTypeRefused
 		}
 		if len(fd.AcceptedIssuingCountries) > 0 && !slices.Contains(fd.AcceptedIssuingCountries, flow.IssuingStateCode(req.Document.IssuingState)) {
@@ -199,6 +199,7 @@ type appResultRequest struct {
 // extras. The shape follows vcmrtd's PassportMRZ/PassportData.
 type documentInfo struct {
 	Type         string `json:"type,omitempty"` // ICAO document code, e.g. "P" for passport
+	Kind         string `json:"kind,omitempty"` // flow.DocumentKindOf, e.g. flow.DocumentKindResidencePermit
 	Number       string `json:"number,omitempty"`
 	IssuingState string `json:"issuingState,omitempty"`
 	Nationality  string `json:"nationality,omitempty"`

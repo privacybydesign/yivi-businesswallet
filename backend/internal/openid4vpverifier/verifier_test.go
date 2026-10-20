@@ -83,14 +83,14 @@ func TestLoginQueryIsEmailOnly(t *testing.T) {
 	}
 }
 
-func TestIdentityQueryOffersPassportOrIDCard(t *testing.T) {
+func TestIdentityQueryOffersPassportIDCardOrResidencePermit(t *testing.T) {
 	q := identityQuery()
-	if len(q.Credentials) != 4 {
-		t.Fatalf("credentials = %d, want 4 (passport, idcard, email, phone)", len(q.Credentials))
+	if len(q.Credentials) != 5 {
+		t.Fatalf("credentials = %d, want 5 (passport, idcard, residencepermit, email, phone)", len(q.Credentials))
 	}
-	// The first credential_set must be the passport-OR-idcard choice.
-	if len(q.CredentialSets) == 0 || len(q.CredentialSets[0].Options) != 2 {
-		t.Fatalf("first credential set is not a 2-way choice: %+v", q.CredentialSets)
+	// The first credential_set must be the passport-OR-idcard-OR-residencepermit choice.
+	if len(q.CredentialSets) == 0 || len(q.CredentialSets[0].Options) != 3 {
+		t.Fatalf("first credential set is not a 3-way choice: %+v", q.CredentialSets)
 	}
 }
 
@@ -98,17 +98,17 @@ func TestQueryForScope(t *testing.T) {
 	if got := len(queryFor(ScopeLogin, nil).Credentials); got != 1 {
 		t.Errorf("ScopeLogin credentials = %d, want 1", got)
 	}
-	if got := len(queryFor(ScopeIdentity, nil).Credentials); got != 4 {
-		t.Errorf("ScopeIdentity credentials = %d, want 4", got)
+	if got := len(queryFor(ScopeIdentity, nil).Credentials); got != 5 {
+		t.Errorf("ScopeIdentity credentials = %d, want 5", got)
 	}
 	if got := len(queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
 		t.Errorf("ScopeVog claims = %d, want 7 (5 core fields + 2 requested aspects)", got)
 	}
 	combined := queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
-	if got := len(combined.Credentials); got != 5 {
-		t.Errorf("ScopeIdentityVog credentials = %d, want 5 (identity's 4 + vog)", got)
+	if got := len(combined.Credentials); got != 6 {
+		t.Errorf("ScopeIdentityVog credentials = %d, want 6 (identity's 5 + vog)", got)
 	}
-	// Four independent sets: passport-or-idcard, email, phone, vog - the VOG is
+	// Four independent sets: identity document, email, phone, vog - the VOG is
 	// required, not optional, in the combined presentation.
 	if got := len(combined.CredentialSets); got != 4 {
 		t.Errorf("ScopeIdentityVog credential sets = %d, want 4", got)
@@ -119,12 +119,12 @@ func TestQueryForScope(t *testing.T) {
 	}
 }
 
-// Proofing asks for the passport or id-card with its photo, and no email or
-// phone.
+// Proofing asks for the passport, id-card or residence permit with its photo,
+// and no email or phone.
 func TestProofingQueryAsksForPhoto(t *testing.T) {
 	q := queryFor(ScopeProofing, nil)
-	if len(q.Credentials) != 2 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 2 {
-		t.Fatalf("proofing query = %+v, want passport OR idcard only", q)
+	if len(q.Credentials) != 3 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 3 {
+		t.Fatalf("proofing query = %+v, want passport OR idcard OR residencepermit only", q)
 	}
 	for _, c := range q.Credentials {
 		if !slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == ClaimPhoto }) {
@@ -145,6 +145,10 @@ func TestDocumentPrefersPassport(t *testing.T) {
 	idcard, ok := Presentation{ByCredential: map[string]map[string]string{credIDIDCard: {}}}.Document()
 	if !ok || idcard.Credential != vctIDCard {
 		t.Fatalf("id-card Document() = %+v, %v", idcard, ok)
+	}
+	permit, ok := Presentation{ByCredential: map[string]map[string]string{credIDResidencePermit: {}}}.Document()
+	if !ok || permit.Credential != vctResidencePermit {
+		t.Fatalf("residence permit Document() = %+v, %v", permit, ok)
 	}
 	if _, ok := (Presentation{ByCredential: map[string]map[string]string{credIDEmail: {}}}).Document(); ok {
 		t.Fatal("an email-only presentation has no document")
@@ -278,10 +282,13 @@ func TestIdentityIssuedAtReadsTheIssuerJWT(t *testing.T) {
 		t.Errorf("identityIssuedAt(passport) = %v, want unix %d", got, obtained)
 	}
 
-	// An id-card presentation is the other half of the identity credential set.
-	idcard := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimFamilyName, "Owner") + "~"
-	if got := identityIssuedAt(map[string][]string{"idcard": {idcard}}); got.Unix() != obtained {
-		t.Errorf("identityIssuedAt(idcard) = %v, want unix %d", got, obtained)
+	// The id-card and residence permit are the other options of the identity
+	// credential set.
+	for _, id := range []string{credIDIDCard, credIDResidencePermit} {
+		tok := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimFamilyName, "Owner") + "~"
+		if got := identityIssuedAt(map[string][]string{id: {tok}}); got.Unix() != obtained {
+			t.Errorf("identityIssuedAt(%s) = %v, want unix %d", id, got, obtained)
+		}
 	}
 }
 

@@ -1683,7 +1683,7 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	}
 	doc, ok := presentation.Document()
 	if !ok {
-		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport or id-card")
+		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
 	}
 	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)

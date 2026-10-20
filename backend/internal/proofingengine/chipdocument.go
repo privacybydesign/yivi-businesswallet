@@ -79,7 +79,7 @@ func dataGroupBytes(ev *mrtdEvidenceRequest, name string) ([]byte, error) {
 	return b, nil
 }
 
-// icaoDocument reads a passport's or identity card's DG1 MRZ, and DG11 for
+// icaoDocument reads a passport's, identity card's or residence permit's DG1 MRZ, and DG11 for
 // the full name, date of birth, personal number and place of birth.
 func icaoDocument(dg1Bytes []byte, ev *mrtdEvidenceRequest, now time.Time) (*documentInfo, error) {
 	dg1, err := document.NewDG1(dg1Bytes)
@@ -100,7 +100,8 @@ func icaoDocument(dg1Bytes []byte, ev *mrtdEvidenceRequest, now time.Time) (*doc
 		return nil, fmt.Errorf("DG1 date of expiry: %w", err)
 	}
 	doc := &documentInfo{
-		Type: m.DocumentCode, Number: m.DocumentNumber, IssuingState: m.IssuingState, Nationality: m.Nationality,
+		Type: m.DocumentCode, Kind: flow.DocumentKindOf(m.DocumentCode, m.IssuingState, m.Nationality),
+		Number: m.DocumentNumber, IssuingState: m.IssuingState, Nationality: m.Nationality,
 		FirstName: given, LastName: surname, DisplayName: displayName(given, surname), Sex: m.Sex,
 		DateOfBirth: birth, DateOfExpiry: expiry,
 	}
@@ -162,7 +163,7 @@ func drivingLicenceDocument(dg1 []byte) (*documentInfo, error) {
 		return nil, errors.New("DG1 has no holder surname")
 	}
 	return &documentInfo{
-		Type: documentTypeDriversLicense, Number: text(edlDocumentNumberTag), IssuingState: text(edlIssuingStateTag),
+		Type: documentTypeDriversLicense, Kind: documentTypeDriversLicense, Number: text(edlDocumentNumberTag), IssuingState: text(edlIssuingStateTag),
 		FirstName: given, LastName: surname, DisplayName: displayName(given, surname),
 		DateOfBirth: birth, DateOfExpiry: expiry, PlaceOfBirth: text(edlPlaceOfBirthTag),
 	}, nil
