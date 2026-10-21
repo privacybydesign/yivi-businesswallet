@@ -49,8 +49,8 @@ export const nl: Translation<typeof en> = {
     members: "Leden",
     identityProofing: "Identiteitsverificatie",
     identityProofingOverview: "Overzicht",
-    identityProofingFlows: "Flows",
-    customers: "Klanten",
+    flows: "Flows",
+    developers: "Ontwikkelaars",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
     postguard: "PostGuard-bestanden",
@@ -437,37 +437,27 @@ export const nl: Translation<typeof en> = {
       pausedTitle: "Identiteitsverificatie is gepauzeerd",
       byPlatform:
         "De platformbeheerder heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact met hen op om het te hervatten.",
-      byOrganization:
-        "Een beheerder van deze organisatie heeft identiteitsverificatie uitgezet.",
       whatStops:
-        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen van klanten en geen gehoste links. Sessies die op beoordeling wachten worden afgewezen, met het verzoek het later opnieuw te proberen. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
-      turnOn: "Identiteitsverificatie aanzetten",
-      turnOff: "Uitzetten",
-      switchTitle: "Identiteitsverificatie uitzetten",
-      switchHint:
-        "Stopt identiteitsverificatie voor deze organisatie totdat een beheerder het weer aanzet.",
-      confirmTitle: "Identiteitsverificatie uitzetten?",
+        "Zolang het gepauzeerd is, start er niets nieuws: geen verzoeken, geen API-aanroepen en geen gehoste links. Sessies die op beoordeling wachten worden afgewezen, met het verzoek het later opnieuw te proberen. Sessies die al lopen worden afgerond en hun webhooks gaan nog uit.",
       platformColumn: "Identiteitsverificatie",
       active: "Actief",
       unknown: "Onbekend",
       pausedByPlatform: "Gepauzeerd door {{name}}",
       pausedByPlatformAdmin: "Gepauzeerd door een platformbeheerder",
       platformConfirmTitle: "Identiteitsverificatie pauzeren voor {{name}}?",
-      byOrganizationMember:
-        "{{name}}, beheerder van deze organisatie, heeft identiteitsverificatie uitgezet.",
-      pausedByOrganization: "Uitgezet door de organisatie",
+      byPlatformAdmin:
+        "{{name}}, platformbeheerder, heeft identiteitsverificatie voor deze organisatie gepauzeerd. Neem contact op om het te hervatten.",
       platformPause: "Pauzeren",
       platformResume: "Hervatten",
     },
     overview: {
       apiDocs: "API-documentatie",
       title: "Overzicht",
-      subtitle:
-        "Identiteitscontroles die je voor je klanten uitvoert. Laatste 30 dagen.",
+      subtitle: "Identiteitscontroles die je uitvoert. Laatste 30 dagen.",
       stats: {
         sessions: "Sessies",
-        sessionsHint_one: "voor {{count}} klant",
-        sessionsHint_other: "voor {{count}} klanten",
+        sessionsHint_one: "over {{count}} flow",
+        sessionsHint_other: "over {{count}} flows",
         verified: "Geverifieerd",
         verifiedHint: "{{share}} van de sessies",
         failed: "Mislukt",
@@ -482,33 +472,34 @@ export const nl: Translation<typeof en> = {
       },
       recent: {
         title: "Recente sessies",
-        scope: "alle klanten",
+        scope: "de hele organisatie",
         scopeOwn: "door jou verstuurd",
-        customer: "Klant",
+        viewAll: "Alles bekijken",
+        person: "Persoon",
+        noName: "Geen naam opgegeven",
         flow: "Flow",
         result: "Resultaat",
         started: "Gestart",
         empty: "Nog geen sessies.",
-        emptyCustomer: "Nog geen sessies voor deze klant.",
-        filterLabel: "Sessies tonen van",
-        allCustomers: "Alle klanten",
       },
-      customers: {
-        title: "Klanten",
+      flows: {
+        title: "Flows",
         viewAll: "Alles bekijken",
-        empty: "Nog geen klanten.",
+        empty: "Nog geen flows.",
         summary_one: "{{count}} sessie · {{share}} geverifieerd",
         summary_other: "{{count}} sessies · {{share}} geverifieerd",
         noSessions: "Geen sessies in 30 dagen",
-        webhookAlertNoAnswer_one:
-          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
-        webhookAlertNoAnswer_other:
-          "{{name}}: webhook antwoordt niet sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
-        webhookAlert_one:
-          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
-        webhookAlert_other:
-          "{{name}}: webhook geeft {{code}} sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+        default: "Standaard",
       },
+      webhookAlertNoAnswer_one:
+        "Het webhook-endpoint antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+      webhookAlertNoAnswer_other:
+        "Het webhook-endpoint antwoordt niet sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      webhookAlert_one:
+        "Het webhook-endpoint geeft {{code}} sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
+      webhookAlert_other:
+        "Het webhook-endpoint geeft {{code}} sinds {{since}}. {{count}} resultaten wachten op een nieuwe poging.",
+      webhookAlertLink: "Webhook openen",
     },
     requests: {
       empty: "Nog geen verzoeken.",
@@ -547,7 +538,8 @@ export const nl: Translation<typeof en> = {
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
       manualReviewRejected: "geweigerd door een beoordelaar",
       reviewLapsed: "niet binnen 30 dagen beoordeeld",
-      legalRetention: "de klant moet deze gegevens volgens de wet bewaren",
+      legalRetention:
+        "de organisatie moet deze gegevens volgens de wet bewaren",
       orgPaused:
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
@@ -563,29 +555,19 @@ export const nl: Translation<typeof en> = {
       flowNotAllowed:
         "Die flow is niet meer beschikbaar voor leden. Kies een andere.",
       memberNotFound: "Die persoon is geen lid van deze organisatie.",
-      customerNotFound: "Die klant bestaat niet.",
-      customerExists: "Je organisatie heeft al een klant met deze naam.",
-      flowNotAssigned:
-        "Die flow is niet meer aan deze klant toegewezen. Kies een andere.",
-      customerPaused:
-        "Verificatie is gepauzeerd voor deze klant. Een beheerder kan het hervatten op de pagina van de klant.",
-      customerHasOpenReviews:
-        "Deze klant heeft sessies die op beoordeling wachten. Beoordeel die eerst voordat je pauzeert.",
-      customerSessionsLeft:
-        "Er zijn sessies voor deze klant verstuurd terwijl hij werd verwijderd. Probeer hem opnieuw te verwijderen.",
+      noDefaultFlow:
+        "Je organisatie heeft geen standaardflow. Kies een flow, of stel een standaard in op de pagina Flows.",
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
-      customerNoApiKey:
-        "Deze klant heeft nog geen API-sleutel. Een beheerder kan er een aanmaken op het tabblad API-sleutels van de klant.",
       apiKeyNotFound: "Die API-sleutel bestaat niet meer.",
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
       referencePhotoRequired:
-        "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de klant-API kan worden meegestuurd. Kies een andere flow.",
+        "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de API kan worden meegestuurd. Kies een andere flow.",
       organizationNotFound: "Die organisatie bestaat niet.",
       webhookNotFound:
-        "De webhook van deze klant bestaat niet meer: misschien heeft iemand hem verwijderd. Laad de pagina opnieuw.",
+        "Het webhook-endpoint bestaat niet meer: misschien heeft iemand het verwijderd. Laad de pagina opnieuw.",
       linkStarted: "Deze link is al ergens anders geopend. Ga daar verder.",
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
       deviceActive:
@@ -607,7 +589,7 @@ export const nl: Translation<typeof en> = {
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
-        "Een flow voor gegevensverzoeken is voor de mensen van een klant. Haal hem eerst uit de flows voor leden.",
+        "Een flow voor gegevensverzoeken is voor externe personen. Haal hem eerst uit de flows voor leden.",
       exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
       mandateWithdrawn:
         "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
@@ -677,99 +659,9 @@ export const nl: Translation<typeof en> = {
         duplicate: "Dit diploma is al toegevoegd.",
       },
     },
-  },
-  customers: {
-    title: "Klanten",
-    subtitle:
-      "Organisaties waarvoor je mensen verifieert. Elk heeft eigen flows en sessies.",
-    add: "Klant toevoegen",
-    status: {
-      active: "Actief",
-      paused: "Gepauzeerd",
-      needsAttention: "Aandacht nodig",
-      setupNeeded: "Inrichting nodig",
-    },
-    list: {
-      search: "Klanten zoeken",
-      count_one: "{{count}} klant",
-      count_other: "{{count}} klanten",
-      name: "Klant",
-      flows: "Flows",
-      sessions: "Sessies 30d",
-      verified: "Geverifieerd",
-      status: "Status",
-      added: "Toegevoegd {{date}}",
-      empty: "Nog geen klanten.",
-      noMatch: "Geen klant komt overeen met je zoekopdracht.",
-      webhook: "Webhook",
-    },
-    new: {
-      title: "Nieuwe klant",
-      name: "Naam",
-      namePlaceholder: "Initech BV",
-      nameRequired: "Vul een naam in.",
-      create: "Klant toevoegen",
-      cancel: "Annuleren",
-    },
-    detail: {
-      since_one:
-        "{{id}} · klant sinds {{date}} · {{count}} sessie in de laatste 30 dagen",
-      since_other:
-        "{{id}} · klant sinds {{date}} · {{count}} sessies in de laatste 30 dagen",
-      notFound: "Deze klant bestaat niet.",
-      verify: "Een persoon verifiëren",
-      pause: "Verificatie pauzeren",
-      resume: "Verificatie hervatten",
-      pausedNotice:
-        "Verificatie is gepauzeerd voor deze klant: er kan geen nieuw verzoek worden verstuurd totdat een beheerder het hervat.",
-      noApiKeyNotice:
-        "Deze klant heeft nog geen API-sleutel: maak er een aan voordat je verzoeken verstuurt.",
-      noApiKeyNoticeMember:
-        "Deze klant heeft nog geen API-sleutel, dus er kan geen verzoek worden verstuurd. Vraag een beheerder er een aan te maken.",
-      createApiKey: "API-sleutel aanmaken",
-      pauseConfirm: {
-        title: "Verificatie pauzeren voor {{name}}?",
-        message:
-          "Er kan geen nieuw verzoek voor deze klant worden verstuurd totdat je het hervat. Verzoeken die al verstuurd zijn lopen gewoon af.",
-        confirm: "Verificatie pauzeren",
-      },
-    },
-    tabs: {
-      flows: "Flows",
-      sessions: "Sessies",
-      settings: "Instellingen",
-      branding: "Huisstijl",
-      apiKeys: "API-sleutels",
-      webhooks: "Webhooks",
-    },
     flows: {
-      live: "Actief",
       eidas: "eIDAS {{level}}",
-      intro:
-        "Een flow bepaalt welke gegevens worden gevraagd en het minimale betrouwbaarheidsniveau. Verzoeken voor deze klant kunnen de hier toegewezen flows gebruiken.",
-      sharedEditNote:
-        "Flows worden gedeeld: deze wijziging geldt voor elke klant en elk lid dat deze flow gebruikt.",
-      newFlowNote: "De nieuwe flow wordt meteen aan {{name}} toegewezen.",
-      newFlow: "Nieuwe flow",
-      assignExisting: "Bestaande flows toewijzen",
-      assignFailed:
-        "De flow is opgeslagen, maar niet aan deze klant toegewezen: {{reason}}",
-      noneAssignedAdmin:
-        "Er zijn nog geen flows aan deze klant toegewezen. Maak er een met Nieuwe flow, of wijs een bestaande flow van je organisatie toe.",
-      done: "Klaar",
-      noneAssigned: "Er zijn nog geen flows aan deze klant toegewezen.",
-      sessions_one: "{{count}} sessie in 30 dagen",
-      sessions_other: "{{count}} sessies in 30 dagen",
-      requestedData: "Gevraagde gegevens",
-      assuranceSteps: "Betrouwbaarheid · stappen",
       noAssurance: "Geen minimumniveau",
-      noData: "Niets gevraagd",
-      edit: "Flow bewerken",
-      title: "Toegewezen flows",
-      hint: "Verzoeken voor deze klant kunnen de hier aangevinkte flows gebruiken, ook als leden ze niet mogen gebruiken; de standaardflow is voorgeselecteerd.",
-      empty: "Je organisatie heeft nog geen flows.",
-      default: "Standaard",
-      save: "Toegewezen flows opslaan",
     },
     send: {
       title: "Een persoon verifiëren",
@@ -788,14 +680,14 @@ export const nl: Translation<typeof en> = {
         },
         link: {
           title: "Link kopiëren",
-          hint: "Een link naar de pagina van de klant, die je de persoon zelf stuurt. 72 uur geldig.",
+          hint: "Een link naar een gehoste pagina, die je de persoon zelf stuurt. 72 uur geldig.",
         },
       },
       emailOptional: "E-mailadres (optioneel)",
       submitOnScreen: "Pagina openen",
       submitLink: "Link maken",
       hintLink:
-        "Je krijgt een link naar een pagina in de huisstijl van de klant. De persoon opent die op het eigen apparaat, leest wat er wordt verzameld, kiest de app en start daar; vanaf dan loopt de sessie. Er wordt niets gemaild.",
+        "Je krijgt een link naar een pagina in de huisstijl van je organisatie. De persoon opent die op het eigen apparaat, leest wat er wordt verzameld, kiest de app en start daar; vanaf dan loopt de sessie. Er wordt niets gemaild.",
       linkTitle: "Link gemaakt",
       linkHint:
         "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt onder Sessies.",
@@ -814,17 +706,16 @@ export const nl: Translation<typeof en> = {
       flow: "Flow",
       submit: "Verzoek versturen",
       cancel: "Annuleren",
-      noFlowsAdmin:
-        "Wijs eerst een flow aan deze klant toe, op het tabblad Flows.",
+      noFlowsAdmin: "Maak eerst een flow aan, op de pagina Flows.",
       noFlowsMember:
-        "Een beheerder moet eerst een flow aan deze klant toewijzen voordat je een verzoek kunt versturen.",
+        "Een beheerder moet eerst een flow beschikbaar maken voor leden voordat je een verzoek kunt versturen.",
       referencePhotoFlows:
-        "Flows die het gezicht vergelijken met de eigen foto van de klant staan hier niet: het systeem van de klant verstuurt die via de API, met de foto.",
+        "Flows die het gezicht vergelijken met je eigen foto van de persoon staan hier niet: jouw systeem verstuurt die via de API, met de foto.",
     },
     onScreen: {
       title: "Een persoon verifiëren",
       missingFlow:
-        "Deze flow is niet meer aan de klant toegewezen. Ga terug en kies een andere.",
+        "Deze flow bestaat niet meer of kan hier niet worden verstuurd. Ga terug en kies een andere.",
       steps: {
         overview: "Wat er wordt verzameld",
         method: "Kies een app",
@@ -939,14 +830,17 @@ export const nl: Translation<typeof en> = {
           message:
             "Er is geen identiteitscontrole gedaan en er is niets gedeeld.",
         },
-        back: "Terug naar {{name}}",
+        back: "Terug naar het overzicht",
         again: "Opnieuw verifiëren",
       },
     },
     sessions: {
+      title: "Sessies",
+      subtitle:
+        "Identiteitscontroles die je hebt verstuurd naar personen buiten je organisatie.",
       review: {
         title: "Beoordeling afronden",
-        hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar de klant.",
+        hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar je webhook-endpoint.",
         reason: "Reden",
         reasonPlaceholder: "Wat je hebt gecontroleerd, en waarom je zo besluit",
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
@@ -964,7 +858,7 @@ export const nl: Translation<typeof en> = {
         data_erasure: {
           title:
             "Deze persoon vraagt om verwijdering van zijn of haar gegevens",
-          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en de klant krijgt per sessie bericht.",
+          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en je webhook-endpoint krijgt per sessie bericht.",
           approve_one: "Goedkeuren: {{count}} sessie verwijderen",
           approve_other: "Goedkeuren: {{count}} sessies verwijderen",
           confirm: {
@@ -977,7 +871,7 @@ export const nl: Translation<typeof en> = {
         reasonPlaceholder:
           "Wat je hebt gecontroleerd, en waarom, bv. een wettelijke bewaarplicht",
         noMatches:
-          "Er zijn geen andere sessies van deze persoon gevonden bij deze klant.",
+          "Er zijn geen andere sessies van deze persoon gevonden in je organisatie.",
         matches_one: "{{count}} sessie van deze persoon gevonden",
         matches_other: "{{count}} sessies van deze persoon gevonden",
         emailMatches_one:
@@ -995,7 +889,7 @@ export const nl: Translation<typeof en> = {
         erasureUntickHint:
           "Sessies waarvan de naam en geboortedatum van een geverifieerde chip zijn gelezen, staan aangevinkt, met hetzelfde of een ander document: die zijn van deze persoon. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erasureEmailMatchesHint:
-          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn om ze ook te verwijderen; de rest wordt verwijderd zodra de bewaartermijn van de klant verloopt.",
+          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn om ze ook te verwijderen; de rest wordt verwijderd zodra de bewaartermijn van de organisatie verloopt.",
         untickHint:
           "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
         erased: "Verwijderd",
@@ -1015,8 +909,9 @@ export const nl: Translation<typeof en> = {
         revealPhoto: "{{name}} tonen",
         conceal: "Verbergen",
         photo: "Documentfoto",
-        referencePhoto: "Foto van de klant",
-        noDocument: "Geen: het gezicht is vergeleken met de foto van de klant",
+        referencePhoto: "Foto die met het verzoek is meegestuurd",
+        noDocument:
+          "Geen: het gezicht is vergeleken met de foto die met het verzoek is meegestuurd",
         selfie: "Selfie",
         documentImage: "Voorkant van het document",
         documentImageBack: "Achterkant van het document",
@@ -1123,23 +1018,12 @@ export const nl: Translation<typeof en> = {
           "Een beoordelaar beslist over elk verzoek. Sessies die bewezen van deze persoon zijn, staan aangevinkt; sessies die alleen op e-mailadres of naam zijn gevonden, vinkt de beoordelaar zelf aan.",
         automatic:
           "Sessies die bewezen van deze persoon zijn, worden meteen verwijderd. Alleen sessies die op e-mailadres of naam zijn gevonden, gaan naar een beoordelaar.",
-        keep: "Elk verzoek wordt geweigerd en de gegevens blijven bewaard, omdat deze klant ze volgens de wet moet bewaren. De persoon krijgt te zien waarom.",
+        keep: "Elk verzoek wordt geweigerd en de gegevens blijven bewaard, omdat deze organisatie ze volgens de wet moet bewaren. De persoon krijgt te zien waarom.",
       },
-      nameTitle: "Naam",
-      nameHint: "Zichtbaar voor je leden en in het auditlog.",
       redirectOriginsTitle: "Terugstuur-origins",
       redirectOriginsHint:
         "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
       save: "Opslaan",
-      removeTitle: "Klant verwijderen",
-      removeHint:
-        "Trekt de API-sleutels in, verwijdert de webhook en wist de sessies. Auditlog-regels blijven bewaard.",
-      remove: "Klant verwijderen",
-      removeConfirm: {
-        title: "{{name}} verwijderen?",
-        message:
-          "De API-sleutels werken niet meer, de webhook wordt verwijderd en elke sessie voor deze klant wordt gewist, met de adressen en namen van de personen. Het auditlog bewaart wat er gebeurde. Dit kan niet ongedaan worden gemaakt.",
-      },
     },
     webhookState: {
       delivering: "Levert af",
@@ -1155,10 +1039,10 @@ export const nl: Translation<typeof en> = {
     },
     branding: {
       title: "Huisstijl",
-      hint: "De eigen huisstijl van de klant voor de mail, de gehoste pagina en de Idem-app. Met een kleur of lettertype hier gebruiken de flows van de klant deze huisstijl in plaats van die van de organisatie; met alleen een logo gebruiken ze de huisstijl van de organisatie met dit logo.",
+      hint: "De huisstijl van de organisatie voor de verificatiemail, de gehoste pagina en de Idem-app. Met een kleur of lettertype hier gebruiken de flows deze huisstijl in plaats van het thema van de organisatie; met alleen een logo gebruiken ze het thema van de organisatie met dit logo.",
       displayName: "Weergavenaam",
       displayNameHint:
-        "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van de klant.",
+        "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van je organisatie.",
       logo: "Logo",
       logoSet: "Huidig logo",
       noLogo: "Geen logo: de weergavenaam staat er in plaats daarvan",
@@ -1197,7 +1081,20 @@ export const nl: Translation<typeof en> = {
         footer: "Identiteitscontrole door Yivi",
       },
     },
+    developers: {
+      title: "Ontwikkelaars",
+      subtitle:
+        "Wat je eigen software en de verificatiepagina's gebruiken: API-sleutels, het webhook-endpoint, huisstijl en sessie-instellingen.",
+      adminOnly: "Alleen een beheerder kan deze pagina zien.",
+      tabs: {
+        apiKeys: "API-sleutels",
+        webhook: "Webhook",
+        branding: "Huisstijl",
+        settings: "Sessie-instellingen",
+      },
+    },
     apiKeys: {
+      nameRequired: "Vul een naam in.",
       intro:
         "Je backend maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API. Alleen actieve sleutels werken.",
       create: "API-sleutel aanmaken",
@@ -1217,8 +1114,6 @@ export const nl: Translation<typeof en> = {
         title: "{{name}} intrekken?",
         message:
           "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
-        lastMessage:
-          "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Het is de laatste actieve sleutel van deze klant, dus ook leden kunnen vanuit het dashboard geen verificatieverzoeken voor deze klant meer sturen tot je een nieuwe maakt. Dit kan niet ongedaan worden gemaakt.",
       },
       createdTitle: "Je nieuwe API-sleutel",
       createdHint:
@@ -1262,7 +1157,7 @@ export const nl: Translation<typeof en> = {
       recent: "Recente afleveringen",
       noEndpointTag: "Geen endpoint",
       defaultBody:
-        "Er worden geen events verstuurd. Sessieresultaten staan op het tabblad Sessies, zijn op te vragen via de API en staan in de auditlog onder deze klant.",
+        "Er worden geen events verstuurd. Sessieresultaten staan op de pagina Sessies, zijn op te vragen via de API en staan in de auditlog.",
       defaultHint:
         "Host je een eigen ontvanger? Voeg de URL toe en de wallet POST elk ondertekend event daarheen.",
       useOwn: "Eigen endpoint gebruiken",
@@ -1286,7 +1181,7 @@ export const nl: Translation<typeof en> = {
     edit: "Bewerken",
     selection: {
       title: "Flows",
-      hint: "Leden versturen verzoeken met de flows die hier aangevinkt zijn; de standaardflow staat bij elk lid voorgeselecteerd. Een flow bewerken slaat een nieuwe versie op, die nieuwe verzoeken vanaf dan gebruiken.",
+      hint: "Leden versturen verzoeken met de flows die hier aangevinkt zijn. De standaardflow is de flow waarop een verzoekformulier start, voor leden en voor de API; leden hoeven hem niet te mogen gebruiken. Een flow bewerken slaat een nieuwe versie op, die nieuwe verzoeken vanaf dan gebruiken.",
       empty: "Nog geen flows. Maak er een aan met Nieuwe flow.",
       default: "Standaard",
       save: "Beschikbare flows opslaan",
@@ -1294,7 +1189,7 @@ export const nl: Translation<typeof en> = {
     hosted: {
       title: "Gehoste pagina",
       enabled:
-        "Klanten mogen links naar een gehoste pagina voor deze flow versturen",
+        "Links naar een gehoste pagina mogen voor deze flow worden verstuurd",
       locales: "Talen",
       localesHint:
         "Vink niets aan om alle talen aan te bieden. De pagina opent in de taal van de sessie, anders in de browsertaal van de persoon.",
@@ -1305,10 +1200,7 @@ export const nl: Translation<typeof en> = {
         done: "Toon altijd de bedankpagina (sessies mogen geen redirect-URL hebben)",
       },
       save: "Gehoste pagina opslaan",
-      previewAs: "Voorbeeld als klant",
       preview: "Voorbeeld van de gehoste pagina",
-      noCustomer:
-        "Voeg een klant toe om de pagina in diens huisstijl te bekijken.",
     },
     versions: {
       title: "Versies",
@@ -1369,15 +1261,15 @@ export const nl: Translation<typeof en> = {
     kinds: {
       identity: {
         title: "Identiteitscontrole",
-        hint: "De persoon bewijst wie hij of zij is; de klant krijgt de uitkomst.",
+        hint: "De persoon bewijst wie hij of zij is; jij krijgt de uitkomst.",
       },
       data_access: {
         title: "Mijn gegevens inzien",
-        hint: "Iemand vraagt de klant welke gegevens er van hem of haar zijn. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren laat de persoon die gegevens downloaden.",
+        hint: "Iemand vraagt je organisatie welke gegevens er van hem of haar zijn. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren laat de persoon die gegevens downloaden.",
       },
       data_erasure: {
         title: "Mijn gegevens verwijderen",
-        hint: "Iemand vraagt de klant om zijn of haar gegevens te verwijderen. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren verwijdert ze.",
+        hint: "Iemand vraagt je organisatie om zijn of haar gegevens te verwijderen. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren verwijdert ze.",
       },
     },
     new: {
@@ -1411,7 +1303,7 @@ export const nl: Translation<typeof en> = {
       faceProviderHint:
         "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto.",
       faceWithoutChip:
-        "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
+        "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
       identityLocked:
         "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
@@ -1446,10 +1338,10 @@ export const nl: Translation<typeof en> = {
       bsnPolicy: "BSN-beleid overschrijven",
       retentionSeconds: "Bewaartermijn overschrijven (seconden)",
       retentionSecondsHint:
-        "Ingevuld vervangt dit de bewaartermijn van de klant voor de sessies van deze flow; leeg of 0 houdt die van de klant aan.",
+        "Ingevuld vervangt dit de bewaartermijn van de organisatie voor de sessies van deze flow; leeg of 0 houdt die van de organisatie aan.",
       keepFacePhotos: "Gezichtsfoto's bewaren overschrijven",
       keepFacePhotosHint:
-        "Uit: het portret, de selfie en de foto van de klant verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een klant die ze moet bewaren.",
+        "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
       blurBsn: "BSN vervagen overschrijven",
       ageOver: "Minimumleeftijd",
       ageOverOption: "{{age}} jaar of ouder",
@@ -1476,7 +1368,7 @@ export const nl: Translation<typeof en> = {
     declineConfirm: {
       title: "Dit verzoek weigeren?",
       message:
-        "{{customer}} krijgt je gegevens niet, en deze link werkt daarna niet meer. Wil je later toch verifiëren, vraag {{customer}} dan om een nieuwe link.",
+        "{{organization}} krijgt je gegevens niet, en deze link werkt daarna niet meer. Wil je later toch verifiëren, vraag {{organization}} dan om een nieuwe link.",
       confirm: "Weigeren",
     },
     errors: {
@@ -1490,29 +1382,29 @@ export const nl: Translation<typeof en> = {
     dataRequest: {
       data_access: {
         intro:
-          "Je vraagt {{customer}} welke gegevens er van je zijn. Bevestig eerst wie je bent.",
+          "Je vraagt {{organization}} welke gegevens er van je zijn. Bevestig eerst wie je bent.",
         inReview:
-          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+          "Je verzoek is ter beoordeling naar {{organization}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
       },
       data_erasure: {
         intro:
-          "Je vraagt {{customer}} om je gegevens te verwijderen. Bevestig eerst wie je bent.",
+          "Je vraagt {{organization}} om je gegevens te verwijderen. Bevestig eerst wie je bent.",
         inReview:
-          "Je verzoek is ter beoordeling naar {{customer}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
+          "Je verzoek is ter beoordeling naar {{organization}} gestuurd. Open deze link later opnieuw om de uitkomst te zien.",
       },
       erased: "Je gegevens zijn verwijderd.",
       erasedPartly_one:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       erasedPartly_other:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{customer}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       refused: {
         reviewer:
-          "{{customer}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",
+          "{{organization}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",
         lapsed:
-          "{{customer}} heeft je verzoek niet binnen 30 dagen beantwoord. Vraag hen om een nieuwe link.",
+          "{{organization}} heeft je verzoek niet binnen 30 dagen beantwoord. Vraag hen om een nieuwe link.",
         paused:
-          "{{customer}} kon je verzoek nu niet behandelen. Vraag hen later om een nieuwe link.",
-        law: "{{customer}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
+          "{{organization}} kon je verzoek nu niet behandelen. Vraag hen later om een nieuwe link.",
+        law: "{{organization}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",
       },
       download: "Mijn gegevens downloaden",
       downloadUntil: "Beschikbaar tot {{date}}.",
@@ -1707,12 +1599,7 @@ export const nl: Translation<typeof en> = {
     identityProofingMailNotSent:
       "Verzoek aangemaakt, maar de mail kon niet verstuurd worden. Controleer de mailinstellingen van deze organisatie.",
     identityProofingRequestSent: "Verzoek verstuurd",
-    identityProofingCustomerCreated: "Klant toegevoegd",
-    identityProofingCustomerRenamed: "Klant hernoemd",
-    identityProofingCustomerSettingsSaved: "Instellingen opgeslagen",
-    identityProofingCustomerPaused: "Verificatie gepauzeerd",
-    identityProofingCustomerResumed: "Verificatie hervat",
-    identityProofingCustomerRemoved: "Klant verwijderd",
+    identityProofingSettingsSaved: "Instellingen opgeslagen",
     identityProofingBrandingSaved: "Huisstijl opgeslagen",
     identityProofingHostedSettingsSaved:
       "Instellingen van de gehoste pagina opgeslagen",
@@ -1720,7 +1607,6 @@ export const nl: Translation<typeof en> = {
     identityProofingWebhookSaved: "Webhook opgeslagen",
     identityProofingWebhookRemoved: "Webhook verwijderd",
     identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
-    identityProofingCustomerFlowsSaved: "Toegewezen flows opgeslagen",
     notificationSettingsSaved: "Notificatie-instellingen opgeslagen",
     provisioningSettingsSaved:
       "Instellingen voor directorysynchronisatie opgeslagen",
@@ -2031,11 +1917,13 @@ export const nl: Translation<typeof en> = {
       identityProofingCustomerFlowsConfigured:
         "Aan een klant toegewezen identiteitsverificatieflows gewijzigd",
       identityProofingCustomerRemoved: "Identiteitsverificatieklant verwijderd",
-      identityProofingApiKeyCreated: "API-sleutel van klant aangemaakt",
-      identityProofingApiKeyRevoked: "API-sleutel van klant ingetrokken",
-      identityProofingWebhookConfigured: "Webhook van klant ingesteld",
-      identityProofingWebhookSecretRotated: "Webhookgeheim van klant vernieuwd",
-      identityProofingWebhookRemoved: "Webhook van klant verwijderd",
+      identityProofingSettingsUpdated:
+        "Instellingen voor identiteitsverificatie bijgewerkt",
+      identityProofingApiKeyCreated: "API-sleutel aangemaakt",
+      identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
+      identityProofingWebhookConfigured: "Webhook-endpoint ingesteld",
+      identityProofingWebhookSecretRotated: "Webhookgeheim vernieuwd",
+      identityProofingWebhookRemoved: "Webhook-endpoint verwijderd",
       identityProofingPaused: "Identiteitsverificatie gepauzeerd",
       identityProofingFlowHostedConfigured:
         "Gehoste pagina van een flow gewijzigd",

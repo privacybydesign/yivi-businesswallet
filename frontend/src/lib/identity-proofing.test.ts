@@ -28,7 +28,7 @@ import {
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
-  assignedFlows,
+  externalFlows,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -46,14 +46,12 @@ import {
   proofingStatsBy,
   proofingStatusLabel,
   requestSubject,
-  searchCustomers,
   sendableFlows,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
   sumProofingStats,
   verifiedShare,
-  customerDisplayStatus,
   DATA_RETENTION_DAY_OPTIONS,
   isHexColor,
   isSuccessStatus,
@@ -467,15 +465,23 @@ describe("sendableFlows", () => {
   });
 });
 
-describe("assignedFlows", () => {
-  it("offers only a customer's assigned flows and starts on its default", () => {
-    const { sendable, initial } = assignedFlows([
-      { id: "a", assigned: false, default: false },
-      { id: "b", assigned: true, default: false },
-      { id: "c", assigned: true, default: true },
+describe("externalFlows", () => {
+  it("offers the flows that can be finished and starts on the org's default", () => {
+    const { sendable, initial } = externalFlows([
+      { id: "a", completable: false, default: false },
+      { id: "b", completable: true, default: false },
+      { id: "c", completable: true, default: true },
     ]);
     expect(sendable.map((f) => f.id)).toEqual(["b", "c"]);
     expect(initial?.id).toBe("c");
+  });
+
+  it("starts on the first flow when the default cannot be finished", () => {
+    const { initial } = externalFlows([
+      { id: "a", completable: true, default: false },
+      { id: "b", completable: false, default: true },
+    ]);
+    expect(initial?.id).toBe("a");
   });
 });
 
@@ -494,27 +500,32 @@ describe("editedFlowSelection", () => {
     expect(dirty).toBe(false);
   });
 
-  it("falls the default to the first ticked flow once it is unticked", () => {
+  it("keeps a default that members may not use", () => {
     const { selection, dirty } = editedFlowSelection(
       flows,
-      new Set(["b", "a"]),
-      "c",
+      new Set(["a", "c"]),
+      "b",
       saved,
     );
-    expect(selection).toEqual({ flowIds: ["a", "b"], defaultFlowId: "a" });
+    expect(selection).toEqual({ flowIds: ["a", "c"], defaultFlowId: "b" });
     expect(dirty).toBe(true);
   });
 
-  it("has no default when nothing is ticked", () => {
-    expect(editedFlowSelection(flows, new Set(), "c", saved).selection).toEqual(
-      { flowIds: [], defaultFlowId: "" },
+  it("has no default once the default is no longer a listed flow", () => {
+    const { selection, dirty } = editedFlowSelection(
+      flows,
+      new Set(["a"]),
+      "gone",
+      saved,
     );
+    expect(selection).toEqual({ flowIds: ["a"], defaultFlowId: "" });
+    expect(dirty).toBe(true);
   });
 
-  it("is dirty when only the default moved", () => {
-    expect(
-      editedFlowSelection(flows, new Set(["a", "c"]), "a", saved).dirty,
-    ).toBe(true);
+  it("has no flows when nothing is ticked", () => {
+    expect(editedFlowSelection(flows, new Set(), "c", saved).selection).toEqual(
+      { flowIds: [], defaultFlowId: "c" },
+    );
   });
 });
 
@@ -592,12 +603,6 @@ describe("proofingErrorMessage", () => {
     ).toBe(t("identityProofing.errors.deviceActive"));
   });
 
-  it("says a paused customer takes no request", () => {
-    expect(
-      proofingErrorMessage(apiError(409, "customer_paused", "internal"), t),
-    ).toBe(t("identityProofing.errors.customerPaused"));
-  });
-
   it("maps known codes to their own copy", () => {
     expect(
       proofingErrorMessage(apiError(422, "flow_not_allowed", "internal"), t),
@@ -605,7 +610,7 @@ describe("proofingErrorMessage", () => {
   });
 
   it.each([
-    [409, "customer_sessions_left", "customerSessionsLeft"],
+    [422, "no_default_flow", "noDefaultFlow"],
     [404, "api_key_not_found", "apiKeyNotFound"],
     [404, "session_not_found", "sessionNotFound"],
     [409, "not_under_review", "notUnderReview"],
@@ -673,20 +678,18 @@ describe("addressVerificationNote", () => {
     ["unsupported", "unsupported"],
     [undefined, "declared"],
   ] as const)("says how a %s address was checked", (verification, key) => {
-    const copy = t(`customers.sessions.address.${key}`);
-    expect(copy).not.toBe(`customers.sessions.address.${key}`);
+    const copy = t(`identityProofing.sessions.address.${key}`);
+    expect(copy).not.toBe(`identityProofing.sessions.address.${key}`);
     expect(addressVerificationNote(verification, t)).toBe(copy);
   });
 });
 
 describe("proofing stats", () => {
   const row = (
-    customerId: string,
     flowId: string,
     sessions: number,
     approved: number,
   ): {
-    customerId: string;
     flowId: string;
     sessions: number;
     approved: number;
@@ -695,7 +698,6 @@ describe("proofing stats", () => {
     expired: number;
     cancelled: number;
   } => ({
-    customerId,
     flowId,
     sessions,
     approved,
@@ -704,11 +706,7 @@ describe("proofing stats", () => {
     expired: 1,
     cancelled: 1,
   });
-  const rows = [
-    row("c1", "f1", 10, 6),
-    row("c1", "f2", 4, 2),
-    row("c2", "f1", 5, 3),
-  ];
+  const rows = [row("f1", 10, 6), row("f2", 4, 2), row("f1", 5, 3)];
 
   it("sums every row", () => {
     expect(sumProofingStats(rows)).toEqual({
@@ -722,31 +720,17 @@ describe("proofing stats", () => {
     expect(sumProofingStats([]).sessions).toBe(0);
   });
 
-  it("groups per customer and per flow", () => {
-    const perCustomer = proofingStatsBy(rows, (r) => r.customerId);
-    expect(perCustomer.get("c1")?.sessions).toBe(14);
-    expect(perCustomer.get("c2")?.approved).toBe(3);
-    expect(perCustomer.has("c3")).toBe(false);
-    const perFlow = proofingStatsBy(
-      rows.filter((r) => r.customerId === "c1"),
-      (r) => r.flowId,
-    );
+  it("groups per flow", () => {
+    const perFlow = proofingStatsBy(rows, (r) => r.flowId);
     expect([...perFlow.keys()]).toEqual(["f1", "f2"]);
+    expect(perFlow.get("f1")?.sessions).toBe(15);
+    expect(perFlow.get("f2")?.approved).toBe(2);
+    expect(perFlow.has("f3")).toBe(false);
   });
 
   it("has no verified share without sessions", () => {
     expect(verifiedShare(sumProofingStats([]))).toBeUndefined();
-    expect(verifiedShare(sumProofingStats([row("c", "f", 4, 3)]))).toBe(0.75);
-  });
-});
-
-describe("searchCustomers", () => {
-  const customers = [{ name: "Veldhuis Verzekeringen" }, { name: "Kliq" }];
-
-  it("matches on the name, ignoring case and space", () => {
-    expect(searchCustomers(customers, "  VERZ ")).toEqual([customers[0]]);
-    expect(searchCustomers(customers, "")).toEqual(customers);
-    expect(searchCustomers(customers, "nope")).toEqual([]);
+    expect(verifiedShare(sumProofingStats([row("f", 4, 3)]))).toBe(0.75);
   });
 });
 
@@ -847,48 +831,7 @@ describe("session settings mirror backend/internal/proofing", () => {
   });
 });
 
-describe("customerDisplayStatus", () => {
-  it("flags an active customer whose webhook fails", () => {
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "failing" },
-        hasApiKey: true,
-      }),
-    ).toBe("needs_attention");
-    expect(
-      customerDisplayStatus({
-        status: "paused",
-        webhook: { state: "failing" },
-        hasApiKey: true,
-      }),
-    ).toBe("paused");
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "delivering" },
-        hasApiKey: true,
-      }),
-    ).toBe("active");
-  });
-
-  it("asks for a live API key before anything but a pause", () => {
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "failing" },
-        hasApiKey: false,
-      }),
-    ).toBe("setup_needed");
-    expect(
-      customerDisplayStatus({
-        status: "paused",
-        webhook: { state: "delivering" },
-        hasApiKey: false,
-      }),
-    ).toBe("paused");
-  });
-
+describe("isSuccessStatus", () => {
   it("tells a 2xx from the rest", () => {
     expect(isSuccessStatus(204)).toBe(true);
     expect(isSuccessStatus(503)).toBe(false);
@@ -1279,7 +1222,8 @@ describe("data request review", () => {
   });
 
   it("names the sessions an erasure deletes", () => {
-    const key = "customers.sessions.dataRequest.data_erasure.confirm.title";
+    const key =
+      "identityProofing.sessions.dataRequest.data_erasure.confirm.title";
     expect(t(key, { count: 1 })).toBe("Erase 1 session?");
     expect(t(key, { count: 3 })).toBe("Erase 3 sessions?");
   });

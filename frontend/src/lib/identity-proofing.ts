@@ -58,7 +58,7 @@ export function progressPollContinues(
 }
 
 // Whether a verify page keeps re-reading a session in review, slowly: a
-// person decides it, or its customer's erasure setting seconds after it got
+// person decides it, or the org's erasure setting seconds after it got
 // there, while the subject may still be watching.
 export function reviewPollContinues(
   progress: { status: string } | undefined,
@@ -183,7 +183,7 @@ const YIVI_EIDAS_LEVEL = "low";
 
 // Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
 // photographs the document, which only the Idem app does, matches the face
-// against a customer's reference photo (proofing.NeedsReferencePhoto: a face
+// against the sender's reference photo (proofing.NeedsReferencePhoto: a face
 // step without the chip read, outside the browser), where the Yivi app
 // matches against its credential's photo instead, or requires a level above
 // what a Yivi session reaches, or checks an age the Yivi passport and id-card
@@ -358,8 +358,8 @@ function tristate(value: boolean | undefined): Tristate {
   return value === undefined ? "" : value ? "true" : "false";
 }
 
-// A flow as any list returns it (the org's, or a customer's), without the
-// list's own selection flags: what the editor needs to seed a new version.
+// A flow as any list returns it, without the list's own selection flags: what
+// the editor needs to seed a new version.
 export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 
 // The editor state for a new version of an existing flow, as stored.
@@ -561,10 +561,14 @@ export function sendableFlows<T extends { allowed: boolean; default: boolean }>(
   return withInitial(flows.filter((flow) => flow.allowed));
 }
 
-export function assignedFlows<
-  T extends { assigned: boolean; default: boolean },
+// The flows an external person can be sent from the app, and the one the form
+// starts on: the org's default, else the first. The list holds every flow for
+// an admin and only the ones members may use for a member; one that needs the
+// sender's own photo is not completable here (the API sends those).
+export function externalFlows<
+  T extends { completable: boolean; default: boolean },
 >(flows: readonly T[]): { sendable: T[]; initial: T | undefined } {
-  return withInitial(flows.filter((flow) => flow.assigned));
+  return withInitial(flows.filter((flow) => flow.completable));
 }
 
 function withInitial<T extends { default: boolean }>(
@@ -576,6 +580,9 @@ function withInitial<T extends { default: boolean }>(
   };
 }
 
+// The selection an admin edited: the ticked flows members may use, and the
+// default, which is not one of them by necessity. Dirty when it differs from
+// the saved one.
 export function editedFlowSelection(
   flows: readonly { id: string }[],
   ticked: ReadonlySet<string>,
@@ -583,7 +590,7 @@ export function editedFlowSelection(
   saved: ProofingFlowSelection,
 ): { selection: ProofingFlowSelection; dirty: boolean } {
   const flowIds = flows.filter((f) => ticked.has(f.id)).map((f) => f.id);
-  const defaultFlowId = ticked.has(defaultId) ? defaultId : (flowIds[0] ?? "");
+  const defaultFlowId = flows.some((f) => f.id === defaultId) ? defaultId : "";
   const dirty =
     saved.flowIds.length !== flowIds.length ||
     saved.flowIds.some((id) => !ticked.has(id)) ||
@@ -708,13 +715,13 @@ export function addressVerificationNote(
 ): string {
   switch (verification) {
     case "verified":
-      return t("customers.sessions.address.verified");
+      return t("identityProofing.sessions.address.verified");
     case "unchecked":
-      return t("customers.sessions.address.unchecked");
+      return t("identityProofing.sessions.address.unchecked");
     case "unsupported":
-      return t("customers.sessions.address.unsupported");
+      return t("identityProofing.sessions.address.unsupported");
     case undefined:
-      return t("customers.sessions.address.declared");
+      return t("identityProofing.sessions.address.declared");
   }
 }
 
@@ -756,7 +763,7 @@ export const PROOFING_REJECTION_CODES = Object.keys(
 
 // Why a data request whose subject did prove who they are was refused: a
 // reviewer refused it, nobody answered it, proofing was paused, or the
-// customer must keep the data. The subject's page then says the request was
+// org must keep the data. The subject's page then says the request was
 // refused, not that they were not verified.
 export type DataRequestRefusal = "reviewer" | "lapsed" | "paused" | "law";
 
@@ -965,22 +972,10 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAllowed");
     case "member_not_found":
       return t("identityProofing.errors.memberNotFound");
-    case "customer_not_found":
-      return t("identityProofing.errors.customerNotFound");
-    case "customer_exists":
-      return t("identityProofing.errors.customerExists");
-    case "flow_not_assigned":
-      return t("identityProofing.errors.flowNotAssigned");
-    case "customer_paused":
-      return t("identityProofing.errors.customerPaused");
-    case "customer_has_open_reviews":
-      return t("identityProofing.errors.customerHasOpenReviews");
-    case "customer_sessions_left":
-      return t("identityProofing.errors.customerSessionsLeft");
+    case "no_default_flow":
+      return t("identityProofing.errors.noDefaultFlow");
     case "proofing_paused":
       return t("identityProofing.errors.proofingPaused");
-    case "customer_no_api_key":
-      return t("identityProofing.errors.customerNoApiKey");
     case "api_key_not_found":
       return t("identityProofing.errors.apiKeyNotFound");
     case "session_not_found":
@@ -1080,7 +1075,7 @@ export function verifyErrorMessage(
 const DELIVERY_FIRST_SEND_POLL_MS = 5_000;
 const DELIVERY_RETRY_POLL_MS = 60_000;
 
-// How often a customer's webhook deliveries are re-read: soon while one waits
+// How often the org's webhook deliveries are re-read: soon while one waits
 // for its first send, slowly while one retries, not at all once none is
 // pending.
 export function deliveriesPollInterval(
@@ -1128,7 +1123,7 @@ export function sumProofingStats(
   );
 }
 
-// Stats rows summed per key: per customer, or per flow of one customer.
+// Stats rows summed per key: per flow.
 export function proofingStatsBy<T extends ProofingTotals>(
   rows: readonly T[],
   key: (row: T) => string,
@@ -1149,19 +1144,6 @@ export function noProofingSessions(): ProofingTotals {
 // percentage cannot express.
 export function verifiedShare(totals: ProofingTotals): number | undefined {
   return totals.sessions === 0 ? undefined : totals.approved / totals.sessions;
-}
-
-// The customers whose name holds the search, ignoring case and surrounding
-// space; every customer for an empty search.
-export function searchCustomers<T extends { name: string }>(
-  customers: readonly T[],
-  search: string,
-): T[] {
-  const needle = search.trim().toLocaleLowerCase();
-  if (needle === "") {
-    return [...customers];
-  }
-  return customers.filter((c) => c.name.toLocaleLowerCase().includes(needle));
 }
 
 // A requested-data value the wallet has copy for; the backend may add others.
@@ -1276,7 +1258,7 @@ export function shortRequestId(id: string): string {
   return id.replaceAll("-", "").slice(0, SHORT_ID_LENGTH);
 }
 
-// The session settings an admin may pick for a customer, mirroring
+// The session settings an admin may pick, mirroring
 // SessionTTLOptions and DataRetentionDayOptions in backend/internal/proofing
 // (identity-proofing.test.ts holds the two together).
 export const SESSION_TTL_OPTIONS_SECONDS = [120, 300, 600] as const;
@@ -1286,29 +1268,6 @@ const SECONDS_IN_MINUTE = 60;
 
 export function ttlMinutes(seconds: number): number {
   return Math.round(seconds / SECONDS_IN_MINUTE);
-}
-
-// How a customer reads in the lists: paused, or active and needing attention
-// because its webhook endpoint is failing, not set up without a live API key,
-// or plainly active.
-export type CustomerDisplayStatus =
-  | "active"
-  | "paused"
-  | "needs_attention"
-  | "setup_needed";
-
-export function customerDisplayStatus(customer: {
-  status: string;
-  webhook: { state: string };
-  hasApiKey: boolean;
-}): CustomerDisplayStatus {
-  if (customer.status === "paused") {
-    return "paused";
-  }
-  if (!customer.hasApiKey) {
-    return "setup_needed";
-  }
-  return customer.webhook.state === "failing" ? "needs_attention" : "active";
 }
 
 // A delivery answered 2xx.
@@ -1392,7 +1351,7 @@ export function sessionEventDetail(
     parts.push(proofingMethodLabel(fields.method, t));
   }
   if (typeof fields.eidasLevel === "string" && fields.eidasLevel !== "") {
-    parts.push(t("customers.flows.eidas", { level: fields.eidasLevel }));
+    parts.push(t("identityProofing.flows.eidas", { level: fields.eidasLevel }));
   }
   if (typeof fields.errorCode === "string" && fields.errorCode !== "") {
     parts.push(proofingRejectionReason(fields.errorCode, t));
@@ -1496,9 +1455,9 @@ export function imageSource(image: ProofingImage): string {
   return `data:${image.mimeType};base64,${image.data}`;
 }
 
-// Who a session timeline event names as its actor: the member, the customer's
-// API key for a request it created, a non-user actor's label, or the system;
-// null when the event's detail already says who.
+// Who a session timeline event names as its actor: the member, the API key for
+// a request it created, a non-user actor's label, or the system; null when the
+// event's detail already says who.
 export function timelineActor(
   event: AuditEvent,
   request: Pick<ProofingRequest, "apiKeyName">,
@@ -1509,7 +1468,9 @@ export function timelineActor(
     return fullName(event.actor);
   }
   if (event.action === "identity_proofing.requested" && request.apiKeyName) {
-    return t("customers.sessions.viaApiKey", { name: request.apiKeyName });
+    return t("identityProofing.sessions.viaApiKey", {
+      name: request.apiKeyName,
+    });
   }
   const label = auditActorLabel(event.actorLabel, t);
   if (label) return label;

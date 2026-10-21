@@ -1,14 +1,16 @@
 import { useState } from "react";
+import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useDecideReviewMutation,
-  useProofingRequestsQuery,
+  useExternalRequestsQuery,
   useProofingRequestEventsQuery,
   useProofingRequestResultQuery,
+  useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
-  ProofingCustomer,
   ProofingImage,
   ProofingRequest,
   ProofingResult,
@@ -43,9 +45,10 @@ import {
   timelineActor,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Button, Card, Icon, Table, Tag } from "../ui";
-import { ResultTag } from "./proofing-customer-ui";
+import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { ResultTag } from "./proofing-ui";
 import { DataRequestPanel, DataRequestTag } from "./data-request-review";
+import { VerifyPerson } from "./proofing-send";
 
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
@@ -55,23 +58,47 @@ const TIMELINE_ICON_SIZE = 14;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
-// Every session sent for the customer (an admin's; a member's own), filterable
-// by outcome. A row opens to its details: who it went to, who sent it, and why
-// it failed.
-export function SessionsTab({
+// The sessions sent to external people. A member sees the ones they sent, an
+// admin every one; an admin also decides the ones waiting for review.
+export default function ProofingSessions(): React.JSX.Element {
+  const { t } = useTranslation();
+  const { orgSlug } = useParams();
+  // Guaranteed by the ":orgSlug" route segment this component mounts under.
+  const slug = orgSlug!;
+  const org = useOrganizationQuery(slug);
+  const isAdmin = org.data?.role === "admin";
+
+  return (
+    <>
+      <TopBar
+        title={t("identityProofing.sessions.title")}
+        subtitle={t("identityProofing.sessions.subtitle")}
+        actions={<VerifyPerson slug={slug} isAdmin={isAdmin} />}
+      />
+      <div className="flex flex-col gap-4 p-4 sm:p-8">
+        <SessionsList slug={slug} isAdmin={isAdmin} />
+      </div>
+    </>
+  );
+}
+
+// Every session sent to an external person (an admin's; a member's own),
+// filterable by outcome. A row opens to its details: who it went to, who sent
+// it, and why it failed; ?session= opens one.
+function SessionsList({
   slug,
-  customer,
   isAdmin,
 }: {
   slug: string;
-  customer: ProofingCustomer;
   isAdmin: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useProofingRequestsQuery(slug, customer.id);
+  const requests = useExternalRequestsQuery(slug);
+  const settings = useProofingSettingsQuery(slug);
   const formatWhen = useWhenFormatter();
+  const [searchParams] = useSearchParams();
   const [filter, setFilter] = useState<SessionFilter>("all");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(searchParams.get("session"));
   const all = requests.data ?? [];
   const counts = sessionFilterCounts(all);
   const shown = all.filter((r) => matchesSessionFilter(r.status, filter));
@@ -81,7 +108,7 @@ export function SessionsTab({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div
           role="group"
-          aria-label={t("customers.sessions.filterLabel")}
+          aria-label={t("identityProofing.sessions.filterLabel")}
           className="flex flex-wrap gap-2"
         >
           {SESSION_FILTERS.map((key) => {
@@ -99,28 +126,30 @@ export function SessionsTab({
                     : "border-line-strong bg-surface text-ink-soft hover:text-ink",
                 ].join(" ")}
               >
-                {t(`customers.sessions.filters.${key}`, {
+                {t(`identityProofing.sessions.filters.${key}`, {
                   count: counts[key],
                 })}
               </button>
             );
           })}
         </div>
-        <p className="text-muted text-[12px]">
-          {isAdmin
-            ? t("customers.sessions.retention", {
-                count: customer.dataRetentionDays,
-              })
-            : t("customers.sessions.retentionOwn", {
-                count: customer.dataRetentionDays,
-              })}
-        </p>
+        {settings.data && (
+          <p className="text-muted text-[12px]">
+            {isAdmin
+              ? t("identityProofing.sessions.retention", {
+                  count: settings.data.dataRetentionDays,
+                })
+              : t("identityProofing.sessions.retentionOwn", {
+                  count: settings.data.dataRetentionDays,
+                })}
+          </p>
+        )}
       </div>
       <Card>
         <Table>
           <Table.Head>
             <Table.HeaderCell>
-              {t("customers.sessions.session")}
+              {t("identityProofing.sessions.session")}
             </Table.HeaderCell>
             <Table.HeaderCell>
               {t("identityProofing.requests.subject")}
@@ -129,16 +158,16 @@ export function SessionsTab({
               {t("identityProofing.requests.flow")}
             </Table.HeaderCell>
             <Table.HeaderCell>
-              {t("customers.sessions.method")}
+              {t("identityProofing.sessions.method")}
             </Table.HeaderCell>
             <Table.HeaderCell>
-              {t("customers.sessions.result")}
+              {t("identityProofing.sessions.result")}
             </Table.HeaderCell>
             <Table.HeaderCell>
-              {t("customers.sessions.started")}
+              {t("identityProofing.sessions.started")}
             </Table.HeaderCell>
             <Table.HeaderCell>
-              {t("customers.sessions.duration")}
+              {t("identityProofing.sessions.duration")}
             </Table.HeaderCell>
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
@@ -228,7 +257,7 @@ function SessionRow({
             </div>
           ) : (
             <div className="text-muted italic">
-              {t("customers.sessions.purgedSubject")}
+              {t("identityProofing.sessions.purgedSubject")}
             </div>
           )}
           {subject.verifiedAs && (
@@ -260,7 +289,7 @@ function SessionRow({
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
-            aria-label={t("customers.sessions.details", {
+            aria-label={t("identityProofing.sessions.details", {
               id: shortRequestId(request.id),
             })}
             onClick={(event) => {
@@ -286,23 +315,27 @@ function SessionRow({
               <div className="flex min-w-0 flex-col gap-4">
                 <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
                   <dt className="text-muted">
-                    {t("customers.sessions.method")}
+                    {t("identityProofing.sessions.method")}
                   </dt>
                   <dd>{proofingMethodLabel(request.method, t)}</dd>
                   <dt className="text-muted">
-                    {t("customers.sessions.fullId")}
+                    {t("identityProofing.sessions.fullId")}
                   </dt>
                   <dd className="font-mono text-[12px] break-all">
                     {request.id}
                   </dd>
-                  <dt className="text-muted">{t("customers.send.email")}</dt>
+                  <dt className="text-muted">
+                    {t("identityProofing.send.email")}
+                  </dt>
                   <dd>{request.subjectEmail || "—"}</dd>
                   {request.expectedSubject && (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.expectedSubject")}
+                        {t("identityProofing.sessions.expectedSubject")}
                       </dt>
-                      <dd>{t("customers.sessions.expectedSubjectValue")}</dd>
+                      <dd>
+                        {t("identityProofing.sessions.expectedSubjectValue")}
+                      </dd>
                     </>
                   )}
                   {isAdmin && (
@@ -312,7 +345,7 @@ function SessionRow({
                       </dt>
                       <dd>
                         {request.apiKeyName
-                          ? t("customers.sessions.viaApiKey", {
+                          ? t("identityProofing.sessions.viaApiKey", {
                               name: request.apiKeyName,
                             })
                           : request.requestedByName || "—"}
@@ -340,7 +373,7 @@ function SessionRow({
                   {request.errorCode && (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.reason")}
+                        {t("identityProofing.sessions.reason")}
                       </dt>
                       <dd>{proofingRejectionReason(request.errorCode, t)}</dd>
                     </>
@@ -348,7 +381,7 @@ function SessionRow({
                   {request.completedAt && (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.completed")}
+                        {t("identityProofing.sessions.completed")}
                       </dt>
                       <dd>{formatWhen(request.completedAt)}</dd>
                     </>
@@ -356,7 +389,7 @@ function SessionRow({
                   {request.purgedAt ? (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.purged")}
+                        {t("identityProofing.sessions.purged")}
                       </dt>
                       <dd>{formatWhen(request.purgedAt)}</dd>
                     </>
@@ -364,7 +397,7 @@ function SessionRow({
                     request.purgeAt && (
                       <>
                         <dt className="text-muted">
-                          {t("customers.sessions.purgeAt")}
+                          {t("identityProofing.sessions.purgeAt")}
                         </dt>
                         <dd>{formatWhen(request.purgeAt)}</dd>
                       </>
@@ -379,7 +412,7 @@ function SessionRow({
                 )}
                 {showIdentity && (
                   <p className={HINT}>
-                    {t("customers.sessions.identity.audited")}
+                    {t("identityProofing.sessions.identity.audited")}
                   </p>
                 )}
                 {request.addressMode !== "off" && (
@@ -417,7 +450,9 @@ function AddressTag({
     request.address === undefined &&
     request.purgedAt === undefined
   ) {
-    return <Tag tone="amber">{t("customers.sessions.address.missing")}</Tag>;
+    return (
+      <Tag tone="amber">{t("identityProofing.sessions.address.missing")}</Tag>
+    );
   }
   return null;
 }
@@ -433,10 +468,10 @@ function SessionAddress({
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-ink text-[13.5px] font-bold">
-        {t("customers.sessions.address.title")}
+        {t("identityProofing.sessions.address.title")}
       </h3>
       {a === undefined ? (
-        <p className={HINT}>{t("customers.sessions.address.none")}</p>
+        <p className={HINT}>{t("identityProofing.sessions.address.none")}</p>
       ) : (
         <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
           {`${a.street} ${a.houseNumber}`}
@@ -462,14 +497,16 @@ function DiplomaTag({
   if (request.diplomas.length > 0) {
     return (
       <Tag tone="blue">
-        {t("customers.sessions.diplomas.tag", {
+        {t("identityProofing.sessions.diplomas.tag", {
           count: request.diplomas.length,
         })}
       </Tag>
     );
   }
   if (request.diplomaMode === "required" && request.status === "approved") {
-    return <Tag tone="amber">{t("customers.sessions.diplomas.missing")}</Tag>;
+    return (
+      <Tag tone="amber">{t("identityProofing.sessions.diplomas.missing")}</Tag>
+    );
   }
   return null;
 }
@@ -485,10 +522,10 @@ function SessionDiplomas({
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-ink text-[13.5px] font-bold">
-        {t("customers.sessions.diplomas.title")}
+        {t("identityProofing.sessions.diplomas.title")}
       </h3>
       {request.diplomas.length === 0 ? (
-        <p className={HINT}>{t("customers.sessions.diplomas.none")}</p>
+        <p className={HINT}>{t("identityProofing.sessions.diplomas.none")}</p>
       ) : (
         <ul className="border-line divide-y rounded-lg border">
           {request.diplomas.map((d) => (
@@ -514,7 +551,7 @@ function SessionDiplomas({
                   .join(" · ")}
               </span>
               <span className="text-muted font-mono text-[11.5px]">
-                {t("customers.sessions.diplomas.number", {
+                {t("identityProofing.sessions.diplomas.number", {
                   number: d.documentNumber,
                 })}
               </span>
@@ -552,33 +589,33 @@ function ReviewDecision({
   return (
     <div className="border-line mt-4 flex flex-col gap-2 border-t pt-4">
       <h3 className="text-ink text-[14px] font-bold">
-        {t("customers.sessions.review.title")}
+        {t("identityProofing.sessions.review.title")}
       </h3>
       <p className="text-ink-soft text-[13px]">
-        {t("customers.sessions.review.hint")}
+        {t("identityProofing.sessions.review.hint")}
       </p>
       <label
         htmlFor={fieldId}
         className="text-ink-soft text-[12px] font-semibold"
       >
-        {t("customers.sessions.review.reason")}
+        {t("identityProofing.sessions.review.reason")}
       </label>
       <textarea
         id={fieldId}
         value={reason}
         aria-invalid={(touched && missing) || tooLong}
-        placeholder={t("customers.sessions.review.reasonPlaceholder")}
+        placeholder={t("identityProofing.sessions.review.reasonPlaceholder")}
         onChange={(event) => setReason(event.target.value)}
         className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
       />
       {touched && missing && (
         <p className="text-error text-[12.5px]">
-          {t("customers.sessions.review.reasonRequired")}
+          {t("identityProofing.sessions.review.reasonRequired")}
         </p>
       )}
       {tooLong && (
         <p className="text-error text-[12.5px]">
-          {t("customers.sessions.review.reasonTooLong", {
+          {t("identityProofing.sessions.review.reasonTooLong", {
             max: REVIEW_REASON_MAX_CHARS,
           })}
         </p>
@@ -596,7 +633,7 @@ function ReviewDecision({
           disabled={decide.isPending}
           onClick={() => submit("approve")}
         >
-          {t("customers.sessions.review.approve")}
+          {t("identityProofing.sessions.review.approve")}
         </Button>
         <Button
           size="sm"
@@ -606,7 +643,7 @@ function ReviewDecision({
           disabled={decide.isPending}
           onClick={() => submit("reject")}
         >
-          {t("customers.sessions.review.reject")}
+          {t("identityProofing.sessions.review.reject")}
         </Button>
       </div>
     </div>
@@ -626,13 +663,15 @@ function IdentityRows({
     value === undefined || value === ""
       ? "—"
       : isCheckOutcome(value)
-        ? t(`customers.sessions.identity.checks.${value}`)
+        ? t(`identityProofing.sessions.identity.checks.${value}`)
         : value;
 
   if (result.isPending) {
     return (
       <>
-        <dt className="text-muted">{t("customers.sessions.identity.name")}</dt>
+        <dt className="text-muted">
+          {t("identityProofing.sessions.identity.name")}
+        </dt>
         <dd className="text-ink-soft">{t("common.loading")}</dd>
       </>
     );
@@ -651,7 +690,7 @@ function IdentityRows({
       {identity ? (
         <>
           <dt className="text-muted">
-            {t("customers.sessions.identity.name")}
+            {t("identityProofing.sessions.identity.name")}
           </dt>
           <dd>
             {[identity.givenName, identity.familyName]
@@ -659,51 +698,51 @@ function IdentityRows({
               .join(" ") || "—"}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.birthDate")}
+            {t("identityProofing.sessions.identity.birthDate")}
           </dt>
           <dd>{identity.birthDate || "—"}</dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.nationality")}
+            {t("identityProofing.sessions.identity.nationality")}
           </dt>
           <dd>{identity.nationality || "—"}</dd>
           {identity.ageOver && (
             <>
               <dt className="text-muted">
-                {t("customers.sessions.identity.ageOver", {
+                {t("identityProofing.sessions.identity.ageOver", {
                   age: identity.ageOver.age,
                 })}
               </dt>
               <dd>
                 {identity.ageOver.over
-                  ? t("customers.sessions.identity.ageOverYes")
-                  : t("customers.sessions.identity.ageOverNo")}
+                  ? t("identityProofing.sessions.identity.ageOverYes")
+                  : t("identityProofing.sessions.identity.ageOverNo")}
               </dd>
             </>
           )}
         </>
       ) : (
         <dd className="text-ink-soft sm:col-span-2">
-          {t("customers.sessions.identity.none")}
+          {t("identityProofing.sessions.identity.none")}
         </dd>
       )}
       {evidence && (
         <>
           <dt className="text-muted">
-            {t("customers.sessions.identity.document")}
+            {t("identityProofing.sessions.identity.document")}
           </dt>
           <dd>
             {evidence.type === "reference_photo"
-              ? t("customers.sessions.identity.noDocument")
+              ? t("identityProofing.sessions.identity.noDocument")
               : [evidence.documentType, evidence.issuingState]
                   .filter(Boolean)
                   .join(" · ") || evidence.type}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.passiveAuth")}
+            {t("identityProofing.sessions.identity.passiveAuth")}
           </dt>
           <dd>{check(evidence.passiveAuth)}</dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.faceMatch")}
+            {t("identityProofing.sessions.identity.faceMatch")}
           </dt>
           <dd>
             {evidence.faceMatch === undefined
@@ -711,7 +750,7 @@ function IdentityRows({
               : `${Math.round(evidence.faceMatch * PERCENT)}%`}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.liveness")}
+            {t("identityProofing.sessions.identity.liveness")}
           </dt>
           <dd>{check(evidence.liveness)}</dd>
         </>
@@ -721,7 +760,7 @@ function IdentityRows({
 }
 
 // The document's photo (read off the chip over NFC, or the disclosed
-// credential's), or the customer's own photo for a flow without the chip,
+// credential's), or the sender's own photo for a flow without the chip,
 // beside the live selfie matched against it, and the photos of
 // the document's front and back; only an approval carries them, only when
 // the flow requested them, and the face photos only when it keeps them. Each
@@ -748,7 +787,7 @@ function IdentityPhotos({
             <RevealablePhoto
               key={key}
               image={image}
-              label={t(`customers.sessions.identity.${key}`)}
+              label={t(`identityProofing.sessions.identity.${key}`)}
             />
           ),
       )}
@@ -782,14 +821,14 @@ function RevealablePhoto({
           <button
             type="button"
             onClick={() => setRevealed(true)}
-            aria-label={t("customers.sessions.identity.revealPhoto", {
+            aria-label={t("identityProofing.sessions.identity.revealPhoto", {
               name: label,
             })}
             className="focus-visible:ring-ink/30 absolute inset-0 flex items-center justify-center outline-none focus-visible:ring-3"
           >
             <span className="bg-surface/90 text-ink inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold shadow-sm">
               <Icon name="view" size={REVEAL_ICON_SIZE} />
-              {t("customers.sessions.identity.reveal")}
+              {t("identityProofing.sessions.identity.reveal")}
             </span>
           </button>
         )}
@@ -802,7 +841,7 @@ function RevealablePhoto({
             onClick={() => setRevealed(false)}
             className="text-link font-semibold hover:underline"
           >
-            {t("customers.sessions.identity.conceal")}
+            {t("identityProofing.sessions.identity.conceal")}
           </button>
         )}
       </figcaption>
@@ -811,7 +850,7 @@ function RevealablePhoto({
 }
 
 // A session's timeline: every audit event about it, oldest first, with who
-// acted (a member, the system, or the customer's API) and what it added.
+// acted (a member, the system, or the API) and what it added.
 function SessionTimeline({
   slug,
   request,
@@ -829,7 +868,7 @@ function SessionTimeline({
         id={`timeline-${request.id}`}
         className="text-muted font-label mb-3 text-[10.5px] font-medium tracking-[0.08em] uppercase"
       >
-        {t("customers.sessions.timeline")}
+        {t("identityProofing.sessions.timeline")}
       </h3>
       {events.isPending ? (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
@@ -837,7 +876,7 @@ function SessionTimeline({
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
       ) : events.data.length === 0 ? (
         <p className="text-ink-soft text-[13px]">
-          {t("customers.sessions.noEvents")}
+          {t("identityProofing.sessions.noEvents")}
         </p>
       ) : (
         <ol className="relative flex flex-col gap-4">

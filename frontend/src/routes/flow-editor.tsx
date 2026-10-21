@@ -51,8 +51,8 @@ const SELECT_CLASS =
 
 export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 
-// The flow editor, here and on a customer's Flows tab: onDone closes it (after
-// a save or a cancel), onSaved gets the saved flow first.
+// The flow editor: onDone closes it (after a save or a cancel), onSaved gets
+// the saved flow first.
 export function FlowEditor({
   slug,
   mode,

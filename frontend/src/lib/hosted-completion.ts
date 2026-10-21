@@ -50,7 +50,7 @@ export function completedMessage(
   return { type: "proofing.completed", session, status };
 }
 
-// The redirect with the session and its status added, keeping the customer's
+// The redirect with the session and its status added, keeping the redirect's
 // own query. The backend accepted the redirect's origin when the session was
 // created; an unparsable one is undefined, so the page shows its own done screen.
 export function completionRedirect(
@@ -116,7 +116,7 @@ export interface MessageTarget {
   postMessage(message: unknown, targetOrigin: string): void;
 }
 
-// Posts the completion to each of the customer's origins, never "*": the
+// Posts the completion to each of the org's origins, never "*": the
 // browser delivers it only when the embedding page is on that origin, so no
 // other page learns the outcome.
 export function postCompletion(
@@ -141,8 +141,8 @@ export function originLines(text: string): string[] {
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 // The hosted page's theme: the white-label design in the look the Idem app
-// shows the session in (the customer's own look, else the org's theme),
-// its header as the page's header. Without one, the customer's own colour as
+// shows the session in (the org's proofing look, else its theme),
+// its header as the page's header. Without one, the org's own colour as
 // the brand colour when it has a valid one. Applied through applyOrgTheme,
 // which keeps text on it readable and drops what is not a valid colour.
 export function hostedTheme(

@@ -36,7 +36,7 @@ describe("hostedLanguage", () => {
 describe("completionRedirect", () => {
   const done = completedMessage("ps_abc", "approved");
 
-  it("adds the session and status, keeping the customer's query", () => {
+  it("adds the session and status, keeping the redirect's query", () => {
     expect(completionRedirect("https://portal.example/done?ref=42", done)).toBe(
       "https://portal.example/done?ref=42&session=ps_abc&status=approved",
     );
@@ -126,7 +126,7 @@ describe("hostedHandBack", () => {
 });
 
 describe("postCompletion", () => {
-  it("posts only to the customer's origins, never to any origin", () => {
+  it("posts only to the org's origins, never to any origin", () => {
     const posted: [unknown, string][] = [];
     const parent: MessageTarget = {
       postMessage: (message, origin) => posted.push([message, origin]),
@@ -165,7 +165,7 @@ describe("originLines", () => {
 });
 
 describe("hostedTheme", () => {
-  it("brands the page in the customer's colour only", () => {
+  it("brands the page in the org's colour only", () => {
     const theme = hostedTheme(undefined, "#0a7c59");
     expect(theme.primaryColor).toBe("#0a7c59");
     expect(theme.accentColor).toBe("");

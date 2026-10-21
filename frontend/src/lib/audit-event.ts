@@ -124,6 +124,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.review_decided": { icon: "valid", tone: "blue" },
   "identity_proofing.data_exported": { icon: "view", tone: "slate" },
   "identity_proofing.flow_kind_configured": { icon: "edit", tone: "blue" },
+  "identity_proofing.settings_updated": { icon: "settings", tone: "blue" },
+  // Customers are gone; their events stay in the audit log and still read.
   "identity_proofing.customer_created": { icon: "add", tone: "green" },
   "identity_proofing.customer_updated": { icon: "edit", tone: "blue" },
   "identity_proofing.customer_flows_configured": {
@@ -178,7 +180,7 @@ const ADMIN_ACTOR = "admin";
 // subject proofed with, as the actor of what it caused.
 const SUBJECT_APP_ACTOR_PREFIX = "app:";
 
-// A non-user actor in words: a customer API key by its prefix, a hosted link's
+// A non-user actor in words: an API key by its prefix, a hosted link's
 // subject, the app a subject proofed with, or the label as it is; null when
 // the event has none.
 export function auditActorLabel(
@@ -463,6 +465,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingDataExported");
     case "identity_proofing.flow_kind_configured":
       return t("auditLog.actions.identityProofingFlowKindConfigured");
+    case "identity_proofing.settings_updated":
+      return t("auditLog.actions.identityProofingSettingsUpdated");
     case "identity_proofing.customer_created":
       return t("auditLog.actions.identityProofingCustomerCreated");
     case "identity_proofing.customer_updated":

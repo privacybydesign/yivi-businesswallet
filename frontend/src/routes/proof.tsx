@@ -33,7 +33,7 @@ import {
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
-import { CustomerMark } from "./proofing-customer-ui";
+import { BrandMark } from "./proofing-ui";
 import {
   MethodChoice,
   Overview,
@@ -46,15 +46,14 @@ const NOT_FOUND = "session_not_found";
 
 type Step = "overview" | "method" | "session";
 
-// A customer's subject on their own device, from a hosted link: what the
-// customer collects (declining cancels the link), the app to use, then that
-// app's session. Public like /vog/:token; the token in the link is the whole
+// An external person on their own device, from a hosted link: what the org
+// collects (declining cancels the link), the app to use, then that app's
+// session. Public like /vog/:token; the token in the link is the whole
 // authorization, and a link starts one session. Once settled, the page posts
-// the outcome to an embedding page on one of the customer's origins, and
-// redirects to the session's redirect when it has one. A session on a data
-// request flow is the person asking the customer for their data or its
-// erasure: the page says so, and an approved "see my data" request's data
-// downloads from it.
+// the outcome to an embedding page on one of the org's origins, and redirects
+// to the session's redirect when it has one. A session on a data request flow
+// is the person asking the org for their data or its erasure: the page says
+// so, and an approved "see my data" request's data downloads from it.
 export default function Proof(): React.JSX.Element {
   const { t } = useTranslation();
   // Guaranteed by the "/p/:token" route this mounts under.
@@ -70,7 +69,7 @@ export default function Proof(): React.JSX.Element {
         {page.data !== undefined ? (
           <>
             <HostedFlow token={token} page={page.data} />
-            {!page.data.customer.branding.hidePoweredBy && (
+            {!page.data.organization.branding.hidePoweredBy && (
               <p className="text-muted mt-4 text-center text-[12px]">
                 {t("proofLink.poweredBy")}
               </p>
@@ -100,7 +99,7 @@ function HostedFlow({
   page: HostedProofing;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const { customer, flow } = page;
+  const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const choice = flow.yiviAvailable;
   const stages = verifyStages({
@@ -134,7 +133,7 @@ function HostedFlow({
   }, [page.language, page.locales]);
 
   // The session's look for as long as the page shows.
-  const { primaryColor } = customer.branding;
+  const { primaryColor } = organization.branding;
   const { theme } = page;
   useEffect(() => {
     applyOrgTheme(hostedTheme(theme, primaryColor));
@@ -167,7 +166,7 @@ function HostedFlow({
       }
       if (handBack.redirectTo) {
         setRedirecting(true);
-        // Replace: back from the customer's page must not land on this link,
+        // Replace: back from the org's page must not land on this link,
         // which would redirect forward again.
         window.location.replace(handBack.redirectTo);
       }
@@ -192,27 +191,31 @@ function HostedFlow({
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
       <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
-        <CustomerMark customer={customer} size="lg" />
+        <BrandMark
+          name={organization.name}
+          branding={organization.branding}
+          size="lg"
+        />
         <span className="font-display text-[16px] font-bold">
-          {customer.name}
+          {organization.name}
         </span>
       </div>
       <div className="flex flex-col gap-6 p-6">
         {dataRequest && (
           <p className="text-ink text-[13.5px]">
             {t(`proofLink.dataRequest.${flow.kind as DataKind}.intro`, {
-              customer: customer.name,
+              organization: organization.name,
             })}
           </p>
         )}
         <Stepper
-          steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
+          steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
           current={stages.indexOf(stage)}
         />
         <StepRegion step={stage}>
           {step === "overview" && (
             <Overview
-              customer={customer}
+              org={organization}
               flow={flow}
               onContinue={choice ? () => setStep("method") : begin}
               starting={start.isPending}
@@ -232,7 +235,7 @@ function HostedFlow({
             <ConfirmDialog
               title={t("proofLink.declineConfirm.title")}
               message={t("proofLink.declineConfirm.message", {
-                customer: customer.name,
+                organization: organization.name,
               })}
               confirmLabel={t("proofLink.declineConfirm.confirm")}
               busy={decline.isPending}
@@ -286,7 +289,7 @@ function HostedFlow({
                 ) : dataRequest ? (
                   <DataRequestOutcome
                     token={token}
-                    customer={customer.name}
+                    organization={organization.name}
                     kind={flow.kind as DataKind}
                     progress={settled ?? page}
                   />
@@ -303,17 +306,17 @@ function HostedFlow({
 type DataKind = Exclude<FlowKind, "identity">;
 
 // What a data request's person sees once their identity check settled: that
-// the request awaits the customer's review, its outcome, and an approved "see
+// the request awaits the org's review, its outcome, and an approved "see
 // my data" request's download while it lasts. An erasure that kept sessions
 // says so, and a refused request says why.
 function DataRequestOutcome({
   token,
-  customer,
+  organization,
   kind,
   progress,
 }: {
   token: string;
-  customer: string;
+  organization: string;
   kind: DataKind;
   progress: ProofingProgress;
 }): React.JSX.Element | null {
@@ -329,7 +332,7 @@ function DataRequestOutcome({
     case "needs_review":
       return (
         <p role="status" className={HINT}>
-          {t(`proofLink.dataRequest.${kind}.inReview`, { customer })}
+          {t(`proofLink.dataRequest.${kind}.inReview`, { organization })}
         </p>
       );
     case "approved":
@@ -339,7 +342,7 @@ function DataRequestOutcome({
             {kept
               ? t("proofLink.dataRequest.erasedPartly", {
                   count: kept,
-                  customer,
+                  organization,
                 })
               : t("proofLink.dataRequest.erased")}
           </p>
@@ -369,7 +372,7 @@ function DataRequestOutcome({
       const why = dataRequestRefusal(errorCode);
       return why === undefined ? null : (
         <p role="status" className={HINT}>
-          {t(`proofLink.dataRequest.refused.${why}`, { customer })}
+          {t(`proofLink.dataRequest.refused.${why}`, { organization })}
         </p>
       );
     }
