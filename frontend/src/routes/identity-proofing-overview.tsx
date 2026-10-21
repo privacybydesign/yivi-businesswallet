@@ -12,6 +12,7 @@ import {
 import type { ProofingFlow, ProofingStats } from "../api/identity-proofing";
 import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
+import { reviewPath } from "../lib/proofing-reviews";
 import {
   noProofingSessions,
   proofingErrorMessage,
@@ -100,7 +101,10 @@ function ActiveOverview({
         {stats.isError ? (
           <p className={ERROR}>{proofingErrorMessage(stats.error, t)}</p>
         ) : (
-          <StatsRow stats={stats.data} />
+          <StatsRow
+            stats={stats.data}
+            reviewsTo={isAdmin ? reviewPath(slug) : undefined}
+          />
         )}
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <RecentSessions slug={slug} isAdmin={isAdmin} />
@@ -118,8 +122,11 @@ function ActiveOverview({
 
 function StatsRow({
   stats,
+  reviewsTo,
 }: {
   stats: ProofingStats | undefined;
+  // Where what waits for a decision is decided; absent for a member.
+  reviewsTo: string | undefined;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatPercent = usePercentFormatter();
@@ -158,6 +165,7 @@ function StatsRow({
         label={t("identityProofing.overview.stats.needsReview")}
         value={value(totals.needsReview)}
         hint={t("identityProofing.overview.stats.needsReviewHint")}
+        hintTo={reviewsTo}
       />
       <StatCell
         label={t("identityProofing.overview.stats.expired")}
@@ -178,10 +186,13 @@ function StatCell({
   label,
   value,
   hint,
+  hintTo,
 }: {
   label: string;
   value: string;
   hint: string;
+  // Turns the hint into a link.
+  hintTo?: string | undefined;
 }): React.JSX.Element {
   return (
     <div className="px-5 py-4">
@@ -191,7 +202,15 @@ function StatCell({
       <div className="font-display text-ink mt-1.5 text-[26px] font-bold tracking-[-0.01em]">
         {value}
       </div>
-      <div className="text-muted mt-0.5 text-[12px]">{hint}</div>
+      <div className="text-muted mt-0.5 text-[12px]">
+        {hintTo ? (
+          <Link to={hintTo} className="text-link underline">
+            {hint}
+          </Link>
+        ) : (
+          hint
+        )}
+      </div>
     </div>
   );
 }

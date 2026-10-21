@@ -4,6 +4,8 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { useWaitingReviewsQuery } from "../api/identity-proofing.queries";
+import { waitingOldestFirst } from "../lib/proofing-reviews";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
@@ -18,6 +20,7 @@ type NavLabelKey =
   | "nav.identityProofing"
   | "nav.identityProofingOverview"
   | "nav.flows"
+  | "nav.reviews"
   | "nav.developers"
   | "nav.qerds"
   | "nav.attestations"
@@ -37,6 +40,8 @@ interface NavItem {
   end?: boolean;
   // A section's pages, listed under it while one of them is open.
   children?: NavChild[];
+  // How many things wait on the reader here, shown beside the name.
+  count?: number;
 }
 
 type NavChild = Omit<NavItem, "icon" | "children">;
@@ -48,6 +53,8 @@ type NavChild = Omit<NavItem, "icon" | "children">;
 interface OrgNavVisibility {
   signing: boolean;
   admin: boolean;
+  // What waits for the reader's decision under Identity proofing › Reviews.
+  waitingReviews: number;
 }
 
 function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
@@ -65,6 +72,11 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
   if (visible.admin) {
     proofingChildren.push(
       { to: `${proofing}/flows`, labelKey: "nav.flows" },
+      {
+        to: `${proofing}/reviews`,
+        labelKey: "nav.reviews",
+        count: visible.waitingReviews,
+      },
       { to: `${proofing}/developers`, labelKey: "nav.developers" },
     );
   }
@@ -73,6 +85,7 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
     labelKey: "nav.identityProofing",
     icon: "scan_qrcode",
     children: proofingChildren,
+    count: visible.waitingReviews,
   });
   items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
@@ -119,6 +132,17 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_ICON_SIZE = 16;
+
+// The number of things that wait, read aloud with what it counts.
+function CountBadge({ count }: { count: number }): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <span className="bg-ink text-surface ml-auto min-w-5 rounded-full px-1.5 text-center text-[11.5px] leading-5">
+      {count}
+      <span className="sr-only"> {t("nav.reviewsWaiting")}</span>
+    </span>
+  );
+}
 const ORG_ADMIN_ROLE = "admin";
 
 // Whether pathname is the section at base or one of its pages.
@@ -174,10 +198,16 @@ export function Sidebar({
   // Platform admins outrank any single org; otherwise show the membership role
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
+  const isOrgAdmin = activeOrg.data?.role === ORG_ADMIN_ROLE;
+  // Only an admin can decide, so only an admin's sidebar counts what waits.
+  const waiting = useWaitingReviewsQuery(activeSlug ?? "", {
+    enabled: activeSlug !== undefined && isOrgAdmin,
+  });
   const navItems = activeSlug
     ? orgNavItems(activeSlug, {
         signing: showSigning,
-        admin: activeOrg.data?.role === ORG_ADMIN_ROLE,
+        admin: isOrgAdmin,
+        waitingReviews: waitingOldestFirst(waiting.data ?? []).length,
       })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
@@ -230,6 +260,12 @@ export function Sidebar({
                   )}
                   <Icon name={item.icon} size={NAV_ICON_SIZE} />
                   {t(item.labelKey)}
+                  {/* Open, the section lists its pages and the count sits on Reviews. */}
+                  {item.count !== undefined &&
+                    item.count > 0 &&
+                    !isWithin(pathname, item.to) && (
+                      <CountBadge count={item.count} />
+                    )}
                 </>
               )}
             </NavLink>
@@ -251,6 +287,9 @@ export function Sidebar({
                     }
                   >
                     {t(child.labelKey)}
+                    {child.count !== undefined && child.count > 0 && (
+                      <CountBadge count={child.count} />
+                    )}
                   </NavLink>
                 ))}
               </div>

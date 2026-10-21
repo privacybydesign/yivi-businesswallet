@@ -367,8 +367,8 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 
 // listRequests shows an admin every request of the org and a member the ones they
 // sent; ?subjectUserId= narrows either to the ones proofing one member,
-// ?subjectKind= to those sent to members or to external people, and ?flowId= to
-// those sent on one flow.
+// ?subjectKind= to those sent to members or to external people, ?flowId= to
+// those sent on one flow, and ?status= to those held in one status.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var filter RequestFilter
@@ -392,6 +392,13 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	}
 	if raw := r.URL.Query().Get("flowId"); raw != "" {
 		filter.FlowID = &raw
+	}
+	if raw := r.URL.Query().Get("status"); raw != "" {
+		status := Status(raw)
+		if !status.stored() {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, approved, rejected or needs_review"}
+		}
+		filter.Status = &status
 	}
 	reqs, err := h.service.Requests(r.Context(), org.ID, filter)
 	if err != nil {

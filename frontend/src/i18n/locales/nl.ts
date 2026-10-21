@@ -50,6 +50,8 @@ export const nl: Translation<typeof en> = {
     identityProofing: "Identiteitsverificatie",
     identityProofingOverview: "Overzicht",
     flows: "Flows",
+    reviews: "Beoordelingen",
+    reviewsWaiting: "wachtend",
     developers: "Ontwikkelaars",
     qerds: "Veilige bezorging",
     attestations: "Attestaties",
@@ -546,6 +548,7 @@ export const nl: Translation<typeof en> = {
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
       unknown: "de controle is niet geslaagd ({{code}})",
+      evidenceNotAsRequested: "wat is aangeleverd is niet wat gevraagd was",
     },
     errors: {
       noEncryptionKey:
@@ -880,65 +883,10 @@ export const nl: Translation<typeof en> = {
     },
     sessions: {
       review: {
-        title: "Beoordeling afronden",
-        hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar je webhook-endpoint.",
-        reason: "Reden",
-        reasonPlaceholder: "Wat je hebt gecontroleerd, en waarom je zo besluit",
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
         reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
-        approve: "Goedkeuren",
-        reject: "Afwijzen",
       },
       dataRequest: {
-        data_access: {
-          title: "Deze persoon vraagt welke gegevens er van hem of haar zijn",
-          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je deelt: de persoon kan die gegevens 24 uur downloaden via de eigen link, en jij kunt ze hier downloaden om te versturen.",
-          approve_one: "Goedkeuren: {{count}} sessie delen",
-          approve_other: "Goedkeuren: {{count}} sessies delen",
-        },
-        data_erasure: {
-          title:
-            "Deze persoon vraagt om verwijdering van zijn of haar gegevens",
-          hint: "De persoon heeft met deze sessie bewezen wie hij of zij is. Controleer de identiteit en keur de sessies goed die je verwijdert: de persoonsgegevens worden direct gewist, de sessies blijven als registratie staan en je webhook-endpoint krijgt per sessie bericht.",
-          approve_one: "Goedkeuren: {{count}} sessie verwijderen",
-          approve_other: "Goedkeuren: {{count}} sessies verwijderen",
-          confirm: {
-            title_one: "{{count}} sessie wissen?",
-            title_other: "{{count}} sessies wissen?",
-            message:
-              "De persoonsgegevens in de aangevinkte sessies, en in dit verzoek, worden direct verwijderd en zijn niet te herstellen. De sessies blijven zonder die gegevens bewaard.",
-          },
-        },
-        reasonPlaceholder:
-          "Wat je hebt gecontroleerd, en waarom, bv. een wettelijke bewaarplicht",
-        noMatches:
-          "Er zijn geen andere sessies van deze persoon gevonden in je organisatie.",
-        matches_one: "{{count}} sessie van deze persoon gevonden",
-        matches_other: "{{count}} sessies van deze persoon gevonden",
-        emailMatches_one:
-          "{{count}} onafgeronde sessie met hetzelfde adres of dezelfde naam",
-        emailMatches_other:
-          "{{count}} onafgeronde sessies met hetzelfde adres of dezelfde naam",
-        emailMatchesHint:
-          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn.",
-        levels: {
-          strong: "Zelfde document",
-          probable: "Naam en geboortedatum",
-          email: "Zelfde e-mailadres",
-          name: "Zelfde naam",
-        },
-        erasureUntickHint:
-          "Sessies waarvan de naam en geboortedatum van een geverifieerde chip zijn gelezen, staan aangevinkt, met hetzelfde of een ander document: die zijn van deze persoon. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
-        erasureEmailMatchesHint:
-          "Deze zijn nooit afgerond, dus er is geen bewezen identiteit om te vergelijken: alleen het e-mailadres of de ingevulde naam komt overeen. Vink aan welke van deze persoon zijn om ze ook te verwijderen; de rest wordt verwijderd zodra de bewaartermijn van de organisatie verloopt.",
-        untickHint:
-          "Sessies met hetzelfde document zijn aangevinkt; een sessie met alleen dezelfde naam en geboortedatum niet, dus vink die alleen aan als je zeker weet dat hij van deze persoon is. Vink uit wat bewaard moet blijven, bijvoorbeeld door een wettelijke bewaarplicht.",
-        erased: "Verwijderd",
-        approved: "Goedgekeurd",
-        kept: "Bewaard",
-        heldUntil: "Wettelijk bewaard tot {{date}}",
-        heldHint:
-          "Sessies die je volgens de wet moet bewaren kunnen nog niet verwijderd worden, dus je kunt ze niet aanvinken. Een verzoek om ze te verwijderen wordt geweigerd tot de getoonde datum.",
         download: "Gegevens downloaden",
         downloadUntil: "Beschikbaar tot {{date}}",
         downloadClosed: "De download was beschikbaar tot {{date}}.",
@@ -1185,6 +1133,171 @@ export const nl: Translation<typeof en> = {
       title: "Terugstuur-origins",
       hint: "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
       save: "Opslaan",
+    },
+    reviews: {
+      title: "Beoordelingen",
+      subtitle:
+        "Controles en gegevensverzoeken die op het besluit van een persoon wachten. Oudste eerst.",
+      adminOnly: "Alleen beheerders kunnen beoordelen.",
+      tabsLabel: "Toon",
+      tabs: {
+        all: "Alles",
+        checks: "Identiteitscontroles",
+        data: "Gegevensverzoeken",
+        closed: "Afgehandeld",
+      },
+      columns: {
+        person: "Persoon",
+        what: "Wat",
+        why: "Waarom het wacht",
+        since: "Wacht sinds",
+        outcome: "Uitkomst",
+        closed: "Afgehandeld",
+        action: "Actie",
+      },
+      review: "Beoordeel",
+      view: "Bekijk",
+      reviewOf: "Beoordeel {{name}}",
+      viewOf: "Bekijk {{name}}",
+      empty: "Er wacht niets op een besluit.",
+      emptyClosed: "Er is nog geen gegevensverzoek afgehandeld.",
+      identityCheck: "Identiteitscontrole",
+      requestedBy: "Aangevraagd door {{name}}",
+      provenWith: {
+        idem_app: "Bewezen met de Idem-app",
+        yivi_app: "Bewezen met de Yivi-app",
+        browser: "Bewezen in de browser",
+        unknown: "Bewezen",
+      },
+      why: {
+        identity: "Een deel is niet ondertekend of uit een bron gehaald",
+        data_access:
+          "Een beoordelaar keurt elk verzoek om gegevens in te zien goed",
+        data_erasure:
+          "Een beoordelaar keurt elk verzoek om gegevens te verwijderen goed",
+      },
+      answerBy: "Antwoord voor {{date}}",
+      outcome: {
+        approved: "Goedgekeurd",
+        rejected: "Afgewezen",
+      },
+      footer: "Beheerders zien deze pagina.",
+      back: "Terug naar beoordelingen",
+      notWaiting: {
+        approved:
+          "Dit verzoek wacht niet meer op een besluit. Het is goedgekeurd.",
+        rejected:
+          "Dit verzoek wacht niet meer op een besluit. Het is afgewezen.",
+        other: "Dit verzoek wacht niet meer op een besluit.",
+      },
+      check: {
+        title: "Een identiteitscontrole beoordelen",
+        why: {
+          title: "Waarom dit op jou wacht",
+          body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
+        },
+        auto: {
+          title: "Automatisch gecontroleerd",
+          none: "Er is geen automatische controle gemeld.",
+          chipGenuine: "De gegevens op de chip zijn echt en ongewijzigd",
+          chipNotCopy: "De chip is geen kopie",
+          livePerson: "Een echte persoon, geen foto of video",
+          faceMatch: "Het gezicht komt overeen met de documentfoto",
+          passed: "Geslaagd",
+          failed: "Mislukt",
+          notPerformed: "Niet uitgevoerd",
+        },
+        data: {
+          title: "Gegevens van de chip",
+          expires: "Verloopt",
+          level: "Bereikt niveau",
+          levelOnceApproved: "{{level}}, na goedkeuring",
+        },
+        decision: {
+          title: "Jouw besluit",
+          question:
+            "Is wat {{name}} heeft gestuurd echt, en is het van die persoon?",
+          approve: "Ja, keur de controle goed",
+          reject: "Nee, wijs de controle af",
+          wrong: "Wat klopt er niet",
+          wrongOptions: {
+            someoneElse: "Het is van iemand anders",
+            altered: "Het lijkt aangepast",
+            notAsked: "Het is niet wat gevraagd was",
+            other: "Iets anders",
+          },
+          reason: "Reden",
+          reasonHint:
+            "Verplicht. Wordt met jouw naam in het auditlogboek bewaard; de persoon ziet het niet.",
+          choiceRequired: "Kies of je de controle goedkeurt of afwijst.",
+          submit: "Beslis",
+          approveSubmit: "Controle goedkeuren",
+          rejectSubmit: "Controle afwijzen",
+          approved: "De controle is goedgekeurd.",
+          rejected: "De controle is afgewezen.",
+        },
+      },
+      dataRequest: {
+        asked: "Gevraagd door {{name}} op {{date}}.",
+        askedPurged: "Gevraagd op {{date}}.",
+        answerBy: "Antwoord voor {{date}} (de AVG geeft één maand).",
+        who: {
+          title: "Wie vraagt het",
+          provenWith: "Bewezen met",
+          chip: "chip",
+          faceMatch: "live gezichtsvergelijking",
+          level: "Bereikt niveau",
+        },
+        found: {
+          title: "Gevonden gegevens van deze persoon",
+          data_access:
+            "Vink aan wat je deelt. Controles die met hetzelfde document zijn bewezen staan aangevinkt; de andere zijn mogelijk van iemand anders.",
+          data_erasure:
+            "Vink aan wat je verwijdert. Controles waarvan naam en geboortedatum van een geverifieerde chip zijn gelezen staan aangevinkt, met hetzelfde document of een ander: ze zijn van deze persoon. Haal het vinkje weg bij wat bewaard moet blijven.",
+          closed: "Wat er per controle is besloten.",
+          none: "Er is in je organisatie geen andere controle van deze persoon gevonden.",
+          unfinished:
+            "Een controle die nooit is afgerond heeft geen bewezen identiteit om mee te vergelijken: alleen het e-mailadres of de ingetypte naam komt overeen. Vink hem alleen aan als hij van deze persoon is.",
+          unfinishedErasure:
+            "Een controle die nooit is afgerond heeft geen bewezen identiteit om mee te vergelijken: alleen het e-mailadres of de ingetypte naam komt overeen. Vink hem aan als hij van deze persoon is om hem ook te verwijderen; de rest wordt verwijderd als de bewaartermijn van je organisatie afloopt.",
+          heldUntil: "Wettelijk bewaard tot {{date}}",
+          held: "Een controle die je wettelijk moet bewaren kan nog niet worden verwijderd, dus je kunt hem niet aanvinken. Het verzoek om hem te verwijderen wordt afgewezen tot de getoonde datum.",
+          levels: {
+            strong: "Hetzelfde document",
+            probable: "Dezelfde naam en geboortedatum",
+            email: "Hetzelfde e-mailadres",
+            name: "Dezelfde naam",
+          },
+          erased: "Verwijderd",
+          approved: "Goedgekeurd",
+          kept: "Bewaard",
+        },
+        decision: {
+          title: "Jouw besluit",
+          data_erasure_one: "Verwijder {{count}} controle.",
+          data_erasure_other: "Verwijder {{count}} controles.",
+          data_access_one:
+            "Open de gegevens van {{count}} controle om te downloaden.",
+          data_access_other:
+            "Open de gegevens van {{count}} controles om te downloaden.",
+          kept_one: "De andere {{count}} blijft.",
+          kept_other: "De andere {{count}} blijven.",
+          reason: "Reden",
+          reasonHint:
+            "Verplicht. Wordt met jouw naam in het auditlogboek bewaard.",
+          approve_data_erasure_one: "Verwijder {{count}} controle",
+          approve_data_erasure_other: "Verwijder {{count}} controles",
+          approve_data_access_one: "Open {{count}} controle",
+          approve_data_access_other: "Open {{count}} controles",
+          refuse: "Wijs het verzoek af",
+          confirmTitle_one: "{{count}} controle verwijderen?",
+          confirmTitle_other: "{{count}} controles verwijderen?",
+          confirmMessage:
+            "De persoonsgegevens in de controles die je hebt aangevinkt, en in dit verzoek, worden direct verwijderd en kunnen niet worden hersteld. De controles blijven als vastlegging zonder die gegevens.",
+          approved: "Het verzoek is goedgekeurd.",
+          rejected: "Het verzoek is afgewezen.",
+        },
+      },
     },
     developers: {
       title: "Ontwikkelaars",

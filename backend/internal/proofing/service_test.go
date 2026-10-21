@@ -1018,6 +1018,20 @@ func TestEffectiveStatusExpiry(t *testing.T) {
 	}
 }
 
+// Only a status the store holds can narrow a list: expired and cancelled are
+// derived, so a filter on them would match nothing.
+func TestStatusStored(t *testing.T) {
+	for status, want := range map[Status]bool{
+		StatusPending: true, StatusInProgress: true, StatusApproved: true,
+		StatusRejected: true, StatusNeedsReview: true,
+		StatusExpired: false, StatusCancelled: false, Status("done"): false, Status(""): false,
+	} {
+		if got := status.stored(); got != want {
+			t.Errorf("%q.stored() = %v, want %v", status, got, want)
+		}
+	}
+}
+
 func TestCompletable(t *testing.T) {
 	if !flowCompletable(testFlow("a", "a", []string{"document_capture", "nfc_read"}, selfieLocationBrowser)) {
 		t.Error("a flow without face steps needs no browser")

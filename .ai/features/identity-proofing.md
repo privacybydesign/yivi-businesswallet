@@ -88,8 +88,10 @@ guard every externally supplied URL goes through),
 `frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table),
 `flow-editor.tsx` + `flow-editor-advanced.tsx` + `flow-editor-parts.tsx` (the
 flow editor), `frontend/src/lib/issuing-countries.ts` (its country list),
-`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
-details and review), `proofing-send.tsx` (the Verify a person dialog),
+`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table and its
+details; a row in review links to its review page), `proofing-reviews.tsx` (the
+Reviews page), `proofing-review.tsx` + `identity-check-review.tsx` +
+`data-request-review.tsx` (the review pages, §9), `proofing-send.tsx` (the Verify a person dialog),
 `proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
 tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `routes/proof.tsx` (the hosted link, §7), `pause*.go` (§8), `flow_hosted*.go` +
@@ -1334,17 +1336,42 @@ the reviews such an org still had open. Audit events recorded with
 ## 9. Manual review
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
-end it, §3). The reviewer sees the person's identity and check results (an
-audited result read). An admin decides it on the All people page or the flow's People tab (filter
-"Needs review", also counted on the overview): approve or reject (optionally
-with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
+end it, §3). An admin decides it on Identity proofing › Reviews
+(`routes/proofing-reviews.tsx`; the sidebar and the overview count what waits).
+The page lists what waits, oldest first (waiting since = `completed_at`, when it
+went to review), under All, Identity checks and Data requests; Closed lists the
+data requests that ended, whoever ended them. The list carries no mark of a
+reviewer's decision (the audit event is not read), and a data request is also
+rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
+the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
+data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
+that a reviewer decided, and the Outcome column shows the error code in words.
+An identity check has no closed list yet, as none goes to review today. A data
+request shows "Answer by" = `purge_at`, the month after it went to review, when it
+lapses (§15). The list is `GET .../requests?status=needs_review`: the filter is
+applied before the list's cap of 200, so an old check in review is never pushed
+off. A row opens its review page, `reviews/{requestId}`: for an identity check
+(`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
+from the chip (an audited result read) and the decision; for a data request §15.
+The decision is approve or reject with a required reason; a rejection names what
+is wrong, sent as the error code (`REJECT_REASONS` in `lib/proofing-reviews.ts`:
+`IDENTITY_MISMATCH`, `DOC_TAMPERED`, `EVIDENCE_NOT_AS_REQUESTED`, none for
+"Something else", which is `MANUAL_REVIEW_REJECTED`).
+`POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
 decided, why and when with the session, `session.ReviewDecision`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the org's webhook is sent (for an external request). A request no longer under
-review is 409 `not_under_review`. Two reviewers deciding at once are
-serialised (`LockReview`).
+review is 409 `not_under_review`. A decision leaves the page, so it marks the
+result read stale without reading it again (`refetchType: "none"`): each read is
+audited, and the next page that opens the request reads the outcome. Two
+reviewers deciding at once are serialised (`LockReview`). An identity check goes
+to review only for something no signature or authoritative register vouches for:
+an unsigned upload, a value typed in by hand. Today nothing built produces that,
+so only data requests (§15) and the dev stub reach review, and the identity
+check page has no "What to check" box for the unsigned item: it needs the item
+from the wallet, which none yet carries.
 
 ## 10. Data minimisation
 
@@ -1704,8 +1731,9 @@ standard feature of every org, not flows anyone sets up: the org sends the
 person a session on its standard flow of that kind, like any other session
 (API, hosted link, mail or on-screen); the person proves who they are, and the
 session goes to the org's **needs review**, where an org admin decides. Code:
-`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`,
-the Verify a person dialog's "What do you send?" and the hosted page.
+`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`
+(its review page), the Verify a person dialog's "What do you send?" and the
+hosted page.
 
 - **Standard flows.** One flow per org of each kind, `data_access` and
   `data_erasure` (`identity_proofing_flow_settings.kind`, `standard` true; a
@@ -1800,7 +1828,7 @@ the Verify a person dialog's "What do you send?" and the hosted page.
   - It links one person's sessions at one org for a database reader, who can
     already link them by the plaintext `subject_email`; it never links across
     orgs.
-- **Review.** The session's panel shows the person's identity and proof (name,
+- **Review.** The review page shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
   matches. A match whose name and date of birth were read off a verified chip

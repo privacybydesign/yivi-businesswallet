@@ -814,8 +814,10 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
 			AND ($5::text IS NULL OR r.subject_kind = $5)
 			AND ($6::text IS NULL OR r.flow_id = $6)
+			AND ($7::text IS NULL OR r.status = $7)
 		ORDER BY r.created_at DESC LIMIT $3`
-	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind, filter.FlowID)
+	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
+		filter.FlowID, filter.Status)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}

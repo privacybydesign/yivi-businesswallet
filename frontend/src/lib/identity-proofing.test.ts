@@ -111,6 +111,7 @@ import {
   supportContactLink,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
+import { REJECT_REASONS } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
 
@@ -1799,7 +1800,9 @@ describe("secondsUntil", () => {
 });
 
 // Every code a session can be rejected with has copy, and copy is only kept
-// for codes the backend still sends: the engine's and the wallet's own.
+// for codes the backend still sends: the engine's, the wallet's own, and the
+// ones a reviewer picks when rejecting a check, which the engine stores as
+// given.
 describe("rejection codes mirror the backend", () => {
   const read = (path: string): string =>
     readFileSync(
@@ -1824,7 +1827,8 @@ describe("rejection codes mirror the backend", () => {
         /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
       ),
   );
-  const backend = [...new Set([...engine, ...wallet])];
+  const reviewer = REJECT_REASONS.flatMap(({ errorCode }) => errorCode ?? []);
+  const backend = [...new Set([...engine, ...wallet, ...reviewer])];
 
   it("has copy for every backend code and no other", () => {
     expect(engine.length).toBeGreaterThan(0);
@@ -2325,11 +2329,10 @@ describe("data request review", () => {
     ).toBe("decide");
   });
 
-  it("names the sessions an erasure deletes", () => {
-    const key =
-      "identityProofing.sessions.dataRequest.data_erasure.confirm.title";
-    expect(t(key, { count: 1 })).toBe("Erase 1 session?");
-    expect(t(key, { count: 3 })).toBe("Erase 3 sessions?");
+  it("names the checks an erasure deletes", () => {
+    const key = "identityProofing.reviews.dataRequest.decision.confirmTitle";
+    expect(t(key, { count: 1 })).toBe("Delete 1 check?");
+    expect(t(key, { count: 3 })).toBe("Delete 3 checks?");
   });
 });
 

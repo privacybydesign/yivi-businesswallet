@@ -229,10 +229,10 @@ const DOCUMENT_KIND_CODES: Record<DocumentKind, readonly string[]> = {
   drivers_license: [],
 };
 
-// The kind a stored document type reads as, a kind by its name in any case
-// (the old editor uppercased them) or one of DOCUMENT_KIND_CODES; undefined
-// for another code.
-function documentKindOf(type: string): DocumentKind | undefined {
+// The kind a stored document type, or a chip's document code, reads as: a
+// kind by its name in any case (the old editor uppercased them) or one of
+// DOCUMENT_KIND_CODES; undefined for another code.
+export function documentKindOf(type: string): DocumentKind | undefined {
   const upper = type.toUpperCase();
   return DOCUMENT_KINDS.find(
     (kind) =>
@@ -896,6 +896,16 @@ export function requestSubject(request: {
   };
 }
 
+// Who sent the check: the API token that created it, else the member.
+export function requestedBy(
+  request: { apiKeyName?: string | undefined; requestedByName: string },
+  t: TFunction,
+): string {
+  return request.apiKeyName
+    ? t("identityProofing.sessions.viaApiKey", { name: request.apiKeyName })
+    : request.requestedByName;
+}
+
 // The engine's bound on a reviewer's reason, in characters (code points, as
 // the backend counts them): an emoji is one, not the two UTF-16 units a
 // textarea's maxLength would count.
@@ -1034,6 +1044,7 @@ const REJECTION_REASON_KEYS = {
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
+  EVIDENCE_NOT_AS_REQUESTED: "evidenceNotAsRequested",
   REVIEW_LAPSED: "reviewLapsed",
   LEGAL_RETENTION: "legalRetention",
   ORG_PAUSED: "orgPaused",

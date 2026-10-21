@@ -104,6 +104,9 @@ import {
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
+// What waits for a decision changes when a person finishes a data request, which
+// no page of the reviewer is watching: the sidebar's count is re-read now and then.
+const WAITING_REVIEWS_POLL_INTERVAL_MS = 60_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
@@ -407,6 +410,44 @@ export function useMemberRequestsQuery(
   });
 }
 
+// The requests held in review, newest first: what waits for a decision. Under
+// the requests key, so a decision refreshes it. A request whose engine session
+// ended is still held here but reads expired: the caller keeps the ones that
+// still read needs_review.
+export function useWaitingReviewsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
+    queryFn: ({ signal }) =>
+      getProofingRequests(slug, { status: "needs_review" }, signal),
+    enabled: options.enabled && slug !== "",
+    refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
+  });
+}
+
+// One request, for its review page. Under the requests key, so a decision
+// refreshes it.
+export function proofingRequestQueryKey(
+  slug: string,
+  requestId: string,
+): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "one", requestId];
+}
+
+export function useProofingRequestQuery(
+  slug: string,
+  requestId: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest, Error> {
+  return useQuery({
+    queryKey: proofingRequestQueryKey(slug, requestId),
+    queryFn: ({ signal }) => getProofingRequest(slug, requestId, signal),
+    enabled: options.enabled && slug !== "" && requestId !== "",
+  });
+}
+
 export function useProofingStatsQuery(
   slug: string,
 ): UseQueryResult<ProofingStats, Error> {
@@ -684,7 +725,7 @@ export function useProofingDataMatchesQuery(
 // then shows the read. It holds the person's identity and photos, so it is
 // dropped from the cache as soon as no row shows it (gcTime 0), not kept for
 // the default five minutes.
-function proofingRequestResultQueryKey(
+export function proofingRequestResultQueryKey(
   slug: string,
   requestId: string,
 ): readonly string[] {
@@ -921,6 +962,24 @@ export function useDeclineHostedMutation(
   });
 }
 
+export function refreshAfterReviewDecision(
+  queryClient: ReturnType<typeof useQueryClient>,
+  slug: string,
+  requestId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestsQueryKey(slug),
+  });
+  // The result is read once and kept (staleTime Infinity); the decision
+  // changed it, so the one read under review is no longer the outcome. The page
+  // is being left and every read is audited, so it is marked stale and read
+  // again by the next page that opens it, not at once.
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestResultQueryKey(slug, requestId),
+    refetchType: "none",
+  });
+}
+
 // Decides a request under review; the lists (and counts) follow.
 export function useDecideReviewMutation(
   slug: string,
@@ -930,15 +989,6 @@ export function useDecideReviewMutation(
   return useMutation({
     mutationFn: (input) => decideProofingReview(slug, requestId, input),
     meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestsQueryKey(slug),
-      });
-      // The result is read once and kept (staleTime Infinity); the decision
-      // changed it, so the one read under review is no longer the outcome.
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestResultQueryKey(slug, requestId),
-      });
-    },
+    onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });
 }

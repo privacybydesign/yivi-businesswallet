@@ -299,6 +299,15 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
+// stored reports a status the store holds, which expired and cancelled are not.
+func (s Status) stored() bool {
+	switch s {
+	case StatusPending, StatusInProgress, StatusApproved, StatusRejected, StatusNeedsReview:
+		return true
+	}
+	return false
+}
+
 // Settled reports an outcome the engine has already decided at least once. needs_review
 // is settled for the recipient (nothing left for them to do) but still reconciled.
 func (s Status) Settled() bool {
@@ -562,6 +571,10 @@ type RequestFilter struct {
 	// FlowID narrows to the requests sent on one flow, any version; the list's
 	// cap then counts only those.
 	FlowID *string
+	// Status narrows to the requests the store holds in that status; the
+	// list's cap then counts only those. A needs_review request whose engine
+	// session ended still matches, though its listed status reads expired.
+	Status *Status
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

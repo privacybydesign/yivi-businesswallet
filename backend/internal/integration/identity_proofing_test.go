@@ -1300,7 +1300,17 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 		t.Fatalf("session = %+v, want needs_review", read)
 	}
 
-	review := "/api/v1/orgs/acme/identity-proofing/requests/" + session.ID + "/review"
+	requests := "/api/v1/orgs/acme/identity-proofing/requests"
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 1 || list[0].Status != "needs_review" {
+		t.Errorf("requests in review = %+v, want the one waiting", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=approved", nil)); len(list) != 0 {
+		t.Errorf("approved requests = %+v, want none yet", list)
+	}
+	wantProofingError(t, "a derived status", env.do(http.MethodGet, requests+"?status=expired", nil),
+		http.StatusBadRequest, "invalid_input")
+
+	review := requests + "/" + session.ID + "/review"
 	resp := env.postJSON(review, map[string]any{"decision": "approve"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("decision without a reason = %d, want 400", resp.StatusCode)
@@ -1320,6 +1330,9 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	_ = resp.Body.Close()
 	if n := env.auditCount(orgID, audit.IdentityProofingReviewDecided); n != 1 {
 		t.Errorf("review_decided audits = %d, want 1", n)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 0 {
+		t.Errorf("requests in review after the decision = %+v, want none", list)
 	}
 }
 

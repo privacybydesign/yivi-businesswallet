@@ -2102,6 +2102,41 @@ func TestRequestListByFlow(t *testing.T) {
 	}
 }
 
+// The cap on a list applies after the narrowing by status: a request in review
+// older than the newest maxListedRequests settled ones is still listed when
+// only the ones in review are asked for.
+func TestRequestListByStatus(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	waiting := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s-review")
+	if err := store.RecordOutcome(ctx, waiting, "s-review", StatusNeedsReview, proofingprovider.Result{}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("b@example.org"))); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	all, err := store.List(ctx, orgID, RequestFilter{})
+	if err != nil || len(all) != maxListedRequests || slices.ContainsFunc(all, func(r Request) bool { return r.ID == waiting.ID }) {
+		t.Fatalf("List = %d rows, %v; want the newest %d, none in review", len(all), err, maxListedRequests)
+	}
+
+	status := StatusNeedsReview
+	got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
+	if err != nil || len(got) != 1 || got[0].ID != waiting.ID {
+		t.Errorf("List needs_review = %d rows, %v; want only the request in review", len(got), err)
+	}
+	status = StatusApproved
+	if got, err = store.List(ctx, orgID, RequestFilter{Status: &status}); err != nil || len(got) != 0 {
+		t.Errorf("List approved = %d rows, %v; want none", len(got), err)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {

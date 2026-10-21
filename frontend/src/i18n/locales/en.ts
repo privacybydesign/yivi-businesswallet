@@ -39,6 +39,8 @@ export const en = {
     identityProofing: "Identity proofing",
     identityProofingOverview: "Overview",
     flows: "Flows",
+    reviews: "Reviews",
+    reviewsWaiting: "waiting",
     developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
@@ -528,6 +530,7 @@ export const en = {
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
       unknown: "the check did not pass ({{code}})",
+      evidenceNotAsRequested: "what was sent is not what was asked for",
     },
     errors: {
       noEncryptionKey:
@@ -858,64 +861,10 @@ export const en = {
     },
     sessions: {
       review: {
-        title: "Decide this review",
-        hint: "The checks could not decide on their own. Your decision settles the session and is sent to your webhook endpoint.",
-        reason: "Reason",
-        reasonPlaceholder: "What you checked, and why you decided so",
         reasonRequired: "Give a reason: it is kept in the audit log.",
         reasonTooLong: "Keep the reason to {{max}} characters or fewer.",
-        approve: "Approve",
-        reject: "Reject",
       },
       dataRequest: {
-        data_access: {
-          title: "This person asks what data is held about them",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to share: they can download that data from their link for 24 hours, and you can download it here to send it.",
-          approve_one: "Approve: share {{count}} session",
-          approve_other: "Approve: share {{count}} sessions",
-        },
-        data_erasure: {
-          title: "This person asks for their data to be deleted",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and your webhook endpoint is told per session.",
-          approve_one: "Approve: erase {{count}} session",
-          approve_other: "Approve: erase {{count}} sessions",
-          confirm: {
-            title_one: "Erase {{count}} session?",
-            title_other: "Erase {{count}} sessions?",
-            message:
-              "The personal data in the sessions you ticked, and in this request, is deleted at once and cannot be restored. The sessions stay as a record without it.",
-          },
-        },
-        reasonPlaceholder:
-          "What you checked, and why, e.g. a legal duty to keep the data",
-        noMatches:
-          "No other sessions of this person were found in your organisation.",
-        matches_one: "{{count}} session of this person found",
-        matches_other: "{{count}} sessions of this person found",
-        emailMatches_one:
-          "{{count}} unfinished session with the same address or name",
-        emailMatches_other:
-          "{{count}} unfinished sessions with the same address or name",
-        emailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's.",
-        levels: {
-          strong: "Same document",
-          probable: "Name and date of birth",
-          email: "Same e-mail address",
-          name: "Same name",
-        },
-        erasureUntickHint:
-          "Sessions whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept, for example under a legal retention duty.",
-        erasureEmailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's to erase them too; the rest is deleted when the organisation's retention lapses.",
-        untickHint:
-          "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
-        erased: "Erased",
-        approved: "Approved",
-        kept: "Kept",
-        heldUntil: "Kept by law until {{date}}",
-        heldHint:
-          "Sessions the law makes you keep cannot be erased yet, so they cannot be ticked. A request to delete them is declined until the date shown.",
         download: "Download the data",
         downloadUntil: "Available until {{date}}",
         downloadClosed: "The download was available until {{date}}.",
@@ -1158,6 +1107,165 @@ export const en = {
       title: "Redirect origins",
       hint: "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
+    },
+    reviews: {
+      title: "Reviews",
+      subtitle:
+        "Checks and data requests that wait for a person's decision. Oldest first.",
+      adminOnly: "Only admins can review.",
+      tabsLabel: "Show",
+      tabs: {
+        all: "All",
+        checks: "Identity checks",
+        data: "Data requests",
+        closed: "Closed",
+      },
+      columns: {
+        person: "Person",
+        what: "What",
+        why: "Why it waits",
+        since: "Waiting since",
+        outcome: "Outcome",
+        closed: "Closed",
+        action: "Action",
+      },
+      review: "Review",
+      view: "View",
+      reviewOf: "Review {{name}}",
+      viewOf: "View {{name}}",
+      empty: "Nothing waits for a decision.",
+      emptyClosed: "No data request has been closed yet.",
+      identityCheck: "Identity check",
+      requestedBy: "Requested by {{name}}",
+      provenWith: {
+        idem_app: "Proven with the Idem app",
+        yivi_app: "Proven with the Yivi app",
+        browser: "Proven in the browser",
+        unknown: "Proven",
+      },
+      why: {
+        identity: "Part of it is not signed or sourced",
+        data_access: "A reviewer approves every request to see data",
+        data_erasure: "A reviewer approves every request to delete data",
+      },
+      answerBy: "Answer by {{date}}",
+      outcome: {
+        approved: "Approved",
+        rejected: "Rejected",
+      },
+      footer: "Admins see this page.",
+      back: "Back to reviews",
+      notWaiting: {
+        approved:
+          "This request no longer waits for a decision. It was approved.",
+        rejected:
+          "This request no longer waits for a decision. It was rejected.",
+        other: "This request no longer waits for a decision.",
+      },
+      check: {
+        title: "Review an identity check",
+        why: {
+          title: "Why this waits for you",
+          body: "No signature or register vouches for part of this check, so a person has to check it.",
+        },
+        auto: {
+          title: "Checked automatically",
+          none: "No automatic check was reported.",
+          chipGenuine: "The chip's data is genuine and unaltered",
+          chipNotCopy: "The chip is not a copy",
+          livePerson: "A live person, not a photo or video",
+          faceMatch: "The face matches the document photo",
+          passed: "Passed",
+          failed: "Failed",
+          notPerformed: "Not performed",
+        },
+        data: {
+          title: "Data from the chip",
+          expires: "Expires",
+          level: "Level reached",
+          levelOnceApproved: "{{level}}, once approved",
+        },
+        decision: {
+          title: "Your decision",
+          question: "Is what {{name}} sent genuine, and is it theirs?",
+          approve: "Yes, approve the check",
+          reject: "No, reject the check",
+          wrong: "What is wrong",
+          wrongOptions: {
+            someoneElse: "It is someone else's",
+            altered: "It looks altered",
+            notAsked: "It is not what was asked for",
+            other: "Something else",
+          },
+          reason: "Reason",
+          reasonHint:
+            "Required. Kept in the audit log with your name; the person does not see it.",
+          choiceRequired: "Choose whether to approve or reject the check.",
+          submit: "Decide",
+          approveSubmit: "Approve the check",
+          rejectSubmit: "Reject the check",
+          approved: "The check is approved.",
+          rejected: "The check is rejected.",
+        },
+      },
+      dataRequest: {
+        asked: "Asked by {{name}} on {{date}}.",
+        askedPurged: "Asked on {{date}}.",
+        answerBy: "Answer by {{date}} (the GDPR gives one month).",
+        who: {
+          title: "Who asks",
+          provenWith: "Proven with",
+          chip: "chip",
+          faceMatch: "live face match",
+          level: "Level reached",
+        },
+        found: {
+          title: "Data found for this person",
+          data_access:
+            "Tick what to share. Checks proven with the same document are ticked; the others may be someone else.",
+          data_erasure:
+            "Tick what to delete. Checks whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept.",
+          closed: "What was decided for each check.",
+          none: "No other check of this person was found in your organisation.",
+          unfinished:
+            "A check that never finished has no proven identity to compare: only the e-mail address or the name typed in matches. Tick it only when it is this person's.",
+          unfinishedErasure:
+            "A check that never finished has no proven identity to compare: only the e-mail address or the name typed in matches. Tick it when it is this person's to delete it too; the rest is deleted when your organisation's retention lapses.",
+          heldUntil: "Kept by law until {{date}}",
+          held: "A check the law makes you keep cannot be deleted yet, so it cannot be ticked. The request to delete it is declined until the date shown.",
+          levels: {
+            strong: "Same document",
+            probable: "Same name and date of birth",
+            email: "Same e-mail address",
+            name: "Same name",
+          },
+          erased: "Deleted",
+          approved: "Approved",
+          kept: "Kept",
+        },
+        decision: {
+          title: "Your decision",
+          data_erasure_one: "Delete {{count}} check.",
+          data_erasure_other: "Delete {{count}} checks.",
+          data_access_one: "Open the data of {{count}} check for download.",
+          data_access_other: "Open the data of {{count}} checks for download.",
+          kept_one: "The other {{count}} stays.",
+          kept_other: "The other {{count}} stay.",
+          reason: "Reason",
+          reasonHint: "Required. Kept in the audit log with your name.",
+          approve_data_erasure_one: "Delete {{count}} check",
+          approve_data_erasure_other: "Delete {{count}} checks",
+          approve_data_access_one: "Open {{count}} check",
+          approve_data_access_other: "Open {{count}} checks",
+          refuse: "Refuse the request",
+          confirmTitle_one: "Delete {{count}} check?",
+          confirmTitle_other: "Delete {{count}} checks?",
+          confirmMessage:
+            "The personal data in the checks you ticked, and in this request, is deleted at once and cannot be restored. The checks stay as a record without it.",
+          approved: "The request is approved.",
+          rejected: "The request is refused.",
+        },
+      },
     },
     developers: {
       title: "Developers",

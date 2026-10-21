@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useDecideReviewMutation,
   useExternalRequestsQuery,
   useProofingRequestEventsQuery,
   useProofingFlowsQuery,
@@ -27,6 +26,7 @@ import {
   auditVisual,
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
+import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   addressVerificationNote,
@@ -36,8 +36,6 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
-  REVIEW_REASON_MAX_CHARS,
-  reviewReasonTooLong,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -46,6 +44,7 @@ import {
   peopleRetentionOf,
   requestFlows,
   requestListCapped,
+  requestedBy,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
@@ -55,9 +54,10 @@ import {
   timelineActor,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { Card, Icon, Table, Tag, TopBar } from "../ui";
 import { ResultTag } from "./proofing-ui";
-import { DataRequestPanel, DataRequestTag } from "./data-request-review";
+import { DataRequestTag } from "./data-request-review";
+import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
 
 const HINT = "text-ink-soft text-[12px]";
@@ -311,13 +311,6 @@ export function PeopleList({
   );
 }
 
-// Who sent the check: the API token that created it, else the member.
-function requestedBy(request: ProofingRequest, t: TFunction): string {
-  return request.apiKeyName
-    ? t("identityProofing.sessions.viaApiKey", { name: request.apiKeyName })
-    : request.requestedByName;
-}
-
 function SessionRow({
   slug,
   request,
@@ -540,11 +533,23 @@ function SessionRow({
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
-            {isAdmin && dataRequest && (
-              <DataRequestPanel slug={slug} request={request} />
-            )}
-            {isAdmin && !dataRequest && request.status === "needs_review" && (
-              <ReviewDecision slug={slug} requestId={request.id} />
+            {isAdmin && (dataRequest || request.status === "needs_review") && (
+              <div className="border-line mt-4 border-t pt-4">
+                <Link
+                  to={reviewPath(slug, request.id)}
+                  className={
+                    request.status === "needs_review"
+                      ? PRIMARY_LINK
+                      : SECONDARY_LINK
+                  }
+                >
+                  {t(
+                    request.status === "needs_review"
+                      ? "identityProofing.reviews.review"
+                      : "identityProofing.reviews.view",
+                  )}
+                </Link>
+              </div>
             )}
           </td>
         </tr>
@@ -675,93 +680,6 @@ function SessionDiplomas({
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-// An administrator's decision on a session under review: approve or reject,
-// always with a reason, which the audit log keeps.
-function ReviewDecision({
-  slug,
-  requestId,
-}: {
-  slug: string;
-  requestId: string;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const decide = useDecideReviewMutation(slug, requestId);
-  const [reason, setReason] = useState("");
-  const [touched, setTouched] = useState(false);
-  const missing = reason.trim() === "";
-  const tooLong = reviewReasonTooLong(reason);
-  const fieldId = `review-reason-${requestId}`;
-
-  function submit(decision: "approve" | "reject"): void {
-    setTouched(true);
-    if (missing || tooLong) return;
-    decide.mutate({ decision, reason: reason.trim() });
-  }
-
-  return (
-    <div className="border-line mt-4 flex flex-col gap-2 border-t pt-4">
-      <h3 className="text-ink text-[14px] font-bold">
-        {t("identityProofing.sessions.review.title")}
-      </h3>
-      <p className="text-ink-soft text-[13px]">
-        {t("identityProofing.sessions.review.hint")}
-      </p>
-      <label
-        htmlFor={fieldId}
-        className="text-ink-soft text-[12px] font-semibold"
-      >
-        {t("identityProofing.sessions.review.reason")}
-      </label>
-      <textarea
-        id={fieldId}
-        value={reason}
-        aria-invalid={(touched && missing) || tooLong}
-        placeholder={t("identityProofing.sessions.review.reasonPlaceholder")}
-        onChange={(event) => setReason(event.target.value)}
-        className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
-      />
-      {touched && missing && (
-        <p className="text-error text-[12.5px]">
-          {t("identityProofing.sessions.review.reasonRequired")}
-        </p>
-      )}
-      {tooLong && (
-        <p className="text-error text-[12.5px]">
-          {t("identityProofing.sessions.review.reasonTooLong", {
-            max: REVIEW_REASON_MAX_CHARS,
-          })}
-        </p>
-      )}
-      {decide.isError && (
-        <p role="alert" className="text-error text-[12.5px]">
-          {proofingErrorMessage(decide.error, t)}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          icon="valid"
-          loading={decide.isPending && decide.variables?.decision === "approve"}
-          disabled={decide.isPending}
-          onClick={() => submit("approve")}
-        >
-          {t("identityProofing.sessions.review.approve")}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          icon="invalid"
-          loading={decide.isPending && decide.variables?.decision === "reject"}
-          disabled={decide.isPending}
-          onClick={() => submit("reject")}
-        >
-          {t("identityProofing.sessions.review.reject")}
-        </Button>
-      </div>
     </div>
   );
 }
