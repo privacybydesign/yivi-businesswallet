@@ -452,6 +452,7 @@ type resultView struct {
 		Assurance *assuranceView `json:"assurance"`
 		Document  *struct {
 			Type         string `json:"type"`
+			Kind         string `json:"kind"`
 			IssuingState string `json:"issuingState"`
 			Nationality  string `json:"nationality"`
 			DisplayName  string `json:"displayName"`
@@ -604,7 +605,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
 		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
 		out.BirthDate, out.Nationality = doc.DateOfBirth, doc.Nationality
-		ev.DocumentType, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.IssuingState, doc.DateOfExpiry
+		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, doc.DateOfExpiry
 	}
 	if chip := res.ChipChecks; chip != nil {
 		if p := chip.Passive; p != nil {

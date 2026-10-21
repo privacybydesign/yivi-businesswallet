@@ -94,6 +94,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/hosted", admin(respond.HandlerFunc(h.saveFlowHosted)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.getFlowDiplomas)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.getFlowAddress)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.saveFlowAddress)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.getFlowKind)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.saveFlowKind)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
@@ -110,6 +112,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.limitMemberFace(h.faceFrame))))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", admin(respond.HandlerFunc(h.dataMatches)))
@@ -155,6 +159,9 @@ type flowResponse struct {
 	// identity check; absent on a single version (create, edit, versions),
 	// whose answer does not read the wallet's setting.
 	DiplomaMode DiplomaMode `json:"diplomaMode,omitempty"`
+	// AddressMode is whether the flow asks for the subject's postal address
+	// after the identity check; absent on a single version, as DiplomaMode.
+	AddressMode AddressMode `json:"addressMode,omitempty"`
 	// flowNeedsReferencePhoto is a flow that matches the face without reading the
 	// chip: only a customer's API can send it, with its own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
@@ -170,7 +177,7 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 	return flowResponse{
 		Flow: f.Flow, Completable: flowCompletable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
+		AddressMode: f.Address, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
 	}
 }
 
@@ -294,6 +301,12 @@ type requestResponse struct {
 	DiplomaMode   DiplomaMode       `json:"diplomaMode"`
 	Diplomas      []diplomaResponse `json:"diplomas"`
 	DiplomasUntil *time.Time        `json:"diplomasUntil,omitempty"`
+	// AddressMode is whether the request asks for the subject's postal
+	// address; Address the one they entered, and AddressUntil when they can
+	// last enter it (absent until the identity is approved, and once entered).
+	AddressMode  AddressMode `json:"addressMode"`
+	Address      *Address    `json:"address,omitempty"`
+	AddressUntil *time.Time  `json:"addressUntil,omitempty"`
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
@@ -313,6 +326,7 @@ func (r requestResponse) withDiplomas(diplomas []Diploma) requestResponse {
 func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
+		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req),
 		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		CustomerID: req.CustomerID, CustomerName: req.CustomerName,
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -916,6 +930,7 @@ type customerFlowResponse struct {
 	Assigned    bool        `json:"assigned"`
 	Default     bool        `json:"default"`
 	DiplomaMode DiplomaMode `json:"diplomaMode"`
+	AddressMode AddressMode `json:"addressMode"`
 	// NeedsReferencePhoto: see flowResponse. flowCompletable counts it as
 	// finishable (customerCompletable), sent through the customer's API.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
@@ -944,7 +959,7 @@ func (h *Handler) listCustomerFlows(w http.ResponseWriter, r *http.Request) erro
 		}
 		out = append(out, customerFlowResponse{
 			Flow: f.Flow, Completable: customerCompletable(f.Flow), Assigned: f.Assigned, Default: f.Default, DiplomaMode: f.Diplomas,
-			NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
+			AddressMode: f.Address, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -1032,10 +1047,20 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}
 	case errors.Is(err, ErrDiplomasClosed):
 		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity is approved: " + DiplomaUploadWindow.String()}
+	case errors.Is(err, ErrAddressNotAsked):
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}
+	case errors.Is(err, ErrAddressClosed):
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity is approved: " + AddressWindow.String()}
+	case errors.Is(err, ErrAddressNotFound):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}
+	case errors.Is(err, ErrAddressLookupUnavailable):
+		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}
 	case errors.Is(err, ErrReferencePhotoRequired):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the customer API"}
 	case errors.Is(err, ErrDiplomasNeedPage):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
+	case errors.Is(err, ErrAddressNeedsPage):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrHostedDisabled):
 		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
 	case errors.Is(err, ErrProofingPaused):

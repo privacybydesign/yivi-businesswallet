@@ -351,6 +351,13 @@ type Request struct {
 	// Diplomas is whether the request asks for DUO diploma extracts once the
 	// identity is approved: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
+	// Address is whether the request asks for the subject's postal address
+	// once the identity is approved: its flow's AddressMode when it was sent.
+	// SubjectAddress is the address they entered, decrypted, at
+	// AddressAddedAt; nil before, and once the request is purged.
+	Address        AddressMode
+	SubjectAddress *Address
+	AddressAddedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -415,13 +422,16 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 }
 
 // linkLive reports whether a hosted link still has its subject at work:
-// waiting to start, its session running or in review, or a diploma or data
-// export window open. A link past all of that only shows its outcome.
+// waiting to start, its session running or in review, or an address, diploma
+// or data export window open. A link past all of that only shows its outcome.
 func (r Request) linkLive(now time.Time) bool {
 	if r.PurgedAt != nil || r.CancelledAt != nil {
 		return false
 	}
 	if r.awaitingStart(now) || r.liveSession(now) != nil || r.EffectiveStatus(now) == StatusNeedsReview {
+		return true
+	}
+	if until := addressUntil(r); until != nil && now.Before(*until) {
 		return true
 	}
 	if until := diplomasUntil(r); until != nil && now.Before(*until) {
@@ -482,6 +492,8 @@ type OrgFlow struct {
 	Default bool
 	// Diplomas is whether the flow asks for DUO diploma extracts.
 	Diplomas DiplomaMode
+	// Address is whether the flow asks for the subject's postal address.
+	Address AddressMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
 }
@@ -639,6 +651,7 @@ type CustomerFlow struct {
 	Assigned bool
 	Default  bool
 	Diplomas DiplomaMode
+	Address  AddressMode
 	Kind     FlowKind
 	// RetentionDays is what a subject on this flow for the customer is told
 	// about keeping their data: subjectRetentionDays.

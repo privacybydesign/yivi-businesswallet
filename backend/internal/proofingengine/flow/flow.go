@@ -295,9 +295,10 @@ type FlowDefinition struct {
 	// needs SelfieLocation native: only the Idem app runs a Regula liveness
 	// session.
 	FaceProvider FaceProvider `json:"FaceProvider"`
-	// AcceptedDocumentTypes are the document codes accepted ("P", ...); empty
-	// accepts any. A driving licence is DocumentTypeDrivingLicence; Validate
-	// refuses DocumentTypeEUDrivingLicence, which no document has.
+	// AcceptedDocumentTypes are the document codes ("P", ...) or kinds
+	// (DocumentKindPassport, ...) accepted; empty accepts any. A driving
+	// licence is DocumentTypeDrivingLicence; Validate refuses
+	// DocumentTypeEUDrivingLicence, which no document has.
 	AcceptedDocumentTypes []string `json:"AcceptedDocumentTypes"`
 	// AcceptedIssuingCountries are the 3-letter ICAO issuing states accepted
 	// (ValidIssuingCountry); empty accepts any.
@@ -406,6 +407,40 @@ const DocumentTypeDrivingLicence = "drivers_license"
 // licence: mrtdEvidence's documentType for a licence chip.
 const DocumentTypeEUDrivingLicence = "eu_driving_licence"
 
+// Document kinds: what a document is, which its MRZ document code alone does
+// not say (Belgium, Denmark and Poland put "ID" on residence permits too).
+const (
+	DocumentKindPassport        = "passport"
+	DocumentKindIdentityCard    = "identity_card"
+	DocumentKindResidencePermit = "residence_permit"
+)
+
+// residencePermitCodes are the MRZ document codes issued residence permits
+// carry, as vcmrtd's td1DocumentType lists them.
+var residencePermitCodes = []string{"AD", "AR", "CR", "IB", "IE", "IF", "IK", "IO", "IR", "IT", "IW", "IZ", "RP", "RT"}
+
+// DocumentKindOf is the kind of a document with MRZ code code, issuing state
+// and holder nationality, by vcmrtd's rule: no state issues its own nationals
+// a residence permit, and only permits carry a permit code. Empty when the MRZ
+// does not tell: a foreigner's card with a plain ID code is a permit in
+// Belgium but an identity card in Estonia.
+func DocumentKindOf(code, issuingState, nationality string) string {
+	c := strings.TrimRight(code, "<")
+	issuer, holder := IssuingStateCode(issuingState), IssuingStateCode(nationality)
+	switch {
+	case DrivingLicence(c):
+		return DocumentTypeDrivingLicence
+	case strings.HasPrefix(c, "P"):
+		return DocumentKindPassport
+	case holder != "" && holder == issuer:
+		return DocumentKindIdentityCard
+	case slices.Contains(residencePermitCodes, c):
+		return DocumentKindResidencePermit
+	default:
+		return ""
+	}
+}
+
 // DrivingLicence is whether t names an EU driving licence, in either
 // spelling: a document's or chip access key's type (DocumentTypeDrivingLicence)
 // or mrtdEvidence's documentType (DocumentTypeEUDrivingLicence).
@@ -413,12 +448,15 @@ func DrivingLicence(t string) bool {
 	return t == DocumentTypeDrivingLicence || t == DocumentTypeEUDrivingLicence
 }
 
-// AcceptsDocumentType is whether fd accepts a document of type t; empty
-// AcceptedDocumentTypes accepts any. Case-insensitive: the flow editor
-// uppercases every type, drivers_license included.
-func (fd *FlowDefinition) AcceptsDocumentType(t string) bool {
+// AcceptsDocumentType is whether fd accepts a document of type t and kind
+// kind (DocumentKindOf): either may be listed; empty AcceptedDocumentTypes
+// accepts any. Case-insensitive: the flow editor uppercases every type,
+// drivers_license and residence_permit included.
+func (fd *FlowDefinition) AcceptsDocumentType(t, kind string) bool {
 	return len(fd.AcceptedDocumentTypes) == 0 ||
-		slices.ContainsFunc(fd.AcceptedDocumentTypes, func(a string) bool { return strings.EqualFold(a, t) })
+		slices.ContainsFunc(fd.AcceptedDocumentTypes, func(a string) bool {
+			return strings.EqualFold(a, t) || (kind != "" && strings.EqualFold(a, kind))
+		})
 }
 
 // ValidationError is Validate refusing a flow definition, as opposed to a

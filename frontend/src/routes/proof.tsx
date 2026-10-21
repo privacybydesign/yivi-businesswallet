@@ -26,6 +26,7 @@ import {
 } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import {
+  currentStage,
   dataRequestRefusal,
   hostedErrorMessage,
   isProofingLive,
@@ -104,8 +105,10 @@ function HostedFlow({
   const choice = flow.yiviAvailable;
   const stages = verifyStages({
     appChoice: choice,
+    address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
   });
+  const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   // A link started before (another tab, a reload) goes straight to its session.
   const [step, setStep] = useState<Step>(
@@ -184,6 +187,7 @@ function HostedFlow({
   const actionError = start.isError
     ? hostedErrorMessage(start.error, t)
     : undefined;
+  const stage = currentStage({ step, inAddress, inDiplomas });
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -203,9 +207,9 @@ function HostedFlow({
         )}
         <Stepper
           steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-          current={stages.indexOf(inDiplomas ? "diplomas" : step)}
+          current={stages.indexOf(stage)}
         />
-        <StepRegion step={inDiplomas ? "diplomas" : step}>
+        <StepRegion step={stage}>
           {step === "overview" && (
             <Overview
               customer={customer}
@@ -270,6 +274,8 @@ function HostedFlow({
               diplomaMode={flow.diplomaMode}
               diplomas={page.diplomas}
               onDiplomaStep={setInDiplomas}
+              addressMode={flow.addressMode}
+              onAddressStep={setInAddress}
               onSettled={settle}
               dataRequest={dataRequest}
               outcomeActions={

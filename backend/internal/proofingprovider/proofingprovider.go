@@ -210,6 +210,9 @@ type Image struct {
 type Evidence struct {
 	Type         string
 	DocumentType string
+	// DocumentKind is passport, identity_card or residence_permit; empty when
+	// the document does not tell.
+	DocumentKind string
 	IssuingState string
 	ExpiryDate   string
 	PassiveAuth  string

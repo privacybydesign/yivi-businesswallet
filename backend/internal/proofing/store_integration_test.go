@@ -75,6 +75,16 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, action string) int {
 	return n
 }
 
+// assertAuditCounts checks how often each action was audited.
+func assertAuditCounts(t *testing.T, pool *pgxpool.Pool, want map[string]int) {
+	t.Helper()
+	for action, n := range want {
+		if got := auditCount(t, pool, action); got != n {
+			t.Errorf("%s audits = %d, want %d", action, got, n)
+		}
+	}
+}
+
 func TestSettingsReplacesFlows(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewSettingsStore(pool, audit.NewDBRecorder())
@@ -373,15 +383,11 @@ func TestCustomerStoreLifecycle(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ID != c.ID {
 		t.Errorf("List = %+v, %v; want only this org's customer", list, err)
 	}
-	for action, want := range map[string]int{
+	assertAuditCounts(t, pool, map[string]int{
 		audit.IdentityProofingCustomerCreated:         2,
 		audit.IdentityProofingCustomerUpdated:         1,
 		audit.IdentityProofingCustomerFlowsConfigured: 2,
-	} {
-		if n := auditCount(t, pool, action); n != want {
-			t.Errorf("%s audits = %d, want %d", action, n, want)
-		}
-	}
+	})
 }
 
 // A rejection is audited as its own action, with IPS's error code as the reason
@@ -1146,9 +1152,9 @@ func TestWebhookLeaseFence(t *testing.T) {
 	}
 }
 
-// A session.diploma_added delivery keeps its diploma while it may be sent
-// again, and drops it in the write that makes it delivered or failed; the
-// rest of the payload stays.
+// A session.diploma_added or session.address_added delivery keeps its diploma
+// or address while it may be sent again, and drops it in the write that makes
+// it delivered or failed; the rest of the payload stays.
 func TestWebhookFinalDropsDiploma(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
@@ -1163,11 +1169,13 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionDiplomaAdded}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x",
+		[]string{EventSessionDiplomaAdded, EventSessionAddressAdded}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
 	in.Diplomas = DiplomasRequired
+	in.Address = AddressRequired
 	req := createStarted(t, requests, in, "s1")
 	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved, proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
@@ -1181,6 +1189,10 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 		if _, added, err := diplomas.Add(ctx, req, extract); err != nil || !added {
 			t.Fatalf("Add %s = %v, %v", number, added, err)
 		}
+	}
+	addr := Address{Street: "Kerkstraat", HouseNumber: "1", PostalCode: "1234 AB", City: "Utrecht", Country: "NL"}
+	if added, err := requests.AddAddress(ctx, req, addr); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v", added, err)
 	}
 	// keys returns each delivery's status and payload keys.
 	keys := func() [][]string {
@@ -1215,30 +1227,35 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 	}
 	unavailable, ok := http.StatusServiceUnavailable, http.StatusOK
 
-	// A retryable failure keeps the diploma for the next attempt; a success drops it.
+	// A retryable failure keeps the diploma or address for the next attempt; a
+	// success drops it.
 	if err := webhooks.recordAttempt(ctx, claim(), &unavailable, "503"); err != nil {
 		t.Fatalf("recordAttempt retry: %v", err)
 	}
 	for _, got := range keys() {
-		if got[0] != DeliveryPending || !slices.Contains(got, webhookDiplomaKey) {
-			t.Errorf("after a retryable failure = %v, want pending with its diploma", got)
+		if got[0] != DeliveryPending || (!slices.Contains(got, webhookDiplomaKey) && !slices.Contains(got, webhookAddressKey)) {
+			t.Errorf("after a retryable failure = %v, want pending with its diploma or address", got)
 		}
 	}
 	if err := webhooks.recordAttempt(ctx, claim(), &ok, ""); err != nil {
 		t.Fatalf("recordAttempt delivered: %v", err)
 	}
-	// The last attempt failing fails it for good, and drops its diploma too.
+	// The last attempt failing fails it for good, and drops its diploma or
+	// address too.
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET attempts = $1
 		WHERE status = $2`, MaxWebhookAttempts-1, DeliveryPending); err != nil {
 		t.Fatalf("spend attempts: %v", err)
 	}
-	if err := webhooks.recordAttempt(ctx, claim(), &unavailable, "503"); err != nil {
-		t.Fatalf("recordAttempt failed: %v", err)
+	for range 2 {
+		if err := webhooks.recordAttempt(ctx, claim(), &unavailable, "503"); err != nil {
+			t.Fatalf("recordAttempt failed: %v", err)
+		}
 	}
 	got := keys()
 	slices.SortFunc(got, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
 	want := [][]string{
 		{DeliveryDelivered, "flowId", "sessionId", "status"},
+		{DeliveryFailed, "flowId", "sessionId", "status"},
 		{DeliveryFailed, "flowId", "sessionId", "status"},
 	}
 	if !reflect.DeepEqual(got, want) {

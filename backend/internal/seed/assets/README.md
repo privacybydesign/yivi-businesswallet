@@ -9,3 +9,4 @@ Each is its owner's trademark; none is ours.
 | `radboud-logo.png` | Radboud Universiteit | `https://www.ru.nl/apple-touch-icon.png`, unchanged | All rights reserved |
 | `asr-logo.png` | a.s.r. | `https://www.asr.nl/public/brand-icon-apple-180.png`, unchanged | All rights reserved |
 | `cm-logo.png` | CM.com | `idem/assets/brands/cm/mark.png` in `privacybydesign/vcmrtd`, removed in `0af7316` | All rights reserved |
+| `odixus-logo.png` | Odixus | `https://www.odixus.nl/apple-touch-icon.png`, unchanged | All rights reserved |

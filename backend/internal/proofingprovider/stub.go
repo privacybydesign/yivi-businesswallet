@@ -258,7 +258,7 @@ func (s *Stub) SessionIdentity(ctx context.Context, t Tenant, sessionID, session
 	if res.Status == StatusApproved {
 		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", stubSpecimenState
 		id.Evidence = &Evidence{
-			Type: EvidenceEMRTD, DocumentType: "P", IssuingState: stubSpecimenState, ExpiryDate: "2031-02-01",
+			Type: EvidenceEMRTD, DocumentType: "P", DocumentKind: "passport", IssuingState: stubSpecimenState, ExpiryDate: "2031-02-01",
 			PassiveAuth: CheckValid, ActiveAuth: CheckValid, Liveness: "passed",
 		}
 		if res.Method == MethodYivi {

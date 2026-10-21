@@ -2,6 +2,8 @@ import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
 import { isDataRequest } from "../api/identity-proofing";
 import type {
+  AddressMode,
+  AddressVerification,
   DiplomaMode,
   FlowKind,
   ProofingChannel,
@@ -10,6 +12,7 @@ import type {
   ProofingFlowSpec,
   ProofingImage,
   ProofingRequest,
+  RegisterAddress,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
 import { errorCode } from "./api-error";
@@ -617,6 +620,65 @@ function serverMessage(error: unknown): string | null {
   return null;
 }
 
+// A Dutch postal code: four digits, the first not a zero, and two letters, as
+// the backend's addresslookup reads it.
+const DUTCH_POSTAL_CODE = /^([1-9]\d{3}) ?([A-Za-z]{2})$/;
+// The number a house number starts with, before any letter or addition.
+const HOUSE_NUMBER = /^(\d+)/;
+
+// What a Dutch address is looked up by: the compact postal code and the
+// number the house number starts with.
+export type AddressLookup = { postalCode: string; houseNumber: string };
+
+// The lookup the typed postal code and house number make, or null while they
+// are not yet a Dutch postal code and a house number.
+export function addressLookup(
+  postalCode: string,
+  houseNumber: string,
+): AddressLookup | null {
+  const code = DUTCH_POSTAL_CODE.exec(postalCode.trim());
+  const number = HOUSE_NUMBER.exec(houseNumber.trim());
+  if (code === null || number === null) return null;
+  return {
+    postalCode: `${code[1]}${code[2].toUpperCase()}`,
+    houseNumber: number[1],
+  };
+}
+
+// A house number as compared with the register's: case, spaces and
+// punctuation left out, as the backend compares them.
+function houseNumberKey(houseNumber: string): string {
+  return houseNumber.toLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
+}
+
+// The register's address the typed house number is, letter and addition
+// included, or undefined when it is none of them.
+export function matchingAddress(
+  found: readonly RegisterAddress[],
+  houseNumber: string,
+): RegisterAddress | undefined {
+  const key = houseNumberKey(houseNumber);
+  return found.find((a) => houseNumberKey(a.houseNumber) === key);
+}
+
+// How a kept address was checked, under it in a session's detail; one kept
+// before addresses were checked reads as declared.
+export function addressVerificationNote(
+  verification: AddressVerification | undefined,
+  t: TFunction,
+): string {
+  switch (verification) {
+    case "verified":
+      return t("customers.sessions.address.verified");
+    case "unchecked":
+      return t("customers.sessions.address.unchecked");
+    case "unsupported":
+      return t("customers.sessions.address.unsupported");
+    case undefined:
+      return t("customers.sessions.address.declared");
+  }
+}
+
 // Why the proofing service did not approve a session, from its errorCode. An
 // unknown code is shown as is, so a new one still says something.
 export function proofingRejectionReason(code: string, t: TFunction): string {
@@ -680,45 +742,87 @@ export function dataRequestRefusal(
 }
 
 // The stages a verify page's stepper shows: what is collected, the app (when
-// the subject has a choice), its session, and the diploma upload (when the
-// flow has that step).
-export type VerifyStage = "overview" | "method" | "session" | "diplomas";
+// the subject has a choice), its session, then the address and the diploma
+// upload (when the flow has those steps).
+export type VerifyStage =
+  | "overview"
+  | "method"
+  | "session"
+  | "address"
+  | "diplomas";
 
 export function verifyStages({
   appChoice,
+  address = false,
   diplomas,
 }: {
   appChoice: boolean;
+  address?: boolean;
   diplomas: boolean;
 }): VerifyStage[] {
   return [
     "overview",
     ...(appChoice ? (["method"] as const) : []),
     "session",
+    ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
   ];
 }
 
-// What a verify page's running session shows: the diploma step once an
-// approved session asks for extracts and the subject is not done adding them,
-// else the outcome once settled, the expiry once an unstarted session's link
-// ran out, or the session itself.
-export type SessionView = "diplomas" | "outcome" | "expired" | "running";
+// The stage a verify page is at: the address or diploma step while it is
+// open, else the page's own step.
+export function currentStage({
+  step,
+  inAddress,
+  inDiplomas,
+}: {
+  step: "overview" | "method" | "session";
+  inAddress: boolean;
+  inDiplomas: boolean;
+}): VerifyStage {
+  if (inAddress) {
+    return "address";
+  }
+  if (inDiplomas) {
+    return "diplomas";
+  }
+  return step;
+}
+
+// What a verify page's running session shows: once an approved session asks
+// for them, the address step and then the diploma step until the subject is
+// done with each, else the outcome once settled, the expiry once an unstarted
+// session's link ran out, or the session itself.
+export type SessionView =
+  | "address"
+  | "diplomas"
+  | "outcome"
+  | "expired"
+  | "running";
 
 export function sessionView({
   status,
+  addressMode,
+  addressUntil,
+  addressDone,
   diplomaMode,
   diplomasUntil,
   diplomasDone,
   secondsLeft,
 }: {
   status: string;
+  addressMode: AddressMode;
+  addressUntil: string | undefined;
+  addressDone: boolean;
   diplomaMode: DiplomaMode;
   diplomasUntil: string | undefined;
   diplomasDone: boolean;
   secondsLeft: number;
 }): SessionView {
   if (!isProofingLive(status)) {
+    if (addressMode !== "off" && addressUntil !== undefined && !addressDone) {
+      return "address";
+    }
     return diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone
       ? "diplomas"
       : "outcome";
@@ -726,13 +830,16 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
-// Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage): a
-// flow that asks for diplomas has them uploaded on the page that runs the
-// session. No flow picked yet is mailable.
+// Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,
+// ErrAddressNeedsPage): a flow that asks for diplomas or the address has them
+// given on the page that runs the session. No flow picked yet is mailable.
 export function sendableByMail(
-  flow: { diplomaMode?: DiplomaMode } | undefined,
+  flow: { diplomaMode?: DiplomaMode; addressMode?: AddressMode } | undefined,
 ): boolean {
-  return (flow?.diplomaMode ?? "off") === "off";
+  return (
+    (flow?.diplomaMode ?? "off") === "off" &&
+    (flow?.addressMode ?? "off") === "off"
+  );
 }
 
 // The document data a flow releases: the holder's name and date of birth.
@@ -838,6 +945,14 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.diplomasClosed");
     case "diplomas_not_asked":
       return t("identityProofing.errors.diplomasNotAsked");
+    case "address_needs_page":
+      return t("identityProofing.errors.addressNeedsPage");
+    case "address_closed":
+      return t("identityProofing.errors.addressClosed");
+    case "address_not_asked":
+      return t("identityProofing.errors.addressNotAsked");
+    case "address_not_found":
+      return t("identityProofing.errors.addressNotFound");
     case "flow_no_identity":
       return t("identityProofing.errors.flowNoIdentity");
     case "data_flow_for_member":
@@ -1231,14 +1346,15 @@ export function sessionEventDetail(
 }
 
 // What the send form does with its fields: the flow it sends (a pick no longer
-// sendable falls back to the default), how (a flow that asks for diplomas
-// cannot be mailed, so it runs on screen), whether it checks for one person (a
+// sendable falls back to the default), how (a flow that asks for diplomas or
+// the address cannot be mailed, so it runs on screen), whether it checks for one person (a
 // flow reading name and date of birth, given a date of birth), and which
 // fields still block it.
 export function sendFormDecision<
   F extends {
     id: string;
     diplomaMode?: DiplomaMode;
+    addressMode?: AddressMode;
     requestedAttributes?: string[];
   },
 >(input: {

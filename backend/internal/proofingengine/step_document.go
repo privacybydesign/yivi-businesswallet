@@ -37,7 +37,7 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if req.ChipAccess != nil && !validChipAccessDocumentType(req.ChipAccess.DocumentType) {
-		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card or drivers_license")
+		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card, residence_permit or drivers_license")
 		return
 	}
 	if !drivingLicenceSupported(req.Document.Type, req.Document.IssuingState) ||
@@ -154,7 +154,7 @@ const errCodeDocumentUnsupported = "document_unsupported"
 
 func writeDocumentUnsupported(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusUnprocessableEntity, errCodeDocumentUnsupported,
-		"only Dutch driving licences are supported: scan a passport, identity card or Dutch driving licence")
+		"only Dutch driving licences are supported: scan a passport, identity card, residence permit or Dutch driving licence")
 }
 
 // drivingLicenceSupported is false for a driving licence from a state other
@@ -165,14 +165,11 @@ func drivingLicenceSupported(documentType, issuingState string) bool {
 	return !flow.DrivingLicence(documentType) || issuingState == "" || issuingState == mrtdverify.DrivingLicenceIssuingState
 }
 
-// The document types a chip access key may name.
-const (
-	chipAccessPassport     = "passport"
-	chipAccessIdentityCard = "identity_card"
-)
-
+// validChipAccessDocumentType is whether t is a document type a chip access
+// key may name.
 func validChipAccessDocumentType(t string) bool {
-	return t == chipAccessPassport || t == chipAccessIdentityCard || t == flow.DocumentTypeDrivingLicence
+	return t == flow.DocumentKindPassport || t == flow.DocumentKindIdentityCard || t == flow.DocumentKindResidencePermit ||
+		t == flow.DocumentTypeDrivingLicence
 }
 
 // documentEvidence is document_capture's evidence from the app's MRZ reading.
@@ -203,7 +200,7 @@ func documentInfoFromParsedMRZ(p session.ParsedMRZ, now time.Time) documentInfo 
 		shownGiven, shownSurname = p.FullGivenNames, p.FullSurname
 	}
 	return documentInfo{
-		Type: p.DocumentType, Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
+		Type: p.DocumentType, Kind: flow.DocumentKindOf(p.DocumentType, p.IssuingState, p.Nationality), Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
 		FirstName: p.GivenNames, LastName: p.Surname, DisplayName: displayName(shownGiven, shownSurname),
 		FullFirstName: p.FullGivenNames, FullLastName: p.FullSurname,
 		Sex: p.Sex, DateOfBirth: p.DateOfBirth, DateOfExpiry: p.DateOfExpiry, PersonalNumber: p.PersonalNumber,

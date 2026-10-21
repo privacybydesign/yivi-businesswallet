@@ -5,10 +5,12 @@ import {
   useCreateProofingFlowMutation,
   useEditProofingFlowMutation,
   useSaveFlowDiplomasMutation,
+  useSaveFlowAddressMutation,
   useSaveFlowKindMutation,
 } from "../api/identity-proofing.queries";
 import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
 import type {
+  AddressMode,
   DiplomaMode,
   FlowKind,
   ProofingFlow,
@@ -65,7 +67,7 @@ export function FlowEditor({
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
-  // a follow-up save (diplomas, kind) fails, a retry must not save the flow
+  // a follow-up save (diplomas, address, kind) fails, a retry must not save the flow
   // again: a create would make a second flow, an edit another version.
   const [saved, setSaved] = useState<{
     flow: ProofingFlow;
@@ -81,6 +83,9 @@ export function FlowEditor({
   const saveDiplomas = useSaveFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
   const [diplomaMode, setDiplomaMode] = useState<DiplomaMode>(savedDiplomas);
+  const saveAddress = useSaveFlowAddressMutation(slug);
+  const savedAddress: AddressMode = editing?.addressMode ?? "off";
+  const [addressMode, setAddressMode] = useState<AddressMode>(savedAddress);
   const saveKind = useSaveFlowKindMutation(slug);
   const savedKind: FlowKind = editing?.kind ?? "identity";
   const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
@@ -88,7 +93,8 @@ export function FlowEditor({
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
   const [touched, setTouched] = useState(false);
-  // A data request asks for no diplomas.
+  // A data request asks for no address and no diplomas.
+  const address: AddressMode = isDataRequest(flowKind) ? "off" : addressMode;
   const diplomas: DiplomaMode = isDataRequest(flowKind) ? "off" : diplomaMode;
   const requiresIdentity = identityRequired(flowKind, diplomas);
   const invalid = flowDraftError(draft, requiresIdentity);
@@ -136,7 +142,7 @@ export function FlowEditor({
       onSaved?.(flow);
       onDone();
     };
-    // The diploma mode, then the kind, each only when it changed.
+    // The diploma mode, the address, then the kind, each only when it changed.
     const saveSettings = (flowId: string, then: () => void): void => {
       const kindThen = (): void => {
         if (flowKind === savedKind) {
@@ -145,11 +151,21 @@ export function FlowEditor({
         }
         saveKind.mutate({ flowId, kind: flowKind }, { onSuccess: then });
       };
+      const addressThen = (): void => {
+        if (address === savedAddress) {
+          kindThen();
+          return;
+        }
+        saveAddress.mutate({ flowId, mode: address }, { onSuccess: kindThen });
+      };
       if (diplomas === savedDiplomas) {
-        kindThen();
+        addressThen();
         return;
       }
-      saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess: kindThen });
+      saveDiplomas.mutate(
+        { flowId, mode: diplomas },
+        { onSuccess: addressThen },
+      );
     };
     const saveSpec = (then: (flow: ProofingFlow) => void): void => {
       if (saved !== null && saved.spec === specKey) {
@@ -273,6 +289,14 @@ export function FlowEditor({
             onChange={(checked) => update({ faceVerification: checked })}
           />
           <Checkbox
+            id="proofing-flow-step-address"
+            checked={addressMode !== "off" && !isDataRequest(flowKind)}
+            disabled={isDataRequest(flowKind)}
+            label={t("identityProofingFlows.steps.address")}
+            hint={t("identityProofingFlows.new.addressHint")}
+            onChange={(checked) => setAddressMode(checked ? "required" : "off")}
+          />
+          <Checkbox
             id="proofing-flow-step-diplomas"
             checked={diplomaMode !== "off" && !isDataRequest(flowKind)}
             disabled={isDataRequest(flowKind)}
@@ -282,6 +306,11 @@ export function FlowEditor({
               chooseKindAndDiplomas(flowKind, checked ? "required" : "off")
             }
           />
+          {saveAddress.isError && (
+            <p className={ERROR}>
+              {proofingErrorMessage(saveAddress.error, t)}
+            </p>
+          )}
           {saveDiplomas.isError && (
             <p className={ERROR}>
               {proofingErrorMessage(saveDiplomas.error, t)}
@@ -294,6 +323,9 @@ export function FlowEditor({
                     ...steps
                       .filter(isProofingStep)
                       .map((step) => t(`identityProofingFlows.steps.${step}`)),
+                    ...(address === "off"
+                      ? []
+                      : [t("identityProofingFlows.steps.address")]),
                     ...(diplomas === "off"
                       ? []
                       : [t("identityProofingFlows.steps.diploma_upload")]),

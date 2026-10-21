@@ -294,7 +294,7 @@ export const en = {
     identityIntro:
       "Confirm your identity with your EU Digital Identity wallet. Here's exactly what you'll share:",
     disclosure: {
-      identityLabel: "Passport or ID card",
+      identityLabel: "Passport, ID card or residence permit",
       identityDetail:
         "Confirms your name, date of birth and nationality, so we can match you to the company's registered representatives at the KVK.",
       emailLabel: "Email address",
@@ -521,7 +521,7 @@ export const en = {
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
       referenceNoFace: "no face was found in the shared photo",
-      photoMissing: "the passport or ID card was shared without its photo",
+      photoMissing: "the identity document was shared without its photo",
       livenessFailed: "liveness check failed",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
@@ -582,6 +582,13 @@ export const en = {
       diplomasClosed:
         "Diplomas can only be added for a while after the identity check succeeded.",
       diplomasNotAsked: "This check does not ask for diplomas.",
+      addressNeedsPage:
+        "This flow asks for the address, which is entered on the page that runs the check. Show it on this screen or send a hosted link.",
+      addressClosed:
+        "The address can only be entered once, for a while after the identity check succeeded.",
+      addressNotAsked: "This check does not ask for an address.",
+      addressNotFound:
+        "This address is not in the Dutch address register. Check the postal code, house number and street.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -591,6 +598,34 @@ export const en = {
         "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
+    },
+    address: {
+      overview: {
+        label: "Address",
+        detail: "After the identity check: the postal address you enter",
+      },
+      identityDone: "Your identity is verified.",
+      heading: "Now enter your address",
+      intro:
+        "Enter the address where you live. In the Netherlands, your postal code and house number fill in the street and city from the Dutch address register. It is kept with your verified identity.",
+      lookup: {
+        choose: "Which of these addresses is yours?",
+        none: "This postal code and house number are not in the Dutch address register. Check them.",
+        unavailable:
+          "Your address cannot be looked up right now. Fill in the street and city yourself.",
+      },
+      netherlands: "Netherlands",
+      fields: {
+        street: "Street",
+        houseNumber: "House number",
+        postalCode: "Postal code",
+        city: "City",
+        country: "Country",
+      },
+      required: "Fill this in.",
+      save: "Save address",
+      closed: "The time to enter your address is up.",
+      continue: "Continue",
     },
     diplomas: {
       overview: {
@@ -753,7 +788,7 @@ export const en = {
       email: "E-mail address",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
-        "This flow asks for diplomas, which are uploaded on the page that runs the check, so it runs on this screen or as a link.",
+        "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
       name: "Name (optional)",
       nameHint:
         "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
@@ -778,6 +813,7 @@ export const en = {
         overview: "What is collected",
         method: "Choose an app",
         session: "Scan the QR code",
+        address: "Address",
         diplomas: "Diploma",
       },
       overview: {
@@ -811,7 +847,7 @@ export const en = {
         yivi: {
           title: "Yivi app",
           detail:
-            "Share the passport or ID card already in your Yivi app, then look into the camera here.",
+            "Share the passport, ID card or residence permit already in your Yivi app, then look into the camera here.",
         },
         idem: {
           title: "Idem app",
@@ -1015,6 +1051,17 @@ export const en = {
       expectedSubject: "Expected person",
       expectedSubjectValue:
         "Name and date of birth checked against the document",
+      address: {
+        title: "Address",
+        none: "No address entered.",
+        missing: "No address",
+        declared: "As the person entered it; not checked against a document.",
+        verified: "Found in the Dutch address register (BAG).",
+        unchecked:
+          "As the person entered it; the Dutch address register could not be reached to check it.",
+        unsupported:
+          "As the person entered it; only Dutch addresses are checked against a register.",
+      },
       diplomas: {
         title: "Diplomas",
         none: "No diploma added.",
@@ -1252,6 +1299,7 @@ export const en = {
       nfc_read: "Read the document's chip",
       document_photo: "Photograph the document",
       face_verification: "Face check",
+      address: "Enter the address",
       diploma_upload: "Upload diplomas (DUO)",
     },
     bsnPolicies: {
@@ -1327,6 +1375,8 @@ export const en = {
       faceVerificationHint:
         "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
       stepsOrder: "Will be sent in this order: {{steps}}",
+      addressHint:
+        "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       diplomaUploadHint:
         "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       faceLocationNative:
@@ -1350,7 +1400,7 @@ export const en = {
       documentsTitle: "Accepted documents",
       documentTypes: "Accepted document types",
       documentTypesHint:
-        "Comma-separated: P (passport), I (ID card), drivers_license (Dutch driving licence). Blank accepts any.",
+        "Comma-separated: P (passport), I (ID card), residence_permit, drivers_license (Dutch driving licence). Blank accepts any.",
       issuingCountries: "Accepted issuing countries",
       issuingCountriesHint:
         "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",
@@ -1951,6 +2001,9 @@ export const en = {
         "Changed whether a flow asks for diplomas",
       identityProofingDiplomaAdded: "Added a diploma",
       identityProofingDiplomaRejected: "Refused a diploma",
+      identityProofingFlowAddressConfigured:
+        "Changed whether a flow asks for the address",
+      identityProofingAddressAdded: "Entered an address",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
@@ -2375,7 +2428,7 @@ export const en = {
   identitySettings: {
     heading: "Re-identification",
     description:
-      "Members prove their identity with a passport or ID card when they join. Set how often they have to prove it again, and what happens when they do not.",
+      "Members prove their identity with a passport, ID card or residence permit when they join. Set how often they have to prove it again, and what happens when they do not.",
     intervals: "How often",
     employeeInterval: "Employees",
     externalInterval: "Externals",
@@ -2403,7 +2456,7 @@ export const en = {
     credentialMaxAgeDays: "Accept a credential obtained at most",
     credentialMaxAgeOff: "Any age",
     credentialMaxAgeHint:
-      "Refuses a re-identification whose passport or ID-card credential was obtained from its issuer longer ago than this. The member has to get a fresh one in their wallet first. Off by default.",
+      "Refuses a re-identification whose passport, ID-card or residence-permit credential was obtained from its issuer longer ago than this. The member has to get a fresh one in their wallet first. Off by default.",
     consequence: "When a member is overdue",
     consequenceFlag: "Flag only",
     consequenceFlagHint:

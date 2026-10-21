@@ -23,8 +23,8 @@ The send form can instead **show the session on this screen**
 `customers/{id}/verify?flow=`, a page in the customer's branding that shows what
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
-vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport or
-ID card with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
+vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport,
+ID card or residence permit with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
 `ScopeProofing`, the `openid4vp://` request shown as an `open.yivi.app` universal
 link and QR; the transaction id stays in `yivi_transaction_id`), polls
 `yivi/disclosure`, which on DONE hands the photo and claims to the engine as the
@@ -60,7 +60,8 @@ pause) + `customer-flows-tab.tsx` (assignment, send) + `customer-sessions-tab.ts
 `routes/flow-hosted-settings.tsx` (per-flow hosted settings), `diploma*.go` +
 `internal/diploma` + `routes/flow-editor.tsx` (the flow's diploma
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
-`matchSubject` in `service.go` (one known person, §13).
+`matchSubject` in `service.go` (one known person, §13), `address*.go` +
+`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -975,6 +976,21 @@ Everything this feature does not do yet, in one place.
     says to scan it from inside the app.
 - **Only Dutch driving licences** (§ Whose identity): no other state's
   licence CSCAs are embedded, and there is no EU licence masterlist to load.
+- **Residence permits** are their own document kind, never an identity card:
+  - The chip access key names `residence_permit`; Passive Authentication runs
+    the ICAO path (`mrtdEvidence.documentType: icao`) against the same
+    master lists. The NL list holds `CSCA NL, OU=Ministry of Security and
+    Justice` (the IND's ministry).
+  - `flow.DocumentKindOf` derives the kind from DG1/MRZ, as vcmrtd's
+    `td1DocumentType` does: same nationality and issuing state is an identity
+    card; a permit code (`IR`, `AR`, ...) is a permit.
+  - A foreigner's card with a plain ID code (`I<`, `ID`) has no kind: BE, DK
+    and PL put `ID` on permits, Estonia on resident EU citizens' identity
+    cards. The app keeps the user's pick there; the server does not take it.
+  - On the Yivi path the credential (`pbdf.residencepermit`) gives the kind.
+  - `AcceptedDocumentTypes` takes codes or kinds, case-insensitively; the
+    result's evidence carries `documentKind`.
+  - Not yet read from a real permit chip.
 - **Hosted page:** no full-theme endpoint; no automated accessibility test
   (axe, WCAG 2.2 AA), which needs a rendered DOM the frontend tests do not have.
 - **Manual review:** when an identity session goes to review is a product
@@ -1029,8 +1045,7 @@ Everything this feature does not do yet, in one place.
   render test.
 - **Planned features:** who sees what (member, admin, platform admin,
   customer); audit log filter and export (the buttons exist); DigiD for the
-  address, compared with what the person gave (Idem route); residence permits
-  over NFC; anti-glare for document capture; `high` assurance, only with a
+  address, compared with what the person gave (Idem route); anti-glare for document capture; `high` assurance, only with a
   certified liveness vendor.
 - **Before launch:**
   - The DPA and the controller and processor chain with each customer.
@@ -1287,7 +1302,7 @@ editor's Type, and the hosted page.
   then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the
   outcome and its `match`. Only a `strong` match also carries identity and
-  evidence, and diplomas: a ticked `probable`, `email` or `name` match may be
+  evidence, the address, and diplomas: a ticked `probable`, `email` or `name` match may be
   someone else's session. The contact the customer gave (the name and address
   it typed) goes out only for a strong match that was also approved for the
   one person it was sent to (`DataExportSession.Addressed`). Images are named in
@@ -1296,3 +1311,66 @@ editor's Type, and the hosted page.
   progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the
   customer (`GET /proofing/sessions/{id}/data-export`). Audited
   `identity_proofing.data_exported`.
+
+## 16. Postal address
+
+For onboarding that needs where the person lives. Wallet-side only, like the
+diplomas (§12): the engine knows nothing of it. The address is what the subject
+declares, never read off a document; a Dutch one is checked against the BAG.
+
+- **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
+  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
+  audited `flow_address_configured`.
+  - The flow editor shows it as "Enter the address", before the diploma step;
+    saved after the flow and before the diplomas' follow-up save.
+  - The flow list carries it as `addressMode`; a single version's answer omits
+    it. A data request flow asks for none.
+  - A request snapshots it at send (`identity_proofing_requests.address`).
+- **A page, never a mail.** Like the diplomas: refused on the mail channel and
+  as a bare deep link (`address_needs_page`, 422); `sendableByMail` checks both.
+- **Entry** (`POST .../requests/{id}/address`, `POST /proof/{token}/address`,
+  JSON, 204):
+  - Once, on an approved request, within `AddressWindow` (1 h) of the approval
+    (`addressUntil` in the request and the hosted progress, gone once entered;
+    the hosted progress says `addressGiven`, never the address).
+  - Street, house number, postal code, city and country, each required, trimmed,
+    at most 200 characters.
+  - Postal code and house number come first in the form. Once they are a Dutch
+    postal code and a number, the page looks them up
+    (`GET .../address/lookup?postalCode=&houseNumber=`, both routes, only while
+    the address is open): every BAG address at that number, letters and
+    additions included.
+    - The typed house number is one of them: street, city, postal code and
+      country fill in, once per postal code and number typed.
+    - It is none of them: the page lists them to pick, or says none exists.
+    - Not Dutch: nothing is asked, the fields are filled in by hand.
+- **Checked** on entry (`verifyAddress`, `internal/addresslookup`), the result
+  in the address as `verification`:
+  - A Dutch postal code (`1234 AB`, which no other country writes) is looked up
+    by postal code and house number; the house number (letter and addition
+    included) and street must match, case and punctuation aside.
+    - Found: kept as the BAG writes it, `verified`, country `Nederland`
+      whatever was typed (the form fills it in the page's language).
+    - Not found: 422 `address_not_found`, nothing kept. The BAG has an address
+      from its building permit on, so a real one is never missing.
+    - Register unreachable: kept as entered, `unchecked`, logged.
+  - A country naming the Netherlands (`dutchCountries`: `NL`, `NLD`,
+    `Nederland`, `Netherlands`, `Holland`, any case) with any other postal
+    code: 422 `address_not_found`, so a mistyped one is not kept `unsupported`.
+  - Any other address: kept as entered, `unsupported`.
+  - An address kept before this has no `verification`; the page shows it as
+    declared.
+- **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
+  at boot. A lookup the register cannot answer is 503
+  `address_lookup_unavailable`; the page asks for street and city by hand.
+- The address window keeps a hosted link live (`linkLive`), so the lookups
+  run on the live link's rate limit, not the stale one's.
+  - The page shows it after the approval and before the diplomas; it hands back
+    (`onSettled`) once the address is kept or the window closed.
+- **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on
+  every request read. Audited `address_added` without the address; the webhook
+  `session.address_added` carries it.
+  - Shown in the request responses, the customer API's `result`, a data
+    access export (strong match only), and the Sessions tab.
+  - `Purge` clears it and strips `address` from the request's webhook
+    deliveries.

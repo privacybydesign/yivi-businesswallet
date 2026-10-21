@@ -11,8 +11,13 @@ import {
   useStartProofingYiviMutation,
   useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
+  useSubmitAddressMutation,
+  useAddressLookupQuery,
 } from "../api/identity-proofing.queries";
 import type {
+  AddressMode,
+  RegisterAddress,
+  ProofingAddressInput,
   DiplomaMode,
   DiplomaVerdict,
   ProofingCustomer,
@@ -24,11 +29,13 @@ import type {
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  addressLookup,
   assuranceLevelLabel,
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
   isRequestedAttribute,
+  matchingAddress,
   proofingErrorMessage,
   proofingRejectionReason,
   dataRequestRefusal,
@@ -38,14 +45,16 @@ import {
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
+import { useDebouncedValue } from "../lib/use-debounced-value";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
-import { Button, DataDisclosure, Icon, Outcome } from "../ui";
+import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
 // The steps a customer's subject goes through to be verified, shared by the
 // on-screen page a member shows (customer-verify) and the hosted page a link
 // opens (proof): what is collected, the app to use, then that app's session.
 
+const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 const CAPTION =
@@ -71,6 +80,8 @@ export interface VerifyFlowInfo {
   requiredAssuranceLevel?: string;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
+  // Whether the subject is asked for their postal address afterwards.
+  addressMode?: AddressMode;
   // The most days the session's data is kept, as the server works it out:
   // the flow's retention when it sets one, else the customer's.
   retentionDays: number;
@@ -78,6 +89,9 @@ export interface VerifyFlowInfo {
 
 // Where a subject logs in with DigiD to download the extract of a diploma.
 const MIJN_DUO_URL = "https://mijn.duo.nl";
+// How long typing a postal code or house number pauses before the address is
+// looked up.
+const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
@@ -119,6 +133,13 @@ export function Overview({
       label: t(`identityProofingFlows.attributes.${value}`),
       detail: t(`customers.onScreen.attributeDetails.${value}`),
     }));
+  if (flow.addressMode !== undefined && flow.addressMode !== "off") {
+    items.push({
+      icon: "personal",
+      label: t("identityProofing.address.overview.label"),
+      detail: t("identityProofing.address.overview.detail"),
+    });
+  }
   if (flow.diplomaMode !== undefined && flow.diplomaMode !== "off") {
     items.push({
       icon: "flag",
@@ -331,6 +352,8 @@ export function Session({
   diplomas = [],
   onDiplomaStep,
   dataRequest = false,
+  addressMode = "off",
+  onAddressStep,
 }: {
   target: VerifyTarget;
   initial: ProofingProgress;
@@ -352,19 +375,28 @@ export function Session({
   // A data request: a refusal reads as the request refused, not the person
   // unverified.
   dataRequest?: boolean;
+  // Whether an approved session goes on to the address step, before the
+  // diploma step; onAddressStep is told whether it shows.
+  addressMode?: AddressMode;
+  onAddressStep?: (active: boolean) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
+  const [addressDone, setAddressDone] = useState(false);
   const [diplomasDone, setDiplomasDone] = useState(false);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const view = sessionView({
     status: current.status,
+    addressMode,
+    addressUntil: current.addressUntil,
+    addressDone,
     diplomaMode,
     diplomasUntil: current.diplomasUntil,
     diplomasDone,
     secondsLeft,
   });
+  const askAddress = view === "address";
   const askDiplomas = view === "diplomas";
   const showsOutcome = view === "outcome";
   useEffect(() => {
@@ -372,6 +404,9 @@ export function Session({
       onSettled?.(current);
     }
   }, [showsOutcome, current, onSettled]);
+  useEffect(() => {
+    onAddressStep?.(askAddress);
+  }, [askAddress, onAddressStep]);
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
@@ -403,6 +438,15 @@ export function Session({
     </div>
   );
 
+  if (askAddress && current.addressUntil !== undefined) {
+    return (
+      <AddressStep
+        target={target}
+        until={current.addressUntil}
+        onDone={() => setAddressDone(true)}
+      />
+    );
+  }
   if (askDiplomas && current.diplomasUntil !== undefined) {
     return (
       <DiplomaStep
@@ -672,6 +716,218 @@ function DiplomaStep({
           {t("identityProofing.diplomas.needOne")}
         </p>
       )}
+    </div>
+  );
+}
+
+// Postal code and house number first: in the Netherlands they fill in the
+// street and city.
+const ADDRESS_FIELDS = [
+  "postalCode",
+  "houseNumber",
+  "street",
+  "city",
+  "country",
+] as const satisfies readonly (keyof ProofingAddressInput)[];
+
+const ADDRESS_AUTOCOMPLETE: Record<keyof ProofingAddressInput, string> = {
+  street: "address-line1",
+  houseNumber: "off",
+  postalCode: "postal-code",
+  city: "address-level2",
+  country: "country-name",
+};
+
+const EMPTY_ADDRESS: ProofingAddressInput = {
+  street: "",
+  houseNumber: "",
+  postalCode: "",
+  city: "",
+  country: "",
+};
+
+// After an approved identity: the subject enters their postal address. It is
+// what they declare, kept beside the proven identity. The step ends once it
+// is kept, or the time to enter it is up.
+function AddressStep({
+  target,
+  until,
+  onDone,
+}: Readonly<{
+  target: VerifyTarget;
+  until: string;
+  onDone: () => void;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const submit = useSubmitAddressMutation(target);
+  const [address, setAddress] = useState<ProofingAddressInput>(EMPTY_ADDRESS);
+  const [touched, setTouched] = useState(false);
+  const postalCode = useDebouncedValue(
+    address.postalCode,
+    ADDRESS_LOOKUP_DEBOUNCE_MS,
+  );
+  const houseNumber = useDebouncedValue(
+    address.houseNumber,
+    ADDRESS_LOOKUP_DEBOUNCE_MS,
+  );
+  const lookupInput = addressLookup(postalCode, houseNumber);
+  const lookup = useAddressLookupQuery(target, lookupInput);
+  const match = lookup.data && matchingAddress(lookup.data, houseNumber);
+
+  // The address the form was last filled in from, so a field edited after it
+  // is left as typed.
+  const [filledFor, setFilledFor] = useState("");
+  const matchKey = `${lookupInput?.postalCode} ${match?.houseNumber}`;
+  if (match !== undefined && matchKey !== filledFor) {
+    setFilledFor(matchKey);
+    fill(match);
+  }
+
+  const secondsLeft = useSecondsLeft(until);
+  const open = secondsLeft > 0;
+  const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
+
+  function save(event: React.FormEvent): void {
+    event.preventDefault();
+    setTouched(true);
+    if (missing.length > 0) return;
+    submit.mutate(address, { onSuccess: onDone });
+  }
+
+  // The register's address fills the form as the register writes it; the
+  // house number is kept as typed until it is picked.
+  function fill(found: RegisterAddress, houseNumber?: string): void {
+    setAddress((current) => ({
+      ...found,
+      houseNumber: houseNumber ?? current.houseNumber,
+      country: t("identityProofing.address.netherlands"),
+    }));
+  }
+
+  return (
+    <form className="flex w-full flex-col gap-5" onSubmit={save} noValidate>
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t("identityProofing.address.identityDone")}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <h2 className="text-ink text-[18px] font-bold">
+          {t("identityProofing.address.heading")}
+        </h2>
+        <p className={HINT}>{t("identityProofing.address.intro")}</p>
+      </div>
+
+      {open ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
+          {ADDRESS_FIELDS.map((field) => {
+            const invalid = touched && missing.includes(field);
+            return (
+              <div
+                key={field}
+                className={`flex flex-col gap-1 ${field === "country" ? "sm:col-span-2" : ""}`}
+              >
+                <label htmlFor={`proofing-address-${field}`} className={LABEL}>
+                  {t(`identityProofing.address.fields.${field}`)}
+                </label>
+                <Input
+                  id={`proofing-address-${field}`}
+                  autoComplete={ADDRESS_AUTOCOMPLETE[field]}
+                  value={address[field]}
+                  aria-invalid={invalid}
+                  aria-describedby={
+                    invalid ? `proofing-address-${field}-error` : undefined
+                  }
+                  onChange={(event) =>
+                    setAddress((current) => ({
+                      ...current,
+                      [field]: event.target.value,
+                    }))
+                  }
+                />
+                {invalid && (
+                  <p id={`proofing-address-${field}-error`} className={ERROR}>
+                    {t("identityProofing.address.required")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <div aria-live="polite" className="sm:col-span-2">
+            {match === undefined && lookup.isFetched && (
+              <AddressLookupResult
+                found={lookup.data}
+                unavailable={lookup.isError}
+                onPick={(a) => fill(a, a.houseNumber)}
+              />
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className={HINT}>{t("identityProofing.address.closed")}</p>
+      )}
+      {submit.isError && (
+        <p role="alert" className={ERROR}>
+          {proofingErrorMessage(submit.error, t)}
+        </p>
+      )}
+
+      <div className="border-line flex items-center justify-between gap-3 border-t pt-4">
+        {open ? <Countdown seconds={secondsLeft} /> : <span />}
+        {open ? (
+          <Button type="submit" icon="arrow_front" loading={submit.isPending}>
+            {t("identityProofing.address.save")}
+          </Button>
+        ) : (
+          <Button variant="secondary" icon="arrow_front" onClick={onDone}>
+            {t("identityProofing.address.continue")}
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+// What the lookup found at a postal code and house number that is none of the
+// register's addresses: the addresses at that number to pick from, or why
+// there are none.
+function AddressLookupResult({
+  found,
+  unavailable,
+  onPick,
+}: Readonly<{
+  found: RegisterAddress[] | undefined;
+  unavailable: boolean;
+  onPick: (address: RegisterAddress) => void;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (unavailable) {
+    return (
+      <p className={HINT}>{t("identityProofing.address.lookup.unavailable")}</p>
+    );
+  }
+  if (found === undefined) {
+    return null;
+  }
+  if (found.length === 0) {
+    return <p className={HINT}>{t("identityProofing.address.lookup.none")}</p>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>{t("identityProofing.address.lookup.choose")}</p>
+      <ul className="border-line rounded-yivi divide-line flex flex-col divide-y border">
+        {found.map((a) => (
+          <li key={a.houseNumber}>
+            <button
+              type="button"
+              className="text-ink hover:bg-surface-3 w-full px-3 py-2 text-left text-[13px]"
+              onClick={() => onPick(a)}
+            >
+              {`${a.street} ${a.houseNumber}, ${a.postalCode} ${a.city}`}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -43,6 +43,7 @@ import {
   getProofingFlowHosted,
   saveProofingFlowHosted,
   saveProofingFlowDiplomas,
+  saveProofingFlowAddress,
   getProofingPause,
   listProofingPauses,
   setPlatformProofingPause,
@@ -53,6 +54,8 @@ import {
   startProofingYivi,
   submitProofingFaceFrame,
   uploadProofingDiplomas,
+  submitProofingAddress,
+  lookUpAddress,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -87,11 +90,15 @@ import type {
   ProofingFlowHosted,
   DiplomaMode,
   DiplomaVerdict,
+  AddressMode,
+  RegisterAddress,
+  ProofingAddressInput,
   FlowKind,
   ProofingDataMatch,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
+import type { AddressLookup } from "../lib/identity-proofing";
 import {
   deliveriesPollInterval,
   isProofingLive,
@@ -264,6 +271,23 @@ export function useSaveFlowDiplomasMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowDiplomas(slug, flowId, mode),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateFlow(queryClient, slug),
+  });
+}
+
+// The flow lists carry each flow's address mode, so they are refetched.
+export function useSaveFlowAddressMutation(
+  slug: string,
+): UseMutationResult<
+  AddressMode,
+  Error,
+  { flowId: string; mode: AddressMode }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ flowId, mode }) =>
+      saveProofingFlowAddress(slug, flowId, mode),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });
@@ -992,6 +1016,45 @@ export function useUploadDiplomasMutation(
   return useMutation({
     mutationFn: (files) => uploadProofingDiplomas(target, files),
     meta: { suppressErrorToast: true },
+  });
+}
+
+// The Dutch addresses at a postal code and house number; asked only for a
+// Dutch postal code and a house number that starts with a number.
+export function useAddressLookupQuery(
+  target: VerifyTarget,
+  lookup: AddressLookup | null,
+): UseQueryResult<RegisterAddress[], Error> {
+  return useQuery<RegisterAddress[]>({
+    queryKey: [
+      ...verifyQueryKey(target),
+      "address-lookup",
+      lookup?.postalCode,
+      lookup?.houseNumber,
+    ],
+    queryFn: ({ signal }) =>
+      lookUpAddress(
+        target,
+        lookup?.postalCode ?? "",
+        lookup?.houseNumber ?? "",
+        signal,
+      ),
+    enabled: lookup !== null,
+    staleTime: Infinity,
+  });
+}
+
+// Keeps the postal address entered on a verify page; the page's progress is
+// refetched, so the step closes.
+export function useSubmitAddressMutation(
+  target: VerifyTarget,
+): UseMutationResult<void, Error, ProofingAddressInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (address) => submitProofingAddress(target, address),
+    meta: { suppressErrorToast: true },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: verifyQueryKey(target) }),
   });
 }
 
