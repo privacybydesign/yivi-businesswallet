@@ -2,9 +2,11 @@ package proofingengine
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify/mrtdtestfixtures"
 )
 
@@ -107,5 +109,68 @@ func TestMRZDate(t *testing.T) {
 	}
 	if _, err := mrzDate("781305", now, mrzBirthDate); err == nil {
 		t.Error("month 13: want an error")
+	}
+}
+
+// mrzCheckDigit is ICAO 9303's check digit over s.
+func mrzCheckDigit(s string) string {
+	weights := []int{7, 3, 1}
+	sum := 0
+	for i, r := range s {
+		v := 0
+		switch {
+		case r >= '0' && r <= '9':
+			v = int(r - '0')
+		case r >= 'A' && r <= 'Z':
+			v = int(r-'A') + 10
+		}
+		sum += v * weights[i%len(weights)]
+	}
+	return string(rune('0' + sum%10))
+}
+
+// mrzField pads s with fillers to n characters.
+func mrzField(s string, n int) string {
+	return s + strings.Repeat("<", n-len(s))
+}
+
+// td1DG1 is the DG1 of a card-sized (TD1) document with this code, issuing
+// state and nationality.
+func td1DG1(code, issuingState, nationality string) []byte {
+	const number, birth, expiry = "SPECI2014", "650310", "340309"
+	line1 := mrzField(code, 2) + issuingState + number + mrzCheckDigit(number) + mrzField("", 15)
+	line2 := birth + mrzCheckDigit(birth) + "F" + expiry + mrzCheckDigit(expiry) + nationality + mrzField("", 11)
+	line2 += mrzCheckDigit(line1[5:30] + line2[0:7] + line2[8:15] + line2[18:29])
+	line3 := mrzField("DE<BRUIJN<<WILLEKE<LISELOTTE", 30)
+	return tlvBytes([]byte{0x61}, tlvBytes([]byte{0x5F, 0x1F}, []byte(line1+line2+line3)))
+}
+
+// A TD1 card's DG1 gives its kind: a residence permit by its code, an
+// identity card by holder and issuer matching, and neither for another
+// state's card.
+func TestDocumentFromEvidenceTD1Kind(t *testing.T) {
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name                      string
+		code, issuer, nationality string
+		want                      string
+	}{
+		{"residence permit", "IR", "NLD", "TUR", flow.DocumentKindResidencePermit},
+		{"another state's card", "ID", "BEL", "MAR", ""},
+		{"identity card", "I", "NLD", "NLD", flow.DocumentKindIdentityCard},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := documentFromEvidence(&mrtdEvidenceRequest{
+				DataGroups: map[string]string{"DG1": hex.EncodeToString(td1DG1(tc.code, tc.issuer, tc.nationality))},
+			}, now)
+			if err != nil {
+				t.Fatalf("documentFromEvidence: %v", err)
+			}
+			if doc.Kind != tc.want || doc.IssuingState != tc.issuer || doc.Nationality != tc.nationality ||
+				doc.LastName != "DE BRUIJN" || doc.DateOfBirth != "1965-03-10" {
+				t.Errorf("document = %+v; want kind %q from the MRZ", doc, tc.want)
+			}
+		})
 	}
 }

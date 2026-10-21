@@ -1344,11 +1344,15 @@ declares, never read off a document; a Dutch one is checked against the BAG.
   - A Dutch postal code (`1234 AB`, which no other country writes) is looked up
     by postal code and house number; the house number (letter and addition
     included) and street must match, case and punctuation aside.
-    - Found: kept as the BAG writes it, `verified`.
+    - Found: kept as the BAG writes it, `verified`, country `Nederland`
+      whatever was typed (the form fills it in the page's language).
     - Not found: 422 `address_not_found`, nothing kept. The BAG has an address
       from its building permit on, so a real one is never missing.
     - Register unreachable: kept as entered, `unchecked`, logged.
-  - Any other postal code: kept as entered, `unsupported`.
+  - A country naming the Netherlands (`dutchCountries`: `NL`, `NLD`,
+    `Nederland`, `Netherlands`, `Holland`, any case) with any other postal
+    code: 422 `address_not_found`, so a mistyped one is not kept `unsupported`.
+  - Any other address: kept as entered, `unsupported`.
   - An address kept before this has no `verification`; the page shows it as
     declared.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged

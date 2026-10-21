@@ -54,8 +54,8 @@ var (
 	// ErrAddressNeedsPage is an address flow sent where its subject gets no
 	// page to enter it on: by mail, or as a bare deep link.
 	ErrAddressNeedsPage = errors.New("proofing: a flow that asks for the address runs on a page: show it on screen or send a hosted link")
-	// ErrAddressNotFound is an address with a Dutch postal code that the
-	// register does not have: no such house number there, or another street.
+	// ErrAddressNotFound is an address in the Netherlands that the register
+	// does not have: no such postal code or house number, or another street.
 	ErrAddressNotFound = errors.New("proofing: the address is not in the Dutch address register")
 	// ErrAddressLookupUnavailable is a suggestion the register could not give.
 	ErrAddressLookupUnavailable = errors.New("proofing: the Dutch address register cannot be reached")
@@ -94,7 +94,16 @@ const (
 	// addressLookupTimeout bounds one question to the register, so the page
 	// never waits long on it.
 	addressLookupTimeout = 5 * time.Second
+	// registerCountry is the country a verified address is kept with, as the
+	// register, which is Dutch, writes it.
+	registerCountry = "Nederland"
 )
+
+// dutchCountries are the countries, as addressKey writes them, that name the
+// Netherlands: its codes, and its names in the page's languages.
+var dutchCountries = map[string]bool{
+	"nl": true, "nld": true, "nederland": true, "netherlands": true, "thenetherlands": true, "holland": true,
+}
 
 // Address is the postal address a subject entered.
 type Address struct {
@@ -384,14 +393,17 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	return req, nil
 }
 
-// verifyAddress checks a normalized address with a Dutch postal code against
-// the register: one it has is kept as the register writes it, one it lacks is
-// ErrAddressNotFound. The street must match, so a mistyped postal code that
-// happens to exist is not taken for another address. Any other address is
-// kept as entered.
+// verifyAddress checks a normalized address in the Netherlands, by its country
+// or its postal code, against the register: one it has is kept as the register
+// writes it, one it lacks is ErrAddressNotFound. The street must match, so a
+// mistyped postal code that happens to exist is not taken for another address.
+// Any other address is kept as entered.
 func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, error) {
-	postalCode, dutch := addresslookup.PostalCode(addr.PostalCode)
-	if !dutch {
+	postalCode, dutchPostalCode := addresslookup.PostalCode(addr.PostalCode)
+	if !dutchPostalCode {
+		if dutchCountries[addressKey(addr.Country)] {
+			return Address{}, fmt.Errorf("%w: a Dutch postal code is four digits and two letters", ErrAddressNotFound)
+		}
 		addr.Verification = AddressUnsupported
 		return addr, nil
 	}
@@ -417,7 +429,7 @@ func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, err
 
 	for _, f := range found {
 		if addressKey(f.HouseNumber) == addressKey(addr.HouseNumber) && addressKey(f.Street) == addressKey(addr.Street) {
-			addr.Street, addr.HouseNumber, addr.PostalCode, addr.City = f.Street, f.HouseNumber, f.PostalCode, f.City
+			addr.Street, addr.HouseNumber, addr.PostalCode, addr.City, addr.Country = f.Street, f.HouseNumber, f.PostalCode, f.City, registerCountry
 			addr.Verification = AddressVerified
 			return addr, nil
 		}

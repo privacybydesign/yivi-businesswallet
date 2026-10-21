@@ -153,7 +153,7 @@ func TestAddAddressVerification(t *testing.T) {
 		{
 			"found, kept as the register writes it", &fakeAddressLookup{found: []addresslookup.Address{registerAddress}},
 			Address{Street: "kerkstraat", HouseNumber: "12 a", PostalCode: "6511ab", City: "Nijmegen", Country: "NL"},
-			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressVerified},
+			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified},
 			"6511AB 12",
 		},
 		{
@@ -199,6 +199,7 @@ func TestAddAddressNotInRegister(t *testing.T) {
 		{"other street", Address{Street: "Molenstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
 		{"other letter", Address{Street: "Kerkstraat", HouseNumber: "12B", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
 		{"no number", Address{Street: "Kerkstraat", HouseNumber: "A", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}},
+		{"mistyped postal code", Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "65111", City: "Nijmegen", Country: "Netherlands"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
