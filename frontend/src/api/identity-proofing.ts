@@ -58,15 +58,15 @@ export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
 // What the address step sends; the backend sets the verification.
 export type ProofingAddressInput = Omit<ProofingAddress, "verification">;
 
-// An address the Dutch address register suggests for what was typed.
-const addressSuggestionSchema = z.object({
+// An address as the Dutch address register writes it.
+const registerAddressSchema = z.object({
   street: z.string(),
   houseNumber: z.string(),
   postalCode: z.string(),
   city: z.string(),
 });
 
-export type AddressSuggestion = z.infer<typeof addressSuggestionSchema>;
+export type RegisterAddress = z.infer<typeof registerAddressSchema>;
 
 // What a flow's sessions are for: an identity check, or a customer's subject
 // asking for the data held of them ("see my data") or for its erasure
@@ -1430,21 +1430,20 @@ export function uploadProofingDiplomas(
   });
 }
 
-// The Dutch addresses that best match what was typed on a verify page, while
-// it takes the address. Not retried: the next keystroke asks again.
-export function getAddressSuggestions(
+// Every Dutch address at a postal code and house number typed on a verify
+// page, while it takes the address. Not retried: the next keystroke asks again.
+export function lookUpAddress(
   target: VerifyTarget,
-  query: string,
+  postalCode: string,
+  houseNumber: string,
   signal?: AbortSignal,
-): Promise<AddressSuggestion[]> {
-  return request(
-    `${verifyPath(target)}/address/suggestions?q=${encodeURIComponent(query)}`,
-    {
-      schema: z.object({ suggestions: z.array(addressSuggestionSchema) }),
-      maxRetries: 0,
-      signal,
-    },
-  ).then((r) => r.suggestions);
+): Promise<RegisterAddress[]> {
+  const params = new URLSearchParams({ postalCode, houseNumber });
+  return request(`${verifyPath(target)}/address/lookup?${params.toString()}`, {
+    schema: z.object({ addresses: z.array(registerAddressSchema) }),
+    maxRetries: 0,
+    signal,
+  }).then((r) => r.addresses);
 }
 
 // Keeps the postal address entered on a verify page, after an approved

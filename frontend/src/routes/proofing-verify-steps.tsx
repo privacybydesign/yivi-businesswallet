@@ -12,11 +12,11 @@ import {
   useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
   useSubmitAddressMutation,
-  useAddressSuggestionsQuery,
+  useAddressLookupQuery,
 } from "../api/identity-proofing.queries";
 import type {
   AddressMode,
-  AddressSuggestion,
+  RegisterAddress,
   ProofingAddressInput,
   DiplomaMode,
   DiplomaVerdict,
@@ -29,11 +29,13 @@ import type {
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  addressLookup,
   assuranceLevelLabel,
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
   isRequestedAttribute,
+  matchingAddress,
   proofingErrorMessage,
   proofingRejectionReason,
   dataRequestRefusal,
@@ -87,8 +89,9 @@ export interface VerifyFlowInfo {
 
 // Where a subject logs in with DigiD to download the extract of a diploma.
 const MIJN_DUO_URL = "https://mijn.duo.nl";
-// How long typing in the address search pauses before addresses are asked for.
-const ADDRESS_SEARCH_DEBOUNCE_MS = 300;
+// How long typing a postal code or house number pauses before the address is
+// looked up.
+const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
@@ -717,10 +720,12 @@ function DiplomaStep({
   );
 }
 
+// Postal code and house number first: in the Netherlands they fill in the
+// street and city.
 const ADDRESS_FIELDS = [
-  "street",
-  "houseNumber",
   "postalCode",
+  "houseNumber",
+  "street",
   "city",
   "country",
 ] as const satisfies readonly (keyof ProofingAddressInput)[];
@@ -757,9 +762,25 @@ function AddressStep({
   const submit = useSubmitAddressMutation(target);
   const [address, setAddress] = useState<ProofingAddressInput>(EMPTY_ADDRESS);
   const [touched, setTouched] = useState(false);
-  const [search, setSearch] = useState("");
-  const query = useDebouncedValue(search.trim(), ADDRESS_SEARCH_DEBOUNCE_MS);
-  const suggestions = useAddressSuggestionsQuery(target, query);
+  const postalCode = useDebouncedValue(
+    address.postalCode,
+    ADDRESS_LOOKUP_DEBOUNCE_MS,
+  );
+  const houseNumber = useDebouncedValue(
+    address.houseNumber,
+    ADDRESS_LOOKUP_DEBOUNCE_MS,
+  );
+  const lookupInput = addressLookup(postalCode, houseNumber);
+  const lookup = useAddressLookupQuery(target, lookupInput);
+  const match = lookup.data && matchingAddress(lookup.data, houseNumber);
+  // The address the form was last filled in from, so a field edited after it
+  // is left as typed.
+  const [filledFor, setFilledFor] = useState("");
+  const matchKey = `${lookupInput?.postalCode} ${match?.houseNumber}`;
+  if (match !== undefined && matchKey !== filledFor) {
+    setFilledFor(matchKey);
+    fill(match);
+  }
   const secondsLeft = useSecondsLeft(until);
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
@@ -771,13 +792,14 @@ function AddressStep({
     submit.mutate(address, { onSuccess: onDone });
   }
 
-  // A picked address fills the form as the register writes it.
-  function pick(suggestion: AddressSuggestion): void {
-    setAddress({
-      ...suggestion,
+  // The register's address fills the form as the register writes it; the
+  // house number is kept as typed until it is picked.
+  function fill(found: RegisterAddress, houseNumber?: string): void {
+    setAddress((current) => ({
+      ...found,
+      houseNumber: houseNumber ?? current.houseNumber,
       country: t("identityProofing.address.netherlands"),
-    });
-    setSearch("");
+    }));
   }
 
   return (
@@ -793,32 +815,6 @@ function AddressStep({
         </h2>
         <p className={HINT}>{t("identityProofing.address.intro")}</p>
       </div>
-
-      {open && (
-        <div className="flex flex-col gap-1">
-          <label htmlFor="proofing-address-search" className={LABEL}>
-            {t("identityProofing.address.search.label")}
-          </label>
-          <Input
-            id="proofing-address-search"
-            icon="search"
-            autoComplete="off"
-            placeholder={t("identityProofing.address.search.placeholder")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          <div aria-live="polite">
-            {search.trim() !== "" && (
-              <AddressSuggestions
-                suggestions={suggestions.data}
-                unavailable={suggestions.isError}
-                onPick={pick}
-              />
-            )}
-          </div>
-          <p className={HINT}>{t("identityProofing.address.search.hint")}</p>
-        </div>
-      )}
 
       {open ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
@@ -855,6 +851,15 @@ function AddressStep({
               </div>
             );
           })}
+          <div aria-live="polite" className="sm:col-span-2">
+            {match === undefined && lookup.isFetched && (
+              <AddressLookupResult
+                found={lookup.data}
+                unavailable={lookup.isError}
+                onPick={(a) => fill(a, a.houseNumber)}
+              />
+            )}
+          </div>
         </div>
       ) : (
         <p className={HINT}>{t("identityProofing.address.closed")}</p>
@@ -881,43 +886,47 @@ function AddressStep({
   );
 }
 
-// What the address search found for what was typed: the addresses to pick,
-// or why there are none. Nothing shows while the first answer is on its way.
-function AddressSuggestions({
-  suggestions,
+// What the lookup found at a postal code and house number that is none of the
+// register's addresses: the addresses at that number to pick from, or why
+// there are none.
+function AddressLookupResult({
+  found,
   unavailable,
   onPick,
 }: Readonly<{
-  suggestions: AddressSuggestion[] | undefined;
+  found: RegisterAddress[] | undefined;
   unavailable: boolean;
-  onPick: (suggestion: AddressSuggestion) => void;
+  onPick: (address: RegisterAddress) => void;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (unavailable) {
     return (
-      <p className={HINT}>{t("identityProofing.address.search.unavailable")}</p>
+      <p className={HINT}>{t("identityProofing.address.lookup.unavailable")}</p>
     );
   }
-  if (suggestions === undefined) {
+  if (found === undefined) {
     return null;
   }
-  if (suggestions.length === 0) {
-    return <p className={HINT}>{t("identityProofing.address.search.none")}</p>;
+  if (found.length === 0) {
+    return <p className={HINT}>{t("identityProofing.address.lookup.none")}</p>;
   }
   return (
-    <ul className="border-line rounded-yivi divide-line flex flex-col divide-y border">
-      {suggestions.map((s) => (
-        <li key={`${s.postalCode} ${s.houseNumber}`}>
-          <button
-            type="button"
-            className="text-ink hover:bg-surface-3 w-full px-3 py-2 text-left text-[13px]"
-            onClick={() => onPick(s)}
-          >
-            {`${s.street} ${s.houseNumber}, ${s.postalCode} ${s.city}`}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>{t("identityProofing.address.lookup.choose")}</p>
+      <ul className="border-line rounded-yivi divide-line flex flex-col divide-y border">
+        {found.map((a) => (
+          <li key={a.houseNumber}>
+            <button
+              type="button"
+              className="text-ink hover:bg-surface-3 w-full px-3 py-2 text-left text-[13px]"
+              onClick={() => onPick(a)}
+            >
+              {`${a.street} ${a.houseNumber}, ${a.postalCode} ${a.city}`}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

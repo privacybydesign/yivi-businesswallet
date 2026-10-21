@@ -55,7 +55,7 @@ import {
   submitProofingFaceFrame,
   uploadProofingDiplomas,
   submitProofingAddress,
-  getAddressSuggestions,
+  lookUpAddress,
 } from "./identity-proofing";
 import type {
   ProofingCustomer,
@@ -91,13 +91,14 @@ import type {
   DiplomaMode,
   DiplomaVerdict,
   AddressMode,
-  AddressSuggestion,
+  RegisterAddress,
   ProofingAddressInput,
   FlowKind,
   ProofingDataMatch,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
+import type { AddressLookup } from "../lib/identity-proofing";
 import {
   deliveriesPollInterval,
   isProofingLive,
@@ -120,9 +121,6 @@ const REVIEW_POLL_INTERVAL_MS = 15_000;
 // lingering there for the default five minutes.
 const SECRET_MUTATION_GC_TIME_MS = 0;
 const IDENTITY_RESULT_GC_TIME_MS = 0;
-// How much must be typed before addresses are suggested; the backend suggests
-// nothing for less.
-const ADDRESS_SUGGEST_MIN_CHARS = 3;
 
 export function proofingQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "identity-proofing"];
@@ -1021,15 +1019,27 @@ export function useUploadDiplomasMutation(
   });
 }
 
-// The Dutch addresses suggested for query; asked once it is long enough.
-export function useAddressSuggestionsQuery(
+// The Dutch addresses at a postal code and house number; asked only for a
+// Dutch postal code and a house number that starts with a number.
+export function useAddressLookupQuery(
   target: VerifyTarget,
-  query: string,
-): UseQueryResult<AddressSuggestion[], Error> {
-  return useQuery<AddressSuggestion[]>({
-    queryKey: [...verifyQueryKey(target), "address-suggestions", query],
-    queryFn: ({ signal }) => getAddressSuggestions(target, query, signal),
-    enabled: query.length >= ADDRESS_SUGGEST_MIN_CHARS,
+  lookup: AddressLookup | null,
+): UseQueryResult<RegisterAddress[], Error> {
+  return useQuery<RegisterAddress[]>({
+    queryKey: [
+      ...verifyQueryKey(target),
+      "address-lookup",
+      lookup?.postalCode,
+      lookup?.houseNumber,
+    ],
+    queryFn: ({ signal }) =>
+      lookUpAddress(
+        target,
+        lookup?.postalCode ?? "",
+        lookup?.houseNumber ?? "",
+        signal,
+      ),
+    enabled: lookup !== null,
     staleTime: Infinity,
   });
 }

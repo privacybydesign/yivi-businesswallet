@@ -129,11 +129,6 @@ type fakeAddressLookup struct {
 	queries []string
 }
 
-func (f *fakeAddressLookup) Suggest(_ context.Context, query string) ([]addresslookup.Address, error) {
-	f.queries = append(f.queries, query)
-	return f.found, f.err
-}
-
 func (f *fakeAddressLookup) Find(_ context.Context, postalCode string, houseNumber int) ([]addresslookup.Address, error) {
 	f.queries = append(f.queries, postalCode+" "+strconv.Itoa(houseNumber))
 	return f.found, f.err
@@ -216,30 +211,32 @@ func TestAddAddressNotInRegister(t *testing.T) {
 	}
 }
 
-func TestAddressSuggestions(t *testing.T) {
+func TestLookUpAddress(t *testing.T) {
 	f := newAddressFixture(AddressRequired)
 	lookup := &fakeAddressLookup{found: []addresslookup.Address{registerAddress}}
 	f.svc.SetAddressLookup(lookup)
 	req := sendApprovedAddress(t, f, time.Minute)
 
-	short, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, " ke ")
-	if err != nil || len(short) != 0 || len(lookup.queries) != 0 {
-		t.Fatalf("short query = %v, %v, asked %q; want nothing asked", short, err, lookup.queries)
+	for _, in := range [][2]string{{"1000", "16"}, {"6511 AB", "A"}, {"", "12"}} {
+		got, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, in[0], in[1])
+		if err != nil || len(got) != 0 || len(lookup.queries) != 0 {
+			t.Fatalf("LookUpAddress(%q) = %v, %v, asked %q; want nothing asked", in, got, err, lookup.queries)
+		}
 	}
-	got, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, " kerkstraat 12 ")
-	if err != nil || len(got) != 1 || got[0] != registerAddress || lookup.queries[0] != "kerkstraat 12" {
-		t.Fatalf("suggestions = %v, %v, asked %q", got, err, lookup.queries)
+	got, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, " 6511ab ", "12a")
+	if err != nil || len(got) != 1 || got[0] != registerAddress || lookup.queries[0] != "6511AB 12" {
+		t.Fatalf("LookUpAddress = %v, %v, asked %q", got, err, lookup.queries)
 	}
 
 	lookup.err = errors.New("pdok down")
-	if _, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, "kerkstraat"); !errors.Is(err, ErrAddressLookupUnavailable) {
+	if _, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, "6511 AB", "12"); !errors.Is(err, ErrAddressLookupUnavailable) {
 		t.Errorf("register down = %v, want ErrAddressLookupUnavailable", err)
 	}
 
 	completed := time.Now().Add(-AddressWindow - time.Minute)
 	f.requests.stored.CompletedAt = &completed
 	lookup.queries = nil
-	if _, err := f.svc.AddressSuggestions(context.Background(), testOrg.ID, req.ID, nil, "kerkstraat"); !errors.Is(err, ErrAddressClosed) || len(lookup.queries) != 0 {
+	if _, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, "6511 AB", "12"); !errors.Is(err, ErrAddressClosed) || len(lookup.queries) != 0 {
 		t.Errorf("window passed = %v, asked %q; want ErrAddressClosed and nothing asked", err, lookup.queries)
 	}
 }

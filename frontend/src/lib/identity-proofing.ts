@@ -12,6 +12,7 @@ import type {
   ProofingFlowSpec,
   ProofingImage,
   ProofingRequest,
+  RegisterAddress,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
 import { errorCode } from "./api-error";
@@ -617,6 +618,47 @@ function serverMessage(error: unknown): string | null {
     return error.body.error;
   }
   return null;
+}
+
+// A Dutch postal code: four digits, the first not a zero, and two letters, as
+// the backend's addresslookup reads it.
+const DUTCH_POSTAL_CODE = /^([1-9]\d{3}) ?([A-Za-z]{2})$/;
+// The number a house number starts with, before any letter or addition.
+const HOUSE_NUMBER = /^(\d+)/;
+
+// What a Dutch address is looked up by: the compact postal code and the
+// number the house number starts with.
+export type AddressLookup = { postalCode: string; houseNumber: string };
+
+// The lookup the typed postal code and house number make, or null while they
+// are not yet a Dutch postal code and a house number.
+export function addressLookup(
+  postalCode: string,
+  houseNumber: string,
+): AddressLookup | null {
+  const code = DUTCH_POSTAL_CODE.exec(postalCode.trim());
+  const number = HOUSE_NUMBER.exec(houseNumber.trim());
+  if (code === null || number === null) return null;
+  return {
+    postalCode: `${code[1]}${code[2].toUpperCase()}`,
+    houseNumber: number[1],
+  };
+}
+
+// A house number as compared with the register's: case, spaces and
+// punctuation left out, as the backend compares them.
+function houseNumberKey(houseNumber: string): string {
+  return houseNumber.toLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, "");
+}
+
+// The register's address the typed house number is, letter and addition
+// included, or undefined when it is none of them.
+export function matchingAddress(
+  found: readonly RegisterAddress[],
+  houseNumber: string,
+): RegisterAddress | undefined {
+  const key = houseNumberKey(houseNumber);
+  return found.find((a) => houseNumberKey(a.houseNumber) === key);
 }
 
 // How a kept address was checked, under it in a session's detail; one kept

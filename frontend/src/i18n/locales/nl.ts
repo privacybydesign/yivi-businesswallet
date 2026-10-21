@@ -605,7 +605,7 @@ export const nl: Translation<typeof en> = {
         "Het adres kan maar één keer worden ingevuld, kort na een geslaagde identiteitscontrole.",
       addressNotAsked: "Deze controle vraagt niet om een adres.",
       addressNotFound:
-        "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat, of zoek je adres hierboven.",
+        "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -624,14 +624,12 @@ export const nl: Translation<typeof en> = {
       identityDone: "Je identiteit is geverifieerd.",
       heading: "Vul nu je adres in",
       intro:
-        "Vul het adres in waar je woont. Het wordt bij je geverifieerde identiteit bewaard. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie.",
-      search: {
-        label: "Zoek je adres",
-        placeholder: "Postcode en huisnummer, of straat en plaats",
-        hint: "Kies je adres om de velden hieronder in te vullen. Woon je buiten Nederland? Vul de velden dan zelf in.",
-        none: "Geen Nederlands adres gevonden. Vul de velden hieronder in.",
+        "Vul het adres in waar je woont. In Nederland vullen je postcode en huisnummer de straat en plaats in uit de Nederlandse adresregistratie. Het wordt bij je geverifieerde identiteit bewaard.",
+      lookup: {
+        choose: "Welk van deze adressen is van jou?",
+        none: "Deze postcode en dit huisnummer staan niet in de Nederlandse adresregistratie. Controleer ze.",
         unavailable:
-          "Adressen zoeken lukt nu niet. Vul de velden hieronder in.",
+          "Je adres kan nu niet worden opgezocht. Vul straat en plaats zelf in.",
       },
       netherlands: "Nederland",
       fields: {

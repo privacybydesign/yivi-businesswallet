@@ -77,21 +77,6 @@ func newPDOK(t *testing.T, status int) (*PDOK, *[]*url.URL) {
 	return NewPDOK(srv.URL+"/", srv.Client()), &seen
 }
 
-func TestSuggest(t *testing.T) {
-	c, seen := newPDOK(t, http.StatusOK)
-	got, err := c.Suggest(context.Background(), "keizersgracht 12")
-	if err != nil {
-		t.Fatalf("Suggest: %v", err)
-	}
-	if !slices.Equal(got, []Address{keizersgracht}) {
-		t.Errorf("Suggest = %+v, want %+v", got, keizersgracht)
-	}
-	u := (*seen)[0]
-	if u.Path != "/suggest" || u.Query().Get("q") != "keizersgracht 12" || u.Query().Get("fq") != addressType {
-		t.Errorf("asked %s", u)
-	}
-}
-
 func TestFind(t *testing.T) {
 	c, seen := newPDOK(t, http.StatusOK)
 	got, err := c.Find(context.Background(), "1015CP", 12)
@@ -119,8 +104,8 @@ func TestFindRefusesBadPostalCode(t *testing.T) {
 
 func TestSearchFails(t *testing.T) {
 	c, _ := newPDOK(t, http.StatusBadGateway)
-	if _, err := c.Suggest(context.Background(), "keizersgracht"); err == nil {
-		t.Error("Suggest on a 502 succeeded")
+	if _, err := c.Find(context.Background(), "1015CP", 12); err == nil {
+		t.Error("Find on a 502 succeeded")
 	}
 	if err := c.Ping(context.Background()); err == nil {
 		t.Error("Ping on a 502 succeeded")

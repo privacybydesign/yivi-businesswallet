@@ -6543,7 +6543,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/address/suggestions:
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup:
     parameters:
       - name: slug
         in: path
@@ -6557,28 +6557,36 @@ paths:
         schema:
           type: string
         description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
-      - name: q
+      - name: postalCode
         in: query
         required: true
         schema:
           type: string
           maxLength: 200
-        description: What the subject typed so far; under 3 characters suggests nothing.
+        description: The postal code the subject typed; one that is not Dutch finds nothing.
+      - name: houseNumber
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 200
+        description: The house number the subject typed; only the number it starts with is looked up.
     get:
       tags: [identity-proofing]
-      summary: Suggest Dutch addresses on an on-screen request
+      summary: Look up a Dutch address on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). While the
-        request takes its address (as the POST), the addresses in the Dutch address register
-        (the BAG, through PDOK) that best match `q`, at most 6. Picking one fills the address
-        form; the POST checks it again.
+        request takes its address (as the POST), every address in the Dutch address register
+        (the BAG, through PDOK) at `postalCode` and the number `houseNumber` starts with, with
+        each letter and addition. The page fills in the street and city from it; the POST
+        checks the address again.
       responses:
         '200':
-          description: The suggested addresses.
+          description: The addresses found; none for a postal code that is not Dutch.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProofingAddressSuggestions'
+                $ref: '#/components/schemas/ProofingAddressLookup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -8326,7 +8334,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/proof/{token}/address/suggestions:
+  /api/v1/proof/{token}/address/lookup:
     parameters:
       - name: token
         in: path
@@ -8334,26 +8342,33 @@ paths:
         schema:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
-      - name: q
+      - name: postalCode
         in: query
         required: true
         schema:
           type: string
           maxLength: 200
-        description: What the subject typed so far; under 3 characters suggests nothing.
+        description: The postal code the subject typed; one that is not Dutch finds nothing.
+      - name: houseNumber
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 200
+        description: The house number the subject typed; only the number it starts with is looked up.
     get:
       tags: [identity-proofing]
-      summary: Suggest Dutch addresses on a hosted link
+      summary: Look up a Dutch address on a hosted link
       security: []
       description: >-
         As the org route of the same name, for a hosted link, by its subject.
       responses:
         '200':
-          description: The suggested addresses.
+          description: The addresses found; none for a postal code that is not Dutch.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProofingAddressSuggestions'
+                $ref: '#/components/schemas/ProofingAddressLookup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -11791,10 +11806,10 @@ components:
             but the register could not be reached, `unsupported` is outside the Netherlands.
             Absent on an address kept before addresses were checked; ignored in a request body.
       required: [street, houseNumber, postalCode, city, country]
-    ProofingAddressSuggestions:
+    ProofingAddressLookup:
       type: object
       properties:
-        suggestions:
+        addresses:
           type: array
           items:
             type: object
@@ -11811,7 +11826,7 @@ components:
               city:
                 type: string
             required: [street, houseNumber, postalCode, city]
-      required: [suggestions]
+      required: [addresses]
     ProofingFlowDiplomas:
       type: object
       additionalProperties: false

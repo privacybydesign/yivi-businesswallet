@@ -7,7 +7,9 @@ import type { ProofingFlow } from "../api/identity-proofing";
 import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
   PROOFING_REJECTION_CODES,
+  addressLookup,
   addressVerificationNote,
+  matchingAddress,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -573,6 +575,43 @@ describe("proofingErrorMessage", () => {
     expect(proofingErrorMessage(new Error("boom"), t)).toBe(
       t("identityProofing.errors.generic"),
     );
+  });
+});
+
+describe("addressLookup", () => {
+  it.each([
+    ["1015 CP", "12", { postalCode: "1015CP", houseNumber: "12" }],
+    [" 1015cp ", "12a", { postalCode: "1015CP", houseNumber: "12" }],
+    ["1015 C", "12", null],
+    ["0123 AB", "12", null],
+    ["1000", "16", null],
+    ["1015 CP", "", null],
+    ["1015 CP", "A", null],
+  ] as const)("looks %s %s up as %o", (postalCode, houseNumber, want) => {
+    expect(addressLookup(postalCode, houseNumber)).toEqual(want);
+  });
+});
+
+describe("matchingAddress", () => {
+  const at = (houseNumber: string) => ({
+    street: "Keizersgracht",
+    houseNumber,
+    postalCode: "1015 CP",
+    city: "Amsterdam",
+  });
+  const found = [at("12"), at("12A"), at("12-2")];
+
+  it.each([
+    ["12", "12"],
+    ["12 a", "12A"],
+    ["12a", "12A"],
+    ["12 2", "12-2"],
+  ])("matches %s to %s", (typed, want) => {
+    expect(matchingAddress(found, typed)?.houseNumber).toBe(want);
+  });
+
+  it("matches no address the number lacks", () => {
+    expect(matchingAddress(found, "12B")).toBeUndefined();
   });
 });
 

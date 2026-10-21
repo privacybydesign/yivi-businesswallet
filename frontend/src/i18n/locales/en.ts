@@ -588,7 +588,7 @@ export const en = {
         "The address can only be entered once, for a while after the identity check succeeded.",
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
-        "This address is not in the Dutch address register. Check the postal code, house number and street, or search for your address above.",
+        "This address is not in the Dutch address register. Check the postal code, house number and street.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -607,14 +607,12 @@ export const en = {
       identityDone: "Your identity is verified.",
       heading: "Now enter your address",
       intro:
-        "Enter the address where you live. It is kept with your verified identity. A Dutch address is checked against the Dutch address register.",
-      search: {
-        label: "Find your address",
-        placeholder: "Postal code and house number, or street and city",
-        hint: "Pick your address to fill in the fields below. Living outside the Netherlands? Fill in the fields yourself.",
-        none: "No Dutch address found. Fill in the fields below.",
+        "Enter the address where you live. In the Netherlands, your postal code and house number fill in the street and city from the Dutch address register. It is kept with your verified identity.",
+      lookup: {
+        choose: "Which of these addresses is yours?",
+        none: "This postal code and house number are not in the Dutch address register. Check them.",
         unavailable:
-          "Searching for addresses is not possible right now. Fill in the fields below.",
+          "Your address cannot be looked up right now. Fill in the street and city yourself.",
       },
       netherlands: "Netherlands",
       fields: {

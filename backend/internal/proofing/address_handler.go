@@ -91,31 +91,35 @@ func (h *Handler) hostedAddAddress(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-// addressSuggestionsBody is the register's addresses for what was typed.
-type addressSuggestionsBody struct {
-	Suggestions []addresslookup.Address `json:"suggestions"`
+// addressLookupBody is the register's addresses at a postal code and number.
+type addressLookupBody struct {
+	Addresses []addresslookup.Address `json:"addresses"`
 }
 
-// addressSuggestions suggests addresses for ?q= on a request's on-screen page.
-func (h *Handler) addressSuggestions(w http.ResponseWriter, r *http.Request) error {
+// lookUpAddress finds the addresses at ?postalCode= and ?houseNumber= on a
+// request's on-screen page.
+func (h *Handler) lookUpAddress(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {
 		return err
 	}
-	found, err := h.service.AddressSuggestions(r.Context(), orgFromRequest(r).ID, id, requestedBy, r.URL.Query().Get("q"))
+	q := r.URL.Query()
+	found, err := h.service.LookUpAddress(r.Context(), orgFromRequest(r).ID, id, requestedBy, q.Get("postalCode"), q.Get("houseNumber"))
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, addressSuggestionsBody{Suggestions: found})
+	respond.JSON(w, r, http.StatusOK, addressLookupBody{Addresses: found})
 	return nil
 }
 
-// hostedAddressSuggestions suggests addresses for ?q= on a hosted link's page.
-func (h *Handler) hostedAddressSuggestions(w http.ResponseWriter, r *http.Request) error {
-	found, err := h.service.HostedAddressSuggestions(r.Context(), r.PathValue("token"), r.URL.Query().Get("q"))
+// hostedLookUpAddress finds the addresses at ?postalCode= and ?houseNumber=
+// on a hosted link's page.
+func (h *Handler) hostedLookUpAddress(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	found, err := h.service.HostedLookUpAddress(r.Context(), r.PathValue("token"), q.Get("postalCode"), q.Get("houseNumber"))
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, addressSuggestionsBody{Suggestions: found})
+	respond.JSON(w, r, http.StatusOK, addressLookupBody{Addresses: found})
 	return nil
 }

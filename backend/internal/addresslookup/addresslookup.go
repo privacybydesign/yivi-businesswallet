@@ -17,8 +17,6 @@ import (
 )
 
 const (
-	// suggestRows is how many addresses one suggestion answer carries.
-	suggestRows = 6
 	// findRows bounds the addresses at one postal code and house number: every
 	// letter and addition of it, far fewer in practice.
 	findRows = 100
@@ -32,10 +30,8 @@ const (
 	maxHouseNumber = 99999
 	// postalCodeDigits is how many digits a postal code starts with.
 	postalCodeDigits = 4
-	// endpointSuggest completes what was typed so far; endpointFree takes a
-	// filter query.
-	endpointSuggest = "suggest"
-	endpointFree    = "free"
+	// endpointFree takes a filter query.
+	endpointFree = "free"
 	// headerAccept and mediaTypeJSON ask for a JSON answer.
 	headerAccept  = "Accept"
 	mediaTypeJSON = "application/json"
@@ -98,14 +94,6 @@ func NewPDOK(baseURL string, httpClient *http.Client) *PDOK {
 func (c *PDOK) Ping(ctx context.Context) error {
 	_, err := c.search(ctx, endpointFree, url.Values{"q": {"*:*"}, "fq": {addressType}, "rows": {"0"}})
 	return err
-}
-
-// Suggest returns the addresses that best match what someone typed so far;
-// one without a postal code is left out.
-func (c *PDOK) Suggest(ctx context.Context, query string) ([]Address, error) {
-	return c.search(ctx, endpointSuggest, url.Values{
-		"q": {query}, "fq": {addressType}, "fl": {addressFields}, "rows": {strconv.Itoa(suggestRows)},
-	})
 }
 
 // Find returns every address at a postal code (as PostalCode returns it) and

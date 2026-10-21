@@ -57,19 +57,18 @@ var (
 	// ErrAddressNotFound is an address in the Netherlands that the register
 	// does not have: no such postal code or house number, or another street.
 	ErrAddressNotFound = errors.New("proofing: the address is not in the Dutch address register")
-	// ErrAddressLookupUnavailable is a suggestion the register could not give.
+	// ErrAddressLookupUnavailable is a lookup the register could not answer.
 	ErrAddressLookupUnavailable = errors.New("proofing: the Dutch address register cannot be reached")
 )
 
 // addressLookup is the Dutch address register (addresslookup.PDOK).
 type addressLookup interface {
-	Suggest(ctx context.Context, query string) ([]addresslookup.Address, error)
 	Find(ctx context.Context, postalCode string, houseNumber int) ([]addresslookup.Address, error)
 }
 
 // SetAddressLookup sets the register addresses are checked against and
-// suggested from; call before serving. Without one, a Dutch address is kept
-// AddressUnchecked and nothing is suggested.
+// filled in from; call before serving. Without one, a Dutch address is kept
+// AddressUnchecked and nothing is looked up.
 func (s *Service) SetAddressLookup(l addressLookup) { s.addressLookup = l }
 
 // AddressVerification is how an address was checked when it was entered.
@@ -88,9 +87,6 @@ const (
 )
 
 const (
-	// minSuggestQueryRunes is how much must be typed before addresses are
-	// suggested.
-	minSuggestQueryRunes = 3
 	// addressLookupTimeout bounds one question to the register, so the page
 	// never waits long on it.
 	addressLookupTimeout = 5 * time.Second
@@ -448,40 +444,43 @@ func addressKey(s string) string {
 	}, s)
 }
 
-// AddressSuggestions suggests addresses from the register for what was typed
-// on the on-screen page of a request the caller may reach (requestedBy as in
-// Request), while it takes an address.
-func (s *Service) AddressSuggestions(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, query string) ([]addresslookup.Address, error) {
+// LookUpAddress returns the register's addresses at the postal code and house
+// number typed on the on-screen page of a request the caller may reach
+// (requestedBy as in Request), while it takes an address, so the page can
+// fill in the rest.
+func (s *Service) LookUpAddress(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, postalCode, houseNumber string) ([]addresslookup.Address, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
 		return nil, err
 	}
-	return s.addressSuggestions(ctx, req, query)
+	return s.lookUpAddress(ctx, req, postalCode, houseNumber)
 }
 
-// HostedAddressSuggestions is AddressSuggestions for a hosted request.
-func (s *Service) HostedAddressSuggestions(ctx context.Context, token, query string) ([]addresslookup.Address, error) {
+// HostedLookUpAddress is LookUpAddress for a hosted request.
+func (s *Service) HostedLookUpAddress(ctx context.Context, token, postalCode, houseNumber string) ([]addresslookup.Address, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
 		return nil, err
 	}
-	return s.addressSuggestions(ctx, req, query)
+	return s.lookUpAddress(ctx, req, postalCode, houseNumber)
 }
 
-// addressSuggestions asks the register only for a request that takes an
-// address now, so the route is no open way into it; too short a query
-// suggests nothing.
-func (s *Service) addressSuggestions(ctx context.Context, req Request, query string) ([]addresslookup.Address, error) {
+// lookUpAddress asks the register only for a request that takes an address
+// now, so the route is no open way into it. A postal code that is not Dutch,
+// or a house number without a number, finds nothing without asking.
+func (s *Service) lookUpAddress(ctx context.Context, req Request, postalCode, houseNumber string) ([]addresslookup.Address, error) {
 	if err := s.addressOpen(req); err != nil {
 		return nil, err
 	}
 
-	query = strings.TrimSpace(query)
-	n := utf8.RuneCountInString(query)
-	if n > maxAddressFieldRunes {
-		return nil, fmt.Errorf("%w: q is at most %d characters", ErrInvalidInput, maxAddressFieldRunes)
+	for _, f := range []struct{ name, value string }{{"postalCode", postalCode}, {"houseNumber", houseNumber}} {
+		if utf8.RuneCountInString(f.value) > maxAddressFieldRunes {
+			return nil, fmt.Errorf("%w: %s is at most %d characters", ErrInvalidInput, f.name, maxAddressFieldRunes)
+		}
 	}
-	if n < minSuggestQueryRunes {
+	compact, dutch := addresslookup.PostalCode(postalCode)
+	number, ok := addresslookup.HouseNumber(houseNumber)
+	if !dutch || !ok {
 		return []addresslookup.Address{}, nil
 	}
 
@@ -491,9 +490,9 @@ func (s *Service) addressSuggestions(ctx context.Context, req Request, query str
 
 	lookupCtx, cancel := context.WithTimeout(ctx, addressLookupTimeout)
 	defer cancel()
-	found, err := s.addressLookup.Suggest(lookupCtx, query)
+	found, err := s.addressLookup.Find(lookupCtx, compact, number)
 	if err != nil {
-		slog.WarnContext(ctx, "proofing: no address suggestions, the register could not be asked", slog.String("error", err.Error()))
+		slog.WarnContext(ctx, "proofing: no address looked up, the register could not be asked", slog.String("error", err.Error()))
 		return nil, ErrAddressLookupUnavailable
 	}
 	return found, nil

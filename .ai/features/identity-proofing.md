@@ -1335,10 +1335,15 @@ declares, never read off a document; a Dutch one is checked against the BAG.
     the hosted progress says `addressGiven`, never the address).
   - Street, house number, postal code, city and country, each required, trimmed,
     at most 200 characters.
-  - The step offers a search (`GET .../address/suggestions?q=`, both routes,
-    only while the address is open, 3+ characters): PDOK's Locatieserver
-    suggests up to 6 BAG addresses, and a pick fills the form. The form stays
-    for any other address.
+  - Postal code and house number come first in the form. Once they are a Dutch
+    postal code and a number, the page looks them up
+    (`GET .../address/lookup?postalCode=&houseNumber=`, both routes, only while
+    the address is open): every BAG address at that number, letters and
+    additions included.
+    - The typed house number is one of them: street, city, postal code and
+      country fill in, once per postal code and number typed.
+    - It is none of them: the page lists them to pick, or says none exists.
+    - Not Dutch: nothing is asked, the fields are filled in by hand.
 - **Checked** on entry (`verifyAddress`, `internal/addresslookup`), the result
   in the address as `verification`:
   - A Dutch postal code (`1234 AB`, which no other country writes) is looked up
@@ -1356,10 +1361,10 @@ declares, never read off a document; a Dutch one is checked against the BAG.
   - An address kept before this has no `verification`; the page shows it as
     declared.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
-  at boot. A suggestion the register cannot give is 503
-  `address_lookup_unavailable`; the page then just shows the form.
-- The address window keeps a hosted link live (`linkLive`), so typing in the
-  search runs on the live link's rate limit, not the stale one's.
+  at boot. A lookup the register cannot answer is 503
+  `address_lookup_unavailable`; the page asks for street and city by hand.
+- The address window keeps a hosted link live (`linkLive`), so the lookups
+  run on the live link's rate limit, not the stale one's.
   - The page shows it after the approval and before the diplomas; it hands back
     (`onSettled`) once the address is kept or the window closed.
 - **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on
