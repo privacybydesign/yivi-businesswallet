@@ -163,12 +163,15 @@ export function SecretReveal({
   title,
   hint,
   secret,
+  footnote,
   doneLabel,
   onClose,
 }: {
   title: string;
   hint: string;
   secret: string;
+  // Shown under the secret, for what to do when it is lost.
+  footnote?: string;
   // The close button's label; "I have stored it" when absent.
   doneLabel?: string;
   onClose: () => void;
@@ -222,6 +225,7 @@ export function SecretReveal({
           {t("common.copyFailed")}
         </p>
       )}
+      {footnote && <p className="text-ink-soft mt-3 text-[13px]">{footnote}</p>}
     </Modal>
   );
 }

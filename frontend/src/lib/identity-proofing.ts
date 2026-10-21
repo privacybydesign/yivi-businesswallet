@@ -13,6 +13,7 @@ import type {
   ProofingImage,
   ProofingRequest,
   RegisterAddress,
+  WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
 import { errorCode } from "./api-error";
@@ -1276,6 +1277,14 @@ const HTTP_STATUS_CLASS_DIVISOR = 100;
 
 export function isSuccessStatus(code: number): boolean {
   return Math.floor(code / HTTP_STATUS_CLASS_DIVISOR) === HTTP_SUCCESS_CLASS;
+}
+
+// The deliveries to the org's own endpoint. Those to the wallet's default
+// endpoint carry no endpointUrl and are the wallet's, not the org's software.
+export function ownEndpointDeliveries(
+  deliveries: readonly WebhookDelivery[],
+): WebhookDelivery[] {
+  return deliveries.filter((d) => d.endpointUrl !== undefined);
 }
 
 // The text colour readable on a #rrggbb fill (WCAG relative luminance): the

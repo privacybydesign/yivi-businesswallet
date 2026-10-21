@@ -47,6 +47,7 @@ type APIKey struct {
 	Name           string
 	Prefix         string
 	Scopes         []string
+	CreatedByName  string
 	CreatedAt      time.Time
 	LastUsedAt     *time.Time
 	RevokedAt      *time.Time
@@ -85,12 +86,17 @@ func newAPIKeySecret() (raw string, hash [sha256.Size]byte) {
 	return raw, sha256.Sum256([]byte(raw))
 }
 
-const apiKeyColumns = `id, organization_id, name, prefix, scopes, created_at, last_used_at, revoked_at`
+// apiKeySelect reads a key with its creator's name; a key whose creator was
+// deleted has none.
+const apiKeySelect = `SELECT k.id, k.organization_id, k.name, k.prefix, k.scopes,
+		COALESCE(` + memberNameExpr + `, ''), k.created_at, k.last_used_at, k.revoked_at
+	FROM identity_proofing_api_keys k
+	LEFT JOIN users u ON u.id = k.created_by`
 
 func scanAPIKey(row pgx.CollectableRow) (APIKey, error) {
 	var k APIKey
 	err := row.Scan(&k.ID, &k.OrganizationID, &k.Name, &k.Prefix, &k.Scopes,
-		&k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+		&k.CreatedByName, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
 	return k, err
 }
 
@@ -121,8 +127,8 @@ func (s *APIKeyStore) Create(ctx context.Context, orgID, createdBy uuid.UUID, na
 }
 
 func (s *APIKeyStore) get(ctx context.Context, orgID, id uuid.UUID) (APIKey, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+apiKeyColumns+` FROM identity_proofing_api_keys
-		WHERE organization_id = $1 AND id = $2`, orgID, id)
+	rows, err := s.db.Query(ctx, apiKeySelect+`
+		WHERE k.organization_id = $1 AND k.id = $2`, orgID, id)
 	if err != nil {
 		return APIKey{}, fmt.Errorf("proofing: read api key %s: %w", id, err)
 	}
@@ -138,8 +144,8 @@ func (s *APIKeyStore) get(ctx context.Context, orgID, id uuid.UUID) (APIKey, err
 
 // List returns the org's keys, revoked ones included, oldest first.
 func (s *APIKeyStore) List(ctx context.Context, orgID uuid.UUID) ([]APIKey, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+apiKeyColumns+` FROM identity_proofing_api_keys
-		WHERE organization_id = $1 ORDER BY created_at, id`, orgID)
+	rows, err := s.db.Query(ctx, apiKeySelect+`
+		WHERE k.organization_id = $1 ORDER BY k.created_at, k.id`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list api keys org %s: %w", orgID, err)
 	}

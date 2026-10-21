@@ -28,18 +28,19 @@ import (
 // refused while the org's proofing is paused.
 
 type apiKeyResponse struct {
-	ID         uuid.UUID  `json:"id"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	Scopes     []string   `json:"scopes"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
-	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
+	ID            uuid.UUID  `json:"id"`
+	Name          string     `json:"name"`
+	Prefix        string     `json:"prefix"`
+	Scopes        []string   `json:"scopes"`
+	CreatedByName string     `json:"createdByName,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastUsedAt    *time.Time `json:"lastUsedAt,omitempty"`
+	RevokedAt     *time.Time `json:"revokedAt,omitempty"`
 }
 
 func newAPIKeyResponse(k APIKey) apiKeyResponse {
 	return apiKeyResponse{
-		ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scopes: k.Scopes,
+		ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scopes: k.Scopes, CreatedByName: k.CreatedByName,
 		CreatedAt: k.CreatedAt, LastUsedAt: k.LastUsedAt, RevokedAt: k.RevokedAt,
 	}
 }

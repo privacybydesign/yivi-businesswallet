@@ -381,6 +381,8 @@ const proofingApiKeySchema = z.object({
   prefix: z.string(),
   // What the key may call; results:read reads verified identities.
   scopes: z.array(z.string()),
+  // Absent once the user who created the key is gone.
+  createdByName: z.string().optional(),
   createdAt: z.string(),
   lastUsedAt: z.string().optional(),
   revokedAt: z.string().optional(),

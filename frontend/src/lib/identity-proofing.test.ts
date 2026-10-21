@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
 import i18n from "../i18n";
-import type { ProofingFlow } from "../api/identity-proofing";
+import type { ProofingFlow, WebhookDelivery } from "../api/identity-proofing";
 import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
   PROOFING_REJECTION_CODES,
@@ -55,6 +55,7 @@ import {
   DATA_RETENTION_DAY_OPTIONS,
   isHexColor,
   isSuccessStatus,
+  ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
   sessionEventDetail,
@@ -836,6 +837,26 @@ describe("isSuccessStatus", () => {
     expect(isSuccessStatus(204)).toBe(true);
     expect(isSuccessStatus(503)).toBe(false);
     expect(isSuccessStatus(301)).toBe(false);
+  });
+});
+
+describe("ownEndpointDeliveries", () => {
+  const delivery = (id: string, endpointUrl?: string): WebhookDelivery => ({
+    id,
+    event: "session.verified",
+    status: "delivered",
+    attempts: 1,
+    createdAt: "2026-10-16T10:00:00Z",
+    endpointUrl,
+  });
+
+  it("drops the deliveries to the wallet's default endpoint", () => {
+    const own = delivery("own", "https://hooks.example.org/yivi");
+    expect(ownEndpointDeliveries([delivery("default"), own])).toEqual([own]);
+  });
+
+  it("is empty for an org that never had an endpoint", () => {
+    expect(ownEndpointDeliveries([delivery("a"), delivery("b")])).toEqual([]);
   });
 });
 

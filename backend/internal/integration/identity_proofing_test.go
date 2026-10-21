@@ -663,11 +663,12 @@ func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string,
 }
 
 type proofingAPIKeyResp struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Prefix    string `json:"prefix"`
-	Secret    string `json:"secret"`
-	RevokedAt string `json:"revokedAt"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Prefix        string `json:"prefix"`
+	Secret        string `json:"secret"`
+	CreatedByName string `json:"createdByName"`
+	RevokedAt     string `json:"revokedAt"`
 }
 
 type proofingAPISessionResp struct {
@@ -725,6 +726,9 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 	listed := decodeJSON[[]proofingAPIKeyResp](t, env.do(http.MethodGet, base+"/api-keys", nil))
 	if len(listed) != 1 || listed[0].Secret != "" {
 		t.Errorf("listed keys = %+v; want the one key without its secret", listed)
+	}
+	if len(listed) == 1 && listed[0].CreatedByName == "" {
+		t.Errorf("listed key = %+v; want it to name who created it", listed[0])
 	}
 
 	resp = env.apiCall(http.MethodGet, "/api/v1/proofing/flows", "yp_live_nope", nil)

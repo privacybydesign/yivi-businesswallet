@@ -16,6 +16,7 @@ import type {
 import { useWhenFormatter } from "../lib/format-when";
 import {
   isSuccessStatus,
+  ownEndpointDeliveries,
   proofingErrorMessage,
   shortRequestId,
 } from "../lib/identity-proofing";
@@ -29,9 +30,9 @@ const CAPTION =
 // The masked middle of a secret whose last four characters are shown.
 const SECRET_MASK = "••••••••••••••••";
 
-// Where the org's session results go: the wallet's own endpoint by default, or
-// one the org hosts, with the deliveries made to it.
-export function WebhooksTab({ slug }: { slug: string }): React.JSX.Element {
+// Where the org's session results go: one endpoint the org hosts, for all its
+// flows, with the deliveries made to it. Without one, no event reaches the org.
+export function WebhookSection({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
   const webhook = useProofingWebhookQuery(slug);
   const [editing, setEditing] = useState(false);
@@ -184,7 +185,7 @@ function EndpointForm({
   );
 }
 
-// Without its own endpoint an org is sent no events; its results show in
+// Without its own endpoint the org is sent no events; its results show in
 // Sessions, through the API and in the audit log.
 function DefaultEndpointCard({
   onCustomize,
@@ -194,17 +195,16 @@ function DefaultEndpointCard({
   const { t } = useTranslation();
   return (
     <Card>
-      <div className="border-line flex items-center justify-between gap-3 border-b px-5 py-4">
-        <h2 className="font-display text-[17px] font-bold">
-          {t("identityProofing.webhooks.endpoint")}
-        </h2>
-        <Tag>{t("identityProofing.webhooks.noEndpointTag")}</Tag>
-      </div>
+      <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
+        {t("identityProofing.webhooks.endpoint")}
+      </h2>
       <div className="flex flex-col gap-3 px-5 py-4">
-        <p className="text-ink text-[13px]">
+        <p className="text-ink text-[14px]">
           {t("identityProofing.webhooks.defaultBody")}
         </p>
-        <p className={HINT}>{t("identityProofing.webhooks.defaultHint")}</p>
+        <p className="text-ink-soft text-[13px]">
+          {t("identityProofing.webhooks.defaultHint")}
+        </p>
         <div>
           <Button size="sm" variant="secondary" onClick={onCustomize}>
             {t("identityProofing.webhooks.useOwn")}
@@ -367,7 +367,7 @@ function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
   const deliveries = useWebhookDeliveriesQuery(slug);
   const formatWhen = useWhenFormatter();
-  const rows = deliveries.data ?? [];
+  const rows = ownEndpointDeliveries(deliveries.data ?? []);
 
   return (
     <Card>

@@ -1790,6 +1790,33 @@ func assertAPIKeyRevokedByOrgOnly(t *testing.T, store *APIKeyStore, orgID, other
 	}
 }
 
+// A key shows who created it, and nothing once that user is gone.
+func TestAPIKeyShowsCreator(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewAPIKeyStore(pool, audit.NopRecorder{})
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	// The display name makeUser gives its user.
+	const samName = "Sam de Vries"
+
+	created, _, err := store.Create(ctx, orgID, sam, "CI", APIKeyScopes)
+	if err != nil || created.CreatedByName != samName {
+		t.Fatalf("Create = %+v, %v; want it created by %s", created, err, samName)
+	}
+	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 1 || keys[0].CreatedByName != samName {
+		t.Errorf("List = %+v, %v; want the creator named", keys, err)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, sam); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 1 || keys[0].CreatedByName != "" {
+		t.Errorf("List after the creator is gone = %+v, %v; want no name", keys, err)
+	}
+}
+
 // A hosted request is found by its link token's hash and, until its link
 // lapses, counts as pending rather than expired, though it has no session.
 func TestRequestStoreHostedLink(t *testing.T) {

@@ -10,8 +10,10 @@ sidebar's "Identity proofing" section holds up to three pages under
 counted, the newest ones, the org's flows with their sessions, and an alert
 for a failing webhook) and, admin-only, **Flows** (full flow configuration,
 versioned, which flows members may use, and the default flow) and
-**Developers** (tabs: API keys, Webhook, Branding and Sessions settings; the
-last two are temporary homes). The **Sessions** list
+**Developers** (tabs: API and webhook, Branding and Session settings; the
+last two are temporary homes). The API and webhook tab holds the **API tokens**
+table (name, created with who by, last used, revoke; revoked ones are not
+listed), the **Webhook endpoint** and its **Recent deliveries**. The **Sessions** list
 (`/{org}/identity-proofing/sessions`, opened from the Overview;
 `?session=<id>` opens a row) is not in the sidebar. "Verify a person" in the
 header of the Overview and of Sessions opens the send form, for any member. Only a
@@ -715,7 +717,9 @@ post-review outcome stay the system's.
 - **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
   org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
   `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. One key works
+  stored as SHA-256 only, shown once; `prefix` tells keys apart. The page calls
+  them API tokens. `createdByName` is the creator's display name, absent once
+  that user is deleted. One key works
   on every flow and reaches every external request of the org. Revoke is
   permanent. Audited `api_key_created` (with its scopes) / `api_key_revoked` on
   the org (target `org_identity_proofing_settings`). There are no test keys
@@ -864,7 +868,7 @@ post-review outcome stay the system's.
   `endpoint_url`, which `claimDue` sets): what an earlier URL, or a customer's
   endpoint the migration dropped, answered does not count
   (`TestWebhookHealthCountsCurrentURL`); a failing endpoint shows as an alert on
-  the Overview (for an admin) and on the Webhook tab. The failing streak counts
+  the Overview (for an admin) and on the Developers page. The failing streak counts
   from a delivery's `first_attempt_at` (or the last success, if later):
   `last_attempt_at` moves with every retry.
 - **Settings** (`identity_proofing_settings`, one row per org): `GET` and

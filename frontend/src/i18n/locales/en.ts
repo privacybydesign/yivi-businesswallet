@@ -540,7 +540,7 @@ export const en = {
       noDefaultFlow:
         "Your organisation has no default flow. Pick a flow, or set a default on the Flows page.",
       proofingPaused: "Identity proofing is paused for this organisation.",
-      apiKeyNotFound: "That API key no longer exists.",
+      apiKeyNotFound: "That API token no longer exists.",
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
@@ -926,7 +926,7 @@ export const en = {
         "You see the sessions you sent. Personal data is purged {{count}} day after a session ends.",
       retentionOwn_other:
         "You see the sessions you sent. Personal data is purged {{count}} days after a session ends.",
-      viaApiKey: "API key · {{name}}",
+      viaApiKey: "API token · {{name}}",
       session: "Session",
       result: "Result",
       started: "Started",
@@ -1058,43 +1058,42 @@ export const en = {
     developers: {
       title: "Developers",
       subtitle:
-        "What your own software and the proofing pages use: API keys, the webhook endpoint, branding and session settings.",
+        "Everything in the Business Wallet works without setup. Come here only to do the same from your own software: mint a token to call the API, and add an endpoint that receives results.",
       adminOnly: "Only an administrator can see this page.",
       tabs: {
-        apiKeys: "API keys",
-        webhook: "Webhook",
+        api: "API and webhook",
         branding: "Branding",
         settings: "Session settings",
       },
     },
     apiKeys: {
+      title: "API tokens",
       nameRequired: "Enter a name.",
       intro:
-        "Your backend uses these keys to create sessions and read their outcome through the proofing API. Only active keys work.",
-      create: "Create API key",
+        "A token lets your software start checks on any flow and read their results. It is shown once, when you create it.",
+      create: "Create token",
       name: "Name",
-      namePlaceholder: "Production backend",
-      key: "Key",
-      prefix: "{{prefix}}…",
+      nameHint:
+        "So you can tell your tokens apart, for example the system that uses it.",
       created: "Created",
       lastUsed: "Last used",
       neverUsed: "Never",
-      empty: "No API keys yet.",
-      status: "Status",
-      active: "Active",
-      revoked: "Revoked",
+      empty: "No tokens yet.",
+      actions: "Actions",
       revoke: "Revoke",
+      revokeNamed: "Revoke {{name}}",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
-          "Anything using this key stops working straight away. This cannot be undone.",
+          "Anything using this token stops working straight away. This cannot be undone.",
       },
-      createdTitle: "Your new API key",
+      createdTitle: "Copy your token now",
       createdHint:
-        "Copy it now and store it somewhere safe, like your backend's secret store: it is not shown again. Only a hash of it is kept.",
+        "This is the only time you see the token “{{name}}”. Store it somewhere safe, such as your backend's secret store.",
+      createdNote: "Lost it? Revoke it and create a new one.",
     },
     webhooks: {
-      endpoint: "Endpoint",
+      endpoint: "Webhook endpoint",
       formHint:
         "The wallet POSTs a signed event to this URL when a session is verified, fails, expires or has its personal data purged.",
       url: "URL",
@@ -1129,12 +1128,11 @@ export const en = {
       secretHint:
         "Copy it now and store it with your receiver: it is not shown again. Check the Yivi-Signature header with it.",
       recent: "Recent deliveries",
-      noEndpointTag: "No endpoint",
       defaultBody:
-        "No events are sent. Session results show on the Sessions page, through the API, and in the audit log.",
+        "No events are sent. Results show on each flow's People tab, through the API and in the audit log.",
       defaultHint:
-        "Hosting your own receiver? Add its URL and the wallet POSTs each signed event there.",
-      useOwn: "Use own endpoint",
+        "Hosting your own receiver? Add its URL and every signed event is POSTed there, for all flows.",
+      useOwn: "Add endpoint",
       noDeliveries: "No events sent yet.",
       queuedTag: "Queued",
       noAnswer: "No answer",
@@ -1571,7 +1569,7 @@ export const en = {
     identityProofingSettingsSaved: "Settings saved",
     identityProofingBrandingSaved: "Branding saved",
     identityProofingHostedSettingsSaved: "Hosted page settings saved",
-    identityProofingApiKeyRevoked: "API key revoked",
+    identityProofingApiKeyRevoked: "API token revoked",
     identityProofingWebhookSaved: "Webhook saved",
     identityProofingWebhookRemoved: "Webhook removed",
     identityProofingWebhookTestQueued: "Test event queued",
@@ -1675,7 +1673,7 @@ export const en = {
     loadMore: "Load more",
     empty: "No activity has been recorded yet.",
     system: "System",
-    apiKeyActor: "API key {{prefix}}…",
+    apiKeyActor: "API token {{prefix}}…",
     hostedLinkActor: "Subject, through a hosted link",
     adminActor: "An admin",
     columns: {
@@ -1877,8 +1875,8 @@ export const en = {
         "Changed the identity proofing flows assigned to a customer",
       identityProofingCustomerRemoved: "Removed identity proofing customer",
       identityProofingSettingsUpdated: "Updated identity proofing settings",
-      identityProofingApiKeyCreated: "Created API key",
-      identityProofingApiKeyRevoked: "Revoked API key",
+      identityProofingApiKeyCreated: "Created API token",
+      identityProofingApiKeyRevoked: "Revoked API token",
       identityProofingWebhookConfigured: "Configured webhook endpoint",
       identityProofingWebhookSecretRotated: "Rotated webhook secret",
       identityProofingWebhookRemoved: "Removed webhook endpoint",

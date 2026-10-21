@@ -424,7 +424,7 @@ function WebhookAlert({ slug }: { slug: string }): React.JSX.Element | null {
               count: health.pendingRetries,
             })}{" "}
         <Link
-          to={`/${slug}/identity-proofing/developers?tab=webhook`}
+          to={`/${slug}/identity-proofing/developers`}
           className="font-semibold underline"
         >
           {t("identityProofing.overview.webhookAlertLink")}

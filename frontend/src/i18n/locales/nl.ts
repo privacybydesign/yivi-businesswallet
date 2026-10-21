@@ -559,7 +559,7 @@ export const nl: Translation<typeof en> = {
         "Je organisatie heeft geen standaardflow. Kies een flow, of stel een standaard in op de pagina Flows.",
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
-      apiKeyNotFound: "Die API-sleutel bestaat niet meer.",
+      apiKeyNotFound: "Dat API-token bestaat niet meer.",
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
@@ -950,7 +950,7 @@ export const nl: Translation<typeof en> = {
         "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist.",
       retentionOwn_other:
         "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist.",
-      viaApiKey: "API-sleutel · {{name}}",
+      viaApiKey: "API-token · {{name}}",
       session: "Sessie",
       result: "Resultaat",
       started: "Gestart",
@@ -1084,43 +1084,42 @@ export const nl: Translation<typeof en> = {
     developers: {
       title: "Ontwikkelaars",
       subtitle:
-        "Wat je eigen software en de verificatiepagina's gebruiken: API-sleutels, het webhook-endpoint, huisstijl en sessie-instellingen.",
+        "Alles in de Business Wallet werkt zonder installatie. Kom hier alleen om hetzelfde vanuit je eigen software te doen: maak een token om de API aan te roepen en voeg een endpoint toe dat de resultaten ontvangt.",
       adminOnly: "Alleen een beheerder kan deze pagina zien.",
       tabs: {
-        apiKeys: "API-sleutels",
-        webhook: "Webhook",
+        api: "API en webhook",
         branding: "Huisstijl",
         settings: "Sessie-instellingen",
       },
     },
     apiKeys: {
+      title: "API-tokens",
       nameRequired: "Vul een naam in.",
       intro:
-        "Je backend maakt met deze sleutels sessies aan en leest de uitkomst via de verificatie-API. Alleen actieve sleutels werken.",
-      create: "API-sleutel aanmaken",
+        "Met een token start je software controles op elke flow en leest ze de resultaten. Het wordt één keer getoond, bij het aanmaken.",
+      create: "Token aanmaken",
       name: "Naam",
-      namePlaceholder: "Productiebackend",
-      key: "Sleutel",
-      prefix: "{{prefix}}…",
+      nameHint:
+        "Zodat je je tokens uit elkaar kunt houden, bijvoorbeeld het systeem dat het gebruikt.",
       created: "Aangemaakt",
       lastUsed: "Laatst gebruikt",
       neverUsed: "Nooit",
-      empty: "Nog geen API-sleutels.",
-      status: "Status",
-      active: "Actief",
-      revoked: "Ingetrokken",
+      empty: "Nog geen tokens.",
+      actions: "Acties",
       revoke: "Intrekken",
+      revokeNamed: "{{name}} intrekken",
       revokeConfirm: {
         title: "{{name}} intrekken?",
         message:
-          "Alles wat deze sleutel gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
+          "Alles wat dit token gebruikt, werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt.",
       },
-      createdTitle: "Je nieuwe API-sleutel",
+      createdTitle: "Kopieer je token nu",
       createdHint:
-        "Kopieer hem nu en bewaar hem veilig, bijvoorbeeld in de geheimenopslag van je backend: hij wordt niet opnieuw getoond. Alleen een hash ervan wordt bewaard.",
+        "Dit is de enige keer dat je het token “{{name}}” ziet. Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend.",
+      createdNote: "Kwijt? Trek het in en maak een nieuw token aan.",
     },
     webhooks: {
-      endpoint: "Endpoint",
+      endpoint: "Webhook-endpoint",
       formHint:
         "De wallet stuurt een ondertekend bericht naar deze URL als een sessie geverifieerd is, mislukt, verloopt of als de persoonsgegevens gewist zijn.",
       url: "URL",
@@ -1155,12 +1154,11 @@ export const nl: Translation<typeof en> = {
       secretHint:
         "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
       recent: "Recente afleveringen",
-      noEndpointTag: "Geen endpoint",
       defaultBody:
-        "Er worden geen events verstuurd. Sessieresultaten staan op de pagina Sessies, zijn op te vragen via de API en staan in de auditlog.",
+        "Er worden geen berichten verstuurd. Resultaten staan op het tabblad Personen van elke flow, zijn op te vragen via de API en staan in de auditlog.",
       defaultHint:
-        "Host je een eigen ontvanger? Voeg de URL toe en de wallet POST elk ondertekend event daarheen.",
-      useOwn: "Eigen endpoint gebruiken",
+        "Host je een eigen ontvanger? Voeg de URL toe en elk ondertekend bericht wordt daarheen gepost, voor alle flows.",
+      useOwn: "Endpoint toevoegen",
       noDeliveries: "Nog geen berichten verstuurd.",
       queuedTag: "In de wachtrij",
       noAnswer: "Geen antwoord",
@@ -1603,7 +1601,7 @@ export const nl: Translation<typeof en> = {
     identityProofingBrandingSaved: "Huisstijl opgeslagen",
     identityProofingHostedSettingsSaved:
       "Instellingen van de gehoste pagina opgeslagen",
-    identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
+    identityProofingApiKeyRevoked: "API-token ingetrokken",
     identityProofingWebhookSaved: "Webhook opgeslagen",
     identityProofingWebhookRemoved: "Webhook verwijderd",
     identityProofingWebhookTestQueued: "Testbericht in de wachtrij",
@@ -1708,7 +1706,7 @@ export const nl: Translation<typeof en> = {
     loadMore: "Meer laden",
     empty: "Er is nog geen activiteit vastgelegd.",
     system: "Systeem",
-    apiKeyActor: "API-sleutel {{prefix}}…",
+    apiKeyActor: "API-token {{prefix}}…",
     hostedLinkActor: "Persoon, via een gehoste link",
     adminActor: "Een beheerder",
     columns: {
@@ -1919,8 +1917,8 @@ export const nl: Translation<typeof en> = {
       identityProofingCustomerRemoved: "Identiteitsverificatieklant verwijderd",
       identityProofingSettingsUpdated:
         "Instellingen voor identiteitsverificatie bijgewerkt",
-      identityProofingApiKeyCreated: "API-sleutel aangemaakt",
-      identityProofingApiKeyRevoked: "API-sleutel ingetrokken",
+      identityProofingApiKeyCreated: "API-token aangemaakt",
+      identityProofingApiKeyRevoked: "API-token ingetrokken",
       identityProofingWebhookConfigured: "Webhook-endpoint ingesteld",
       identityProofingWebhookSecretRotated: "Webhookgeheim vernieuwd",
       identityProofingWebhookRemoved: "Webhook-endpoint verwijderd",

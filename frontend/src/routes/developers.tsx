@@ -2,30 +2,33 @@ import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { absoluteApiUrl } from "../api/http";
 import { useProofingSettingsQuery } from "../api/identity-proofing.queries";
 import { proofingErrorMessage } from "../lib/identity-proofing";
 import { TopBar } from "../ui";
-import { ApiKeysTab } from "./developers-api-keys";
-import { WebhooksTab } from "./developers-webhook";
+import { ApiTokensSection } from "./developers-api-keys";
+import { WebhookSection } from "./developers-webhook";
 import { BrandingTab } from "./proofing-branding";
 import { SettingsTab } from "./proofing-settings";
 
-type TabKey = "apiKeys" | "webhook" | "branding" | "settings";
-const DEFAULT_TAB: TabKey = "apiKeys";
+type TabKey = "api" | "branding" | "settings";
+const DEFAULT_TAB: TabKey = "api";
+// The API reference the backend serves (internal/apidocs).
+const API_DOCS_PATH = "/api/docs";
 
 const TABS: {
   key: TabKey;
   labelKey: `identityProofing.developers.tabs.${TabKey}`;
 }[] = [
-  { key: "apiKeys", labelKey: "identityProofing.developers.tabs.apiKeys" },
-  { key: "webhook", labelKey: "identityProofing.developers.tabs.webhook" },
+  { key: "api", labelKey: "identityProofing.developers.tabs.api" },
   { key: "branding", labelKey: "identityProofing.developers.tabs.branding" },
   { key: "settings", labelKey: "identityProofing.developers.tabs.settings" },
 ];
 
 // What an org sets up once for identity proofing, for all its flows: the API
-// keys and the webhook endpoint its own software uses, the look of the mail
-// and the hosted page, and the session settings. Admin only.
+// tokens and the webhook endpoint its own software uses, and, until they get
+// their own pages, the look of the mail and the hosted page and the session
+// settings. Admin only.
 export default function Developers(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -72,6 +75,16 @@ export default function Developers(): React.JSX.Element {
       <TopBar
         title={t("identityProofing.developers.title")}
         subtitle={t("identityProofing.developers.subtitle")}
+        actions={
+          <a
+            href={absoluteApiUrl(API_DOCS_PATH)}
+            target="_blank"
+            rel="noreferrer"
+            className="text-link inline-flex h-9 items-center px-1 text-[13.5px] font-semibold underline"
+          >
+            {t("identityProofing.overview.apiDocs")}
+          </a>
+        }
       />
       {isAdmin ? (
         <>
@@ -109,10 +122,14 @@ export default function Developers(): React.JSX.Element {
             id="developers-tabpanel"
             role="tabpanel"
             aria-labelledby={`developers-tab-${activeTab}`}
-            className="flex flex-col gap-4 p-4 sm:p-8"
+            className="flex flex-col gap-6 p-4 sm:p-8"
           >
-            {activeTab === "apiKeys" && <ApiKeysTab slug={slug} />}
-            {activeTab === "webhook" && <WebhooksTab slug={slug} />}
+            {activeTab === "api" && (
+              <>
+                <ApiTokensSection slug={slug} />
+                <WebhookSection slug={slug} />
+              </>
+            )}
             {showsSettings && settings.isPending && (
               <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
             )}

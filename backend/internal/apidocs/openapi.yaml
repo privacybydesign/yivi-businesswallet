@@ -7014,7 +7014,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. Every key of the organisation,
         revoked ones included, oldest first: its `id`, name, `scopes`, its public `prefix`,
-        when it was created and last used, and `revokedAt` once revoked. Never a secret.
+        when it was created, by whom (`createdByName`, absent once that user is gone) and last
+        used, and `revokedAt` once revoked. Never a secret.
       responses:
         '200':
           description: The keys, oldest first.
@@ -7030,6 +7031,7 @@ paths:
                       name: Production backend
                       prefix: yp_live_3kq7
                       scopes: [sessions:write, sessions:read, results:read, flows:read]
+                      createdByName: Sam de Vries
                       createdAt: "2026-09-01T10:05:00Z"
                       lastUsedAt: "2026-10-02T09:30:00Z"
         '401':
@@ -11779,6 +11781,9 @@ components:
           items:
             type: string
             enum: [sessions:write, sessions:read, results:read, flows:read]
+        createdByName:
+          type: string
+          description: Who created the key; absent once that user is gone.
         createdAt:
           type: string
           format: date-time
