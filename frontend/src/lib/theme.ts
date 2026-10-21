@@ -94,6 +94,7 @@ const LINE = "--yb-line";
 const LINE_STRONG = "--yb-line-strong";
 const SUCCESS = "--yb-success";
 const SUCCESS_BG = "--yb-success-bg";
+const SUCCESS_FG = "--yb-success-fg";
 const WARNING = "--yb-warning";
 const WARNING_FG = "--yb-warning-fg";
 const WARNING_BG = "--yb-warning-bg";
@@ -568,6 +569,7 @@ export function resolveThemeCss(
     const p = statusPair(success, surfaces);
     out[SUCCESS] = p.solid;
     out[SUCCESS_BG] = p.bg;
+    out[SUCCESS_FG] = p.solid;
   }
   const warning = theme?.warningColor ?? "";
   if (parseHex(warning)) {

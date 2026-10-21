@@ -15,7 +15,7 @@ import {
   proofingStatusTone,
   readableTextOn,
 } from "../lib/identity-proofing";
-import { Button, Modal, Tag } from "../ui";
+import { Button, Modal, StatusText } from "../ui";
 
 const MARK_SIZES = {
   md: "h-8 w-8 text-[13px] rounded-md",
@@ -97,7 +97,7 @@ export function InitialMark({
 
 // A session's result; a failed one names why, which is what a member acts on.
 // compact leaves the reason to the tooltip, for a narrow column.
-export function ResultTag({
+export function ResultText({
   request,
   compact = false,
 }: {
@@ -110,15 +110,17 @@ export function ResultTag({
     request.status === "rejected" && request.errorCode
       ? proofingRejectionReason(request.errorCode, t)
       : undefined;
+  // A session still under way is plain text: it is neither good nor bad yet.
+  const status = proofingStatusTone(request.status);
   return (
-    <Tag tone={proofingStatusTone(request.status)} dot title={reason}>
+    <StatusText tone={status === "blue" ? "default" : status} title={reason}>
       {reason && !compact
         ? t("identityProofing.sessions.failedBecause", {
             status: label,
             reason,
           })
         : label}
-    </Tag>
+    </StatusText>
   );
 }
 

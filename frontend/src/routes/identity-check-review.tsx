@@ -36,7 +36,7 @@ import type {
   OwnReview,
   RejectReasonKey,
 } from "../lib/proofing-reviews";
-import { Button, Icon, Select, Tag, TopBar } from "../ui";
+import { Button, Icon, Select, StatusText, TopBar } from "../ui";
 import {
   BackToReviews,
   ClosedNote,
@@ -49,7 +49,7 @@ import {
 } from "./proofing-review-parts";
 
 const WARNING_ICON_SIZE = 18;
-// The tag colour of an automatic check's outcome.
+// The colour of an automatic check's outcome.
 const OUTCOME_TONES = {
   passed: "green",
   failed: "red",
@@ -199,9 +199,9 @@ function CheckOutcome({ check }: { check: AutomaticCheck }): React.JSX.Element {
   }
   const outcome = check.outcome ?? "notPerformed";
   return (
-    <Tag tone={OUTCOME_TONES[outcome]}>
+    <StatusText tone={OUTCOME_TONES[outcome]}>
       {t(`identityProofing.reviews.check.auto.${outcome}`)}
-    </Tag>
+    </StatusText>
   );
 }
 

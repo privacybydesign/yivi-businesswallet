@@ -40,7 +40,7 @@ import {
   waitingForOthers,
 } from "../lib/proofing-todo";
 import { Card, Icon, TaskEmpty, TaskRow, TaskSection, TopBar } from "../ui";
-import { ResultTag } from "./proofing-ui";
+import { ResultText } from "./proofing-ui";
 import { VerifyPerson } from "./proofing-send";
 import { ProofingPausedNotice } from "./proofing-pause";
 import { PRIMARY_LINK } from "./proofing-review-parts";
@@ -350,7 +350,7 @@ function FinishedSection({
             detail={flowLine(request, t)}
             aside={
               <span className="flex items-center gap-3">
-                <ResultTag request={request} compact />
+                <ResultText request={request} compact />
                 <span className={WHEN}>{formatWhen(finishedOn(request))}</span>
               </span>
             }

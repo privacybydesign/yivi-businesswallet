@@ -38,7 +38,7 @@ import {
   reviewPath,
 } from "../lib/proofing-reviews";
 import { toast } from "../lib/toast";
-import { Button, ConfirmDialog, Tag, TopBar } from "../ui";
+import { Button, ConfirmDialog, StatusText, TopBar } from "../ui";
 import {
   BackToReviews,
   ClosedNote,
@@ -58,9 +58,9 @@ const LINK_BUTTON =
 // What a data request asks for: the data held of the person, or its deletion.
 type DataRequestKind = "data_access" | "data_erasure";
 
-// DataRequestTag marks a session that is a person asking for their data or
-// its erasure, in the sessions list.
-export function DataRequestTag({
+// DataRequestNote says a session is a person asking for their data or its
+// erasure, in the sessions list.
+export function DataRequestNote({
   request,
 }: {
   request: Pick<ProofingRequest, "flowKind">;
@@ -70,9 +70,9 @@ export function DataRequestTag({
     return null;
   }
   return (
-    <Tag tone="blue">
+    <div className={HINT}>
       {t(`identityProofingFlows.kinds.${request.flowKind}.title`)}
-    </Tag>
+    </div>
   );
 }
 
@@ -390,17 +390,17 @@ function MatchRow({
         </div>
       )}
       <span className="flex flex-wrap justify-end gap-1.5">
-        <Tag tone={LEVEL_TONES[match.level]}>
+        <StatusText tone={LEVEL_TONES[match.level]}>
           {t(
             `identityProofing.reviews.dataRequest.found.levels.${match.level}`,
           )}
-        </Tag>
+        </StatusText>
         {match.heldUntil && (
-          <Tag tone="amber">
+          <StatusText tone="amber">
             {t("identityProofing.reviews.dataRequest.found.heldUntil", {
               date: formatDate(match.heldUntil),
             })}
-          </Tag>
+          </StatusText>
         )}
         {!selection && <MatchDecision match={match} />}
       </span>
@@ -415,17 +415,21 @@ function MatchDecision({
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   if (match.purgedAt) {
-    return <Tag>{t("identityProofing.reviews.dataRequest.found.erased")}</Tag>;
+    return (
+      <StatusText>
+        {t("identityProofing.reviews.dataRequest.found.erased")}
+      </StatusText>
+    );
   }
   if (match.approved === undefined) {
     return null;
   }
   return (
-    <Tag tone={match.approved ? "blue" : "default"}>
+    <StatusText>
       {match.approved
         ? t("identityProofing.reviews.dataRequest.found.approved")
         : t("identityProofing.reviews.dataRequest.found.kept")}
-    </Tag>
+    </StatusText>
   );
 }
 

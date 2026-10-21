@@ -33,7 +33,7 @@ import {
   waitingSince,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
-import { Card, Table, Tag, TopBar } from "../ui";
+import { Card, StatusText, Table, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
 const REVIEW_COLUMNS = 5;
@@ -380,13 +380,13 @@ function ClosedRow({
       <PersonCell request={request}>{provenLine(request, t)}</PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        <Tag tone={approved ? "green" : "red"}>
+        <StatusText tone={approved ? "green" : "red"}>
           {t(
             approved
               ? "identityProofing.reviews.outcome.approved"
               : "identityProofing.reviews.outcome.rejected",
           )}
-        </Tag>
+        </StatusText>
         {request.errorCode && (
           <div className={SUB_LINE}>
             {proofingRejectionReason(request.errorCode, t)}

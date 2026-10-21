@@ -55,9 +55,9 @@ import {
   ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Card, Icon, Select, Table, Tag, TopBar } from "../ui";
-import { ResultTag } from "./proofing-ui";
-import { DataRequestTag } from "./data-request-review";
+import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
+import { ResultText } from "./proofing-ui";
+import { DataRequestNote } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
 
@@ -362,10 +362,10 @@ function SessionRow({
         </Table.Cell>
         {scope === "all" && <Table.Cell>{request.flowName}</Table.Cell>}
         <Table.Cell>
-          <ResultTag request={request} compact />{" "}
-          <AddressTag request={request} />
-          <DiplomaTag request={request} />
-          <DataRequestTag request={request} />
+          <ResultText request={request} compact />
+          <AddressNote request={request} />
+          <DiplomaNote request={request} />
+          <DataRequestNote request={request} />
         </Table.Cell>
         <Table.Cell className="text-ink-soft whitespace-nowrap">
           {proofingMethodLabel(request.method, t)}
@@ -542,7 +542,7 @@ function SessionRow({
 }
 
 // For an approved session that requires the address, that none was entered.
-function AddressTag({
+function AddressNote({
   request,
 }: Readonly<{
   request: ProofingRequest;
@@ -555,7 +555,11 @@ function AddressTag({
     request.purgedAt === undefined
   ) {
     return (
-      <Tag tone="amber">{t("identityProofing.sessions.address.missing")}</Tag>
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.address.missing")}
+        </StatusText>
+      </div>
     );
   }
   return null;
@@ -592,7 +596,7 @@ function SessionAddress({
 
 // Whether a session that asks for diplomas holds any: how many, or, for an
 // approved one that requires them, that none came.
-function DiplomaTag({
+function DiplomaNote({
   request,
 }: {
   request: ProofingRequest;
@@ -600,16 +604,20 @@ function DiplomaTag({
   const { t } = useTranslation();
   if (request.diplomas.length > 0) {
     return (
-      <Tag tone="blue">
+      <div className={HINT}>
         {t("identityProofing.sessions.diplomas.tag", {
           count: request.diplomas.length,
         })}
-      </Tag>
+      </div>
     );
   }
   if (request.diplomaMode === "required" && request.status === "approved") {
     return (
-      <Tag tone="amber">{t("identityProofing.sessions.diplomas.missing")}</Tag>
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.diplomas.missing")}
+        </StatusText>
+      </div>
     );
   }
   return null;

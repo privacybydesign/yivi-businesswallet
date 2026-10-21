@@ -35,6 +35,9 @@ const CONTRAST_PAIRS: ReadonlyArray<[fg: string, bg: string, label: string]> = [
   ["--yb-warning-fg", "--yb-warning-bg", "warning tag"],
   ["--yb-error", "--yb-error-bg", "error tag"],
   ["--yb-link", "--yb-highlight", "link/info tag"],
+  ["--yb-success-fg", "--yb-surface", "success status text"],
+  ["--yb-warning-fg", "--yb-surface", "warning status text"],
+  ["--yb-error", "--yb-surface", "error status text"],
   ["--yb-primary-fg", "--yb-primary", "default primary button"],
 ];
 

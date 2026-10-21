@@ -127,6 +127,7 @@
   /* Communicating */
   --yb-success: #00973a;
   --yb-success-bg: #e3f4e9;
+  --yb-success-fg: #1e6b3a;
   --yb-warning: #eba73b;
   --yb-warning-fg: #8a5d17;
   --yb-warning-bg: #fbefd8;
@@ -228,6 +229,7 @@
 
   --yb-success: #6ad28c;
   --yb-success-bg: #10321e;
+  --yb-success-fg: #6ad28c;
   --yb-warning: #eba73b;
   --yb-warning-fg: #eba73b;
   --yb-warning-bg: #3a2e14;
@@ -338,6 +340,7 @@
 
   --color-success: var(--yb-success);
   --color-success-bg: var(--yb-success-bg);
+  --color-success-fg: var(--yb-success-fg);
   --color-warning: var(--yb-warning);
   --color-warning-fg: var(--yb-warning-fg);
   --color-warning-bg: var(--yb-warning-bg);

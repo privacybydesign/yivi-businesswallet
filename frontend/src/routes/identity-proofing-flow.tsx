@@ -22,7 +22,7 @@ import {
   proofingErrorMessage,
   requestListCapped,
 } from "../lib/identity-proofing";
-import { Button, Card, Tag, TopBar } from "../ui";
+import { Button, Card, StatusText, TopBar } from "../ui";
 import { FlowBrandingSettings } from "./flow-branding";
 import { FlowHostedSettings } from "./flow-hosted-settings";
 import { FlowEditor } from "./flow-editor";
@@ -320,9 +320,9 @@ function VersionHistory({
             <span className={HINT}>{formatWhen(version.createdAt)}</span>
             <FlowSummary flow={version} />
             {version.active ? (
-              <Tag tone="green">
+              <StatusText tone="green">
                 {t("identityProofingFlows.versions.active")}
-              </Tag>
+              </StatusText>
             ) : (
               <Button
                 type="button"

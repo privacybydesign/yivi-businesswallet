@@ -16,7 +16,7 @@ import {
   proofingErrorMessage,
   proofingStatsBy,
 } from "../lib/identity-proofing";
-import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { Button, Card, Icon, StatusText, Table, TopBar } from "../ui";
 import { FlowEditor } from "./flow-editor";
 
 const ERROR = "text-error text-[12.5px]";
@@ -178,9 +178,9 @@ function FlowsTable({
                           {flow.name}
                         </Link>
                         {!flow.completable && (
-                          <Tag tone="amber">
+                          <StatusText tone="amber">
                             {t("identityProofingFlows.notCompletable")}
-                          </Tag>
+                          </StatusText>
                         )}
                       </div>
                       <div className="text-ink-soft text-[12.5px]">
