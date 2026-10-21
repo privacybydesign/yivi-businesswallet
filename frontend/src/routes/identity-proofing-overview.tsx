@@ -1,47 +1,75 @@
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useExternalRequestsQuery,
-  useProofingFlowsQuery,
   useProofingPauseQuery,
   useProofingStatsQuery,
   useProofingWebhookQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
-import type { ProofingFlow, ProofingStats } from "../api/identity-proofing";
-import { usePercentFormatter } from "../lib/format-percent";
+import type { ProofingRequest } from "../api/identity-proofing";
+import { isDataRequest } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
-import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
 import {
-  noProofingSessions,
   proofingErrorMessage,
   proofingMethodLabel,
-  proofingStatsBy,
+  proofingStatusLabel,
   requestSubject,
   sumProofingStats,
-  verifiedShare,
 } from "../lib/identity-proofing";
-import type { ProofingTotals } from "../lib/identity-proofing";
-import { Card, Icon, Table, Tag, TopBar } from "../ui";
+import {
+  personName,
+  reviewPath,
+  waitingOldestFirst,
+  waitingSince,
+} from "../lib/proofing-reviews";
+import {
+  TODO_ROWS,
+  finishedChecks,
+  finishedOn,
+  unfinishedChecks,
+} from "../lib/proofing-todo";
+import { Icon, TaskEmpty, TaskRow, TaskSection, TopBar } from "../ui";
 import { ResultTag } from "./proofing-ui";
 import { VerifyPerson } from "./proofing-send";
-import { absoluteApiUrl } from "../api/http";
 import { ProofingPausedNotice } from "./proofing-pause";
+import { PRIMARY_LINK } from "./proofing-review-parts";
 
-const ERROR = "text-error text-[12.5px]";
-// The recent sessions table shows the newest few; the rest are on the All
-// people page.
-const RECENT_SESSIONS = 6;
-const RECENT_COLUMNS = 5;
+const ERROR = "text-error px-5 pt-3.5 pb-[18px] text-[12.5px]";
+const WHEN = "text-ink-soft text-[13px] whitespace-nowrap";
+const SECTION_LINK = "text-ink text-[13.5px] font-semibold hover:underline";
 const ALERT_ICON_SIZE = 14;
-// The API reference the backend serves (internal/apidocs).
-const API_DOCS_PATH = "/api/docs";
 
-// Identity proofing at a glance: the last 30 days' sessions across every flow,
-// the newest of them, and the flows themselves. An admin sees the whole org's,
-// a member the sessions they sent. While a platform admin has paused the org's
+// What a section holds below its title: why there are no rows yet, that there
+// are none, or the rows.
+function Rows({
+  query,
+  empty,
+  rows,
+}: {
+  query: { isError: boolean; isPending: boolean; error: Error | null };
+  empty: string;
+  rows: React.ReactElement[];
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  if (query.isError) {
+    return (
+      <p role="alert" className={ERROR}>
+        {proofingErrorMessage(query.error, t)}
+      </p>
+    );
+  }
+  if (query.isPending) return <TaskEmpty>{t("common.loading")}</TaskEmpty>;
+  if (rows.length === 0) return <TaskEmpty>{empty}</TaskEmpty>;
+  return <ul>{rows}</ul>;
+}
+
+// Identity proofing as a to-do list: what waits for the reader's decision, who
+// the org waits for, and what finished lately. An admin sees the whole org's,
+// a member the checks they sent. While a platform admin has paused the org's
 // proofing, only why.
 export default function IdentityProofingOverview(): React.JSX.Element {
   const { t } = useTranslation();
@@ -79,367 +107,248 @@ function ActiveOverview({
   canReview: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const stats = useProofingStatsQuery(slug);
-  const flows = useProofingFlowsQuery(slug);
-  const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
+  const requests = useExternalRequestsQuery(slug);
 
   return (
     <>
       <TopBar
         title={t("identityProofing.overview.title")}
         subtitle={t("identityProofing.overview.subtitle")}
-        actions={
-          <>
-            <a
-              href={absoluteApiUrl(API_DOCS_PATH)}
-              target="_blank"
-              rel="noreferrer"
-              className="border-line-strong bg-surface text-ink hover:bg-surface-2 inline-flex h-9 items-center rounded-md border px-3.5 text-[13.5px] font-semibold transition-colors"
-            >
-              {t("identityProofing.overview.apiDocs")}
-            </a>
-            <VerifyPerson slug={slug} isAdmin={isAdmin} />
-          </>
-        }
+        actions={<VerifyPerson slug={slug} isAdmin={isAdmin} />}
       />
-      <div className="flex flex-col gap-6 p-4 sm:p-8">
-        {stats.isError ? (
-          <p className={ERROR}>{proofingErrorMessage(stats.error, t)}</p>
-        ) : (
-          <StatsRow
-            stats={stats.data}
-            reviews={
-              canReview
-                ? {
-                    to: reviewPath(slug),
-                    waiting: waiting.data
-                      ? waitingOldestFirst(waiting.data).length
-                      : undefined,
-                  }
-                : undefined
-            }
-          />
-        )}
-        <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <RecentSessions slug={slug} isAdmin={isAdmin} />
-          <FlowsCard
-            slug={slug}
-            isAdmin={isAdmin}
-            flows={flows}
-            stats={stats.data}
-          />
-        </div>
+      <div className="flex max-w-240 flex-col gap-6 p-4 sm:p-8">
+        {isAdmin && <WebhookAlert slug={slug} />}
+        {canReview && <DecisionSection slug={slug} />}
+        <WaitingSection slug={slug} requests={requests} canReview={canReview} />
+        <FinishedSection slug={slug} requests={requests} />
+        <LastMonth slug={slug} />
       </div>
     </>
   );
 }
 
-function StatsRow({
-  stats,
-  reviews,
-}: {
-  stats: ProofingStats | undefined;
-  // For the reader who decides: where, and how much waits in the whole org
-  // (a reviewer's own stats count only their sent requests). Absent for a
-  // member without the right.
-  reviews: { to: string; waiting: number | undefined } | undefined;
-}): React.JSX.Element {
+// What the reader decides, the longest waiting first: an admin's and a
+// reviewer's, who see what waits in the whole org.
+function DecisionSection({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const formatPercent = usePercentFormatter();
-  const totals = sumProofingStats(stats?.rows ?? []);
-  const share = verifiedShare(totals);
-  const flowCount = new Set(stats?.rows.map((r) => r.flowId)).size;
-  // While the counts load, the tiles hold their place without a number.
-  const count = (n: number | undefined): string =>
-    n === undefined ? "—" : String(n);
-  const value = (n: number): string => count(stats ? n : undefined);
-  const needsReview = reviews
-    ? count(reviews.waiting)
-    : value(totals.needsReview);
-
-  return (
-    <Card className="divide-line grid grid-cols-2 lg:grid-cols-6 lg:divide-x">
-      <StatCell
-        label={t("identityProofing.overview.stats.sessions")}
-        value={value(totals.sessions)}
-        hint={t("identityProofing.overview.stats.sessionsHint", {
-          count: flowCount,
-        })}
-      />
-      <StatCell
-        label={t("identityProofing.overview.stats.verified")}
-        value={value(totals.approved)}
-        hint={
-          share === undefined
-            ? t("identityProofing.overview.stats.noSessions")
-            : t("identityProofing.overview.stats.verifiedHint", {
-                share: formatPercent(share),
-              })
-        }
-      />
-      <StatCell
-        label={t("identityProofing.overview.stats.failed")}
-        value={value(totals.rejected)}
-        hint={t("identityProofing.overview.stats.failedHint")}
-      />
-      <StatCell
-        label={t("identityProofing.overview.stats.needsReview")}
-        value={needsReview}
-        hint={t("identityProofing.overview.stats.needsReviewHint")}
-        hintTo={reviews?.to}
-      />
-      <StatCell
-        label={t("identityProofing.overview.stats.expired")}
-        value={value(totals.expired)}
-        hint={t("identityProofing.overview.stats.expiredHint")}
-      />
-      <StatCell
-        label={t("identityProofing.overview.stats.cancelled")}
-        value={value(totals.cancelled)}
-        hint={t("identityProofing.overview.stats.cancelledHint")}
-      />
-    </Card>
-  );
-}
-
-// One figure of the stats row: the row is one card, split in cells.
-function StatCell({
-  label,
-  value,
-  hint,
-  hintTo,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  // Turns the hint into a link.
-  hintTo?: string;
-}): React.JSX.Element {
-  return (
-    <div className="px-5 py-4">
-      <div className="text-muted font-label text-[11px] font-medium tracking-[0.08em] uppercase">
-        {label}
-      </div>
-      <div className="font-display text-ink mt-1.5 text-[26px] font-bold tracking-[-0.01em]">
-        {value}
-      </div>
-      <div className="text-muted mt-0.5 text-[12px]">
-        {hintTo ? (
-          <Link to={hintTo} className="text-link underline">
-            {hint}
-          </Link>
-        ) : (
-          hint
-        )}
-      </div>
-    </div>
-  );
-}
-
-// The newest sessions sent to external people, across every flow.
-function RecentSessions({
-  slug,
-  isAdmin,
-}: {
-  slug: string;
-  isAdmin: boolean;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const requests = useExternalRequestsQuery(slug);
   const formatWhen = useWhenFormatter();
-  const navigate = useNavigate();
-  const recent = (requests.data ?? []).slice(0, RECENT_SESSIONS);
+  const waiting = useWaitingReviewsQuery(slug, { enabled: true });
+  const held = waitingOldestFirst(waiting.data ?? []);
 
   return (
-    <Card>
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 pt-4 pb-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-display text-[16px] font-bold">
-            {t("identityProofing.overview.recent.title")}
-          </h2>
-          <span className="text-muted text-[12px]">
-            {isAdmin
-              ? t("identityProofing.overview.recent.scope")
-              : t("identityProofing.overview.recent.scopeOwn")}
-          </span>
-        </div>
-        <Link
-          to={`/${slug}/identity-proofing/people`}
-          className="text-ink text-[12.5px] font-semibold hover:underline"
-        >
-          {t("identityProofing.overview.recent.viewAll")}
-        </Link>
-      </div>
-      <Table>
-        <Table.Head>
-          <Table.HeaderCell>
-            {t("identityProofing.overview.recent.person")}
-          </Table.HeaderCell>
-          <Table.HeaderCell>
-            {t("identityProofing.overview.recent.flow")}
-          </Table.HeaderCell>
-          <Table.HeaderCell>
-            {t("identityProofing.sessions.method")}
-          </Table.HeaderCell>
-          <Table.HeaderCell>
-            {t("identityProofing.overview.recent.result")}
-          </Table.HeaderCell>
-          <Table.HeaderCell className="text-right">
-            {t("identityProofing.overview.recent.started")}
-          </Table.HeaderCell>
-        </Table.Head>
-        <Table.Body>
-          {requests.isPending ? (
-            <Table.State colSpan={RECENT_COLUMNS}>
-              {t("common.loading")}
-            </Table.State>
-          ) : requests.isError ? (
-            <Table.State colSpan={RECENT_COLUMNS}>
-              {proofingErrorMessage(requests.error, t)}
-            </Table.State>
-          ) : recent.length === 0 ? (
-            <Table.State colSpan={RECENT_COLUMNS}>
-              {t("identityProofing.overview.recent.empty")}
-            </Table.State>
-          ) : (
-            recent.map((request) => {
-              const sessionPath = `/${slug}/identity-proofing/people?session=${request.id}`;
-              return (
-                <Table.Row
-                  key={request.id}
-                  onClick={() => void navigate(sessionPath)}
-                  className="hover:bg-surface-3 cursor-pointer transition-colors"
+    <TaskSection
+      title={t("identityProofing.overview.decision.title")}
+      count={held.length > 0 ? held.length : undefined}
+      action={
+        held.length > 0 ? (
+          <Link to={reviewPath(slug)} className={SECTION_LINK}>
+            {t("identityProofing.overview.decision.open")}
+          </Link>
+        ) : undefined
+      }
+    >
+      <Rows
+        query={waiting}
+        empty={t("identityProofing.overview.decision.empty")}
+        rows={held.slice(0, TODO_ROWS).map((request) => (
+          <TaskRow
+            key={request.id}
+            title={
+              <Link
+                to={reviewPath(slug, request.id)}
+                className="hover:underline"
+              >
+                {personName(request, t)}
+              </Link>
+            }
+            detail={
+              isDataRequest(request.flowKind)
+                ? t(`identityProofingFlows.kinds.${request.flowKind}.title`)
+                : request.flowName
+            }
+            aside={
+              <span className="flex items-center gap-3">
+                <span className={WHEN}>
+                  {formatWhen(waitingSince(request))}
+                </span>
+                <Link
+                  to={reviewPath(slug, request.id)}
+                  aria-label={t("identityProofing.reviews.reviewOf", {
+                    name: personName(request, t),
+                  })}
+                  className={PRIMARY_LINK}
                 >
-                  <Table.Cell>
-                    <Link
-                      to={sessionPath}
-                      // The row navigates too; one history entry per click.
-                      onClick={(event) => event.stopPropagation()}
-                      className="text-ink font-semibold hover:underline"
-                    >
-                      {requestSubject(request).name ||
-                        t("identityProofing.requests.noName")}
-                    </Link>
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft min-w-40">
-                    {request.flowName}
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft whitespace-nowrap">
-                    {proofingMethodLabel(request.method, t)}
-                  </Table.Cell>
-                  <Table.Cell>
-                    <ResultTag request={request} compact />
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft text-right whitespace-nowrap">
-                    {formatWhen(request.createdAt)}
-                  </Table.Cell>
-                </Table.Row>
-              );
-            })
-          )}
-        </Table.Body>
-      </Table>
-    </Card>
+                  {t("identityProofing.reviews.review")}
+                </Link>
+              </span>
+            }
+          />
+        ))}
+      />
+    </TaskSection>
   );
 }
 
-// The flows with their sessions of the last 30 days; an admin's links on to
-// the Flows page. A member sees the flows members may use.
-function FlowsCard({
+// Where a session sits in the list of people: its row on All people.
+function personPath(slug: string, request: ProofingRequest): string {
+  return `/${slug}/identity-proofing/people?session=${request.id}`;
+}
+
+// The person's name, or a word for a check sent without one.
+function PersonName({
   slug,
-  isAdmin,
-  flows,
-  stats,
+  request,
 }: {
   slug: string;
-  isAdmin: boolean;
-  flows: ReturnType<typeof useProofingFlowsQuery>;
-  stats: ProofingStats | undefined;
+  request: ProofingRequest;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const perFlow = proofingStatsBy(stats?.rows ?? [], (r) => r.flowId);
-
+  const name = requestSubject(request).name;
   return (
-    <Card>
-      <div className="border-line flex items-center justify-between border-b px-5 pt-4 pb-3">
-        <h2 className="font-display text-[16px] font-bold">
-          {t("identityProofing.overview.flows.title")}
-        </h2>
-        {isAdmin && (
-          <Link
-            to={`/${slug}/identity-proofing/flows`}
-            className="text-ink text-[12.5px] font-semibold hover:underline"
-          >
-            {t("identityProofing.overview.flows.viewAll")}
-          </Link>
-        )}
-      </div>
-      {flows.isPending && (
-        <p className="text-ink-soft px-5 py-4 text-[13px]">
-          {t("common.loading")}
-        </p>
+    <Link to={personPath(slug, request)} className="hover:underline">
+      {name === "" ? (
+        <span className="text-ink-soft font-normal italic">
+          {t("identityProofing.requests.noName")}
+        </span>
+      ) : (
+        name
       )}
-      {flows.isError && (
-        <p className={`${ERROR} px-5 py-4`}>
-          {proofingErrorMessage(flows.error, t)}
-        </p>
-      )}
-      {flows.isSuccess && flows.data.length === 0 && (
-        <p className="text-ink-soft px-5 py-4 text-[13px]">
-          {t("identityProofing.overview.flows.empty")}
-        </p>
-      )}
-      {flows.isSuccess && flows.data.length > 0 && (
-        <ul className="divide-line divide-y">
-          {flows.data.map((flow) => (
-            <FlowRow
-              key={flow.id}
-              flow={flow}
-              totals={perFlow.get(flow.id) ?? noProofingSessions()}
-            />
-          ))}
-        </ul>
-      )}
-      {isAdmin && <WebhookAlert slug={slug} />}
-    </Card>
+    </Link>
   );
 }
 
-function FlowRow({
-  flow,
-  totals,
+// The flow, and the app the person opened it in once they did.
+function flowLine(request: ProofingRequest, t: TFunction): string {
+  return request.method
+    ? `${request.flowName} · ${proofingMethodLabel(request.method, t)}`
+    : request.flowName;
+}
+
+// The checks the org waits on others for: people who have not finished, and
+// for a member who cannot decide, their own checks held for an admin.
+function WaitingSection({
+  slug,
+  requests,
+  canReview,
 }: {
-  flow: ProofingFlow;
-  totals: ProofingTotals;
+  slug: string;
+  requests: ReturnType<typeof useExternalRequestsQuery>;
+  canReview: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const formatPercent = usePercentFormatter();
-  const share = verifiedShare(totals);
+  const formatWhen = useWhenFormatter();
+  const all = requests.data ?? [];
+  const waiting = [
+    ...unfinishedChecks(all),
+    ...(canReview ? [] : waitingOldestFirst(all)),
+  ];
 
   return (
-    <li className="flex items-center gap-3 px-5 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="text-ink truncate text-[13.5px] font-semibold">
-          {flow.name}
-        </div>
-        <div className="text-muted text-[12px]">
-          {share === undefined
-            ? t("identityProofing.overview.flows.noSessions")
-            : t("identityProofing.overview.flows.summary", {
-                count: totals.sessions,
-                share: formatPercent(share),
-              })}
-        </div>
-      </div>
-      {flow.default && (
-        <Tag>{t("identityProofing.overview.flows.default")}</Tag>
-      )}
-    </li>
+    <TaskSection
+      title={t("identityProofing.overview.waiting.title")}
+      count={requests.data ? waiting.length : undefined}
+      hint={t("identityProofing.overview.waiting.hint")}
+      action={
+        waiting.length > TODO_ROWS ? (
+          <Link
+            to={`/${slug}/identity-proofing/people`}
+            className={SECTION_LINK}
+          >
+            {t("identityProofing.overview.allPeople")}
+          </Link>
+        ) : undefined
+      }
+    >
+      <Rows
+        query={requests}
+        empty={t("identityProofing.overview.waiting.empty")}
+        rows={waiting.slice(0, TODO_ROWS).map((request) => (
+          <TaskRow
+            key={request.id}
+            title={<PersonName slug={slug} request={request} />}
+            detail={flowLine(request, t)}
+            aside={
+              <span className={WHEN}>
+                {request.status === "needs_review"
+                  ? t("identityProofing.overview.waiting.forAdmin")
+                  : `${proofingStatusLabel(request.status, t)} · ${formatWhen(request.createdAt)}`}
+              </span>
+            }
+          />
+        ))}
+      />
+    </TaskSection>
+  );
+}
+
+// The newest checks that ended in a result; the rest are on All people.
+function FinishedSection({
+  slug,
+  requests,
+}: {
+  slug: string;
+  requests: ReturnType<typeof useExternalRequestsQuery>;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const finished = finishedChecks(requests.data ?? []);
+
+  return (
+    <TaskSection
+      title={t("identityProofing.overview.finished.title")}
+      action={
+        <Link to={`/${slug}/identity-proofing/people`} className={SECTION_LINK}>
+          {t("identityProofing.overview.allPeople")}
+        </Link>
+      }
+    >
+      <Rows
+        query={requests}
+        empty={t("identityProofing.overview.finished.empty")}
+        rows={finished.slice(0, TODO_ROWS).map((request) => (
+          <TaskRow
+            key={request.id}
+            title={<PersonName slug={slug} request={request} />}
+            detail={flowLine(request, t)}
+            aside={
+              <span className="flex items-center gap-3">
+                <ResultTag request={request} compact />
+                <span className={WHEN}>{formatWhen(finishedOn(request))}</span>
+              </span>
+            }
+          />
+        ))}
+      />
+    </TaskSection>
+  );
+}
+
+// The counts of the last 30 days, in one line.
+function LastMonth({ slug }: { slug: string }): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const stats = useProofingStatsQuery(slug);
+  if (!stats.data) {
+    return stats.isError ? (
+      <p role="alert" className="text-error text-[12.5px]">
+        {proofingErrorMessage(stats.error, t)}
+      </p>
+    ) : null;
+  }
+
+  const totals = sumProofingStats(stats.data.rows);
+  return (
+    <p className="text-ink-soft text-[13px]">
+      {t("identityProofing.overview.summary", {
+        count: totals.sessions,
+        verified: totals.approved,
+        failed: totals.rejected,
+      })}
+    </p>
   );
 }
 
 // The org's webhook endpoint, while it is failing, with what waits for it: the
-// one thing on this page an admin has to act on.
+// one thing on this page an admin has to act on besides the lists.
 function WebhookAlert({ slug }: { slug: string }): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
@@ -450,7 +359,7 @@ function WebhookAlert({ slug }: { slug: string }): React.JSX.Element | null {
   }
   const since = health.failingSince ? formatWhen(health.failingSince) : "—";
   return (
-    <div className="bg-warning-bg text-warning-fg flex items-start gap-2 rounded-b-[inherit] px-5 py-3 text-[12.5px]">
+    <div className="bg-warning-bg text-warning-fg rounded-yivi flex items-start gap-2 px-5 py-3 text-[12.5px]">
       <Icon name="warning" size={ALERT_ICON_SIZE} className="mt-0.5 shrink-0" />
       <span>
         {health.lastStatusCode === undefined

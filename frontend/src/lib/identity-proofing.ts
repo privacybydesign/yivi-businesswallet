@@ -1562,16 +1562,6 @@ export function proofingStatsBy<T extends ProofingTotals>(
   return new Map([...groups].map(([k, group]) => [k, sumProofingStats(group)]));
 }
 
-export function noProofingSessions(): ProofingTotals {
-  return { ...NO_SESSIONS };
-}
-
-// The share of sessions verified, 0..1; undefined with no sessions, which a
-// percentage cannot express.
-export function verifiedShare(totals: ProofingTotals): number | undefined {
-  return totals.sessions === 0 ? undefined : totals.approved / totals.sessions;
-}
-
 // A requested-data value the wallet has copy for; the backend may add others.
 export type RequestedAttribute = (typeof REQUESTED_ATTRIBUTES)[number]["value"];
 

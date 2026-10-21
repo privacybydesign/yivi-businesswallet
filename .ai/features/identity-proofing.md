@@ -6,9 +6,9 @@ tenant under the org's own id, with no provisioning step. Flows are the org's
 main object: an org has one set of flows with one default, one set of settings,
 one set of API keys and one webhook endpoint, and no customers (§1). The
 sidebar's "Identity proofing" section holds up to three pages under
-`/{org}/identity-proofing`: **Overview** (the last 30 days' external sessions
-counted, the newest ones, the org's flows with their sessions, and an alert
-for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
+`/{org}/identity-proofing`: **Overview** (a to-do list: **Waiting for your
+decision**, **Waiting for the person**, **Recently finished**, one line with the last 30
+days' counts, and an alert for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
 with the people each identified in 30 days, the default flow and which flows
 members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
 with **People** and **Versions** tabs, **Edit flow** (tabs **Check**, **Branding**
@@ -1415,10 +1415,29 @@ engine is asked), and `result`, `data-matches`, `data-export` and the decision
 take the same scope (`reviewScope`); any other is a 404, as for a member. The
 app reads `canReview` from `GET /orgs/{slug}` (the same `MayReview`): it shows
 the sidebar's Reviews item and count, the Reviews and review pages, and the
-Overview's needs-review tile, which counts what waits in the org as the sidebar
-does. The Reviews footer links to Members for an admin only, as only an admin
+Overview's **Waiting for your decision**, which lists what waits in the org as
+the sidebar counts it. The Reviews footer links to Members for an admin only, as only an admin
 reads that page. Not yet: the review link on a row of All people and the flow's
-People tab is an admin's, and the dashboard's to-do list (#320) does not exist.
+People tab is an admin's.
+
+**The Overview and the dashboard are to-do lists** (`identity-proofing-overview.tsx`,
+`dashboard.tsx` and `dashboard-todo.tsx`, built from `ui/task-list.tsx`).
+The Overview lists, up to five rows each: what waits for the reader's decision
+(an admin and a reviewer; a link to Reviews); the external checks nobody has
+finished (`pending`, `in_progress`), the longest waiting first; and the latest
+that ended (`approved`, `rejected`, `expired`; a withdrawn one is no news). A member
+reads the same lists about the checks they sent, as `GET .../requests` already
+scopes them. A member who cannot decide sees their own checks held for review under
+**Waiting for the person** as "Waiting for an admin". The dashboard's **To do** holds
+a row for what waits for the reader's decision and, for an admin, for the members
+who have not identified and those whose VOG needs attention
+(`lib/member-insights.ts`); **Waiting on others** holds the unfinished checks and,
+for a member who cannot decide, the ones held for an admin. A row appears only
+with a count above zero. While a platform admin has paused the org's proofing,
+every one of these lists answers 403 `proofing_paused`, so the dashboard reads
+none of them: **To do** keeps the member rows and **Waiting on others** is left
+out (`dashboardReads`). The pure parts (`lib/proofing-todo.ts`) are tested;
+the counts come from the same lists as the Overview.
 
 ## 10. Data minimisation
 

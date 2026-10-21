@@ -456,43 +456,29 @@ export const nl: Translation<typeof en> = {
     overview: {
       apiDocs: "API-documentatie",
       title: "Overzicht",
-      subtitle: "Identiteitscontroles die je uitvoert. Laatste 30 dagen.",
-      stats: {
-        sessions: "Sessies",
-        sessionsHint_one: "over {{count}} flow",
-        sessionsHint_other: "over {{count}} flows",
-        verified: "Geverifieerd",
-        verifiedHint: "{{share}} van de sessies",
-        failed: "Mislukt",
-        failedHint: "Niet door de controles gekomen",
-        expired: "Verlopen",
-        needsReview: "Te beoordelen",
-        needsReviewHint: "Wacht op jouw besluit",
-        expiredHint: "Niet binnen 10 minuten afgerond",
-        cancelled: "Geannuleerd",
-        cancelledHint: "Ingetrokken voordat ze klaar waren",
-        noSessions: "Nog geen sessies",
+      subtitle: "Wat jouw aandacht vraagt, en op wie je wacht.",
+      decision: {
+        title: "Wacht op jouw besluit",
+        open: "Beoordelingen openen",
+        empty:
+          "Niets te beoordelen. Als een controle zelf niet kan beslissen, staat die hier.",
       },
-      recent: {
-        title: "Recente sessies",
-        scope: "de hele organisatie",
-        scopeOwn: "door jou verstuurd",
-        viewAll: "Alles bekijken",
-        person: "Persoon",
-        flow: "Flow",
-        result: "Resultaat",
-        started: "Gestart",
-        empty: "Nog geen sessies.",
+      waiting: {
+        title: "Wacht op de persoon",
+        hint: "Verstuurd, maar nog niet afgerond.",
+        empty: "Geen enkele controle wacht op een persoon.",
+        forAdmin: "Wacht op een beheerder",
       },
-      flows: {
-        title: "Flows",
-        viewAll: "Alles bekijken",
-        empty: "Nog geen flows.",
-        summary_one: "{{count}} sessie · {{share}} geverifieerd",
-        summary_other: "{{count}} sessies · {{share}} geverifieerd",
-        noSessions: "Geen sessies in 30 dagen",
-        default: "Standaard",
+      finished: {
+        title: "Recent afgerond",
+        empty:
+          "Nog geen controle afgerond. Geverifieerde, mislukte en verlopen controles staan hier.",
       },
+      allPeople: "Alle personen",
+      summary_one:
+        "Laatste 30 dagen: {{count}} controle verstuurd, {{verified}} geverifieerd, {{failed}} mislukt.",
+      summary_other:
+        "Laatste 30 dagen: {{count}} controles verstuurd, {{verified}} geverifieerd, {{failed}} mislukt.",
       webhookAlertNoAnswer_one:
         "Het webhook-endpoint antwoordt niet sinds {{since}}. {{count}} resultaat wacht op een nieuwe poging.",
       webhookAlertNoAnswer_other:
@@ -1850,37 +1836,40 @@ export const nl: Translation<typeof en> = {
       afternoon: "Goedemiddag, {{name}}",
       evening: "Goedenavond, {{name}}",
     },
-    role: "Je rol: {{role}}",
-    stats: {
-      attestations: "Uitgegeven attestaties",
-      documents: "Te ondertekenen documenten",
-    },
-    insights: {
-      title: "Ledenoverzicht",
-      members: "Leden",
-      notIdentified: "Niet geïdentificeerd",
-      notIdentifiedHint: "Nooit geïdentificeerd, verlopen of gevraagd",
-      vogAttention: "VOG vraagt aandacht",
-      vogAttentionHint:
-        "Ontbreekt, gevraagd, afgewezen, verlopen of opnieuw nodig",
-      vogNotRequired: "Je beleid vereist geen VOG",
-      identityBar: "Identiteitsstatus",
-      screeningBar: "VOG-status",
-      empty: "Nog geen leden.",
-      error: "Kon ledeninzichten niet laden: {{message}}",
-    },
-    details: "Details",
-    id: "ID",
     viewMembers: "Leden bekijken",
-    wallet: {
-      title: "Business wallet",
-      legalName: "Wettelijke naam",
-      kvkNumber: "KVK-nummer",
-      euid: "EUID",
-      address: "Digitaal adres",
-      noAddress: "Geen standaard digitaal adres",
-      status: "Status",
+    todo: {
+      title: "Te doen",
+      hint: "Wat in de Business Wallet jouw aandacht vraagt.",
+      empty: "Er is nu niets dat jouw aandacht vraagt.",
+      error: "Kon ledeninzichten niet laden: {{message}}",
+      reviews_one: "{{count}} verzoek wacht op jouw besluit",
+      reviews_other: "{{count}} verzoeken wachten op jouw besluit",
+      reviewsDetail:
+        "Identiteitscontroles en gegevensverzoeken waarover een persoon moet beslissen.",
+      openReviews: "Beoordelingen openen",
+      notIdentified_one: "{{count}} lid heeft zich niet geïdentificeerd",
+      notIdentified_other: "{{count}} leden hebben zich niet geïdentificeerd",
+      notIdentifiedDetail:
+        "Leden moeten zich identificeren voordat ze namens {{org}} kunnen handelen.",
+      vogAttention_one: "{{count}} lid heeft een VOG die aandacht vraagt",
+      vogAttention_other: "{{count}} leden hebben een VOG die aandacht vraagt",
+      vogAttentionDetail:
+        "Ontbreekt, gevraagd, afgewezen, verlopen of opnieuw nodig.",
     },
+    waiting: {
+      title: "Wachten op anderen",
+      hint: "Er is nog niets dat jij hoeft te doen.",
+      empty: "Je wacht op niemand.",
+      unfinished_one: "{{count}} identiteitscontrole niet afgerond",
+      unfinished_other: "{{count}} identiteitscontroles niet afgerond",
+      unfinishedDetail: "De mensen hebben ze nog niet afgerond.",
+      forAdmin_one: "{{count}} verzoek wacht op een beheerder",
+      forAdmin_other: "{{count}} verzoeken wachten op een beheerder",
+      forAdminDetail: "Een beheerder moet erover beslissen.",
+      openOverview: "Overzicht openen",
+    },
+    orgDetails:
+      "Organisatiegegevens, KVK-nummer en digitaal adres staan bij <settings>Instellingen › Organisatie</settings>.",
   },
   access: {
     notMember: "Je bent geen lid van deze organisatie.",

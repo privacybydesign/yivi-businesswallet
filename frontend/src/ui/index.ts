@@ -11,6 +11,7 @@ export type { CrumbContext, RouteHandle } from "./breadcrumb";
 export { Input } from "./input";
 export { Avatar } from "./avatar";
 export { Stat } from "./stat";
+export { TaskEmpty, TaskRow, TaskSection } from "./task-list";
 export { Logo } from "./logo";
 export { Sidebar } from "./sidebar";
 export { OrgSwitcher } from "./org-switcher";

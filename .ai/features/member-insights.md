@@ -1,10 +1,11 @@
 # Feature: Member insights (dashboard overview)
 
-**Status:** Implemented. An org admin's dashboard opens with how many members
-have not identified and how many have a VOG that needs attention, with the
-per-status breakdown behind each number.
+**Status:** Implemented. An org admin's dashboard lists, under **To do**, how
+many members have not identified and how many have a VOG that needs attention,
+each a row with a link to Members; a row shows only above zero. The counters and
+the per-status bars this once drew are gone.
 **Slice:** `internal/organization/member_insights.go` (store query, pure tally,
-`GET /orgs/{slug}/member-insights`), `frontend/src/routes/member-insights.tsx`,
+`GET /orgs/{slug}/member-insights`), `frontend/src/routes/dashboard-todo.tsx`,
 `frontend/src/lib/member-insights.ts`.
 **Builds on:** `.ai/features/member-reidentification.md` §2 (identity status)
 and `.ai/features/member-screening-vog.md` §3 (screening status) - it only
@@ -30,7 +31,7 @@ to know the status list to draw a complete bar.
 Active memberships only. A pending invitation has no identity or screening to
 speak of, so it would only inflate "never" and "none".
 
-## The two headline numbers are frontend definitions
+## The two to-dos are frontend definitions
 
 `frontend/src/lib/member-insights.ts` decides what "not identified" and "VOG
 needs attention" mean, tested as pure functions:
@@ -40,22 +41,12 @@ needs attention" mean, tested as pure functions:
 | not identified | `never`, `requested`, `overdue` (`due_soon` is still identified) |
 | VOG needs attention | `none`, `requested`, `rejected`, `expired`, `recheck_required` (`expiring` is still valid today; `not_required` is nobody's problem) |
 
-The screening bar and headline are suppressed (shown as "—" with a hint) when
-every member is `not_required`, i.e. the policy requires a VOG of nobody.
-
-## No charting library
-
-The stacked proportional bars are divs (the way `ui/stepper.tsx` draws its
-meter), coloured from the same tone functions the member list's `Tag`s use
-(`identityStatusTone`, `screeningStatusTone`) so bar, legend and list agree. A
-status the backend adds before the frontend knows it is appended to the bar
-rather than dropped (`statusSegments`). The Vitest setup is `node`-only and
-skips `.test.tsx`, so a chart component would have been untestable; the logic
-that matters is in `lib/` and tested.
+A policy that requires a VOG of nobody makes every member `not_required`, which
+is in neither list, so the VOG to-do never appears.
 
 ## Not built
 
-- **Filtering the member list by identity or VOG status** from a bar segment.
+- **Filtering the member list by identity or VOG status** from a to-do row.
   The link goes to the unfiltered list; a status filter has to be expressed
   in SQL to keep paging totals honest (see the re-identification doc's §11).
 - **Trends over time.** The overview is a snapshot; nothing is recorded.

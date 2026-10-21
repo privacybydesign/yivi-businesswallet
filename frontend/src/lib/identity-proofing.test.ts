@@ -99,7 +99,6 @@ import {
   sessionFilterCounts,
   shortRequestId,
   sumProofingStats,
-  verifiedShare,
   isHexColor,
   isSuccessStatus,
   ownEndpointDeliveries,
@@ -1458,11 +1457,6 @@ describe("proofing stats", () => {
     expect(perFlow.get("f1")?.sessions).toBe(15);
     expect(perFlow.get("f2")?.approved).toBe(2);
     expect(perFlow.has("f3")).toBe(false);
-  });
-
-  it("has no verified share without sessions", () => {
-    expect(verifiedShare(sumProofingStats([]))).toBeUndefined();
-    expect(verifiedShare(sumProofingStats([row("f", 4, 3)]))).toBe(0.75);
   });
 });
 
