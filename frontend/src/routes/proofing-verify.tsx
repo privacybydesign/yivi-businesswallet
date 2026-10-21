@@ -167,14 +167,14 @@ function VerifyFlow({
   const create = useCreateRequestMutation(slug);
   const name = org.branding.displayName || org.name;
 
-  function start(): void {
+  function start(picked: ProofingMethod): void {
     create.mutate(
       {
         email: subject.email ?? "",
         name: subject.name ?? "",
         birthDate: subject.birthDate,
         flowId: flow.id,
-        method,
+        method: picked,
         channel: "on_screen",
       },
       {
@@ -209,7 +209,7 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onContinue={choice ? () => setStep("method") : start}
+          onContinue={choice ? () => setStep("method") : () => start(method)}
           starting={create.isPending}
           error={
             create.isError ? proofingErrorMessage(create.error, t) : undefined
@@ -227,10 +227,12 @@ function VerifyFlow({
       )}
       {step === "method" && (
         <MethodChoice
-          method={method}
-          onChange={setMethod}
+          picked={method}
+          onChoose={(picked) => {
+            setMethod(picked);
+            start(picked);
+          }}
           onBack={() => setStep("overview")}
-          onContinue={start}
           starting={create.isPending}
           error={
             create.isError ? proofingErrorMessage(create.error, t) : undefined

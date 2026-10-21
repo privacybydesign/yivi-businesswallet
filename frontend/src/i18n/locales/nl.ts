@@ -757,12 +757,10 @@ export const nl: Translation<typeof en> = {
         intro:
           "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
         noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
-        flow: "Flow",
-        assurance: "Betrouwbaarheidsniveau",
         retention_one:
-          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dag na afloop verwijderd.",
+          "Deze gegevens worden uiterlijk {{count}} dag na afloop van de controle verwijderd.",
         retention_other:
-          "Wat de verificatie verzamelt (je naam en de andere gegevens en foto's hierboven) wordt uiterlijk {{count}} dagen na afloop verwijderd.",
+          "Deze gegevens worden uiterlijk {{count}} dagen na afloop van de controle verwijderd.",
         support: "Vragen? {{contact}}",
         privacy: "Privacyverklaring",
         cancel: "Annuleren",
@@ -796,7 +794,6 @@ export const nl: Translation<typeof en> = {
             "Scan je paspoort of identiteitskaart met de Idem-app en houd het tegen je telefoon om de chip te lezen.",
         },
         back: "Terug",
-        continue: "QR-code tonen",
       },
       scan: {
         yiviHeading: "Scan met de Yivi-app",
@@ -1588,6 +1585,7 @@ export const nl: Translation<typeof en> = {
       message:
         "{{organization}} krijgt je gegevens niet, en deze link werkt daarna niet meer. Wil je later toch verifiëren, vraag {{organization}} dan om een nieuwe link.",
       confirm: "Weigeren",
+      back: "Ga terug",
     },
     errors: {
       unavailable:

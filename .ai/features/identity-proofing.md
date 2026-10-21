@@ -1188,11 +1188,15 @@ A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link). The retention it states is the
+what is collected, retention, privacy link); it never shows the flow's name or
+its assurance level. The retention it states is the
 server's `retentionDays` (hosted view `flow`, flow list):
 `subjectRetentionDays`, the flow's override else the org's days, plus the
-engine's day of grace, rounded up ("deleted at most N days after"). Its Decline,
-after a confirmation that says the link stops working, calls
+engine's day of grace, rounded up ("deleted at most N days after"). With a
+choice of app, tapping Yivi app or Idem app starts the session (no radio, no
+confirm button). The overview's Decline asks to confirm first (`ConfirmDialog`:
+"Go back" or Decline, saying the link stops working; it stays open while the
+request is in flight), then calls
 `POST /proof/{token}/decline`, which cancels a link not yet started
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
 actor label `hosted_link`); a started link is 409 `link_started`. The org

@@ -1,6 +1,7 @@
 // How a hosted proofing page picks its language and hands its subject back
 // once the session settles. Pure, so the rules are unit-tested.
 
+import type { MutationStatus } from "@tanstack/react-query";
 import type { HostedTheme } from "../api/identity-proofing";
 import type { OrgTheme } from "../api/theme";
 import {
@@ -169,4 +170,9 @@ export function hostedTheme(
     fontFamily: theme?.fontFamily ?? "",
     logoUri: "",
   };
+}
+
+// Whether the decline dialog may close: not while the decline is in flight.
+export function canCloseDecline(status: MutationStatus): boolean {
+  return status !== "pending";
 }

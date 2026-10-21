@@ -20,6 +20,7 @@ import { errorCode } from "../lib/api-error";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
 import {
+  canCloseDecline,
   hostedHandBack,
   hostedLanguage,
   hostedTheme,
@@ -175,8 +176,8 @@ function HostedFlow({
     [page.sessionId, page.embedOrigins, page.redirectUrl, dataRequest],
   );
 
-  function begin(): void {
-    start.mutate(method, {
+  function begin(picked: ProofingMethod): void {
+    start.mutate(picked, {
       onSuccess: (next) => {
         setStarted(next);
         setStep("session");
@@ -218,7 +219,9 @@ function HostedFlow({
             <Overview
               org={organization}
               flow={flow}
-              onContinue={choice ? () => setStep("method") : begin}
+              onContinue={
+                choice ? () => setStep("method") : () => begin(method)
+              }
               starting={start.isPending}
               error={actionError}
               cancel={
@@ -239,6 +242,7 @@ function HostedFlow({
                 organization: organization.name,
               })}
               confirmLabel={t("proofLink.declineConfirm.confirm")}
+              cancelLabel={t("proofLink.declineConfirm.back")}
               busy={decline.isPending}
               error={
                 decline.isError
@@ -246,6 +250,13 @@ function HostedFlow({
                   : undefined
               }
               onClose={() => {
+                // Closing resets the mutation, which drops the onSuccess below
+                // that moves the page on, though the server cancels the link
+                // all the same.
+                if (!canCloseDecline(decline.status)) {
+                  return;
+                }
+
                 setConfirmDecline(false);
                 decline.reset();
               }}
@@ -261,10 +272,12 @@ function HostedFlow({
           )}
           {step === "method" && (
             <MethodChoice
-              method={method}
-              onChange={setMethod}
+              picked={method}
+              onChoose={(picked) => {
+                setMethod(picked);
+                begin(picked);
+              }}
               onBack={() => setStep("overview")}
-              onContinue={begin}
               starting={start.isPending}
               error={actionError}
             />

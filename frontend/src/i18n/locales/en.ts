@@ -739,12 +739,10 @@ export const en = {
         intro:
           "You check your identity with your passport or ID card. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
-        flow: "Flow",
-        assurance: "Assurance level",
         retention_one:
-          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} day after it ends.",
+          "This data is deleted at most {{count}} day after the check ends.",
         retention_other:
-          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} days after it ends.",
+          "This data is deleted at most {{count}} days after the check ends.",
         support: "Questions? {{contact}}",
         privacy: "Privacy statement",
         cancel: "Cancel",
@@ -777,7 +775,6 @@ export const en = {
             "Scan your passport or ID card with the Idem app and hold it to your phone to read its chip.",
         },
         back: "Back",
-        continue: "Show QR code",
       },
       scan: {
         yiviHeading: "Scan with the Yivi app",
@@ -1557,6 +1554,7 @@ export const en = {
       message:
         "{{organization}} does not get your data, and this link stops working. To verify later, ask {{organization}} for a new link.",
       confirm: "Decline",
+      back: "Go back",
     },
     errors: {
       unavailable:

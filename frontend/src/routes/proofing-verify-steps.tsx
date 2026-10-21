@@ -32,7 +32,6 @@ import {
   ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
   addressLookup,
-  assuranceLevelLabel,
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
@@ -60,8 +59,6 @@ import type { DataDisclosureItem, IconName } from "../ui";
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
-const CAPTION =
-  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const LINK_BUTTON =
   "rounded-yivi font-display bg-primary text-primary-fg hover:bg-primary-hover inline-flex h-11 items-center justify-center px-[18px] text-[15px] font-semibold";
 
@@ -76,9 +73,7 @@ export interface VerifyOrg {
 
 // What the flow collects, as the steps show it.
 export interface VerifyFlowInfo {
-  name: string;
   requestedAttributes?: string[];
-  requiredAssuranceLevel?: string;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
   // Whether the subject is asked for their postal address afterwards.
@@ -171,26 +166,6 @@ export function Overview({
       ) : (
         <DataDisclosure items={items} />
       )}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <div className={CAPTION}>
-            {t("identityProofing.onScreen.overview.flow")}
-          </div>
-          <div className="text-ink mt-1 text-[13px]">{flow.name}</div>
-        </div>
-        <div>
-          <div className={CAPTION}>
-            {t("identityProofing.onScreen.overview.assurance")}
-          </div>
-          <div className="text-ink mt-1 text-[13px]">
-            {flow.requiredAssuranceLevel
-              ? t("identityProofing.flows.eidas", {
-                  level: assuranceLevelLabel(flow.requiredAssuranceLevel, t),
-                })
-              : t("identityProofing.flows.noAssurance")}
-          </div>
-        </div>
-      </div>
       <p className={HINT}>
         {t("identityProofing.onScreen.overview.retention", {
           count: flow.retentionDays,
@@ -233,17 +208,16 @@ export function Overview({
 }
 
 export function MethodChoice({
-  method,
-  onChange,
+  picked,
+  onChoose,
   onBack,
-  onContinue,
   starting,
   error,
 }: {
-  method: ProofingMethod;
-  onChange: (method: ProofingMethod) => void;
+  // The app last tapped: it shows as starting while the session is created.
+  picked: ProofingMethod;
+  onChoose: (method: ProofingMethod) => void;
   onBack: () => void;
-  onContinue: () => void;
   starting: boolean;
   error?: string;
 }): React.JSX.Element {
@@ -258,56 +232,56 @@ export function MethodChoice({
       <h2 className="text-ink text-[18px] font-bold">
         {t("identityProofing.onScreen.method.heading")}
       </h2>
-      <fieldset className="flex flex-col gap-3">
-        <legend className="sr-only">
-          {t("identityProofing.onScreen.method.heading")}
-        </legend>
+      <div className="flex flex-col gap-3">
         {options.map((option) => {
-          const checked = method === option.value;
+          const busy = starting && picked === option.value;
           return (
-            <label
+            <button
               key={option.value}
+              type="button"
+              disabled={starting}
+              aria-busy={busy || undefined}
+              onClick={() => onChoose(option.value)}
               className={[
-                "rounded-yivi flex cursor-pointer items-start gap-3 border p-4",
-                checked
-                  ? "border-primary bg-highlight"
-                  : "border-line-strong bg-surface",
+                "rounded-yivi border-line-strong bg-surface enabled:hover:bg-surface-3 flex min-h-[88px] w-full cursor-pointer items-center gap-4 border px-5 py-[18px] text-left transition-colors duration-150 disabled:cursor-not-allowed",
+                busy ? "" : "disabled:opacity-50",
               ].join(" ")}
             >
-              <input
-                type="radio"
-                name="proofing-method"
-                value={option.value}
-                checked={checked}
-                onChange={() => onChange(option.value)}
-                className="mt-1"
-              />
-              <span className="bg-tile text-tile-fg rounded-yivi-sm flex h-9 w-9 shrink-0 items-center justify-center">
-                <Icon name={METHOD_ICONS[option.value]} />
+              <span className="bg-tile text-tile-fg rounded-yivi flex h-10 w-10 shrink-0 items-center justify-center">
+                <Icon name={METHOD_ICONS[option.value]} size={20} />
               </span>
-              <span className="flex flex-col gap-0.5">
-                <span className="text-ink text-[14.5px] font-bold">
+              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="text-ink text-[16px] font-semibold">
                   {t(`identityProofing.onScreen.method.${option.key}.title`)}
                 </span>
-                <span className="text-ink-soft text-[13px]">
+                <span className="text-ink-soft text-[14px] leading-[21px]">
                   {t(`identityProofing.onScreen.method.${option.key}.detail`)}
                 </span>
               </span>
-            </label>
+              {busy ? (
+                <span
+                  aria-hidden="true"
+                  className="text-ink h-[18px] w-[18px] shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                />
+              ) : (
+                <Icon
+                  name="chevron_right"
+                  size={18}
+                  className="text-ink shrink-0"
+                />
+              )}
+            </button>
           );
         })}
-      </fieldset>
+      </div>
       {error && (
         <p role="alert" className={ERROR}>
           {error}
         </p>
       )}
-      <div className="flex justify-between gap-2">
+      <div>
         <Button variant="secondary" icon="arrow_back" onClick={onBack}>
           {t("identityProofing.onScreen.method.back")}
-        </Button>
-        <Button icon="scan_qrcode" loading={starting} onClick={onContinue}>
-          {t("identityProofing.onScreen.method.continue")}
         </Button>
       </div>
     </div>

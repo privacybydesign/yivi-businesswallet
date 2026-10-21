@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canCloseDecline,
   completedMessage,
   completionRedirect,
   hostedHandBack,
@@ -221,5 +222,16 @@ describe("hostedTheme", () => {
     expect(theme.accentColor).toBe("#5412c7");
     expect(theme.topbarColor).toBe("#101e1e");
     expect(hostedTheme(sessionTheme, "red").primaryColor).toBe("#036bd2");
+  });
+});
+
+describe("canCloseDecline", () => {
+  it("keeps the dialog open while the decline is in flight", () => {
+    expect(canCloseDecline("pending")).toBe(false);
+  });
+
+  it("closes it before the decline and after it failed", () => {
+    expect(canCloseDecline("idle")).toBe(true);
+    expect(canCloseDecline("error")).toBe(true);
   });
 });
