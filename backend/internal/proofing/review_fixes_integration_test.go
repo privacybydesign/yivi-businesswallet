@@ -3,7 +3,6 @@
 package proofing
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -16,63 +15,24 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-// A new logo over an old one is stored even when the text fields stay as
-// they were, as the branding form sends them with every upload.
-func TestReplaceLogoKeepingText(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	ctx := context.Background()
-	orgID := makeOrg(t, pool, "acme")
-	store := NewCustomerStore(pool, audit.NopRecorder{})
-	customer, err := store.Create(ctx, orgID, makeUser(t, pool, "sam@example.org"), "Initech")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	branding := CustomerBranding{DisplayName: "Initech"}
-	first := CustomerLogo{Bytes: []byte("first logo"), ContentType: "image/png"}
-	second := CustomerLogo{Bytes: []byte("second logo"), ContentType: "image/png"}
-	if _, err := store.SaveBranding(ctx, orgID, customer.ID, branding, LogoChange{Replace: true, Logo: first}); err != nil {
-		t.Fatalf("first logo: %v", err)
-	}
-	if _, err := store.SaveBranding(ctx, orgID, customer.ID, branding, LogoChange{Replace: true, Logo: second}); err != nil {
-		t.Fatalf("second logo: %v", err)
-	}
-	got, err := store.Logo(ctx, orgID, customer.ID)
-	if err != nil {
-		t.Fatalf("Logo: %v", err)
-	}
-	if !bytes.Equal(got.Bytes, second.Bytes) {
-		t.Errorf("logo = %q, want the second one", got.Bytes)
-	}
-}
-
 // A batch takes at most perEndpoint of one endpoint's deliveries, its oldest,
 // so another org's delivery is claimed alongside a backlog.
 func TestClaimCapsEachEndpoint(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, newTestCipher(t))
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
-	busy, err := customers.Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatal(err)
-	}
-	quiet, err := customers.Create(ctx, orgID, sam, "Umbrella")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []Customer{busy, quiet} {
-		if _, _, err := webhooks.Save(ctx, orgID, c.ID, "https://hooks.example.org/"+c.Name, WebhookEvents); err != nil {
+	busy, quiet := makeOrg(t, pool, "acme"), makeOrg(t, pool, "globex")
+	for orgID, name := range map[uuid.UUID]string{busy: "busy", quiet: "quiet"} {
+		if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/"+name, WebhookEvents); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for range 5 {
-		if err := webhooks.SendTest(ctx, orgID, busy.ID); err != nil {
+		if err := webhooks.SendTest(ctx, busy); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := webhooks.SendTest(ctx, orgID, quiet.ID); err != nil {
+	if err := webhooks.SendTest(ctx, quiet); err != nil {
 		t.Fatal(err)
 	}
 	due, err := webhooks.claimDue(ctx, deliveryBatch, endpointWorkers)
@@ -83,7 +43,7 @@ func TestClaimCapsEachEndpoint(t *testing.T) {
 	for _, d := range due {
 		per[d.URL]++
 	}
-	if per["https://hooks.example.org/Initech"] != endpointWorkers || per["https://hooks.example.org/Umbrella"] != 1 {
+	if per["https://hooks.example.org/busy"] != endpointWorkers || per["https://hooks.example.org/quiet"] != 1 {
 		t.Errorf("claimed per endpoint = %v, want %d of the backlog and the other one", per, endpointWorkers)
 	}
 }
@@ -94,17 +54,12 @@ func TestClaimCapsEachEndpoint(t *testing.T) {
 func TestWebhookSealedSecretAndFailingSince(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
-	customer, err := customers.Create(ctx, orgID, makeUser(t, pool, "sam@example.org"), "Initech")
-	if err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", WebhookEvents); err != nil {
-		t.Fatal(err)
-	}
-	if err := webhooks.SendTest(ctx, orgID, customer.ID); err != nil {
+	if err := webhooks.SendTest(ctx, orgID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhooks SET secret_ciphertext = '\x00'`); err != nil {
@@ -131,7 +86,7 @@ func TestWebhookSealedSecretAndFailingSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := health[customer.ID].FailingSince; got == nil || !got.Equal(first) {
+	if got := health.FailingSince; got == nil || !got.Equal(first) {
 		t.Errorf("failing since = %v, want the first attempt %v", got, first)
 	}
 }
@@ -144,7 +99,7 @@ func TestExtendSession(t *testing.T) {
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
-	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{Email: "anna@example.org"}), "s1")
+	req := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s1")
 	later := req.session.ExpiresAt.Add(10 * time.Minute)
 	if err := store.ExtendSession(ctx, req, "s1", later); err != nil {
 		t.Fatalf("ExtendSession: %v", err)
@@ -174,17 +129,13 @@ func TestLapseLinksPastAnUnreadableSeal(t *testing.T) {
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
-	customer, err := NewCustomerStore(pool, audit.NopRecorder{}).Create(ctx, orgID, sam, "Initech")
-	if err != nil {
-		t.Fatal(err)
-	}
 	lapse := time.Now().Add(time.Minute)
 	for _, name := range []string{"Anna Jansen", "Bram de Vries"} {
 		_, hash, err := newLinkToken()
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Name: name, BirthDate: testBirthDate})
+		in := newStoredRequest(orgID, sam, Subject{Kind: SubjectExternal, Name: name, BirthDate: testBirthDate})
 		in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
 		if _, err := store.Create(ctx, in); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -199,35 +150,35 @@ func TestLapseLinksPastAnUnreadableSeal(t *testing.T) {
 	}
 }
 
-// A customer's erasure handling is stored; an approved erasure's kept count
-// is kept on its request; an undecided identity review is purged at its
-// retention like a decided one.
+// An org's erasure handling is stored; an approved erasure's kept count is
+// kept on its request; an undecided identity review is purged at its retention
+// like a decided one.
 func TestErasureSettingsAndReviewRetention(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	settings := NewOrgSettingsStore(pool, audit.NopRecorder{})
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
-	customer, err := customers.Create(ctx, orgID, sam, "Initech")
+	current, err := settings.Get(ctx, orgID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if customer.Settings.ErasureHandling != ErasureReview {
-		t.Errorf("new customer's erasure handling = %q, want review", customer.Settings.ErasureHandling)
+	if current.Session.ErasureHandling != ErasureReview {
+		t.Errorf("a new org's erasure handling = %q, want review", current.Session.ErasureHandling)
 	}
 	keep := ErasureKeep
-	saved, err := customers.SaveSettings(ctx, orgID, customer.ID, CustomerSettingsChange{ErasureHandling: &keep})
-	if err != nil || saved.Settings.ErasureHandling != ErasureKeep || saved.Settings.DataRetentionDays != customer.Settings.DataRetentionDays {
-		t.Errorf("SaveSettings(keep) = %+v, %v; want keep, the rest as it was", saved.Settings, err)
+	saved, err := settings.SaveSession(ctx, orgID, SessionSettingsChange{ErasureHandling: &keep})
+	if err != nil || saved.Session.ErasureHandling != ErasureKeep || saved.Session.DataRetentionDays != current.Session.DataRetentionDays {
+		t.Errorf("SaveSession(keep) = %+v, %v; want keep, the rest as it was", saved.Session, err)
 	}
 
-	req := createStarted(t, store, newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"}), "s1")
+	req := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s1")
 	if err := store.RecordOutcome(ctx, req, "s1", StatusNeedsReview, proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	got := onlyRequest(t, store, orgID)
-	if got.PurgeAt == nil || got.CompletedAt == nil || !got.PurgeAt.Equal(got.CompletedAt.Add(customer.Settings.DataRetention())) {
+	if got.PurgeAt == nil || got.CompletedAt == nil || !got.PurgeAt.Equal(got.CompletedAt.Add(current.Session.DataRetention())) {
 		t.Errorf("review's purge at = %v, want its retention after it went to review (%v)", got.PurgeAt, got.CompletedAt)
 	}
 
@@ -251,7 +202,7 @@ func TestCancelRollsBackWhenTheEngineRefuses(t *testing.T) {
 	ctx := context.Background()
 	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
-	req := createStarted(t, store, newStoredRequest(orgID, makeUser(t, pool, "sam@example.org"), Subject{Email: "anna@example.org"}), "s1")
+	req := createStarted(t, store, newStoredRequest(orgID, makeUser(t, pool, "sam@example.org"), externalSubject("anna@example.org")), "s1")
 	refused := errors.New("the engine decided first")
 	if ok, err := store.Cancel(ctx, req, func(context.Context) error { return refused }); ok || !errors.Is(err, refused) {
 		t.Fatalf("Cancel = %v, %v; want the engine's refusal", ok, err)

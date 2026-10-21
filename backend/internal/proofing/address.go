@@ -261,7 +261,7 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 
 		data := sessionEventData(req, req.Status)
 		data[webhookAddressKey] = addr
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionAddressAdded, &req.ID, data)
+		return enqueueRequestWebhook(ctx, q, req, EventSessionAddressAdded, data)
 	})
 	if err != nil {
 		return false, err

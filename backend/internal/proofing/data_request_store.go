@@ -94,7 +94,7 @@ func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, fl
 	return kind, nil
 }
 
-// Candidates is every session of req's customer that still
+// Candidates is every external session of req's org that still
 // holds personal data and has an outcome: what a data request is matched
 // against. The person's earlier data requests are among them, since each
 // holds who asked (an erasure covers them too), but only once decided: one
@@ -109,22 +109,22 @@ func (s *DataRequestStore) Candidates(ctx context.Context, req Request, requeste
 		return []Request{}, err
 	}
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3 AND r.identity_match_key = $6
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2 AND r.identity_match_key = $5
 			AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
-			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $4))
-			AND r.error_code IS DISTINCT FROM $5
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID, string(FlowIdentity), errorIdentityMismatch, key)
+			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $3))
+			AND r.error_code IS DISTINCT FROM $4
+		ORDER BY r.created_at`, req.OrganizationID, req.ID, string(FlowIdentity), errorIdentityMismatch, key)
 }
 
-// UnfinishedCandidates is every unfinished session of req's customer
+// UnfinishedCandidates is every unfinished external session of req's org
 // (pending, in progress, expired or cancelled) that still holds personal data:
 // what a data request matches by e-mail address (MatchEmail) or typed name
 // (MatchName), there being no proofed identity in them.
 func (s *DataRequestStore) UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.id <> $3
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2
 			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
-		ORDER BY r.created_at`, req.OrganizationID, req.CustomerID, req.ID)
+		ORDER BY r.created_at`, req.OrganizationID, req.ID)
 }
 
 // matchingLockKey namespaces TryLockMatching's advisory lock.
@@ -160,15 +160,15 @@ func (s *DataRequestStore) MatchChecks(ctx context.Context, req Request) (map[uu
 // identityKeyPurpose names the secret identity match keys are hashed with.
 const identityKeyPurpose = "identity_proofing_identity_match_key"
 
-// identityMatchKey is the keyed hash of req's customer, a family name,
-// compared as diploma.Normalize does, and a date of birth: equal for the same
-// person's sessions at one customer, without the name or date being stored,
-// and never equal across customers. nil when the name or date is missing or
-// unreadable.
+// identityMatchKey is the keyed hash of req's org, a family name, compared as
+// diploma.Normalize does, and a date of birth: equal for the same person's
+// external sessions at one org, without the name or date being stored, and
+// never equal across orgs. nil for a member's request, or when the name or
+// date is missing or unreadable.
 func (s *DataRequestStore) identityMatchKey(req Request, id SubjectIdentity) ([]byte, error) {
 	family := strings.Join(strings.Fields(diploma.Normalize(id.FamilyName)), " ")
 	birthDate, err := diploma.ParseDate(id.BirthDate)
-	if req.CustomerID == nil || family == "" || err != nil {
+	if !req.External() || family == "" || err != nil {
 		return nil, nil
 	}
 	if s.requests.cipher == nil {
@@ -179,7 +179,7 @@ func (s *DataRequestStore) identityMatchKey(req Request, id SubjectIdentity) ([]
 		return nil, fmt.Errorf("proofing: identity match key: %w", err)
 	}
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(req.CustomerID.String() + "\x00" + family + "\x00" + birthDate.Format(time.DateOnly)))
+	mac.Write([]byte(req.OrganizationID.String() + "\x00" + family + "\x00" + birthDate.Format(time.DateOnly)))
 	return mac.Sum(nil), nil
 }
 
@@ -202,10 +202,10 @@ func (s *DataRequestStore) RecordIdentityKey(ctx context.Context, req Request, i
 // so it is never read from the engine again.
 func (s *DataRequestStore) RecordMatchCheck(ctx context.Context, req Request, candidateID uuid.UUID, level MatchLevel) error {
 	if _, err := s.db.Exec(ctx, `INSERT INTO identity_proofing_request_match_checks
-			(organization_id, customer_id, request_id, candidate_request_id, level)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+			(organization_id, request_id, candidate_request_id, level)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
 		ON CONFLICT (request_id, candidate_request_id) DO NOTHING`,
-		req.OrganizationID, req.CustomerID, req.ID, candidateID, string(level)); err != nil {
+		req.OrganizationID, req.ID, candidateID, string(level)); err != nil {
 		return fmt.Errorf("proofing: match check request %s candidate %s: %w", req.ID, candidateID, err)
 	}
 	return nil
@@ -219,8 +219,8 @@ func (s *DataRequestStore) SaveMatches(ctx context.Context, req Request, matches
 		}
 		for _, m := range matches {
 			if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_request_matches
-					(organization_id, customer_id, request_id, matched_request_id, level)
-				VALUES ($1, $2, $3, $4, $5)`, req.OrganizationID, req.CustomerID, req.ID, m.RequestID, string(m.Level)); err != nil {
+					(organization_id, request_id, matched_request_id, level)
+				VALUES ($1, $2, $3, $4)`, req.OrganizationID, req.ID, m.RequestID, string(m.Level)); err != nil {
 				return fmt.Errorf("proofing: match request %s: %w", req.ID, err)
 			}
 		}

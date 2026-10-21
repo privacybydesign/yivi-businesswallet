@@ -22,7 +22,7 @@ import (
 
 const (
 	idempotencyHeader = "Idempotency-Key"
-	// maxIdempotencyKeyLength bounds the key a customer sends.
+	// maxIdempotencyKeyLength bounds the key an API caller sends.
 	maxIdempotencyKeyLength = 255
 	// maxIdempotentBody bounds the request body hashed; the handlers' own
 	// decoders cap it further.
@@ -45,7 +45,7 @@ type storedAnswer struct {
 	Body   []byte
 }
 
-// IdempotencyStore keeps customer-API answers by Idempotency-Key, sealed: an
+// IdempotencyStore keeps API answers by Idempotency-Key, sealed: an
 // answer can carry a hosted link and the subject's name and e-mail.
 type IdempotencyStore struct {
 	db     database.DB
@@ -58,13 +58,12 @@ func NewIdempotencyStore(db database.DB, cipher *crypto.Cipher) *IdempotencyStor
 
 // begin claims key for a call with hash. It answers nil to run the call, the
 // stored answer to replay it, or errIdempotencyMismatch / errIdempotencyInFlight.
-func (s *IdempotencyStore) begin(ctx context.Context, customerID uuid.UUID, key string, hash []byte) (*storedAnswer, error) {
+func (s *IdempotencyStore) begin(ctx context.Context, orgID uuid.UUID, key string, hash []byte) (*storedAnswer, error) {
 	if s.cipher == nil {
 		return nil, ErrNoEncryptionKey
 	}
-	tag, err := s.db.Exec(ctx, `INSERT INTO identity_proofing_idempotency_keys (organization_id, customer_id, key, request_hash)
-		SELECT c.organization_id, c.id, $2, $3 FROM identity_proofing_customers c WHERE c.id = $1
-		ON CONFLICT DO NOTHING`, customerID, key, hash)
+	tag, err := s.db.Exec(ctx, `INSERT INTO identity_proofing_idempotency_keys (organization_id, key, request_hash)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, orgID, key, hash)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: claim idempotency key: %w", err)
 	}
@@ -75,7 +74,7 @@ func (s *IdempotencyStore) begin(ctx context.Context, customerID uuid.UUID, key 
 	var status *int
 	var body []byte
 	err = s.db.QueryRow(ctx, `SELECT request_hash, status_code, response FROM identity_proofing_idempotency_keys
-		WHERE customer_id = $1 AND key = $2`, customerID, key).Scan(&stored, &status, &body)
+		WHERE organization_id = $1 AND key = $2`, orgID, key).Scan(&stored, &status, &body)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// Abandoned between the insert and this read: the caller retries.
@@ -96,14 +95,14 @@ func (s *IdempotencyStore) begin(ctx context.Context, customerID uuid.UUID, key 
 
 // finish stores a's answer to key, linked to the session the answer names so
 // that purging that session drops it too.
-func (s *IdempotencyStore) finish(ctx context.Context, customerID uuid.UUID, key string, a storedAnswer) error {
+func (s *IdempotencyStore) finish(ctx context.Context, orgID uuid.UUID, key string, a storedAnswer) error {
 	sealed, err := s.cipher.Encrypt(a.Body)
 	if err != nil {
 		return fmt.Errorf("proofing: seal idempotent answer: %w", err)
 	}
 	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_idempotency_keys
 		SET status_code = $3, response = $4, request_id = $5
-		WHERE customer_id = $1 AND key = $2`, customerID, key, a.Status, sealed, answerRequestID(a.Body)); err != nil {
+		WHERE organization_id = $1 AND key = $2`, orgID, key, a.Status, sealed, answerRequestID(a.Body)); err != nil {
 		return fmt.Errorf("proofing: store idempotent answer: %w", err)
 	}
 	return nil
@@ -126,9 +125,9 @@ func answerRequestID(body []byte) *uuid.UUID {
 }
 
 // abandon releases key after a call that failed, so a retry runs it again.
-func (s *IdempotencyStore) abandon(ctx context.Context, customerID uuid.UUID, key string) error {
+func (s *IdempotencyStore) abandon(ctx context.Context, orgID uuid.UUID, key string) error {
 	if _, err := s.db.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys
-		WHERE customer_id = $1 AND key = $2 AND status_code IS NULL`, customerID, key); err != nil {
+		WHERE organization_id = $1 AND key = $2 AND status_code IS NULL`, orgID, key); err != nil {
 		return fmt.Errorf("proofing: release idempotency key: %w", err)
 	}
 	return nil
@@ -155,7 +154,7 @@ func (a *answerRecorder) Header() http.Header         { return a.header }
 func (a *answerRecorder) Write(b []byte) (int, error) { return a.body.Write(b) }
 func (a *answerRecorder) WriteHeader(status int)      { a.status = status }
 
-// idempotent runs a customer-API POST at most once per Idempotency-Key: a retry
+// idempotent runs an API POST at most once per Idempotency-Key: a retry
 // with the same key and body gets the first successful answer again. A call
 // that errs or panics keeps no answer, so it can be retried. A call that may
 // have had its effect but has no stored answer (its answer could not be
@@ -181,8 +180,8 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		sum := sha256.Sum256(append([]byte(r.Method+" "+r.URL.Path+"\n"), body...))
-		customerID := callerFromContext(r.Context()).CustomerID
-		replay, err := h.idempotency.begin(r.Context(), customerID, key, sum[:])
+		orgID := callerFromContext(r.Context()).Org.ID
+		replay, err := h.idempotency.begin(r.Context(), orgID, key, sum[:])
 		switch {
 		case errors.Is(err, errIdempotencyMismatch):
 			return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "idempotency_key_reused", Message: "this Idempotency-Key was used for another request"}
@@ -201,9 +200,9 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 		// the recoverer answer the panic.
 		defer func() {
 			if p := recover(); p != nil {
-				if err := h.idempotency.abandon(context.WithoutCancel(r.Context()), customerID, key); err != nil {
+				if err := h.idempotency.abandon(context.WithoutCancel(r.Context()), orgID, key); err != nil {
 					slog.ErrorContext(r.Context(), "release idempotency key after a panic",
-						slog.String("customer_id", customerID.String()), slog.Any("error", err))
+						slog.String("org_id", orgID.String()), slog.Any("error", err))
 				}
 				panic(p)
 			}
@@ -213,18 +212,18 @@ func (h *Handler) idempotent(next respond.HandlerFunc) respond.HandlerFunc {
 			// A context of its own: the key must be released even if the call was cancelled.
 			// The caller still gets the call's own answer, so a key left in
 			// flight is logged here: the answer would hide it.
-			if abandonErr := h.idempotency.abandon(context.WithoutCancel(r.Context()), customerID, key); abandonErr != nil {
+			if abandonErr := h.idempotency.abandon(context.WithoutCancel(r.Context()), orgID, key); abandonErr != nil {
 				slog.ErrorContext(r.Context(), "release idempotency key after a failed call",
-					slog.String("customer_id", customerID.String()), slog.Any("error", abandonErr))
+					slog.String("org_id", orgID.String()), slog.Any("error", abandonErr))
 			}
 			return err
 		}
 		// The call had its effect: an answer that cannot be stored keeps the key
 		// in flight rather than freeing it, and the caller still gets its answer.
-		if err := h.idempotency.finish(context.WithoutCancel(r.Context()), customerID, key,
+		if err := h.idempotency.finish(context.WithoutCancel(r.Context()), orgID, key,
 			storedAnswer{Status: rec.status, Body: rec.body.Bytes()}); err != nil {
 			slog.ErrorContext(r.Context(), "store idempotent answer",
-				slog.String("customer_id", customerID.String()), slog.Any("error", err))
+				slog.String("org_id", orgID.String()), slog.Any("error", err))
 		}
 		w.WriteHeader(rec.status)
 		_, err = w.Write(rec.body.Bytes())

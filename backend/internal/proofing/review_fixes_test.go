@@ -103,7 +103,7 @@ func TestIdempotencyWithoutKeyIs409(t *testing.T) {
 	h := &Handler{idempotency: NewIdempotencyStore(nil, nil)}
 	r := httptest.NewRequest(http.MethodPost, "/proofing/sessions", strings.NewReader(`{}`))
 	r.Header.Set(idempotencyHeader, "k-1")
-	r = r.WithContext(context.WithValue(r.Context(), apiCallerKey{}, APIKeyCaller{CustomerID: uuid.New()}))
+	r = r.WithContext(context.WithValue(r.Context(), apiCallerKey{}, APIKeyCaller{Org: Org{ID: uuid.New()}}))
 	w := httptest.NewRecorder()
 	h.idempotent(func(http.ResponseWriter, *http.Request) error {
 		t.Error("the call ran without a key to store its answer")
@@ -114,9 +114,8 @@ func TestIdempotencyWithoutKeyIs409(t *testing.T) {
 	}
 }
 
-// A live link spends its customer's hosted budget; once it is over it only
-// spends its own, so an old link polled hard leaves the customer's live pages
-// alone.
+// A live link spends its org's hosted budget; once it is over it only spends
+// its own, so an old link polled hard leaves the org's live pages alone.
 func TestStaleHostedLinkSpendsItsOwnBudget(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
@@ -124,8 +123,8 @@ func TestStaleHostedLinkSpendsItsOwnBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hostedLimitKey: %v", err)
 	}
-	if !live.live || live.key != initech.ID.String() {
-		t.Errorf("waiting link's budget = %+v, want its customer's", live)
+	if !live.live || live.key != testOrg.ID.String() {
+		t.Errorf("waiting link's budget = %+v, want its org's", live)
 	}
 	if _, err := f.svc.DeclineHosted(context.Background(), token); err != nil {
 		t.Fatalf("DeclineHosted: %v", err)
@@ -134,7 +133,7 @@ func TestStaleHostedLinkSpendsItsOwnBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hostedLimitKey: %v", err)
 	}
-	if stale.live || stale.key == initech.ID.String() {
+	if stale.live || stale.key == testOrg.ID.String() {
 		t.Errorf("declined link's budget = %+v, want its own", stale)
 	}
 }
@@ -169,14 +168,4 @@ func TestExpectedSubjectMatchesTheChipsFullName(t *testing.T) {
 			}
 		})
 	}
-}
-
-// settingsChange sets every one of settings, as a whole-form save does; an
-// unset erasure handling is left as it is.
-func settingsChange(settings CustomerSettings) CustomerSettingsChange {
-	change := CustomerSettingsChange{SessionTTL: &settings.SessionTTL, DataRetentionDays: &settings.DataRetentionDays}
-	if settings.ErasureHandling != "" {
-		change.ErasureHandling = &settings.ErasureHandling
-	}
-	return change
 }

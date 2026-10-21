@@ -39,7 +39,7 @@ type RootRegisterer interface {
 // PageHeaderer is implemented by a feature that sets response headers on the
 // SPA's index document for the client-side routes it owns, such as a
 // Content-Security-Policy that depends on the page (a hosted page framed only
-// by its customer). It is called for every index fallback; it sets nothing
+// by its org). It is called for every index fallback; it sets nothing
 // for a path that is not its own.
 type PageHeaderer interface {
 	PageHeaders(r *http.Request, h http.Header)

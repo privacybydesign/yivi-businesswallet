@@ -21,11 +21,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
-// The public proofing API: a customer's backend, authenticated by one of the
-// customer's API keys (Authorization: Bearer yp_live_…), lists the customer's
-// flows, creates sessions for its subjects and reads their outcome. It acts
-// exactly as a member sending for the customer would, on the customer's
-// assigned flows, and is refused while the customer is paused.
+// The public proofing API: an org's software, authenticated by one of the
+// org's API keys (Authorization: Bearer yp_live_…), lists the org's flows,
+// creates sessions for external people and reads their outcome. It acts as an
+// admin sending to an external person would, on any flow of the org, and is
+// refused while the org's proofing is paused.
 
 type apiKeyResponse struct {
 	ID         uuid.UUID  `json:"id"`
@@ -51,11 +51,7 @@ type createdAPIKeyResponse struct {
 }
 
 func (h *Handler) listAPIKeys(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	keys, err := h.service.APIKeys(r.Context(), orgFromRequest(r).ID, id)
+	keys, err := h.service.APIKeys(r.Context(), orgFromRequest(r).ID)
 	if err != nil {
 		return mapError(err)
 	}
@@ -72,16 +68,12 @@ type createAPIKeyRequest struct {
 }
 
 func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
 	var body createAPIKeyRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
 	caller := auth.UserFromContext(r.Context())
-	key, secret, err := h.service.CreateAPIKey(r.Context(), orgFromRequest(r).ID, id, caller.ID, body.Name)
+	key, secret, err := h.service.CreateAPIKey(r.Context(), orgFromRequest(r).ID, caller.ID, body.Name)
 	if err != nil {
 		return mapError(err)
 	}
@@ -90,15 +82,11 @@ func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handler) revokeAPIKey(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
 	keyID, err := uuid.Parse(r.PathValue("keyID"))
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid API key id"}
 	}
-	key, err := h.service.RevokeAPIKey(r.Context(), orgFromRequest(r).ID, id, keyID)
+	key, err := h.service.RevokeAPIKey(r.Context(), orgFromRequest(r).ID, keyID)
 	if err != nil {
 		return mapError(err)
 	}
@@ -115,13 +103,13 @@ func callerFromContext(ctx context.Context) APIKeyCaller {
 
 const bearerPrefix = "Bearer "
 
-// requireAPIKey authenticates the customer key in the Authorization header.
+// requireAPIKey authenticates the key in the Authorization header.
 func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Handler {
 	return respond.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
 		raw, ok := strings.CutPrefix(r.Header.Get(headerAuthorization), bearerPrefix)
 		if !ok || raw == "" {
 			w.Header().Set(headerWWWAuthenticate, `Bearer realm="proofing"`)
-			return &respond.APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "send a customer API key as a Bearer token"}
+			return &respond.APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "send an API key as a Bearer token"}
 		}
 
 		caller, err := h.service.AuthenticateAPIKey(r.Context(), strings.TrimSpace(raw))
@@ -137,7 +125,7 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 			return err
 		}
 
-		if err := rateLimited(w, h.apiCalls, caller.CustomerID.String()); err != nil {
+		if err := rateLimited(w, h.apiCalls, caller.Org.ID.String()); err != nil {
 			return err
 		}
 
@@ -155,11 +143,11 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 	})
 }
 
-// limitSessions holds session creation to APISessionLimit per customer, on
+// limitSessions holds session creation to APISessionLimit per org, on
 // top of apiCallLimit: each one costs an engine session and maybe a mail.
 func (h *Handler) limitSessions(next respond.HandlerFunc) respond.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		if err := rateLimited(w, h.apiSessions, callerFromContext(r.Context()).CustomerID.String()); err != nil {
+		if err := rateLimited(w, h.apiSessions, callerFromContext(r.Context()).Org.ID.String()); err != nil {
 			return err
 		}
 		return next(w, r)
@@ -224,12 +212,15 @@ type apiFlowResponse struct {
 
 func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 	caller := callerFromContext(r.Context())
-	flows, err := h.service.CustomerFlows(r.Context(), caller.Org, caller.CustomerID, FlowsAllowed)
+	flows, err := h.service.Flows(r.Context(), caller.Org, FlowsAll)
 	if err != nil {
 		return mapError(err)
 	}
 	out := make([]apiFlowResponse, 0, len(flows))
 	for _, f := range flows {
+		if !externalCompletable(f.Flow) {
+			continue
+		}
 		attrs := f.RequestedAttributes
 		if attrs == nil {
 			attrs = []string{}
@@ -243,9 +234,9 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// apiSessionResponse is a session as the customer's backend sees it: the
+// apiSessionResponse is a session as the org's software sees it: the
 // outcome, and for an approved subject the name read off their document until
-// the customer's data retention clears it. Never other document data.
+// the org's data retention clears it. Never other document data.
 type apiSessionResponse struct {
 	// ID is the session's ps_ id (publicSessionID).
 	ID             string     `json:"id"`
@@ -300,7 +291,7 @@ type apiCreatedSessionResponse struct {
 }
 
 // apiCreateSessionRequest names the subject by address and optional name; an
-// absent flowId is the customer's default flow, and sendMail false leaves the
+// absent flowId is the org's default flow, and sendMail false leaves the
 // mail out.
 type apiCreateSessionRequest struct {
 	Email string `json:"email"`
@@ -308,7 +299,7 @@ type apiCreateSessionRequest struct {
 	// BirthDate (YYYY-MM-DD) with Name makes the session one for that person
 	// only: anyone else is rejected with IDENTITY_MISMATCH.
 	BirthDate string `json:"birthDate"`
-	// ReferencePhoto is the customer's own photo of the subject's face
+	// ReferencePhoto is the caller's own photo of the subject's face
 	// (standard base64 of a PNG, JPEG or WebP, at most maxReferencePhotoBytes),
 	// for a flow that matches the face without the chip read.
 	ReferencePhoto string `json:"referencePhoto"`
@@ -320,7 +311,7 @@ type apiCreateSessionRequest struct {
 	// subject opens it on their own device and starts there; nothing is mailed.
 	Hosted bool `json:"hosted"`
 	// RedirectURL is where a hosted page sends its subject once the session
-	// settles, on one of the customer's allowed redirect origins.
+	// settles, on one of the org's allowed redirect origins.
 	RedirectURL string `json:"redirectUrl"`
 }
 
@@ -338,8 +329,7 @@ func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error
 	}
 	sent, err := h.service.CreateRequest(r.Context(), caller.Org,
 		Requester{Name: caller.KeyName, APIKeyID: &caller.KeyID}, NewRequest{
-			Channel:    channel,
-			CustomerID: &caller.CustomerID, SubjectEmail: body.Email, SubjectName: body.Name,
+			Channel: channel, SubjectEmail: body.Email, SubjectName: body.Name,
 			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
 			RedirectURL: body.RedirectURL,
 		})
@@ -369,7 +359,7 @@ func (h *Handler) apiListSessions(w http.ResponseWriter, r *http.Request) error 
 		limit = n
 	}
 	caller := callerFromContext(r.Context())
-	reqs, next, err := h.service.CustomerRequestPage(r.Context(), caller.Scope(), r.URL.Query().Get("cursor"), limit)
+	reqs, next, err := h.service.ExternalRequestPage(r.Context(), caller.Org.ID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		return mapError(err)
 	}
@@ -385,7 +375,7 @@ func (h *Handler) apiListSessions(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-// apiMethodResponse is a headless start: the link the customer's UI shows for
+// apiMethodResponse is a headless start: the link the caller's UI shows for
 // the picked app, and when the session ends.
 type apiMethodResponse struct {
 	ID         string    `json:"id"`
@@ -402,7 +392,7 @@ func (h *Handler) apiStartMethod(w http.ResponseWriter, r *http.Request) error {
 	}
 	method := proofingprovider.Method(r.PathValue("method"))
 	caller := callerFromContext(r.Context())
-	started, err := h.service.StartHeadless(r.Context(), caller.Scope(), id, method)
+	started, err := h.service.StartHeadless(r.Context(), caller.Org.ID, id, method)
 	if err != nil {
 		return mapError(err)
 	}
@@ -428,7 +418,7 @@ func (h *Handler) apiMethodStatus(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.StoredCustomerRequest(r.Context(), caller.Scope(), id)
+	req, err := h.service.StoredExternalRequest(r.Context(), caller.Org.ID, id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -443,7 +433,7 @@ func (h *Handler) apiMethodStatus(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-// apiSessionID is the session a customer-API route names.
+// apiSessionID is the session an API route names.
 func apiSessionID(r *http.Request) (uuid.UUID, error) {
 	id, ok := parsePublicSessionID(r.PathValue("sessionID"))
 	if !ok {
@@ -507,7 +497,7 @@ func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, identity, err := h.service.RequestResult(r.Context(), caller.Scope(), id)
+	req, identity, err := h.service.RequestResult(r.Context(), caller.Org.ID, id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -528,8 +518,8 @@ func (h *Handler) diplomaResponses(r *http.Request, req Request) ([]diplomaRespo
 	return newDiplomaResponses(diplomas[req.ID]), nil
 }
 
-// requestResult is an org admin's view of a customer request's identity in the
-// wallet, in the customer API's shape plus the face images; each view is
+// requestResult is an org admin's view of an external request's identity in the
+// wallet, in the API's shape plus the face images; each view is
 // audited.
 func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
@@ -554,15 +544,15 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// adminResultResponse is the customer API's result as an admin reads it in the
+// adminResultResponse is the API's result as an admin reads it in the
 // wallet: for an approval, also the document's portrait, the live selfie
 // matched against it and the photos of the document's front and back. The
-// customer API never carries an image.
+// API never carries an image.
 type adminResultResponse struct {
 	apiResultResponse
 	Photo  *adminImage `json:"photo,omitempty"`
 	Selfie *adminImage `json:"selfie,omitempty"`
-	// ReferencePhoto is the customer's own photo the selfie was matched
+	// ReferencePhoto is the sender's own photo the selfie was matched
 	// against, for a flow without the chip read.
 	ReferencePhoto    *adminImage `json:"referencePhoto,omitempty"`
 	DocumentImage     *adminImage `json:"documentImage,omitempty"`
@@ -615,7 +605,7 @@ func (h *Handler) apiCancelSession(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.CancelRequest(r.Context(), caller.Scope(), id)
+	req, err := h.service.CancelRequest(r.Context(), caller.Org.ID, id)
 	if err != nil {
 		return mapError(err)
 	}
@@ -629,7 +619,7 @@ func (h *Handler) apiPurgeSession(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	if err := h.service.PurgeRequest(r.Context(), caller.Scope(), id); err != nil {
+	if err := h.service.PurgeRequest(r.Context(), caller.Org.ID, id); err != nil {
 		return mapError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -642,7 +632,7 @@ func (h *Handler) apiGetSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.CustomerRequest(r.Context(), caller.Scope(), id)
+	req, err := h.service.ExternalRequest(r.Context(), caller.Org.ID, id)
 	if err != nil {
 		return mapError(err)
 	}

@@ -20,7 +20,7 @@ type appSessionView struct {
 	ID           string         `json:"id"`
 	Method       session.Method `json:"method"`
 	RelyingParty string         `json:"relyingParty"`
-	// Branding is the look of the org or customer that requested the session;
+	// Branding is the look of the org that requested the session;
 	// absent, the app keeps its own.
 	Branding *Branding `json:"branding,omitempty"`
 	// Status lets the browser tell a finished session from a running one.

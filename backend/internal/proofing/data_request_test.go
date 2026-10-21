@@ -127,10 +127,10 @@ func newDataFixture(kind FlowKind) (fixture, *fakeDataRequests) {
 	return f, data
 }
 
-// heldSession is a settled customer session holding personal data.
+// heldSession is a settled external session holding personal data.
 func heldSession(proofedName string) Request {
 	return Request{
-		ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusApproved,
+		ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusApproved,
 		ProofedName: proofedName, session: &ipsSession{ID: "s-" + uuid.NewString(), Token: "t"},
 	}
 }
@@ -177,13 +177,13 @@ func TestMatchLevel(t *testing.T) {
 }
 
 // A proven person's data request is not approved: it goes to review with the
-// customer's sessions of that person.
+// org's external sessions of that person.
 func TestDataRequestReviewMatches(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	// The store gives only the sessions with the requester's identity match key.
 	anna := heldSession("Anna Jansen")
 	data.candidates = []Request{anna}
-	sent := f.sendForCustomer(t, "anna@example.org", "")
+	sent := f.sendExternal(t, "anna@example.org", "")
 	if sent.Request.FlowKind != FlowDataErasure {
 		t.Fatalf("sent kind = %q; want the flow's data_erasure", sent.Request.FlowKind)
 	}
@@ -212,10 +212,10 @@ func TestDataRequestReviewMatches(t *testing.T) {
 func TestDataRequestMatchesByEmail(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	anna := heldSession("Anna Jansen")
-	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "Anna@Example.org"}
-	other := Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectEmail: "piet@example.org"}
+	pending := Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectEmail: "Anna@Example.org"}
+	other := Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectEmail: "piet@example.org"}
 	data.candidates, data.unfinished = []Request{anna}, []Request{pending, other, anna}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 
 	f.reconcile(t)
@@ -231,11 +231,11 @@ func TestDataRequestMatchesByEmail(t *testing.T) {
 func TestDataRequestMatchesByName(t *testing.T) {
 	f, data := newDataFixture(FlowDataErasure)
 	unfinished := func(name string) Request {
-		return Request{ID: uuid.New(), OrganizationID: testOrg.ID, CustomerID: &initech.ID, Status: StatusPending, SubjectName: name}
+		return Request{ID: uuid.New(), OrganizationID: testOrg.ID, SubjectKind: SubjectExternal, Status: StatusPending, SubjectName: name}
 	}
 	named, partial, other, unnamed := unfinished("ANNA JANSEN"), unfinished("Jansen"), unfinished("Piet Jansen"), unfinished("")
 	data.unfinished = []Request{named, partial, other, unnamed}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 
 	f.reconcile(t)
@@ -260,7 +260,7 @@ func TestApprovedSkipsEmailMatches(t *testing.T) {
 	}
 }
 
-func TestDataRequestFlowCustomers(t *testing.T) {
+func TestDataFlowsNotForMembers(t *testing.T) {
 	f, _ := newDataFixture(FlowDataAccess)
 	f.settings.selection = FlowSelection{FlowIDs: []string{appFlow.ID, chipFlow.ID}, DefaultFlowID: appFlow.ID}
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()},
@@ -270,6 +270,9 @@ func TestDataRequestFlowCustomers(t *testing.T) {
 	}
 	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}); !errors.Is(err, ErrDataFlowForMember) {
 		t.Errorf("offering a data flow to members = %v; want ErrDataFlowForMember", err)
+	}
+	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{DefaultFlowID: chipFlow.ID}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a data flow as the default = %v; want ErrInvalidInput", err)
 	}
 }
 
@@ -282,6 +285,10 @@ func TestSaveFlowKindNeedsIdentity(t *testing.T) {
 	f.settings.selection = FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}
 	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrDataFlowForMember) {
 		t.Errorf("a flow members may send = %v; want ErrDataFlowForMember", err)
+	}
+	f.settings.selection = FlowSelection{DefaultFlowID: chipFlow.ID}
+	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("the default flow = %v; want ErrInvalidInput", err)
 	}
 	f.settings.selection = FlowSelection{}
 	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, "everything"); !errors.Is(err, ErrInvalidInput) {
@@ -302,7 +309,7 @@ func inReview(t *testing.T, kind FlowKind) (fixture, *fakeDataRequests, Request,
 	data.candidates = []Request{first, second}
 	data.matched = []Request{first, second}
 	data.checks = map[uuid.UUID]MatchLevel{first.ID: MatchStrong}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 	if req := f.reconcile(t); req.Status != StatusNeedsReview {
 		t.Fatalf("status = %q; want needs_review", req.Status)
@@ -380,15 +387,13 @@ func TestApprovedTakesSureMatches(t *testing.T) {
 	}
 }
 
-// erasureInReview is a "delete my data" request of a customer whose erasures
-// are decided as handling says, proven, matching a strong and a probable
+// erasureInReview is a "delete my data" request of an org whose erasures are
+// decided as handling says, proven, matching a strong and a probable
 // session, and with unsure an unfinished one sent to the same address.
 func erasureInReview(t *testing.T, handling ErasureHandling, unsure bool) (fixture, *fakeDataRequests, Request) {
 	t.Helper()
 	f, data := newDataFixture(FlowDataErasure)
-	customer := f.customers.byID[initech.ID]
-	customer.Settings.ErasureHandling = handling
-	f.customers.byID[initech.ID] = customer
+	f.orgSettings.settings.Session.ErasureHandling = handling
 	first, second := heldSession("Anna Jansen"), heldSession("Anna Jansen")
 	data.candidates = []Request{first, second}
 	data.matched = []Request{first, second}
@@ -396,12 +401,12 @@ func erasureInReview(t *testing.T, handling ErasureHandling, unsure bool) (fixtu
 	if unsure {
 		data.unfinished = []Request{{ID: uuid.New(), SubjectEmail: "anna@example.org", Status: StatusPending}}
 	}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 	return f, data, f.reconcile(t)
 }
 
-// A customer can have its erasures decided without a reviewer: erased at once
+// An org can have its erasures decided without a reviewer: erased at once
 // when every match is sure, the unsure ones left to a reviewer, or all kept
 // under a legal duty.
 func TestErasureHandling(t *testing.T) {
@@ -489,10 +494,10 @@ func TestErasedAccessExportsNothing(t *testing.T) {
 	}
 	until := time.Now().Add(DataExportWindow)
 	f.requests.stored.DataExportUntil = &until
-	if err := f.svc.PurgeRequest(ctx, initechScope, req.ID); err != nil {
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, req.ID); err != nil {
 		t.Fatalf("PurgeRequest: %v", err)
 	}
-	if _, err := f.svc.CustomerDataExport(ctx, initechScope, req.ID); !errors.Is(err, ErrExportUnavailable) {
+	if _, err := f.svc.ExternalDataExport(ctx, testOrg.ID, req.ID); !errors.Is(err, ErrExportUnavailable) {
 		t.Errorf("export after erasure = %v, want %v", err, ErrExportUnavailable)
 	}
 }
@@ -585,7 +590,7 @@ func TestExportPersonalOnlyStrong(t *testing.T) {
 func TestMatchingRunsOnce(t *testing.T) {
 	f, data := newDataFixture(FlowDataAccess)
 	data.candidates = []Request{heldSession("Anna Jansen")}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 	data.matchingBusy = true
 
@@ -610,7 +615,7 @@ func TestCandidateReadOnce(t *testing.T) {
 	f, data := newDataFixture(FlowDataAccess)
 	first, second := heldSession(""), heldSession("")
 	data.candidates = []Request{first, second}
-	f.sendForCustomer(t, "anna@example.org", "")
+	f.sendExternal(t, "anna@example.org", "")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial, Name: "Anna Jansen"}
 	data.saveErr = errors.New("database down")
 
@@ -636,10 +641,10 @@ func TestCandidateReadOnce(t *testing.T) {
 	}
 }
 
-// Bob proofs on the link a customer sent Alice, then asks for his own data:
+// Bob proofs on the link an org sent Alice, then asks for his own data:
 // his session matches strongly (it holds his identity), but it was never
 // shown to be Alice's, so the export carries his identity and not the name
-// and address the customer typed for Alice. A session approved for the one
+// and address the sender typed for Alice. A session approved for the one
 // person it was sent to does carry them. (The fake engine proofs everyone as
 // Anna Jansen: Bob, here.)
 func TestExportContactOnlyWhenAddressed(t *testing.T) {
@@ -685,12 +690,12 @@ func TestExportContactOnlyWhenAddressed(t *testing.T) {
 	}
 }
 
-// A customer's session keeps who it proofed as an identity match key once it
-// is decided, rejected included; a member's session does not.
+// An external person's session keeps who it proofed as an identity match key
+// once it is decided, rejected included; a member's session does not.
 func TestOutcomeRecordsIdentityKey(t *testing.T) {
 	tests := []struct {
 		name     string
-		customer bool
+		external bool
 		result   proofingprovider.Result
 		want     bool
 	}{
@@ -701,8 +706,8 @@ func TestOutcomeRecordsIdentityKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f, data := newDataFixture(FlowIdentity)
-			if tt.customer {
-				f.sendForCustomer(t, "anna@example.org", "")
+			if tt.external {
+				f.sendExternal(t, "anna@example.org", "")
 			} else {
 				f.send(t)
 			}

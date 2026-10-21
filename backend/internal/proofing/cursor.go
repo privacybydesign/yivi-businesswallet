@@ -8,14 +8,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// RequestCursor is where a page of a customer's requests ends: the last one's
+// RequestCursor is where a page of an org's external requests ends: the last one's
 // creation and id, newest first.
 type RequestCursor struct {
 	CreatedAt time.Time
 	ID        uuid.UUID
 }
 
-// Page sizes of the customer API's session list.
+// Page sizes of the API's session list.
 const (
 	defaultPageSize = 50
 	maxPageSize     = 100

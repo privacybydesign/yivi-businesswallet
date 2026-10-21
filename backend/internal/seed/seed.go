@@ -35,7 +35,7 @@ const (
 	vogTestEmail      = "daan.smit@example.test"
 )
 
-// The orgs that run identity proofing for their own customers (proofing.go).
+// The orgs that run identity proofing for external people (proofing.go).
 const (
 	radboudSlug = "radboud-universiteit"
 	asrSlug     = "asr"
@@ -414,8 +414,8 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	// The identity proofing use cases the proofing orgs run for their customers.
-	if err := seedProofing(ctx, pool, orgsBySlug, usersByEmail["admin@yivi.app"].ID); err != nil {
+	// The identity proofing use cases the proofing orgs run for external people.
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
 		return err
 	}
 

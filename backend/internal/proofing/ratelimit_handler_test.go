@@ -51,15 +51,13 @@ func TestUnknownCredentialsLimited(t *testing.T) {
 // another guess is refused. The hosted page's guesses count against it too.
 func TestValidCredentialsPassSpentFailures(t *testing.T) {
 	f := newFixture()
-	ctx := context.Background()
 	_, token := f.sendHosted(t)
-	if _, err := f.svc.SaveCustomerRedirectOrigins(ctx, testOrg.ID, initech.ID,
-		[]string{"https://portal.initech.example"}); err != nil {
-		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	const secret = apiKeyPrefix + "valid"
 	f.svc.apiKeys = oneValidKey{secret: secret, caller: APIKeyCaller{
-		KeyID: uuid.New(), CustomerID: initech.ID, Org: testOrg, Scopes: APIKeyScopes,
+		KeyID: uuid.New(), Org: testOrg, Scopes: APIKeyScopes,
 	}}
 	pass := func(next http.Handler) http.Handler { return next }
 	h := NewHandler(f.svc, pass, pass)
@@ -109,11 +107,9 @@ func TestValidCredentialsPassSpentFailures(t *testing.T) {
 // trusted proxy reports, not the proxy.
 func TestHostedSourceLimited(t *testing.T) {
 	f := newFixture()
-	ctx := context.Background()
 	_, token := f.sendHosted(t)
-	if _, err := f.svc.SaveCustomerRedirectOrigins(ctx, testOrg.ID, initech.ID,
-		[]string{"https://portal.initech.example"}); err != nil {
-		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	pass := func(next http.Handler) http.Handler { return next }
 	h := NewHandler(f.svc, pass, pass)
