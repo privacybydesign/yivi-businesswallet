@@ -16,6 +16,7 @@ import {
 vi.mock("./http", () => ({ request: vi.fn(), absoluteApiUrl: vi.fn() }));
 
 const RETENTION_DAYS = 31;
+const SESSION_TTL_SECONDS = 600;
 
 // The schema the last request was made with.
 function lastSchema(): z.ZodType {
@@ -63,6 +64,7 @@ const hostedPage = {
     addressMode: "off",
     kind: "identity",
     retentionDays: RETENTION_DAYS,
+    sessionTtlSeconds: SESSION_TTL_SECONDS,
   },
   diplomas: [],
 };
@@ -122,6 +124,25 @@ describe("a value the backend adds", () => {
     expect(schema.parse({ ...hostedPage, flow })).toMatchObject({
       flow: { diplomaMode: "required", kind: "identity" },
     });
+  });
+});
+
+// The hosted page names how long the session ran when it ends unfinished, so
+// the schema must carry the lifetime the server works out.
+describe("the session lifetime a subject is told", () => {
+  beforeEach(() => {
+    vi.mocked(request).mockReset();
+  });
+
+  it("comes with the hosted page's flow", async () => {
+    await getHostedProofing("token");
+    const schema = lastSchema();
+    expect(schema.parse(hostedPage)).toMatchObject({
+      flow: { sessionTtlSeconds: SESSION_TTL_SECONDS },
+    });
+    const flow: Record<string, unknown> = { ...hostedPage.flow };
+    delete flow.sessionTtlSeconds;
+    expect(() => schema.parse({ ...hostedPage, flow })).toThrow();
   });
 });
 

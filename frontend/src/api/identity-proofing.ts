@@ -1320,6 +1320,9 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
+    // How long a started session runs, as the page tells the subject when it
+    // ends unfinished.
+    sessionTtlSeconds: z.number(),
   }),
   // The diploma extracts the subject added.
   diplomas: z.array(hostedDiplomaSchema),

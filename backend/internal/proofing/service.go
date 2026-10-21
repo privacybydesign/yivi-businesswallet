@@ -622,6 +622,16 @@ func flowSessionTTL(f proofingprovider.Flow, orgTTL time.Duration) time.Duration
 	return time.Duration(f.SessionTTLSeconds) * time.Second
 }
 
+// sessionTTL is how long a session of f runs under s: the flow's own lifetime
+// when it sets one, else the org's, else SessionTTL.
+func (s Settings) sessionTTL(f proofingprovider.Flow) time.Duration {
+	orgTTL := SessionTTL
+	if s.Session.SessionTTL != 0 {
+		orgTTL = s.Session.SessionTTL
+	}
+	return flowSessionTTL(f, orgTTL)
+}
+
 // Requester is who sends a request: a member, or the org's software calling
 // the API.
 type Requester struct {

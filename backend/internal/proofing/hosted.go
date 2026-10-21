@@ -254,15 +254,10 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 			return Sent{}, ErrFlowNotCompletable
 		}
 	}
-	ttl := SessionTTL
-	if settings.Session.SessionTTL != 0 {
-		ttl = settings.Session.SessionTTL
-	}
-	ttl = flowSessionTTL(flow, ttl)
 	tenant := orgTenant(req.OrganizationID)
 	retention := engineRetention(&settings, req.FlowKind, req.RetentionOverride)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
-		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
+		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: settings.sessionTTL(flow), Method: method,
 		Language: string(req.Language), Retention: retention, ReferencePhoto: photo,
 	})
 	if err != nil {

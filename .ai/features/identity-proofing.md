@@ -1165,7 +1165,9 @@ the engine's status live (`devices[].current`/`away`) as `waiting`, `connected` 
 `deepLinkExpiresAt` or the last code lapses), hides it while `connected`, and
 mints a handover QR the moment the app is `away`; the app coming back drops that
 code (the engine cancels the grant). If `app` cannot be read it falls back to the
-manual "Show a new code", which the hosted page still uses.
+page's own code. That code, like the hosted page's, lasts the whole session, so
+neither page offers a new one while it shows; a hosted page opened with no code
+in the window (a reload) still has "Show a new code".
 
 ## 7. Hosted link
 
@@ -1247,8 +1249,15 @@ retention; the branding is the flow's own over the org's). Once `Session` report
 to its parent for each allowed origin (never `*`), then redirects
 (`location.replace`, so back does not land on the link and redirect again) with
 `?session=&status=` when there is a redirect; otherwise it shows its own
-outcome (`cancelled` included). A data request in review is not handed back:
-the page says it is in review. The page's language is the request's
+outcome (`cancelled` included). A session that ran out, or a link that lapsed
+unstarted, shows "This check has ended" instead (`CheckEnded` in `proof.tsx`):
+nothing was shared, for a started session how long it ran (`flow.sessionTtlSeconds`
+of the hosted view, the flow's lifetime else the org's, read when the page
+loads, so a lifetime changed mid-session shows the new one), and who to ask for
+a new link, with the support contact from the branding (the flow's, else the
+org's; a mail or web address is a link, a web one in a new tab because the page
+can be framed). A data request in review is not handed back: the page says it
+is in review. The page's language is the request's
 `language` (also passed to the engine at start), then the browser's, then English
 (`lib/hosted-completion.ts`). It switches i18n without persisting the wallet's
 stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the

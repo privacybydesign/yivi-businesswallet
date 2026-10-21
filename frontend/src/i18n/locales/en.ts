@@ -803,7 +803,7 @@ export const en = {
           "Scan this code with the Idem app to carry on where the session was, on the same phone or another one.",
         newCodeLoading: "Getting a new code…",
         newCodeHint:
-          "App closed, code expired, or another phone? A new code carries on where the session was.",
+          "App closed or another phone? A new code carries on where the session was.",
       },
       yiviEnded: "The Yivi app session ended: {{reason}}",
       yiviShared: "Shared from the Yivi app. Finishing the verification…",
@@ -1573,6 +1573,15 @@ export const en = {
     },
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",
+    ended: {
+      title: "This check has ended",
+      started:
+        "It was not finished within {{minutes}} minutes, so nothing was shared with {{name}}.",
+      notStarted:
+        "It was not started in time, so nothing was shared with {{name}}.",
+      retryTitle: "Want to try again?",
+      retryHint: "Ask {{name}} for a new link.",
+    },
     dataRequest: {
       data_access: {
         intro:

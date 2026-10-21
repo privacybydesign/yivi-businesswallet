@@ -1774,6 +1774,42 @@ export function ttlMinutes(seconds: number): number {
   return Math.round(seconds / SECONDS_IN_MINUTE);
 }
 
+const MAIL_ADDRESS = /^[^\s@]+@[^\s@]+$/;
+const MAILTO_SCHEME = "mailto:";
+const WEB_PROTOCOLS = ["http:", "https:"];
+
+interface SupportLink {
+  href: string;
+  kind: "mail" | "web";
+}
+
+// Where a support contact leads: a mail address opens the mail app and a web
+// address its page. Anything else (a phone number, opening hours) is text.
+export function supportContactLink(contact: string): SupportLink | undefined {
+  const value = contact.trim();
+
+  // Not URL.canParse: Safari 16 lacks it.
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
+  }
+
+  // Before the mail test: a /@handle path or user@host matches MAIL_ADDRESS.
+  if (url && WEB_PROTOCOLS.includes(url.protocol)) {
+    return { href: url.href, kind: "web" };
+  }
+
+  const address = value.toLowerCase().startsWith(MAILTO_SCHEME)
+    ? value.slice(MAILTO_SCHEME.length)
+    : value;
+
+  return MAIL_ADDRESS.test(address)
+    ? { href: `${MAILTO_SCHEME}${address}`, kind: "mail" }
+    : undefined;
+}
+
 // How long a mailed session runs on a flow: its own lifetime, else the
 // organisation's, which is unknown until the settings are read.
 export function mailLifetimeMinutes(

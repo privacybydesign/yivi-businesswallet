@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
 import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
 import type {
@@ -108,6 +108,7 @@ import {
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
   SUBSTANTIAL_FACE_MATCH_FLOOR,
+  supportContactLink,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
 
@@ -2221,6 +2222,59 @@ describe("mailLifetimeMinutes", () => {
   it("is unknown until the organisation's settings are read", () => {
     expect(mailLifetimeMinutes({}, undefined)).toBeUndefined();
     expect(mailLifetimeMinutes({ sessionTtlSeconds: 120 }, undefined)).toBe(2);
+  });
+});
+
+describe("supportContactLink", () => {
+  it.each([
+    "help@example.nl",
+    "  help@example.nl ",
+    "mailto:help@example.nl",
+    "MAILTO:help@example.nl",
+  ])("opens %j in the mail app, never as a mailto: prefix", (contact) => {
+    expect(supportContactLink(contact)).toEqual({
+      href: "mailto:help@example.nl",
+      kind: "mail",
+    });
+  });
+
+  it("does not link a mailto: prefix without an address", () => {
+    expect(supportContactLink("mailto:help")).toBeUndefined();
+  });
+
+  it.each([
+    ["https://example.nl/help", "https://example.nl/help"],
+    ["http://example.nl", "http://example.nl/"],
+    ["https://mastodon.social/@yivi", "https://mastodon.social/@yivi"],
+    ["https://medium.com/@yivi/help", "https://medium.com/@yivi/help"],
+    ["https://user@example.nl", "https://user@example.nl/"],
+  ])("opens %s as a web link, also with an @", (contact, href) => {
+    expect(supportContactLink(contact)).toEqual({ href, kind: "web" });
+  });
+
+  it("parses without URL.canParse, which Safari 16 lacks", () => {
+    const canParse = vi.spyOn(URL, "canParse");
+    try {
+      supportContactLink("https://example.nl");
+      supportContactLink("030 123 4567");
+      supportContactLink("");
+
+      expect(canParse).not.toHaveBeenCalled();
+    } finally {
+      canParse.mockRestore();
+    }
+  });
+
+  it("leaves a phone number or opening hours as text", () => {
+    expect(supportContactLink("030 123 4567")).toBeUndefined();
+    expect(supportContactLink("Mon to Fri, 9:00 to 17:00")).toBeUndefined();
+    expect(supportContactLink("")).toBeUndefined();
+  });
+
+  it("never links a script or a file", () => {
+    expect(supportContactLink("javascript:alert(1)")).toBeUndefined();
+    expect(supportContactLink("data:text/html,<b>x</b>")).toBeUndefined();
+    expect(supportContactLink("file:///etc/passwd")).toBeUndefined();
   });
 });
 

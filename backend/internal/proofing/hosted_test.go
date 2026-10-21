@@ -345,3 +345,37 @@ func TestHostedViewCarriesReasons(t *testing.T) {
 		t.Errorf("hosted view = %s, want %s", body, withReasons)
 	}
 }
+
+// The hosted page names how long the session ran when it ends: the flow's own
+// lifetime, else the org's, else the default.
+func TestHostedViewSessionTTL(t *testing.T) {
+	d := newDiplomaFixture(DiplomasOff)
+	_, token := d.sendHosted(t)
+	view := func() string {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		return w.Body.String()
+	}
+
+	if body, want := view(), `"sessionTtlSeconds":600`; !strings.Contains(body, want) {
+		t.Errorf("hosted view with the default lifetime = %s, want %s", body, want)
+	}
+
+	orgTTL := 5 * time.Minute
+	if _, err := d.svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{SessionTTL: &orgTTL}); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	if body, want := view(), `"sessionTtlSeconds":300`; !strings.Contains(body, want) {
+		t.Errorf("hosted view under the org's lifetime = %s, want %s", body, want)
+	}
+
+	i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == appFlow.ID })
+	d.ips.flows[i].SessionTTLSeconds = 120
+	if body, want := view(), `"sessionTtlSeconds":120`; !strings.Contains(body, want) {
+		t.Errorf("hosted view under the flow's lifetime = %s, want %s", body, want)
+	}
+}

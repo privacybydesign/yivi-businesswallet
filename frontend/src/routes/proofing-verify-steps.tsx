@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import type { TFunction } from "i18next";
@@ -373,7 +380,9 @@ export function StepRegion({
 
 // The running session: the app's QR code and link with a countdown, until
 // the request settles or the session runs out. onRestart, when set, offers a
-// new session after one ended; outcomeActions go under the outcome.
+// new session after one ended; outcomeActions go under the outcome. A page
+// that gives ended shows it instead of the outcome once the session ran out,
+// and is told through onEnded.
 export function Session({
   target,
   initial,
@@ -382,6 +391,8 @@ export function Session({
   method,
   onRestart,
   outcomeActions,
+  ended,
+  onEnded,
   onSettled,
   diplomaMode = "off",
   diplomas = [],
@@ -397,6 +408,8 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
+  ended?: React.ReactNode;
+  onEnded?: () => void;
   // Called with the progress once the session has an outcome, and the subject
   // is done adding diploma extracts when it asks for them; again whenever
   // that outcome changes (a data request's review decided).
@@ -445,6 +458,14 @@ export function Session({
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
+  const over =
+    ended !== undefined && (current.status === "expired" || view === "expired");
+  // Before paint, so the page drops its stepper in the same frame.
+  useLayoutEffect(() => {
+    if (over) {
+      onEnded?.();
+    }
+  }, [over, onEnded]);
   const [link, setLink] = useState(deepLink);
   const fresh = useNewClaimLinkMutation(target);
   const newCode = (
@@ -492,6 +513,9 @@ export function Session({
       />
     );
   }
+  if (over) {
+    return <>{ended}</>;
+  }
   if (showsOutcome) {
     return (
       <SessionOutcome
@@ -505,7 +529,7 @@ export function Session({
     return <Expired onRestart={onRestart} />;
   }
 
-  // The page's own link with the manual "new code": the hosted page's view,
+  // The page's own link, which lasts the session: the hosted page's view,
   // and the on-screen one's when where the phone is cannot be read.
   const manualIdem = link ? (
     <>
@@ -520,7 +544,6 @@ export function Session({
         {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={secondsLeft} />
-      {newCode}
     </>
   ) : (
     // The link was shown in another window: the app carries on there,

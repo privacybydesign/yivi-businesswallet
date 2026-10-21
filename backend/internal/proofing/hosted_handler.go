@@ -243,6 +243,8 @@ type hostedViewResponse struct {
 		// RetentionDays is how many days the session's data is kept at most:
 		// subjectRetentionDays, with the flow's override at send.
 		RetentionDays int `json:"retentionDays"`
+		// SessionTTLSeconds is how long a session of the flow runs once started.
+		SessionTTLSeconds int `json:"sessionTtlSeconds"`
 	} `json:"flow"`
 	// Diplomas are the extracts the subject added, as the page lists them.
 	Diplomas []hostedDiplomaResponse `json:"diplomas"`
@@ -358,6 +360,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.AddressMode = addressModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
+	out.Flow.SessionTTLSeconds = int(st.sessionTTL(f).Seconds())
 
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {

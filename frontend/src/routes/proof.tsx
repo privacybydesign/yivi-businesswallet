@@ -33,6 +33,8 @@ import {
   hostedErrorMessage,
   isProofingLive,
   methodChoices,
+  supportContactLink,
+  ttlMinutes,
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
@@ -118,6 +120,8 @@ function HostedFlow({
     page.method === "yivi_app" ? "yivi_app" : "idem_app",
   );
   const [started, setStarted] = useState<HostedStart>();
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const onEnded = useCallback(() => setSessionEnded(true), []);
   const start = useStartHostedMutation(token);
   const decline = useDeclineHostedMutation(token);
   const [confirmDecline, setConfirmDecline] = useState(false);
@@ -188,6 +192,8 @@ function HostedFlow({
     ? hostedErrorMessage(start.error, t)
     : undefined;
   const stage = currentStage({ step, inAddress, inDiplomas });
+  const showsEnded =
+    step === "session" && (sessionEnded || page.status === "expired");
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -209,10 +215,12 @@ function HostedFlow({
             })}
           </p>
         )}
-        <Stepper
-          steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-          current={stages.indexOf(stage)}
-        />
+        {!showsEnded && (
+          <Stepper
+            steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
+            current={stages.indexOf(stage)}
+          />
+        )}
         <StepRegion step={stage} headingLevel="h1">
           {step === "overview" && (
             <Overview
@@ -292,6 +300,18 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
+              ended={
+                <CheckEnded
+                  name={organization.name}
+                  contact={organization.branding.supportContact}
+                  minutes={
+                    page.started || started !== undefined
+                      ? ttlMinutes(flow.sessionTtlSeconds)
+                      : undefined
+                  }
+                />
+              }
+              onEnded={onEnded}
               onSettled={settle}
               dataRequest={dataRequest}
               outcomeActions={
@@ -317,6 +337,60 @@ function HostedFlow({
 }
 
 type DataKind = Exclude<FlowKind, "identity">;
+
+// What the person sees once the check ran out: nothing was shared, and who to
+// ask for a new link. minutes is how long the session ran; absent when the
+// link was never started.
+function CheckEnded({
+  name,
+  contact,
+  minutes,
+}: {
+  name: string;
+  contact: string;
+  minutes: number | undefined;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const link = supportContactLink(contact);
+  // The page can be framed, and a plain link would replace it inside the frame.
+  const newTab = link?.kind === "web";
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-ink text-[20px] font-bold">
+          {t("proofLink.ended.title")}
+        </h1>
+        <p className="text-ink-soft text-[14px]">
+          {minutes === undefined
+            ? t("proofLink.ended.notStarted", { name })
+            : t("proofLink.ended.started", { name, minutes })}
+        </p>
+      </div>
+      <div className="rounded-yivi bg-surface-2 flex flex-col gap-2 p-4">
+        <span className="text-ink font-semibold">
+          {t("proofLink.ended.retryTitle")}
+        </span>
+        <span className={`${HINT} text-[14px]`}>
+          {t("proofLink.ended.retryHint", { name })}
+        </span>
+        {link !== undefined ? (
+          <a
+            href={link.href}
+            target={newTab ? "_blank" : undefined}
+            rel={newTab ? "noreferrer" : undefined}
+            className="text-link font-semibold hover:underline"
+          >
+            {contact}
+          </a>
+        ) : (
+          contact !== "" && (
+            <span className="text-ink font-semibold">{contact}</span>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
 
 // What a data request's person sees once their identity check settled: that
 // the request awaits the org's review, its outcome, and an approved "see

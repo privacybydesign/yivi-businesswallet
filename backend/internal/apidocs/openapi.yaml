@@ -7624,8 +7624,8 @@ paths:
         is rate-limited per organisation, across all its links. `organization` (its `name`,
         `branding`, whose `logoUri` is this
         link's logo route, and `dataRetentionDays`), `flow` (its `name`, `requestedAttributes`,
-        `attributeReasons`, `requiredAssuranceLevel`, `yiviAvailable`, `diplomaMode` and `retentionDays`, the most
-        days the session's data is kept), the extracts added so far
+        `attributeReasons`, `requiredAssuranceLevel`, `yiviAvailable`, `diplomaMode`, `retentionDays`, the most
+        days the session's data is kept, and `sessionTtlSeconds`, how long a started session runs), the extracts added so far
         (`diplomas`), and the progress: `status`, `errorCode`, `method`, `started`,
         `completedAt`, `diplomasUntil` and `linkExpiresAt` (the link's end until started, then
         the session's). `sessionId` is the API's id for the session; `redirectUrl` (absent
@@ -7680,6 +7680,7 @@ paths:
                       diplomaMode: "off"
                       addressMode: "off"
                       retentionDays: 31
+                      sessionTtlSeconds: 600
                     diplomas: []
         '403':
           $ref: '#/components/responses/ProofingForbidden'
@@ -12361,7 +12362,13 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays]
+                sessionTtlSeconds:
+                  type: integer
+                  description: >-
+                    How long a session of the flow runs once started: the flow's own lifetime when
+                    it sets one, else the organisation's. What the page tells the subject when it
+                    ends unfinished.
+              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays, sessionTtlSeconds]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.

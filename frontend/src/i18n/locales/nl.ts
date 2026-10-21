@@ -822,7 +822,7 @@ export const nl: Translation<typeof en> = {
           "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",
         newCodeLoading: "Nieuwe code ophalen…",
         newCodeHint:
-          "App gesloten, code verlopen of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
+          "App gesloten of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
       },
       yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
       yiviShared: "Gedeeld vanuit de Yivi-app. De verificatie wordt afgerond…",
@@ -1604,6 +1604,15 @@ export const nl: Translation<typeof en> = {
     },
     redirecting: "Je wordt teruggestuurd…",
     poweredBy: "Mogelijk gemaakt door Yivi",
+    ended: {
+      title: "Deze controle is beëindigd",
+      started:
+        "De controle is niet binnen {{minutes}} minuten afgerond, dus er is niets gedeeld met {{name}}.",
+      notStarted:
+        "De controle is niet op tijd gestart, dus er is niets gedeeld met {{name}}.",
+      retryTitle: "Opnieuw proberen?",
+      retryHint: "Vraag {{name}} om een nieuwe link.",
+    },
     dataRequest: {
       data_access: {
         intro:
