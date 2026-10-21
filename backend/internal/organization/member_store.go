@@ -33,9 +33,9 @@ func (s *Store) AddMembership(ctx context.Context, orgID, userID uuid.UUID, role
 }
 
 func (s *Store) GetMembership(ctx context.Context, userID, orgID uuid.UUID) (Membership, error) {
-	const q = `SELECT user_id, organization_id, role, job_title, department_id FROM memberships WHERE user_id = $1 AND organization_id = $2`
+	const q = `SELECT user_id, organization_id, role, job_title, department_id, can_review FROM memberships WHERE user_id = $1 AND organization_id = $2`
 	var m Membership
-	err := s.db.QueryRow(ctx, q, userID, orgID).Scan(&m.UserID, &m.OrganizationID, &m.Role, &m.JobTitle, &m.DepartmentID)
+	err := s.db.QueryRow(ctx, q, userID, orgID).Scan(&m.UserID, &m.OrganizationID, &m.Role, &m.JobTitle, &m.DepartmentID, &m.CanReview)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Membership{}, ErrNotMember
 	}
@@ -131,7 +131,7 @@ WITH entries AS (
 	       u.email, u.preferred_name, u.given_names, u.last_name,
 	       m.role, m.job_title, m.department_id, d.name AS department_name,
 	       NULL::timestamptz AS expires_at, NULL::uuid AS invited_by,
-	       m.phone, m.identity_verified_at, m.member_type, m.external_organisation,
+	       m.phone, m.can_review, m.identity_verified_at, m.member_type, m.external_organisation,
 	       m.identity_due_at, m.identity_requested_at,
 	       m.vog_last_result, m.vog_valid_until, m.vog_covered_codes, m.vog_requested_at, m.vog_requested_by,
 	       u.avatar_bytes IS NOT NULL AS has_avatar, u.avatar_updated_at
@@ -144,7 +144,7 @@ WITH entries AS (
 	       i.email, NULL::text AS preferred_name, i.invited_given_names, i.invited_last_name,
 	       i.role, i.job_title, i.department_id, d.name AS department_name,
 	       i.expires_at, i.invited_by,
-	       NULL::text AS phone, NULL::timestamptz AS identity_verified_at, i.member_type, i.external_organisation,
+	       NULL::text AS phone, false AS can_review, NULL::timestamptz AS identity_verified_at, i.member_type, i.external_organisation,
 	       NULL::timestamptz AS identity_due_at, NULL::timestamptz AS identity_requested_at,
 	       NULL::text AS vog_last_result, NULL::timestamptz AS vog_valid_until, NULL::text[] AS vog_covered_codes,
 	       NULL::timestamptz AS vog_requested_at, NULL::uuid AS vog_requested_by,
@@ -196,7 +196,7 @@ func (s *Store) ListMemberEntries(ctx context.Context, orgID uuid.UUID, p Member
 
 	q := memberEntriesCTE + `
 SELECT status, user_id, invitation_id, email, preferred_name, given_names, last_name,
-       role, job_title, department_id, department_name, expires_at, invited_by, phone, identity_verified_at,
+       role, job_title, department_id, department_name, expires_at, invited_by, phone, can_review, identity_verified_at,
        member_type, external_organisation, identity_due_at, identity_requested_at,
        vog_last_result, vog_valid_until, vog_covered_codes, vog_requested_at, vog_requested_by,
        has_avatar, avatar_updated_at
@@ -213,7 +213,7 @@ FROM entries` + memberSearchWhere + "\nORDER BY " + memberOrderBy(p.Sort, p.Desc
 		var e MemberEntry
 		if err := rows.Scan(&e.Status, &e.UserID, &e.InvitationID, &e.Email, &e.PreferredName,
 			&e.GivenNames, &e.LastName, &e.Role, &e.JobTitle, &e.DepartmentID, &e.DepartmentName,
-			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.IdentityVerifiedAt,
+			&e.ExpiresAt, &e.InvitedBy, &e.Phone, &e.CanReview, &e.IdentityVerifiedAt,
 			&e.MemberType, &e.ExternalOrganisation, &e.IdentityDueAt, &e.IdentityRequestedAt,
 			&e.VogLastResult, &e.VogValidUntil, &e.VogCoveredCodes, &e.VogRequestedAt, &e.VogRequestedBy,
 			&e.HasAvatar, &e.AvatarUpdatedAt); err != nil {
@@ -270,7 +270,7 @@ LIMIT 1`
 func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member, error) {
 	const q = `
 		SELECT u.id, u.email, u.preferred_name, u.given_names, u.last_name,
-		       m.role, m.job_title, m.department_id, d.name, m.phone, m.identity_verified_at,
+		       m.role, m.job_title, m.department_id, d.name, m.phone, m.can_review, m.identity_verified_at,
 		       m.member_type, m.external_organisation, m.identity_due_at, m.identity_requested_at, m.identity_requested_by,
 		       m.vog_last_result, m.vog_valid_until, m.vog_covered_codes, m.vog_requested_at, m.vog_requested_by,
 		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
@@ -280,7 +280,7 @@ func (s *Store) GetMember(ctx context.Context, orgID, userID uuid.UUID) (Member,
 		WHERE m.organization_id = $1 AND m.user_id = $2`
 	var m Member
 	err := s.db.QueryRow(ctx, q, orgID, userID).Scan(&m.UserID, &m.Email, &m.PreferredName, &m.GivenNames, &m.LastName,
-		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.IdentityVerifiedAt,
+		&m.Role, &m.JobTitle, &m.DepartmentID, &m.DepartmentName, &m.Phone, &m.CanReview, &m.IdentityVerifiedAt,
 		&m.MemberType, &m.ExternalOrganisation, &m.IdentityDueAt, &m.IdentityRequestedAt, &m.IdentityRequestedBy,
 		&m.VogLastResult, &m.VogValidUntil, &m.VogCoveredCodes, &m.VogRequestedAt, &m.VogRequestedBy,
 		&m.HasAvatar, &m.AvatarUpdatedAt)

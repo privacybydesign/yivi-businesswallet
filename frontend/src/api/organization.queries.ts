@@ -38,6 +38,7 @@ import {
   revokeInvitation,
   saveIdentitySettings,
   saveScreeningSettings,
+  setMemberReviewRight,
   updateDepartment,
   updateMemberType,
   updateOrganization,
@@ -506,6 +507,31 @@ export function useRequestIdentificationMutation(
           queryKey: organizationMemberQueryKey(slug, userId),
         });
       }
+      void queryClient.invalidateQueries({
+        queryKey: organizationAuditEventsQueryKey(slug),
+      });
+    },
+  });
+}
+
+// The save that follows the member's other fields: the form's first mutation
+// already toasts, so this one stays quiet on success.
+export function useSetReviewRightMutation(
+  slug: string,
+): UseMutationResult<Member, Error, { userId: string; canReview: boolean }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, canReview }) =>
+      setMemberReviewRight(slug, userId, { canReview }),
+    meta: { suppressErrorToast: true },
+    onSuccess: (member, { userId }) => {
+      queryClient.setQueryData(
+        organizationMemberQueryKey(slug, userId),
+        member,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: organizationMembersQueryKey(slug),
+      });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
       });

@@ -6,17 +6,24 @@ import {
   useOrganizationDepartmentsQuery,
   useOrganizationMemberQuery,
   useOrganizationQuery,
+  useSetReviewRightMutation,
   useUpdateMemberMutation,
   useUpdateMemberTypeMutation,
 } from "../api/organization.queries";
 import { accessMessage } from "../lib/access-message";
 import { fullName } from "../lib/name";
+import {
+  reviewRightChanged,
+  reviewRightLocked,
+  reviewRightShown,
+} from "../lib/review-right";
 import { ApiError } from "../api/http";
 import { Button, Card, TopBar } from "../ui";
 import * as React from "react";
 
 const FORM_ID = "member-edit-form";
 const CONFLICT_STATUS = 409;
+const CAN_REVIEW_HINT_ID = "member-edit-can-review-hint";
 const FIELD_LABEL = "text-ink text-[13px] font-semibold";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
@@ -34,7 +41,9 @@ function EditForm({
   const navigate = useNavigate();
   const update = useUpdateMemberMutation(slug);
   const updateType = useUpdateMemberTypeMutation(slug);
+  const setReviewRight = useSetReviewRightMutation(slug);
   const [role, setRole] = useState(member.role);
+  const [canReview, setCanReview] = useState(member.canReview);
   const [jobTitle, setJobTitle] = useState(member.jobTitle ?? "");
   const [departmentId, setDepartmentId] = useState(member.departmentId ?? "");
   const [memberType, setMemberType] = useState<MemberType>(
@@ -53,14 +62,27 @@ function EditForm({
     (memberType === "external" &&
       trimmedExternal !== (member.externalOrganisation ?? ""));
 
-  // The membership fields and the member type are two routes (changing the type
-  // recomputes the re-identification deadline server-side), so a save that
-  // touches both chains them and only navigates once the second lands.
+  const reviewChanged = reviewRightChanged(member, { role, canReview });
+
+  // The membership fields, the member type and the review right are three
+  // routes (changing the type recomputes the re-identification deadline
+  // server-side), so a save that touches several chains them and only
+  // navigates once the last lands.
   function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    const saveReviewRight = (): void => {
+      if (!reviewChanged) {
+        backToMember();
+        return;
+      }
+      setReviewRight.mutate(
+        { userId: member.userId, canReview },
+        { onSuccess: backToMember },
+      );
+    };
     const saveType = (): void => {
       if (!typeChanged) {
-        backToMember();
+        saveReviewRight();
         return;
       }
       updateType.mutate(
@@ -72,7 +94,7 @@ function EditForm({
               ? trimmedExternal
               : null,
         },
-        { onSuccess: backToMember },
+        { onSuccess: saveReviewRight },
       );
     };
     update.mutate(
@@ -86,12 +108,13 @@ function EditForm({
     );
   }
 
-  const saveError = update.error ?? updateType.error;
+  const saveError = update.error ?? updateType.error ?? setReviewRight.error;
   const errorText =
     update.error instanceof ApiError && update.error.status === CONFLICT_STATUS
       ? t("memberEdit.lastAdmin")
       : t("common.saveError", { message: saveError?.message ?? "" });
-  const saving = update.isPending || updateType.isPending;
+  const saving =
+    update.isPending || updateType.isPending || setReviewRight.isPending;
 
   return (
     <>
@@ -128,6 +151,25 @@ function EditForm({
                 <option value="admin">{t("memberInvite.roleAdmin")}</option>
               </select>
             </label>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={reviewRightShown({ role, canReview })}
+                  disabled={reviewRightLocked(role)}
+                  aria-describedby={CAN_REVIEW_HINT_ID}
+                  onChange={(event) => setCanReview(event.target.checked)}
+                />
+                <span className={FIELD_LABEL}>{t("common.canReview")}</span>
+              </label>
+              <span
+                id={CAN_REVIEW_HINT_ID}
+                className="text-ink-soft text-[12px]"
+              >
+                {t("memberEdit.canReviewHint")}
+              </span>
+            </div>
 
             <label className="flex flex-col gap-1.5">
               <span className={FIELD_LABEL}>{t("common.jobTitle")}</span>
@@ -193,7 +235,9 @@ function EditForm({
               </label>
             )}
 
-            {(update.isError || updateType.isError) && (
+            {(update.isError ||
+              updateType.isError ||
+              setReviewRight.isError) && (
               <p
                 role="alert"
                 className="rounded-yivi bg-error-bg text-error px-3 py-2 text-[13px]"

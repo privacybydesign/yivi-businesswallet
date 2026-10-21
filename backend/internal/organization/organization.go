@@ -27,6 +27,11 @@ const (
 	MemberTypeEmployee = "employee"
 	MemberTypeExternal = "external"
 
+	// The reviewer right (#327): whether an admin lets a member decide identity
+	// checks and data requests.
+	ReviewRightGranted ReviewRight = "granted"
+	ReviewRightNone    ReviewRight = "none"
+
 	// Re-identification status, derived from IdentityVerifiedAt / IdentityDueAt /
 	// IdentityRequestedAt — never stored independently (see DeriveIdentityStatus).
 	IdentityStatusNever     = "never"
@@ -136,12 +141,18 @@ type Department struct {
 	Name           string    `json:"name"`
 }
 
+// ReviewRight is whether a member may decide identity checks and data requests.
+type ReviewRight string
+
 type Membership struct {
 	UserID         uuid.UUID  `json:"userId"`
 	OrganizationID uuid.UUID  `json:"organizationId"`
 	Role           string     `json:"role"`
 	JobTitle       *string    `json:"jobTitle"`
 	DepartmentID   *uuid.UUID `json:"departmentId"`
+	// CanReview is the reviewer right an admin gave this member. An admin
+	// reviews without it; see MayReview.
+	CanReview bool `json:"canReview"`
 }
 
 type Invitation struct {
@@ -176,6 +187,8 @@ type Member struct {
 	DepartmentID   *uuid.UUID `json:"departmentId"`
 	DepartmentName *string    `json:"departmentName"`
 	Phone          *string    `json:"phone"`
+	// CanReview is the reviewer right; see Membership.CanReview.
+	CanReview bool `json:"canReview"`
 	// Verified reports that the member proved a passport/id-card identity when they
 	// joined; orthogonal to the active/invited status. Derived from
 	// IdentityVerifiedAt, never set independently of it.
@@ -235,6 +248,8 @@ type MemberEntry struct {
 	ExpiresAt      *time.Time `json:"expiresAt"`
 	InvitedBy      *uuid.UUID `json:"invitedBy"`
 	Phone          *string    `json:"phone"`
+	// CanReview is always false for invited entries (no membership row yet).
+	CanReview bool `json:"canReview"`
 	// Verified is always false for invited entries (no identity proven yet).
 	Verified bool `json:"verified"`
 	// IdentityVerifiedAt is always nil for invited entries (no membership row yet).

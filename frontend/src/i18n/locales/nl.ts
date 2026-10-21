@@ -12,6 +12,7 @@ type Translation<T> = {
 export const nl: Translation<typeof en> = {
   common: {
     cancel: "Annuleren",
+    canReview: "Mag beoordelen",
     close: "Sluiten",
     comingSoon: "Binnenkort beschikbaar",
     copy: "Kopiëren",
@@ -1145,7 +1146,8 @@ export const nl: Translation<typeof en> = {
       title: "Beoordelingen",
       subtitle:
         "Controles en gegevensverzoeken die op het besluit van een persoon wachten. Oudste eerst.",
-      adminOnly: "Alleen beheerders kunnen beoordelen.",
+      notAllowed:
+        "Alleen beheerders en leden met het recht om te beoordelen kunnen beoordelen.",
       tabsLabel: "Toon",
       tabs: {
         all: "Alles",
@@ -1188,7 +1190,9 @@ export const nl: Translation<typeof en> = {
         approved: "Goedgekeurd",
         rejected: "Afgewezen",
       },
-      footer: "Beheerders zien deze pagina.",
+      footer:
+        "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
+      footerWho: "Wie dat heeft: <members>Leden</members>.",
       back: "Terug naar beoordelingen",
       notWaiting: {
         approved:
@@ -2158,6 +2162,7 @@ export const nl: Translation<typeof en> = {
       roleChanged: "Rol gewijzigd",
       inviteExpired: "Uitnodiging verlopen",
       memberTypeChanged: "Type lid gewijzigd",
+      reviewRightChanged: "Recht om te beoordelen gewijzigd",
       identityRequested: "Identificatie aangevraagd",
       identityReverified: "Identiteit opnieuw bevestigd",
       identityReverifyRejected: "Heridentificatiepoging afgewezen",
@@ -2445,6 +2450,8 @@ export const nl: Translation<typeof en> = {
       "Voor externen kun je een kortere heridentificatietermijn instellen dan voor medewerkers.",
     externalOrganisation: "Werkt voor",
     externalOrganisationPlaceholder: "bijv. Contractors BV",
+    canReviewHint:
+      "Beslist over identiteitscontroles en gegevensverzoeken bij Beoordelingen. Beheerders mogen dit altijd.",
     lastAdmin:
       "Dit is de enige beheerder van de organisatie. Maak eerst een ander lid beheerder.",
   },

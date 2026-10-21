@@ -52,10 +52,12 @@ type NavChild = Omit<NavItem, "icon" | "children">;
 // Which optional items the org nav shows. signing gates "Sign documents" on the
 // org having a CSC signing provider configured (see the sidebar body); it is a
 // plugin, absent otherwise. admin adds the items only an organization admin can
-// use.
+// use. reviewer adds Reviews, which an admin or a member with the reviewer right
+// can use.
 interface OrgNavVisibility {
   signing: boolean;
   admin: boolean;
+  reviewer: boolean;
   // What waits for the reader's decision under Identity proofing › Reviews,
   // and whether the list it is counted from may have left some out.
   waitingReviews: number;
@@ -75,16 +77,21 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
     { to: proofing, labelKey: "nav.identityProofingOverview", end: true },
   ];
   if (visible.admin) {
-    proofingChildren.push(
-      { to: `${proofing}/flows`, labelKey: "nav.flows" },
-      {
-        to: `${proofing}/reviews`,
-        labelKey: "nav.reviews",
-        count: visible.waitingReviews,
-        countCapped: visible.waitingReviewsCapped,
-      },
-      { to: `${proofing}/developers`, labelKey: "nav.developers" },
-    );
+    proofingChildren.push({ to: `${proofing}/flows`, labelKey: "nav.flows" });
+  }
+  if (visible.reviewer) {
+    proofingChildren.push({
+      to: `${proofing}/reviews`,
+      labelKey: "nav.reviews",
+      count: visible.waitingReviews,
+      countCapped: visible.waitingReviewsCapped,
+    });
+  }
+  if (visible.admin) {
+    proofingChildren.push({
+      to: `${proofing}/developers`,
+      labelKey: "nav.developers",
+    });
   }
   items.push({
     to: proofing,
@@ -213,14 +220,16 @@ export function Sidebar({
   // for the org currently in the URL.
   const activeOrg = useOrganizationQuery(activeSlug ?? "");
   const isOrgAdmin = activeOrg.data?.role === ORG_ADMIN_ROLE;
-  // Only an admin can decide, so only an admin's sidebar counts what waits.
+  // Only who can decide counts what waits.
+  const canReview = activeOrg.data?.canReview === true;
   const waiting = useWaitingReviewsQuery(activeSlug ?? "", {
-    enabled: activeSlug !== undefined && isOrgAdmin,
+    enabled: activeSlug !== undefined && canReview,
   });
   const navItems = activeSlug
     ? orgNavItems(activeSlug, {
         signing: showSigning,
         admin: isOrgAdmin,
+        reviewer: canReview,
         waitingReviews: waitingOldestFirst(waiting.data ?? []).length,
         waitingReviewsCapped: requestListCapped(waiting.data ?? []),
       })

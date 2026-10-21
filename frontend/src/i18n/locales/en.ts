@@ -1,6 +1,7 @@
 export const en = {
   common: {
     cancel: "Cancel",
+    canReview: "Can review",
     close: "Close",
     comingSoon: "Coming soon",
     copy: "Copy",
@@ -1117,7 +1118,7 @@ export const en = {
       title: "Reviews",
       subtitle:
         "Checks and data requests that wait for a person's decision. Oldest first.",
-      adminOnly: "Only admins can review.",
+      notAllowed: "Only admins and members with the reviewer right can review.",
       tabsLabel: "Show",
       tabs: {
         all: "All",
@@ -1158,7 +1159,8 @@ export const en = {
         approved: "Approved",
         rejected: "Rejected",
       },
-      footer: "Admins see this page.",
+      footer: "Admins and members with the reviewer right see this page.",
+      footerWho: "Who has it: <members>Members</members>.",
       back: "Back to reviews",
       notWaiting: {
         approved:
@@ -2113,6 +2115,7 @@ export const en = {
       roleChanged: "Changed role",
       inviteExpired: "Invitation expired",
       memberTypeChanged: "Changed member type",
+      reviewRightChanged: "Changed review right",
       identityRequested: "Requested identification",
       identityReverified: "Re-confirmed identity",
       identityReverifyRejected: "Rejected re-identification attempt",
@@ -2389,6 +2392,8 @@ export const en = {
       "Externals can be held to a shorter re-identification interval than employees.",
     externalOrganisation: "Works for",
     externalOrganisationPlaceholder: "e.g. Contractors BV",
+    canReviewHint:
+      "Decides identity checks and data requests under Reviews. Admins always can.",
     lastAdmin:
       "This is the organization's only admin. Promote another member to admin first.",
   },

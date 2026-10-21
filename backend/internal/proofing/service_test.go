@@ -1805,6 +1805,25 @@ func TestReadRechecksAtMostOnce(t *testing.T) {
 	}
 }
 
+func TestRequestIfSkipsRecheck(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	refuse := func(Request) bool { return false }
+	accept := func(Request) bool { return true }
+	if _, err := f.svc.RequestIf(context.Background(), testOrg.ID, sent.Request.ID, refuse); !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("RequestIf refused = %v, want ErrRequestNotFound", err)
+	}
+	if f.ips.statusReads != 0 {
+		t.Fatalf("status reads = %d, want none for a request the caller may not open", f.ips.statusReads)
+	}
+	if _, err := f.svc.RequestIf(context.Background(), testOrg.ID, sent.Request.ID, accept); err != nil {
+		t.Fatalf("RequestIf allowed: %v", err)
+	}
+	if f.ips.statusReads != 1 {
+		t.Errorf("status reads = %d, want 1: the refused read took no slot", f.ips.statusReads)
+	}
+}
+
 func TestCreateRequestResolvesOnce(t *testing.T) {
 	f := newFixture()
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, sam,

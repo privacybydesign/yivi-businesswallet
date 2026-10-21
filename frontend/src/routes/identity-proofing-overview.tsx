@@ -8,11 +8,12 @@ import {
   useProofingPauseQuery,
   useProofingStatsQuery,
   useProofingWebhookQuery,
+  useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingFlow, ProofingStats } from "../api/identity-proofing";
 import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
-import { reviewPath } from "../lib/proofing-reviews";
+import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
 import {
   noProofingSessions,
   proofingErrorMessage,
@@ -49,6 +50,7 @@ export default function IdentityProofingOverview(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
+  const canReview = org.data?.canReview === true;
   const pause = useProofingPauseQuery(slug);
 
   if (pause.data?.paused) {
@@ -64,19 +66,22 @@ export default function IdentityProofingOverview(): React.JSX.Element {
       </>
     );
   }
-  return <ActiveOverview slug={slug} isAdmin={isAdmin} />;
+  return <ActiveOverview slug={slug} isAdmin={isAdmin} canReview={canReview} />;
 }
 
 function ActiveOverview({
   slug,
   isAdmin,
+  canReview,
 }: {
   slug: string;
   isAdmin: boolean;
+  canReview: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const stats = useProofingStatsQuery(slug);
   const flows = useProofingFlowsQuery(slug);
+  const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
 
   return (
     <>
@@ -103,7 +108,16 @@ function ActiveOverview({
         ) : (
           <StatsRow
             stats={stats.data}
-            reviewsTo={isAdmin ? reviewPath(slug) : undefined}
+            reviews={
+              canReview
+                ? {
+                    to: reviewPath(slug),
+                    waiting: waiting.data
+                      ? waitingOldestFirst(waiting.data).length
+                      : undefined,
+                  }
+                : undefined
+            }
           />
         )}
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -122,11 +136,13 @@ function ActiveOverview({
 
 function StatsRow({
   stats,
-  reviewsTo,
+  reviews,
 }: {
   stats: ProofingStats | undefined;
-  // Where what waits for a decision is decided; absent for a member.
-  reviewsTo: string | undefined;
+  // For the reader who decides: where, and how much waits in the whole org
+  // (a reviewer's own stats count only their sent requests). Absent for a
+  // member without the right.
+  reviews: { to: string; waiting: number | undefined } | undefined;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatPercent = usePercentFormatter();
@@ -134,7 +150,12 @@ function StatsRow({
   const share = verifiedShare(totals);
   const flowCount = new Set(stats?.rows.map((r) => r.flowId)).size;
   // While the counts load, the tiles hold their place without a number.
-  const value = (n: number): string => (stats ? String(n) : "—");
+  const count = (n: number | undefined): string =>
+    n === undefined ? "—" : String(n);
+  const value = (n: number): string => count(stats ? n : undefined);
+  const needsReview = reviews
+    ? count(reviews.waiting)
+    : value(totals.needsReview);
 
   return (
     <Card className="divide-line grid grid-cols-2 lg:grid-cols-6 lg:divide-x">
@@ -163,9 +184,9 @@ function StatsRow({
       />
       <StatCell
         label={t("identityProofing.overview.stats.needsReview")}
-        value={value(totals.needsReview)}
+        value={needsReview}
         hint={t("identityProofing.overview.stats.needsReviewHint")}
-        hintTo={reviewsTo}
+        hintTo={reviews?.to}
       />
       <StatCell
         label={t("identityProofing.overview.stats.expired")}

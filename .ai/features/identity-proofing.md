@@ -1342,8 +1342,9 @@ the reviews such an org still had open. Audit events recorded with
 ## 9. Manual review
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
-end it, §3). An admin decides it on Identity proofing › Reviews
-(`routes/proofing-reviews.tsx`; the sidebar and the overview count what waits).
+end it, §3). An admin, or a member with the reviewer right (below), decides it on
+Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and the
+overview count what waits).
 The page lists what waits, oldest first (waiting since = `completed_at`, when it
 went to review), under All, Identity checks and Data requests; Closed lists the
 data requests that ended, whoever ended them. The list carries no mark of a
@@ -1375,9 +1376,9 @@ identity check they sent or that is about them (403 `own_review`; the page
 shows a note in place of the decision); a data request's link sender may
 decide it, or a one-admin org could never answer it.
 `POST .../requests/{id}/review` calls the engine's
-`DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
+`DecideReview` (the reviewer's e-mail as `reviewer`; the engine keeps who
 decided, why and when with the session, `session.ReviewDecision`), audits
-`identity_proofing.review_decided` with the admin as actor, then reconciles:
+`identity_proofing.review_decided` with the reviewer as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the org's webhook is sent (for an external request). A request no longer under
 review is 409 `not_under_review`. A decision leaves the page, so it marks the
@@ -1389,6 +1390,28 @@ an unsigned upload, a value typed in by hand. Today nothing built produces that,
 so only data requests (§15) and the dev stub reach review, and the identity
 check page has no "What to check" box for the unsigned item: it needs the item
 from the wallet, which none yet carries.
+
+**The reviewer right.** An admin gives a member the right to decide in the
+member's edit page, "Can review" (`PUT .../members/{userId}/review-right`,
+`memberships.can_review`, audited `membership.review_changed` only when it
+changes; an admin's is ignored, they review as admins). `organization.MayReview`
+is an admin whose mandate is not withdrawn, or a member with the right, and
+`organization.RequireReviewer` gates the four `reviewer(...)` routes in
+`proofing/handler.go`: `review`, `result`, `data-matches` and `data-export`.
+Everything else stays a member's. A reviewer reads more only where the pages need
+it: `GET .../requests` lists every request in the org for `?status=needs_review`
+(Waiting) and for `?status=approved` or `rejected` with `?subjectKind=external`
+(Closed, read separately); any other list is the requests they sent. So are the
+stats, All people and the member routes. `GET .../requests/{id}` opens one they
+sent, an external one or one waiting for review (`mayOpen`, judged on the stored
+request through `Service.RequestIf`, before the engine is asked); any other is a
+404, as for a member. The app reads `canReview` from `GET /orgs/{slug}`
+(the same `MayReview`): it shows the sidebar's Reviews item and count, the
+Reviews and review pages, and the Overview's needs-review tile, which counts what
+waits in the org as the sidebar does. The Reviews footer links to Members for an
+admin only, as only an admin reads that page. Not yet: the review link on a row of
+All people and the flow's People tab is an admin's, and the dashboard's to-do list
+(#320) does not exist.
 
 ## 10. Data minimisation
 
@@ -1748,7 +1771,8 @@ its erasure ("delete my data", Art. 17). See my data and Delete my data are a
 standard feature of every org, not flows anyone sets up: the org sends the
 person a session on its standard flow of that kind, like any other session
 (API, hosted link, mail or on-screen); the person proves who they are, and the
-session goes to the org's **needs review**, where an org admin decides. Code:
+session goes to the org's **needs review**, where an org admin or a reviewer
+decides (§9). Code:
 `standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`
 (its review page), the Verify a person dialog's "What do you send?" and the
 hosted page.

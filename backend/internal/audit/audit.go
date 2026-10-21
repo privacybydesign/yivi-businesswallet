@@ -28,6 +28,7 @@ const (
 	MembershipRoleChanged    = "membership.role_changed"
 	MembershipExpired        = "membership.expired"
 	MembershipTypeChanged    = "membership.type_changed"
+	MembershipReviewChanged  = "membership.review_changed"
 
 	// Re-identification lifecycle (#240): verified-at/overdue status, per-type
 	// intervals, reminder emails and admin on-demand request.

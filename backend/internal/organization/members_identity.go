@@ -53,6 +53,41 @@ func (h *Handler) updateMemberType(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+type updateReviewRightRequest struct {
+	CanReview *bool `json:"canReview"`
+}
+
+func (h *Handler) updateReviewRight(w http.ResponseWriter, r *http.Request) error {
+	userID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		return badRequest("invalid_id", "invalid user id")
+	}
+	var req updateReviewRightRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CanReview == nil {
+		return badRequest("invalid_body", "invalid request body")
+	}
+	right := ReviewRightNone
+	if *req.CanReview {
+		right = ReviewRightGranted
+	}
+
+	org := OrgFromContext(r.Context())
+	member, err := h.store.SetReviewRight(r.Context(), org.ID, userID, right)
+	switch {
+	case errors.Is(err, ErrNotMember):
+		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
+	case err != nil:
+		return fmt.Errorf("updating review right: %w", err)
+	}
+	member.AvatarURI = user.AvatarURL(MemberAvatarPath(org.Slug, member.UserID), member.HasAvatar, member.AvatarUpdatedAt)
+	member, err = h.withStatuses(r.Context(), org.ID, member)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, member)
+	return nil
+}
+
 type requestIdentificationRequest struct {
 	Reason string `json:"reason"`
 }

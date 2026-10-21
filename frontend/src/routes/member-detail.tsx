@@ -37,6 +37,7 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
+import { showsReviewTag } from "../lib/review-right";
 import { MemberProofing } from "./member-proofing";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
@@ -365,6 +366,7 @@ export default function MemberDetail(): React.JSX.Element {
                   {screeningStatusLabel(member.vogStatus, t)}
                 </Tag>
               )}
+              {showsReviewTag(member) && <Tag>{t("common.canReview")}</Tag>}
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">

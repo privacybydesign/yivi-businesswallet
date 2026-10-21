@@ -9,7 +9,7 @@ import { DataRequestReview } from "./data-request-review";
 import { IdentityCheckReview } from "./identity-check-review";
 
 // One thing that waits for a decision, or was decided: the page of an identity
-// check or of a data request. Admin only until members can be given the right.
+// check or of a data request. For an admin and a member with the reviewer right.
 export default function ProofingReview(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug, requestId } = useParams();
@@ -17,8 +17,8 @@ export default function ProofingReview(): React.JSX.Element {
   const slug = orgSlug!;
   const id = requestId!;
   const org = useOrganizationQuery(slug);
-  const isAdmin = org.data?.role === "admin";
-  const request = useProofingRequestQuery(slug, id, { enabled: isAdmin });
+  const canReview = org.data?.canReview === true;
+  const request = useProofingRequestQuery(slug, id, { enabled: canReview });
 
   const { data } = request;
   if (data) {
@@ -29,12 +29,12 @@ export default function ProofingReview(): React.JSX.Element {
     );
   }
   let message: string;
-  if (org.isPending || (isAdmin && request.isPending)) {
+  if (org.isPending || (canReview && request.isPending)) {
     message = t("common.loading");
-  } else if (isAdmin) {
+  } else if (canReview) {
     message = proofingErrorMessage(request.error, t);
   } else {
-    message = t("identityProofing.reviews.adminOnly");
+    message = t("identityProofing.reviews.notAllowed");
   }
   return (
     <>

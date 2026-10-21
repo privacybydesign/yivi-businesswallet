@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	admin := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
 	}
+	// reviewer admits an admin and a member an admin gave the reviewer right.
+	reviewer := func(next http.Handler) http.Handler {
+		return h.requireUser(h.authorize(organization.RequireReviewer(next)))
+	}
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows", member(respond.HandlerFunc(h.listFlows)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows", admin(respond.HandlerFunc(h.createFlow)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.listFlowVersions)))
@@ -113,10 +118,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", admin(respond.HandlerFunc(h.dataMatches)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", admin(respond.HandlerFunc(h.adminDataExport)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", reviewer(respond.HandlerFunc(h.adminDataExport)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/settings", member(respond.HandlerFunc(h.getSettings)))
 	mux.Handle("PATCH /orgs/{slug}/identity-proofing/settings", admin(respond.HandlerFunc(h.updateSettings)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/settings/branding", admin(respond.HandlerFunc(h.saveBranding)))
@@ -378,14 +383,16 @@ const flowKindDataRequest = "data_request"
 // sent; ?subjectUserId= narrows either to the ones proofing one member,
 // ?subjectKind= to those sent to members or to external people, ?flowId= to
 // those sent on one flow, ?status= to those held in one status, and
-// ?flowKind=data_request to the data requests.
+// ?flowKind=data_request to the data requests. A member with the reviewer
+// right also sees the requests the Reviews page reads: those waiting for
+// review and the external ones that ended.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	filter, err := requestFilterFrom(r.URL.Query())
 	if err != nil {
 		return err
 	}
-	if !organization.ActsAsAdmin(r.Context()) {
+	if !listsEveryRequest(r.Context(), filter) {
 		id := auth.UserFromContext(r.Context()).ID
 		filter.RequestedBy = &id
 	}
@@ -447,6 +454,23 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 	return filter, nil
 }
 
+// listsEveryRequest reports whether the caller lists the org's requests whoever
+// sent them: an admin always, a reviewer only what the Reviews page reads, the
+// requests waiting for review and the external ones that ended.
+func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
+	if organization.ActsAsAdmin(ctx) {
+		return true
+	}
+	if !organization.MayReview(ctx) || filter.Status == nil {
+		return false
+	}
+	if *filter.Status == StatusNeedsReview {
+		return true
+	}
+	return (*filter.Status == StatusApproved || *filter.Status == StatusRejected) &&
+		filter.SubjectKind != nil && *filter.SubjectKind == SubjectExternal
+}
+
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
 // API and webhooks show it (a ps_ id), so either can be looked up.
 func parseRequestID(s string) (uuid.UUID, error) {
@@ -471,13 +495,25 @@ func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	return id, &caller, nil
 }
 
+// mayOpen reports whether a caller who is not an admin opens req: one they sent,
+// or as a reviewer one the review pages read, an external request or one waiting
+// for review.
+func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
+	if req.RequestedBy != nil && *req.RequestedBy == caller {
+		return true
+	}
+	return organization.MayReview(ctx) && (req.External() || req.Status == StatusNeedsReview)
+}
+
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
 func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {
 		return err
 	}
-	req, err := h.service.Request(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	req, err := h.service.RequestIf(r.Context(), orgFromRequest(r).ID, id, func(req Request) bool {
+		return requestedBy == nil || mayOpen(r.Context(), req, *requestedBy)
+	})
 	if err != nil {
 		return mapError(err)
 	}
@@ -489,7 +525,7 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// reviewDecisionRequest is an admin's decision on a request under review:
+// reviewDecisionRequest is a reviewer's decision on a request under review:
 // decision "approve" or "reject", a required reason, and for a rejection an
 // optional errorCode.
 type reviewDecisionRequest struct {

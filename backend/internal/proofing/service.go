@@ -1694,6 +1694,20 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	return s.readReconciled(ctx, req)
 }
 
+// RequestIf is Request for a caller whose scope the caller decides: allow sees the
+// request as stored, and one it refuses is ErrRequestNotFound, never re-checked in
+// the engine.
+func (s *Service) RequestIf(ctx context.Context, orgID, id uuid.UUID, allow func(Request) bool) (Request, error) {
+	req, err := s.requests.Get(ctx, orgID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if !allow(req) {
+		return Request{}, ErrRequestNotFound
+	}
+	return s.readReconciled(ctx, req)
+}
+
 // readReconciled re-checks a request that may have moved on in the engine, at most
 // once per readReconcileEvery: a fallback for a missed notice, so a poller
 // never turns into one the engine read per poll.

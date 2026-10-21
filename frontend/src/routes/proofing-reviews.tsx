@@ -1,5 +1,5 @@
 import { Link, useParams, useSearchParams } from "react-router";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import * as React from "react";
 import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -41,7 +41,7 @@ const SHOW_PARAM = "show";
 const SUB_LINE = "text-ink-soft text-[12.5px]";
 
 // Everything that waits for a person's decision, the longest first: identity
-// checks and data requests. Admin only until members can be given the right.
+// checks and data requests. For an admin and a member with the reviewer right.
 export default function ProofingReviews(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -49,7 +49,8 @@ export default function ProofingReviews(): React.JSX.Element {
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
-  const waiting = useWaitingReviewsQuery(slug, { enabled: isAdmin });
+  const canReview = org.data?.canReview === true;
+  const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
   const waitingNow = waitingOldestFirst(waiting.data ?? []);
@@ -57,11 +58,11 @@ export default function ProofingReviews(): React.JSX.Element {
   // The backend lists at most the 200 longest in review: past that the counts
   // are lower bounds.
   const capped = requestListCapped(waiting.data ?? []);
-  // What shows instead of the reviews to anyone but an admin, and until the
-  // org is known.
+  // What shows instead of the reviews to anyone without the right, and until
+  // the org is known.
   const notice = org.isPending
     ? t("common.loading")
-    : t("identityProofing.reviews.adminOnly");
+    : t("identityProofing.reviews.notAllowed");
 
   return (
     <>
@@ -69,7 +70,7 @@ export default function ProofingReviews(): React.JSX.Element {
         title={t("identityProofing.reviews.title")}
         subtitle={t("identityProofing.reviews.subtitle")}
       />
-      {isAdmin ? (
+      {canReview ? (
         <>
           <ReviewTabs active={tab} counts={counts} capped={capped} />
           <div className="flex flex-col gap-4 p-4 sm:p-8">
@@ -87,6 +88,22 @@ export default function ProofingReviews(): React.JSX.Element {
             </Card>
             <p className="text-ink-soft text-[13px]">
               {t("identityProofing.reviews.footer")}
+              {isAdmin && (
+                <>
+                  {" "}
+                  <Trans
+                    i18nKey="identityProofing.reviews.footerWho"
+                    components={{
+                      members: (
+                        <Link
+                          to={`/${slug}/members`}
+                          className="text-link underline"
+                        />
+                      ),
+                    }}
+                  />
+                </>
+              )}
             </p>
           </div>
         </>
