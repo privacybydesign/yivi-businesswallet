@@ -60,12 +60,14 @@ func TestResultReleasesAgeOverOnly(t *testing.T) {
 	req := appResultRequest{Document: &documentInfo{DateOfBirth: "2008-10-22"}, AgeOver: &ageOverInfo{Age: 18, Over: true}}
 	sess := session.Session{RequestedAttributes: []string{attrAgeOver}}
 	result := buildResult(sess, req, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})
+
 	if _, ok := result["document"]; ok {
 		t.Error("age_over released the document")
 	}
 	if got, ok := result["ageOver"].(*ageOverInfo); !ok || *got != (ageOverInfo{Age: 18, Over: true}) {
 		t.Errorf("ageOver = %v, want age 18, over", result["ageOver"])
 	}
+
 	document := session.Session{RequestedAttributes: []string{attrDocument}}
 	if _, ok := buildResult(document, req, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})["ageOver"]; ok {
 		t.Error("dg1 alone released ageOver")

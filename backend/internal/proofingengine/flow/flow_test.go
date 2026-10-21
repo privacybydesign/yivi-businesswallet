@@ -31,6 +31,7 @@ func TestValidateAgeOver(t *testing.T) {
 	if err := Validate(ok); err != nil {
 		t.Fatalf("Validate(age_over 18) = %v, want nil", err)
 	}
+
 	noChip := ok
 	noChip.Steps = []Step{StepDocumentPhoto}
 	noChip.RequiredChecks = nil
@@ -38,6 +39,7 @@ func TestValidateAgeOver(t *testing.T) {
 	noAge.AgeOver = 0
 	tooOld.AgeOver = MaxAgeOver + 1
 	ageOnly.AgeOver = 18
+
 	for name, tc := range map[string]struct {
 		fd   FlowDefinition
 		want string

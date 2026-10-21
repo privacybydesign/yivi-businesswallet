@@ -356,10 +356,12 @@ describe("flowDraftError", () => {
   it("needs a whole minimum age with the age check", () => {
     const age = (ageOver: string) =>
       draft({ requestedAttributes: new Set(["age_over"]), ageOver });
+
     expect(flowDraftError(age("18"))).toBeNull();
     for (const bad of ["", "0", "17.5", "121"]) {
       expect(flowDraftError(age(bad))).toBe("ageOver");
     }
+
     expect(
       flowDraftError(
         draft({ requestedAttributes: new Set(["dg1"]), ageOver: "" }),
