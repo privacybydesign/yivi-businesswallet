@@ -531,11 +531,13 @@ func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.
 			return "", fmt.Errorf("seed: flow %s diplomas: %w", f.def.Name, err)
 		}
 	}
+
 	if f.address != "" {
 		if _, err := proofing.NewFlowAddressStore(tx, recorder).Save(ctx, orgID, saved.ID, f.address); err != nil {
 			return "", fmt.Errorf("seed: flow %s address: %w", f.def.Name, err)
 		}
 	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
 	}

@@ -773,6 +773,7 @@ function AddressStep({
   const lookupInput = addressLookup(postalCode, houseNumber);
   const lookup = useAddressLookupQuery(target, lookupInput);
   const match = lookup.data && matchingAddress(lookup.data, houseNumber);
+
   // The address the form was last filled in from, so a field edited after it
   // is left as typed.
   const [filledFor, setFilledFor] = useState("");
@@ -781,6 +782,7 @@ function AddressStep({
     setFilledFor(matchKey);
     fill(match);
   }
+
   const secondsLeft = useSecondsLeft(until);
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");

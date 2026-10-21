@@ -12,6 +12,12 @@ import (
 // far above what its fields allow, read before they are checked.
 const maxFormBodyBytes = 16 << 10
 
+// The query parameters of the address lookup routes.
+const (
+	queryPostalCode  = "postalCode"
+	queryHouseNumber = "houseNumber"
+)
+
 type flowAddressBody struct {
 	AddressMode AddressMode `json:"addressMode"`
 }
@@ -104,7 +110,7 @@ func (h *Handler) lookUpAddress(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	q := r.URL.Query()
-	found, err := h.service.LookUpAddress(r.Context(), orgFromRequest(r).ID, id, requestedBy, q.Get("postalCode"), q.Get("houseNumber"))
+	found, err := h.service.LookUpAddress(r.Context(), orgFromRequest(r).ID, id, requestedBy, q.Get(queryPostalCode), q.Get(queryHouseNumber))
 	if err != nil {
 		return mapError(err)
 	}
@@ -116,7 +122,7 @@ func (h *Handler) lookUpAddress(w http.ResponseWriter, r *http.Request) error {
 // on a hosted link's page.
 func (h *Handler) hostedLookUpAddress(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	found, err := h.service.HostedLookUpAddress(r.Context(), r.PathValue("token"), q.Get("postalCode"), q.Get("houseNumber"))
+	found, err := h.service.HostedLookUpAddress(r.Context(), r.PathValue("token"), q.Get(queryPostalCode), q.Get(queryHouseNumber))
 	if err != nil {
 		return mapError(err)
 	}

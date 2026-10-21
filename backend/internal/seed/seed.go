@@ -747,7 +747,7 @@ type testMembers struct {
 }
 
 // seedActivity performs real, audited operations — invitations, revocations and
-// the test members' identification and VOG requests — each attributed to a
+// the test members' identification and VOG requests, each attributed to a
 // random admin, so the audit log reflects genuine history (every entry
 // corresponds to real data) with varied actors.
 func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins []uuid.UUID, members testMembers, deptIDs []uuid.UUID) error {
@@ -782,7 +782,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		invitationIDs = append(invitationIDs, inv.ID)
 	}
 
-	// Revoke them all — 'gone' history, correctly absent from the list.
+	// Revoke them all: 'gone' history, correctly absent from the list.
 	for _, id := range invitationIDs {
 		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, id); err != nil {
 			return fmt.Errorf("seed: revoke: %w", err)

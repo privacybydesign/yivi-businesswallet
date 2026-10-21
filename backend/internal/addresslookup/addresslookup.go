@@ -32,6 +32,14 @@ const (
 	postalCodeDigits = 4
 	// endpointFree takes a filter query.
 	endpointFree = "free"
+	// matchAll is the query every address matches; the filters narrow it.
+	matchAll = "*:*"
+	// paramQuery, paramFilter, paramFields and paramRows are the search API's
+	// query parameters.
+	paramQuery  = "q"
+	paramFilter = "fq"
+	paramFields = "fl"
+	paramRows   = "rows"
 	// headerAccept and mediaTypeJSON ask for a JSON answer.
 	headerAccept  = "Accept"
 	mediaTypeJSON = "application/json"
@@ -92,7 +100,7 @@ func NewPDOK(baseURL string, httpClient *http.Client) *PDOK {
 
 // Ping is the boot check: one search that asks for no rows.
 func (c *PDOK) Ping(ctx context.Context) error {
-	_, err := c.search(ctx, endpointFree, url.Values{"q": {"*:*"}, "fq": {addressType}, "rows": {"0"}})
+	_, err := c.search(ctx, endpointFree, url.Values{paramQuery: {matchAll}, paramFilter: {addressType}, paramRows: {"0"}})
 	return err
 }
 
@@ -103,9 +111,9 @@ func (c *PDOK) Find(ctx context.Context, postalCode string, houseNumber int) ([]
 		return nil, fmt.Errorf("addresslookup: %q is not a Dutch postal code", postalCode)
 	}
 	return c.search(ctx, endpointFree, url.Values{
-		"q":  {"*:*"},
-		"fq": {addressType, "postcode:" + postalCode, "huisnummer:" + strconv.Itoa(houseNumber)},
-		"fl": {addressFields}, "rows": {strconv.Itoa(findRows)},
+		paramQuery:  {matchAll},
+		paramFilter: {addressType, "postcode:" + postalCode, "huisnummer:" + strconv.Itoa(houseNumber)},
+		paramFields: {addressFields}, paramRows: {strconv.Itoa(findRows)},
 	})
 }
 

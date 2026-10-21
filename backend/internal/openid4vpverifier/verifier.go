@@ -79,7 +79,7 @@ type Presentation struct {
 	// dateOfBirth - and Claims keeps only one of them, in map-iteration order.
 	ByCredential map[string]map[string]string
 	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport,
-	// id-card or residence permit) issuer-signed JWT — the moment the wallet obtained that credential
+	// id-card or residence permit) issuer-signed JWT, the moment the wallet obtained that credential
 	// from its issuer, not the physical document's issue date. Used by a
 	// freshness check on re-identification (see .ai/features/auth-openid4vp.md and
 	// the member-reidentification feature); zero when the presentation carried no
