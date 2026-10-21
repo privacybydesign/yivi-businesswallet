@@ -253,8 +253,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
-    `face.match`. "Reject expired documents" is a read-only row, always on: the
-    engine refuses an expired document on every flow (`DOC_EXPIRED`).
+    `face.match` (see the face match threshold below). "Reject expired
+    documents" is a read-only row, always on: the engine refuses an expired
+    document on every flow (`DOC_EXPIRED`).
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
@@ -466,8 +467,21 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       which replaces the org's fixed 7 days for the flow's sessions.
     - The session (QR) lifetime (the org's fixed 10 minutes, 2, 5 or 10
       minutes), saved on the flow version.
-  - The face match threshold has no field in the editor: a stored one is carried
-    over unchanged.
+  - The face match threshold is a slider under Checks while the flow has the
+    face check: 0 to 1.00 in steps of 0.01, the value beside it, a scale at 0,
+    0.50, 0.75 and 1.00. A flow with none starts the slider at 0.75, Regula's
+    default (`FACE_MATCH_RECOMMENDED`), and saves one only once it is moved.
+    The flow's threshold replaces the deployment's
+    (`REGULA_FACE_MATCH_THRESHOLD`) for that flow's face match, lower or
+    higher. At Substantial the range starts at 0.75
+    (`SUBSTANTIAL_FACE_MATCH_FLOOR`, `flow.SubstantialMinFaceMatch`): the part
+    below is greyed out and out of reach, picking Substantial lifts a lower
+    stored threshold to it, and the engine refuses a Substantial flow with one
+    under it. At None or Low the whole range can be picked, with a mark at
+    0.75; below it the track and value turn amber and a warning with a tooltip
+    appears. The eIDAS level a session reaches has the same floor
+    (`meetsFaceMatchFloor`): a face scored under 0.75 reaches no more than Low,
+    whichever threshold matched it, the flow's or the deployment's.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always

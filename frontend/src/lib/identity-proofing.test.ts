@@ -48,7 +48,11 @@ import {
   withIdentity,
   editedFlowSelection,
   emptyFlowDraft,
+  FACE_MATCH_RECOMMENDED,
+  faceMatchFloor,
+  faceMatchValue,
   flowDraftError,
+  formatFaceMatch,
   reachesAssuranceLevel,
   flowSpecFromDraft,
   formatDuration,
@@ -79,6 +83,7 @@ import {
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
+  SUBSTANTIAL_FACE_MATCH_FLOOR,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
 
@@ -131,7 +136,7 @@ describe("flowSpecFromDraft", () => {
       draft({
         chipAuthentication: true,
         liveness: true,
-        faceMatchThreshold: "0.8",
+        faceMatchThreshold: 0.8,
       }),
     );
     expect(spec.steps).toEqual([
@@ -567,7 +572,7 @@ describe("draftFromFlow", () => {
       steps: ["document_capture", "nfc_read", "face_verification"],
       requestedAttributes: ["dg1", "selfie"],
       requiredChecks: ["nfc.passive_auth", "face.match"],
-      checkThresholds: { "face.match": 0.7 },
+      checkThresholds: { "face.match": 0.8 },
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "omit",
       keepFacePhotos: false,
@@ -586,7 +591,7 @@ describe("draftFromFlow", () => {
       // Not stored, but substantial needs them: they are ticked, and locked.
       chipAuthentication: true,
       liveness: true,
-      faceMatchThreshold: "0.7",
+      faceMatchThreshold: 0.8,
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
       keepFacePhotos: false,
@@ -730,7 +735,7 @@ describe("flowDraftError", () => {
         draft({ documentAndChip: false, faceVerification: false }),
       ),
     ).toBe("steps");
-    expect(flowDraftError(draft({ faceMatchThreshold: "1.5" }))).toBe(
+    expect(flowDraftError(draft({ faceMatchThreshold: 1.5 }))).toBe(
       "faceMatchThreshold",
     );
   });
@@ -777,6 +782,102 @@ describe("identity for data requests and diplomas", () => {
       "dg1",
     ]);
     expect(flowDraftError(needed, true)).toBeNull();
+  });
+});
+
+describe("face match threshold", () => {
+  const withThreshold = (
+    level: "" | "low" | "substantial",
+    faceMatchThreshold: number | null,
+  ) => withAssuranceLevel(draft({ faceMatchThreshold }), level);
+
+  it("floors only Substantial", () => {
+    expect(faceMatchFloor("")).toBe(0);
+    expect(faceMatchFloor("low")).toBe(0);
+    expect(faceMatchFloor("substantial")).toBe(SUBSTANTIAL_FACE_MATCH_FLOOR);
+  });
+
+  it("shows the recommended minimum while the flow sets none", () => {
+    expect(faceMatchValue(draft())).toBe(FACE_MATCH_RECOMMENDED);
+    expect(faceMatchValue(draft({ faceMatchThreshold: 0.4 }))).toBe(0.4);
+    expect(faceMatchValue(draft({ faceMatchThreshold: 0 }))).toBe(0);
+  });
+
+  it("lifts a threshold under the floor when Substantial is picked", () => {
+    expect(withThreshold("substantial", 0.6).faceMatchThreshold).toBe(0.75);
+    expect(withThreshold("substantial", 0).faceMatchThreshold).toBe(0.75);
+  });
+
+  it("keeps a threshold the level allows, and none", () => {
+    expect(withThreshold("substantial", 0.9).faceMatchThreshold).toBe(0.9);
+    expect(withThreshold("substantial", 0.75).faceMatchThreshold).toBe(0.75);
+    expect(withThreshold("substantial", null).faceMatchThreshold).toBeNull();
+    expect(withThreshold("low", 0.6).faceMatchThreshold).toBe(0.6);
+    expect(withThreshold("", 0).faceMatchThreshold).toBe(0);
+  });
+
+  it("writes a threshold with two decimals in the reader's language", () => {
+    expect(formatFaceMatch(0.75, "en")).toBe("0.75");
+    expect(formatFaceMatch(0.5, "en")).toBe("0.50");
+    expect(formatFaceMatch(1, "en")).toBe("1.00");
+    expect(formatFaceMatch(0, "en")).toBe("0");
+    expect(formatFaceMatch(0.75, "nl")).toBe("0,75");
+  });
+
+  it("keeps a lifted threshold when the level drops", () => {
+    const substantial = withThreshold("substantial", 0.6);
+    expect(withAssuranceLevel(substantial, "low").faceMatchThreshold).toBe(
+      0.75,
+    );
+  });
+
+  it("refuses a threshold under the level's floor or off the scale", () => {
+    const substantial = (faceMatchThreshold: number) =>
+      flowDraftError({
+        ...withAssuranceLevel(draft(), "substantial"),
+        faceMatchThreshold,
+      });
+    expect(substantial(0.74)).toBe("faceMatchThreshold");
+    expect(substantial(0.75)).toBeNull();
+    expect(substantial(1)).toBeNull();
+    expect(substantial(1.01)).toBe("faceMatchThreshold");
+    expect(flowDraftError(draft({ faceMatchThreshold: 0 }))).toBeNull();
+    expect(flowDraftError(draft({ faceMatchThreshold: -0.1 }))).toBe(
+      "faceMatchThreshold",
+    );
+    expect(flowDraftError(draft({ faceMatchThreshold: NaN }))).toBe(
+      "faceMatchThreshold",
+    );
+  });
+
+  it("sends the threshold only for a flow that matches a face", () => {
+    const sent = (patch: Partial<ProofingFlowDraft>) =>
+      flowSpecFromDraft(draft(patch)).checkThresholds;
+    expect(sent({ faceMatchThreshold: 0.6 })).toEqual({ "face.match": 0.6 });
+    expect(sent({ faceMatchThreshold: 0 })).toEqual({ "face.match": 0 });
+    expect(sent({ faceMatchThreshold: null })).toBeUndefined();
+    expect(
+      sent({ faceMatchThreshold: 0.6, faceVerification: false }),
+    ).toBeUndefined();
+  });
+
+  it("starts from a stored threshold, lifted to what the level allows", () => {
+    const stored = (level: string, threshold: number) =>
+      draftFromFlow({
+        id: "f1",
+        version: 1,
+        active: true,
+        name: "Flow",
+        steps: ["document_capture", "nfc_read", "face_verification"],
+        requiredChecks: ["nfc.passive_auth", "face.match"],
+        requiredAssuranceLevel: level,
+        checkThresholds: { "face.match": threshold },
+        createdAt: "2026-09-24T10:00:00Z",
+        completable: true,
+      }).faceMatchThreshold;
+    expect(stored("", 0.6)).toBe(0.6);
+    expect(stored("substantial", 0.6)).toBe(0.75);
+    expect(stored("substantial", 0.85)).toBe(0.85);
   });
 });
 
@@ -1313,6 +1414,35 @@ describe("session settings mirror backend/internal/proofing", () => {
     const cap = /const maxListedRequests = (\d+)/.exec(source);
     expect(cap).not.toBeNull();
     expect(MAX_LISTED_REQUESTS).toBe(Number(cap![1]));
+  });
+});
+
+// The face match slider's floor and recommended mark are the engine's.
+describe("face match threshold mirrors the backend", () => {
+  const read = (path: string): string =>
+    readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  const constant = (source: string, name: string): number => {
+    const found = new RegExp(`const ${name} = ([\\d.]+)`).exec(source);
+    expect(found, `${name} is declared`).not.toBeNull();
+    return Number(found![1]);
+  };
+
+  it("floors Substantial where the engine does", () => {
+    const flowGo = read(
+      "../../../backend/internal/proofingengine/flow/flow.go",
+    );
+    expect(SUBSTANTIAL_FACE_MATCH_FLOOR).toBe(
+      constant(flowGo, "SubstantialMinFaceMatch"),
+    );
+  });
+
+  it("recommends Regula's default", () => {
+    const regulaGo = read(
+      "../../../backend/internal/proofingengine/regula/regula.go",
+    );
+    expect(FACE_MATCH_RECOMMENDED).toBe(
+      constant(regulaGo, "DefaultMatchThreshold"),
+    );
   });
 });
 

@@ -1338,7 +1338,7 @@ export const en = {
           "This flow cannot reach the required level: turn on what the level needs, or lower it.",
         documentTypes: "Tick at least one document type.",
         issuingCountries: "Add a country, or choose Any country.",
-        faceMatchThreshold: "Enter a number from 0 to 1.",
+        faceMatchThreshold: "Pick a face match threshold the level allows.",
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
         identity:
@@ -1435,8 +1435,17 @@ export const en = {
       },
       checks: {
         title: "Checks",
-        hint: "A failed check rejects the session. The face match uses Regula's threshold.",
+        hint: "A failed check rejects the session.",
         expired: "Reject expired documents",
+        threshold: {
+          label: "Face match threshold",
+          hint: "How closely the selfie must match the photo on the chip. Higher rejects more look-alikes, and more real holders.",
+          floor: "At least {{min}} for {{level}}",
+          recommended: "The mark at {{min}} is the recommended minimum.",
+          warningLabel: "Below {{min}} is not recommended",
+          warning:
+            "Below {{min}} is not recommended: more people who are not the document's holder get through.",
+        },
       },
       privacy: {
         title: "Privacy",

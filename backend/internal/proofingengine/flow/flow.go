@@ -191,7 +191,15 @@ type LevelRequirement struct {
 	Level        AssuranceLevel
 	Checks       []Check
 	FaceProvider FaceProvider
+	// MinFaceMatch is the lowest face match threshold a flow requiring Level may
+	// set; 0 puts no floor under it.
+	MinFaceMatch float64
 }
+
+// SubstantialMinFaceMatch is Regula's default face match threshold, which
+// Substantial has always used: eIDAS sets no face match score, so this floor is
+// our own.
+const SubstantialMinFaceMatch = 0.75
 
 // LevelRequirements is every level this service can claim, lowest first.
 // High is absent: no check computed here is certified anti-spoofing.
@@ -207,6 +215,7 @@ var LevelRequirements = []LevelRequirement{
 		Level:        AssuranceLevelSubstantial,
 		Checks:       []Check{CheckNFCPassiveAuth, CheckNFCChipAuth, CheckFaceMatch, CheckFaceLiveness},
 		FaceProvider: FaceProviderRegula,
+		MinFaceMatch: SubstantialMinFaceMatch,
 	},
 }
 
@@ -320,7 +329,9 @@ type FlowDefinition struct {
 	// check listed scores as failed.
 	RequiredChecks []Check `json:"RequiredChecks"`
 	// CheckThresholds are minimum scores for listed checks; only CheckFaceMatch
-	// has a score. A check without one is pass/fail.
+	// has a score. A check without one is pass/fail. The face match's replaces
+	// the deployment's threshold, and a flow requiring Substantial may not set
+	// it under SubstantialMinFaceMatch.
 	CheckThresholds map[Check]float64 `json:"CheckThresholds"`
 	// RequiredAssuranceLevel is the minimum eIDAS level a session must achieve
 	// to be approved (MeetsLevel); empty requires none. It changes no step, no
@@ -662,8 +673,8 @@ func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	return nil
 }
 
-// validateRequiredLevel rejects a RequiredAssuranceLevel fd's checks and face
-// provider cannot reach (see LevelRequirements).
+// validateRequiredLevel rejects a RequiredAssuranceLevel fd's checks, face
+// provider and face match threshold cannot reach (see LevelRequirements).
 func validateRequiredLevel(fd FlowDefinition, seenChecks map[Check]bool) error {
 	if fd.RequiredAssuranceLevel == "" {
 		return nil
@@ -679,6 +690,9 @@ func validateRequiredLevel(fd FlowDefinition, seenChecks map[Check]bool) error {
 	}
 	if req.FaceProvider != "" && fd.FaceProvider != req.FaceProvider {
 		return fmt.Errorf("flow: requiredAssuranceLevel %q requires faceProvider %q", req.Level, req.FaceProvider)
+	}
+	if threshold, ok := fd.CheckThresholds[CheckFaceMatch]; ok && threshold < req.MinFaceMatch {
+		return fmt.Errorf("flow: requiredAssuranceLevel %q requires a face match threshold of at least %.2f", req.Level, req.MinFaceMatch)
 	}
 	return nil
 }

@@ -112,11 +112,12 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
-//     only for face.match.
+//     only for face.match, on a slider from 0 to 1 that Substantial floors.
 //   - Requested data: each item is available only when the step that produces
 //     it is in the flow, and cleared otherwise; none is forced on.
 //   - Assurance (flow.LevelRequirements): low needs nfc.passive_auth;
-//     substantial also nfc.chip_auth, face.match and face.liveness with Regula.
+//     substantial also nfc.chip_auth, face.match (at a threshold of at least
+//     SUBSTANTIAL_FACE_MATCH_FLOOR) and face.liveness with Regula.
 //     Picking a level ticks what it needs and locks it (withAssuranceLevel);
 //     a draft that still cannot reach its level is refused. High is never
 //     reachable. The engine explains a refusal.
@@ -128,6 +129,17 @@ export const CHECK_PASSIVE_AUTH = "nfc.passive_auth";
 export const CHECK_CHIP_AUTH = "nfc.chip_auth";
 export const CHECK_FACE_MATCH = "face.match";
 export const CHECK_LIVENESS = "face.liveness";
+
+// The face match threshold is a similarity from 0 to 1, in steps of 0.01.
+export const FACE_MATCH_MIN = 0;
+export const FACE_MATCH_MAX = 1;
+export const FACE_MATCH_STEP = 0.01;
+// Regula's default (regula.DefaultMatchThreshold): what a flow with no
+// threshold gets, and the lowest one recommended.
+export const FACE_MATCH_RECOMMENDED = 0.75;
+// The lowest threshold a flow requiring Substantial may set
+// (flow.SubstantialMinFaceMatch).
+export const SUBSTANTIAL_FACE_MATCH_FLOOR = 0.75;
 
 // The requested data the service's admin page offers, in the order the editor
 // lists them, and the step that produces each: the document scan gives the
@@ -288,9 +300,8 @@ export interface ProofingFlowDraft {
   chipAuthentication: boolean;
   liveness: boolean;
   faceProvider: FaceProvider;
-  // A decimal 0..1 as stored; "" is pass/fail only. The editor shows no field
-  // for it, so a stored one is kept.
-  faceMatchThreshold: string;
+  // The face match threshold, 0..1; null sets none, so the deployment's applies.
+  faceMatchThreshold: number | null;
   requestedAttributes: ReadonlySet<string>;
   // Whole years as typed, the age the age check answers for.
   ageOver: string;
@@ -371,13 +382,54 @@ export function levelRequirement(
   return level === "" ? {} : LEVEL_REQUIREMENTS[level];
 }
 
+// The lowest face match threshold a level allows; only Substantial floors it.
+export function faceMatchFloor(level: Inherit<AssuranceLevel>): number {
+  return level === "substantial"
+    ? SUBSTANTIAL_FACE_MATCH_FLOOR
+    : FACE_MATCH_MIN;
+}
+
+// The threshold the slider shows: the draft's, else Regula's default.
+export function faceMatchValue(draft: ProofingFlowDraft): number {
+  return draft.faceMatchThreshold ?? FACE_MATCH_RECOMMENDED;
+}
+
+const faceMatchFormats = new Map<string, Intl.NumberFormat>();
+
+// A face match threshold as the editor writes it: two decimals in the reader's
+// locale, and a bare 0 for the start of the scale.
+export function formatFaceMatch(value: number, locale: string): string {
+  if (value === FACE_MATCH_MIN) {
+    return "0";
+  }
+  let format = faceMatchFormats.get(locale);
+  if (format === undefined) {
+    format = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    faceMatchFormats.set(locale, format);
+  }
+  return format.format(value);
+}
+
 // The draft at a level, with what the level needs ticked. The rest stays as it
-// was, so a setting a lower level leaves free keeps its value.
+// was, so a setting a lower level leaves free keeps its value; a threshold
+// under the level's floor is lifted to it.
 export function withAssuranceLevel(
   draft: ProofingFlowDraft,
   level: Inherit<AssuranceLevel>,
 ): ProofingFlowDraft {
-  return { ...draft, ...levelRequirement(level), assuranceLevel: level };
+  const { faceMatchThreshold } = draft;
+  return {
+    ...draft,
+    ...levelRequirement(level),
+    assuranceLevel: level,
+    faceMatchThreshold:
+      faceMatchThreshold === null
+        ? null
+        : Math.max(faceMatchThreshold, faceMatchFloor(level)),
+  };
 }
 
 // Whether the draft's level needs a setting on, which locks it.
@@ -421,7 +473,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     chipAuthentication: false,
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
-    faceMatchThreshold: "",
+    faceMatchThreshold: null,
     requestedAttributes: new Set(),
     ageOver: String(DEFAULT_AGE_OVER),
     documentKinds: new Set(DOCUMENT_KINDS),
@@ -454,7 +506,6 @@ export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 // its level needs ticked.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
-  const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
   const storedTypes = flow.acceptedDocumentTypes ?? [];
   const storedCountries = flow.acceptedIssuingCountries ?? [];
   const draft: ProofingFlowDraft = {
@@ -467,7 +518,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
-    faceMatchThreshold: threshold === undefined ? "" : String(threshold),
+    faceMatchThreshold: flow.checkThresholds?.[CHECK_FACE_MATCH] ?? null,
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
     documentKinds: storedDocumentKinds(storedTypes),
@@ -527,9 +578,13 @@ export function flowDraftError(
   if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
     return "issuingCountries";
   }
-  if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
-    const value = Number(draft.faceMatchThreshold);
-    if (!Number.isFinite(value) || value < 0 || value > 1) {
+  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
+    const value = draft.faceMatchThreshold;
+    if (
+      !Number.isFinite(value) ||
+      value < faceMatchFloor(draft.assuranceLevel) ||
+      value > FACE_MATCH_MAX
+    ) {
       return "faceMatchThreshold";
     }
   }
@@ -618,10 +673,8 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.faceVerification) {
     spec.faceProvider = draft.faceProvider;
   }
-  if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
-    spec.checkThresholds = {
-      [CHECK_FACE_MATCH]: Number(draft.faceMatchThreshold),
-    };
+  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
+    spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
   }
   if (draft.assuranceLevel !== "") {
     spec.requiredAssuranceLevel = draft.assuranceLevel;

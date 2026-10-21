@@ -1367,7 +1367,8 @@ export const nl: Translation<typeof en> = {
           "Deze flow kan het vereiste niveau niet halen: zet aan wat het niveau vereist, of verlaag het.",
         documentTypes: "Vink minstens één documenttype aan.",
         issuingCountries: "Voeg een land toe, of kies Elk land.",
-        faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
+        faceMatchThreshold:
+          "Kies een drempel voor de gezichtsvergelijking die het niveau toestaat.",
         retentionSeconds: "Vul een heel aantal seconden in.",
         ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
         identity:
@@ -1464,8 +1465,17 @@ export const nl: Translation<typeof en> = {
       },
       checks: {
         title: "Controles",
-        hint: "Een mislukte controle wijst de sessie af. De gezichtsvergelijking gebruikt de drempel van Regula.",
+        hint: "Een mislukte controle wijst de sessie af.",
         expired: "Verlopen documenten weigeren",
+        threshold: {
+          label: "Drempel voor de gezichtsvergelijking",
+          hint: "Hoe goed de selfie moet overeenkomen met de foto op de chip. Een hogere drempel wijst meer look-alikes af, en ook meer echte houders.",
+          floor: "Minstens {{min}} voor {{level}}",
+          recommended: "De markering bij {{min}} is het aanbevolen minimum.",
+          warningLabel: "Onder {{min}} wordt afgeraden",
+          warning:
+            "Onder {{min}} wordt afgeraden: meer mensen die niet de houder van het document zijn komen erdoor.",
+        },
       },
       privacy: {
         title: "Privacy",

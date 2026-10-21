@@ -42,6 +42,7 @@ import {
   Section,
 } from "./flow-editor-parts";
 import type { OptionLock } from "./flow-editor-parts";
+import { FaceMatchThreshold } from "./flow-editor-threshold";
 
 const LABEL = "text-[14px] font-semibold";
 // Lines a field up under an option's label: past its checkbox and the gap.
@@ -576,6 +577,9 @@ function ChecksSection({
         label={t("identityProofingFlows.editor.checks.expired")}
         lock={{ note: t("identityProofingFlows.editor.locks.everyFlow") }}
       />
+      {draft.faceVerification && (
+        <FaceMatchThreshold draft={draft} update={update} />
+      )}
     </Section>
   );
 }

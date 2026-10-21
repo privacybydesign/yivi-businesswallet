@@ -75,13 +75,18 @@ func (s *Server) faceProviderFor(fd *flow.FlowDefinition) flow.FaceProvider {
 	return flow.FaceProviderEngine
 }
 
-// faceVerifier returns the verifier for p; ok is false when p isn't configured.
-func (s *Server) faceVerifier(p flow.FaceProvider) (faceVerifier, bool) {
+// faceVerifier returns the verifier for p, matching at fd's threshold; ok is
+// false when p isn't configured.
+func (s *Server) faceVerifier(p flow.FaceProvider, fd *flow.FlowDefinition) (faceVerifier, bool) {
 	if p == flow.FaceProviderRegula {
 		if s.cfg.Regula == nil {
 			return nil, false
 		}
-		return regulaFaceVerifier{client: s.cfg.Regula, threshold: s.cfg.RegulaFaceMatchThreshold}, true
+		threshold, ok := fd.CheckThresholds[flow.CheckFaceMatch]
+		if !ok {
+			threshold = s.cfg.RegulaFaceMatchThreshold
+		}
+		return regulaFaceVerifier{client: s.cfg.Regula, threshold: threshold}, true
 	}
 	// The wallet runs no face engine of its own: only Regula verifies a face.
 	return nil, false

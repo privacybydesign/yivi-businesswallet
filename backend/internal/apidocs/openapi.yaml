@@ -10959,6 +10959,10 @@ components:
           type: object
           additionalProperties:
             type: number
+          description: >-
+            Only `face.match` takes one: the similarity from 0 to 1 the face match must reach,
+            in place of the deployment's. Absent, the deployment's applies. A flow requiring
+            `substantial` may not set it under 0.75.
         requiredAssuranceLevel:
           type: string
           enum: [low, substantial]
