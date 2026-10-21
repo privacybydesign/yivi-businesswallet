@@ -668,9 +668,6 @@ export const nl: Translation<typeof en> = {
     },
     send: {
       title: "Een persoon verifiëren",
-      hint: "De persoon krijgt een mail met een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
-      hintOnScreen:
-        "De persoon is bij je. Een pagina laat zien wat er wordt verzameld, laat kiezen tussen de Yivi-app en de Idem-app en toont de QR-code. Er wordt niets gemaild.",
       channel: "Hoe krijgt de persoon de QR-code?",
       channels: {
         email: {
@@ -679,33 +676,39 @@ export const nl: Translation<typeof en> = {
         },
         onScreen: {
           title: "Op dit scherm tonen",
-          hint: "Een pagina hier, voor iemand die bij je is.",
+          hint: "Voor iemand die bij je is.",
         },
         link: {
           title: "Link kopiëren",
-          hint: "Een link naar een gehoste pagina, die je de persoon zelf stuurt. 72 uur geldig.",
+          hint: "Je stuurt de link zelf. Hij kan één keer worden gestart, binnen 72 uur.",
         },
       },
-      emailOptional: "E-mailadres (optioneel)",
+      mailLifetime: "Werkt {{minutes}} minuten na het versturen.",
       submitOnScreen: "Pagina openen",
       submitLink: "Link maken",
-      hintLink:
-        "Je krijgt een link naar een pagina in de huisstijl van je organisatie. De persoon opent die op het eigen apparaat, leest wat er wordt verzameld, kiest de app en start daar; vanaf dan loopt de sessie. Er wordt niets gemaild.",
       linkTitle: "Link gemaakt",
       linkHint:
         "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt onder Sessies.",
       linkDone: "Klaar",
       email: "E-mailadres",
+      emailPlaceholder: "naam@example.nl",
       emailRequired: "Vul een geldig e-mailadres in.",
       diplomasOnScreen:
         "Deze flow vraagt om een adres of diploma's, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
-      name: "Naam (optioneel)",
-      nameHint:
-        "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
-      nameRequired: "Vul de naam in van de persoon bij deze geboortedatum.",
-      birthDate: "Geboortedatum (optioneel)",
-      birthDateHint:
-        "Met een geboortedatum kan alleen deze persoon slagen: de naam en geboortedatum op het document moeten kloppen, anders wordt de controle afgewezen.",
+      addName: {
+        title: "Naam van de persoon toevoegen",
+        hint: "Staat in je lijst tot de controle klaar is; daarna de naam van hun document.",
+        passNote: "Nodig om de naam op hun document te vergelijken.",
+      },
+      onlyThisPerson: {
+        title: "Alleen deze persoon laten slagen",
+        hint: "De naam en geboortedatum op hun document moeten kloppen, anders wordt de controle afgewezen.",
+      },
+      name: "Naam",
+      birthDate: "Geboortedatum",
+      required: "(verplicht)",
+      nameRequired: "Vul de naam van de persoon in.",
+      birthDateRequired: "Vul de geboortedatum in.",
       flow: "Flow",
       submit: "Verzoek versturen",
       cancel: "Annuleren",

@@ -650,9 +650,6 @@ export const en = {
     },
     send: {
       title: "Verify a person",
-      hint: "The person gets a mail with a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
-      hintOnScreen:
-        "The person is with you. A page shows them what is collected, lets them choose the Yivi app or the Idem app, and shows its QR code. Nothing is mailed.",
       channel: "How does the person get the QR code?",
       channels: {
         email: {
@@ -661,33 +658,39 @@ export const en = {
         },
         onScreen: {
           title: "Show on this screen",
-          hint: "A page here, for a person who is with you.",
+          hint: "For a person who is with you.",
         },
         link: {
           title: "Copy a link",
-          hint: "A link to a hosted page, which you send the person yourself. Valid 72 hours.",
+          hint: "You send the link yourself. It can be started once, within 72 hours.",
         },
       },
-      emailOptional: "E-mail address (optional)",
+      mailLifetime: "It works for {{minutes}} minutes after sending.",
       submitOnScreen: "Open page",
       submitLink: "Create link",
-      hintLink:
-        "You get a link to a page in your organisation's branding. The person opens it on their own device, reads what is collected, picks the app and starts there; the session runs from then. Nothing is mailed.",
       linkTitle: "Link created",
       linkHint:
         "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears under Sessions.",
       linkDone: "Done",
       email: "E-mail address",
+      emailPlaceholder: "name@example.nl",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
         "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
-      name: "Name (optional)",
-      nameHint:
-        "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
-      nameRequired: "Enter the name of the person the date of birth is for.",
-      birthDate: "Date of birth (optional)",
-      birthDateHint:
-        "With a date of birth, only this person can pass: the name and date of birth on their document must match, or the check is rejected.",
+      addName: {
+        title: "Add the person's name",
+        hint: "Shown in your list until the check finishes; after that, the name from their document.",
+        passNote: "Needed to match the name on their document.",
+      },
+      onlyThisPerson: {
+        title: "Only let this person pass",
+        hint: "The name and date of birth on their document must match, or the check is rejected.",
+      },
+      name: "Name",
+      birthDate: "Date of birth",
+      required: "(required)",
+      nameRequired: "Enter the name of the person.",
+      birthDateRequired: "Enter the date of birth.",
       flow: "Flow",
       submit: "Send request",
       cancel: "Cancel",

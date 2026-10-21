@@ -39,9 +39,11 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
+  mailLifetimeMinutes,
   readsIdentity,
   sendableByMail,
   sessionView,
+  sendRequestFields,
   verifyStages,
   currentStage,
   progressPollContinues,
@@ -1819,6 +1821,106 @@ describe("diploma step", () => {
       expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
     }
     expect(diplomaRejectionReason("something_new", t)).toBe("something_new");
+  });
+});
+
+describe("sendRequestFields", () => {
+  const filled = {
+    delivery: "email",
+    matchable: true,
+    nameOn: false,
+    passOn: false,
+    email: " anna@example.org ",
+    name: " Anna ",
+    birthDate: "1990-04-02",
+  } as const;
+
+  it("sends only the address while both switches are off", () => {
+    const fields = sendRequestFields(filled);
+
+    expect(fields.email).toBe("anna@example.org");
+    expect(fields.name).toBe("");
+    expect(fields.birthDate).toBeUndefined();
+    expect(fields.missing).toEqual({
+      email: false,
+      name: false,
+      birthDate: false,
+    });
+  });
+
+  it("asks for an address only when the person gets a mail", () => {
+    expect(sendRequestFields({ ...filled, email: "" }).missing.email).toBe(
+      true,
+    );
+    expect(sendRequestFields({ ...filled, email: "anna" }).missing.email).toBe(
+      true,
+    );
+
+    for (const delivery of ["on_screen", "hosted"] as const) {
+      const fields = sendRequestFields({ ...filled, delivery, email: "" });
+
+      expect(fields.missing.email).toBe(false);
+      expect(sendRequestFields({ ...filled, delivery }).email).toBe("");
+    }
+  });
+
+  it("sends the name once its switch is on, and asks for it", () => {
+    const on = { ...filled, nameOn: true };
+
+    expect(sendRequestFields(on).name).toBe("Anna");
+    expect(sendRequestFields(on).nameShown).toBe(true);
+    expect(sendRequestFields({ ...on, name: " " }).missing.name).toBe(true);
+  });
+
+  it("passes one person on name and date of birth", () => {
+    const fields = sendRequestFields({ ...filled, passOn: true });
+
+    expect(fields.passing).toBe(true);
+    expect(fields.nameShown).toBe(true);
+    expect(fields.name).toBe("Anna");
+    expect(fields.birthDate).toBe("1990-04-02");
+    expect(
+      sendRequestFields({ ...filled, passOn: true, name: "" }).missing.name,
+    ).toBe(true);
+    expect(
+      sendRequestFields({ ...filled, passOn: true, birthDate: "" }).missing
+        .birthDate,
+    ).toBe(true);
+  });
+
+  it("ignores the pass switch on a flow that does not read identity", () => {
+    const fields = sendRequestFields({
+      ...filled,
+      passOn: true,
+      matchable: false,
+      birthDate: "",
+    });
+
+    expect(fields.passing).toBe(false);
+    expect(fields.birthDate).toBeUndefined();
+    expect(fields.name).toBe("");
+    expect(fields.missing).toEqual({
+      email: false,
+      name: false,
+      birthDate: false,
+    });
+  });
+});
+
+describe("mailLifetimeMinutes", () => {
+  it("takes the flow's own lifetime over the organisation's", () => {
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 120 }, 600)).toBe(2);
+  });
+
+  it("follows the organisation when the flow sets none", () => {
+    expect(mailLifetimeMinutes({}, 300)).toBe(5);
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 0 }, 300)).toBe(5);
+    expect(mailLifetimeMinutes(undefined, 300)).toBe(5);
+  });
+
+  it("is unknown until the organisation's settings are read", () => {
+    expect(mailLifetimeMinutes({}, undefined)).toBeUndefined();
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 120 }, undefined)).toBe(2);
   });
 });
 

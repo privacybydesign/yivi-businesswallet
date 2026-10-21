@@ -1108,6 +1108,51 @@ export function identityRequired(
   return isDataRequest(kind) || diplomas !== "off";
 }
 
+interface SendFields {
+  email: string;
+  name: string;
+  birthDate: string | undefined;
+  // Only this person may pass: set by its switch, on a flow that reads identity.
+  passing: boolean;
+  // Passing is matched on the name too, so it asks for one whatever the name
+  // switch says.
+  nameShown: boolean;
+  missing: { email: boolean; name: boolean; birthDate: boolean };
+}
+
+// What the Verify a person form sends, and what it still lacks. A field whose
+// switch is off, or whose channel does not use it, sends nothing even if it
+// was filled before; only a mail carries an address.
+export function sendRequestFields(input: {
+  delivery: ProofingChannel;
+  matchable: boolean;
+  nameOn: boolean;
+  passOn: boolean;
+  email: string;
+  name: string;
+  birthDate: string;
+}): SendFields {
+  const passing = input.passOn && input.matchable;
+  const nameShown = input.nameOn || passing;
+  const mailed = input.delivery === "email";
+  const email = mailed ? input.email.trim() : "";
+  const name = nameShown ? input.name.trim() : "";
+  const birthDate = passing ? input.birthDate : undefined;
+
+  return {
+    email,
+    name,
+    birthDate,
+    passing,
+    nameShown,
+    missing: {
+      email: mailed && !email.includes("@"),
+      name: nameShown && name === "",
+      birthDate: passing && input.birthDate === "",
+    },
+  };
+}
+
 // Why an uploaded diploma extract was not kept, from its verdict's reason.
 // An unknown reason is shown as is.
 export function diplomaRejectionReason(reason: string, t: TFunction): string {
@@ -1560,6 +1605,18 @@ export function ttlMinutes(seconds: number): number {
   return Math.round(seconds / SECONDS_IN_MINUTE);
 }
 
+// How long a mailed session runs on a flow: its own lifetime, else the
+// organisation's, which is unknown until the settings are read.
+export function mailLifetimeMinutes(
+  flow: Pick<ProofingFlow, "sessionTtlSeconds"> | undefined,
+  orgSeconds: number | undefined,
+): number | undefined {
+  const own = flow?.sessionTtlSeconds ?? FOLLOW_ORG;
+  const seconds = own === FOLLOW_ORG ? orgSeconds : own;
+
+  return seconds === undefined ? undefined : ttlMinutes(seconds);
+}
+
 // A delivery answered 2xx.
 const HTTP_SUCCESS_CLASS = 2;
 const HTTP_STATUS_CLASS_DIVISOR = 100;
@@ -1776,11 +1833,11 @@ export function sessionEventDetail(
   return parts;
 }
 
-// What the send form does with its fields: the flow it sends (a pick no longer
-// sendable falls back to the default), how (a flow that asks for diplomas or
-// the address cannot be mailed, so it runs on screen), whether it checks for one person (a
-// flow reading name and date of birth, given a date of birth), and which
-// fields still block it.
+// What the send form does with the flow and channel it is given: the flow it
+// sends (a pick no longer sendable falls back to the default), how (a flow that
+// asks for diplomas or the address cannot be mailed, so it runs on screen) and
+// whether it can check for one person (a flow reading name and date of birth).
+// sendRequestFields has what the fields send and lack.
 export function sendFormDecision<
   F extends {
     id: string;
@@ -1793,17 +1850,11 @@ export function sendFormDecision<
   initial: F | undefined;
   picked: string;
   channel: ProofingChannel;
-  email: string;
-  name: string;
-  birthDate: string;
 }): {
   flowId: string;
   mailable: boolean;
   matchable: boolean;
-  expectedBirthDate: string;
   delivery: ProofingChannel;
-  emailMissing: boolean;
-  nameMissing: boolean;
 } {
   const flowId = input.sendable.some((f) => f.id === input.picked)
     ? input.picked
@@ -1811,24 +1862,9 @@ export function sendFormDecision<
   const flow = input.sendable.find((f) => f.id === flowId);
   const mailable = sendableByMail(flow);
   const matchable = readsIdentity(flow);
-  const expectedBirthDate = matchable ? input.birthDate : "";
   const delivery: ProofingChannel =
     input.channel === "email" && !mailable ? "on_screen" : input.channel;
-  // Only a mail needs an address; one given must still be one.
-  const emailMissing =
-    delivery === "email"
-      ? !input.email.includes("@")
-      : input.email.trim() !== "" && !input.email.includes("@");
-  const nameMissing = expectedBirthDate !== "" && input.name.trim() === "";
-  return {
-    flowId,
-    mailable,
-    matchable,
-    expectedBirthDate,
-    delivery,
-    emailMissing,
-    nameMissing,
-  };
+  return { flowId, mailable, matchable, delivery };
 }
 
 // Whether a session's row shows its verified identity to this reader: an

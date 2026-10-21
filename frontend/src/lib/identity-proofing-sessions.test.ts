@@ -32,9 +32,6 @@ const base = {
   initial: plain,
   picked: "",
   channel: "email" as const,
-  email: "anna@example.org",
-  name: "",
-  birthDate: "",
 };
 
 describe("sendFormDecision", () => {
@@ -51,37 +48,20 @@ describe("sendFormDecision", () => {
     expect(d.delivery).toBe("on_screen");
   });
 
-  it("needs an address for a mail, and a valid one if given otherwise", () => {
-    expect(sendFormDecision({ ...base, email: "" }).emailMissing).toBe(true);
-    expect(
-      sendFormDecision({ ...base, channel: "on_screen", email: "" })
-        .emailMissing,
-    ).toBe(false);
-    expect(
-      sendFormDecision({ ...base, channel: "on_screen", email: "nope" })
-        .emailMissing,
-    ).toBe(true);
+  it("can check for one person only on a flow reading the identity", () => {
+    expect(sendFormDecision({ ...base, picked: "plain" }).matchable).toBe(
+      false,
+    );
+    expect(sendFormDecision({ ...base, picked: "matching" }).matchable).toBe(
+      true,
+    );
   });
 
-  it("checks for one person only on a flow reading the identity, then needs the name", () => {
-    expect(
-      sendFormDecision({ ...base, birthDate: "1990-04-12" }).expectedBirthDate,
-    ).toBe("");
-    const d = sendFormDecision({
-      ...base,
-      picked: "matching",
-      birthDate: "1990-04-12",
-    });
-    expect(d.expectedBirthDate).toBe("1990-04-12");
-    expect(d.nameMissing).toBe(true);
-    expect(
-      sendFormDecision({
-        ...base,
-        picked: "matching",
-        birthDate: "1990-04-12",
-        name: "Anna",
-      }).nameMissing,
-    ).toBe(false);
+  it("keeps the channel for a flow that can be mailed", () => {
+    expect(sendFormDecision(base).delivery).toBe("email");
+    expect(sendFormDecision({ ...base, channel: "hosted" }).delivery).toBe(
+      "hosted",
+    );
   });
 });
 

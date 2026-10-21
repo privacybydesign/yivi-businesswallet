@@ -22,7 +22,10 @@ same table narrowed to that flow by the backend (`?flowId=`), as is All people
 when its Flow filter picks one, whose retention line then states that flow's
 retention. A count read from a list of 200, the cap, may be short, so it shows
 as "200+" ("12+" for a part of it). "Verify a person" in the
-header of the Overview, of All people and of a flow opens the send form, for any member. Only a
+header of the Overview, of All people and of a flow opens the send form, for any member. From a
+flow the dialog sends on that flow; from the Overview or All people it asks for the flow first. It
+asks how the person gets the QR code (the e-mail address sits inside the e-mail option) and has
+two switches, off by default: "Add the person's name" and "Only let this person pass". Only a
 platform admin pauses an org's proofing, after which no request can be sent
 (`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
 request from their member detail page (admin-only, like that page). The people
@@ -1558,8 +1561,9 @@ session) or "Dibran Mulder must identify himself". Wallet-side only: the engine
 proofs whoever scans, and the wallet holds the outcome to the person.
 
 - **Send.** An external person's request with a `birthDate` (YYYY-MM-DD, past, with
-  `name`): the Verify a person dialog's "Date of birth" (shown only for a flow that reads
-  the document data), `POST .../requests`, and the public API's
+  `name`): the Verify a person dialog's "Only let this person pass" switch (shown only for a
+  flow that reads the document data), which asks for the name and the date of birth,
+  `POST .../requests`, and the public API's
   `POST /proofing/sessions`, on every channel. A request to a member cannot
   (`ErrInvalidInput`: the wallet holds no birth date of a member), nor a flow
   whose result lacks the document data (`readsIdentity`, the same name in the

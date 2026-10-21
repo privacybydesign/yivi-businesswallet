@@ -1,32 +1,38 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
   useCreateRequestMutation,
   useProofingFlowsQuery,
+  useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingChannel, ProofingFlow } from "../api/identity-proofing";
 import {
   externalFlows,
+  mailLifetimeMinutes,
   proofingErrorMessage,
   sendFormDecision,
+  sendRequestFields,
 } from "../lib/identity-proofing";
 import { Button, Input, Modal } from "../ui";
+import { ChevronSelect } from "./flow-editor-parts";
 import { SecretReveal } from "./proofing-ui";
 
-const LABEL = "text-ink-soft text-[12px] font-semibold";
+const LABEL = "text-ink text-[14px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
+const OPTION_HINT = "text-ink-soft text-[13px] leading-5";
 const ERROR = "text-error text-[12.5px]";
-// Mirrors the Input base so the flow select reads as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-9 disabled:opacity-60";
+const SEND_FORM = "proofing-send";
+const EMAIL_ERROR_ID = "proofing-subject-email-error";
+const NAME_ERROR_ID = "proofing-subject-name-error";
+const BIRTH_DATE_ERROR_ID = "proofing-subject-birth-date-error";
 
 // The "Verify a person" button and its dialog: any member sends an external
-// person a request (an e-mail address and an optional name; the person needs no
-// account). A hosted link is shown to copy once the dialog has closed, so
-// closing that dialog cannot discard it. flowId is the flow the form starts on,
-// when the button belongs to one.
+// person a request (the person needs no account). A hosted link is shown to
+// copy once the dialog has closed, so closing that dialog cannot discard it.
+// flowId is the flow the button belongs to: the dialog then does not ask for
+// one.
 export function VerifyPerson({
   slug,
   isAdmin,
@@ -88,30 +94,32 @@ function SendModal({
   const { t } = useTranslation();
   const flows = useProofingFlowsQuery(slug);
 
+  if (flows.isPending || flows.isError) {
+    return (
+      <Modal
+        title={t("identityProofing.send.title")}
+        closeLabel={t("common.close")}
+        onClose={onClose}
+      >
+        {flows.isPending ? (
+          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+        ) : (
+          <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
+        )}
+      </Modal>
+    );
+  }
+
   return (
-    <Modal
-      title={t("identityProofing.send.title")}
-      closeLabel={t("common.close")}
-      onClose={onClose}
-    >
-      {flows.isPending && (
-        <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-      )}
-      {flows.isError && (
-        <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
-      )}
-      {flows.isSuccess && (
-        <SendForm
-          slug={slug}
-          flows={flows.data}
-          isAdmin={isAdmin}
-          startFlowId={startFlowId}
-          onSent={onClose}
-          onLink={onLink}
-          onCancel={onClose}
-        />
-      )}
-    </Modal>
+    <SendForm
+      slug={slug}
+      flows={flows.data}
+      isAdmin={isAdmin}
+      startFlowId={startFlowId}
+      onSent={onClose}
+      onLink={onLink}
+      onCancel={onClose}
+    />
   );
 }
 
@@ -127,14 +135,10 @@ const SEND_CHANNELS: {
   { value: "hosted", key: "link" },
 ];
 
-// The ids the channel radios are labelled and described by.
-const CHANNEL_ID = "proofing-channel";
-
-// The line above the form: what the delivery does.
-const HINT_KEYS = {
-  email: "hint",
-  on_screen: "hintOnScreen",
-  hosted: "hintLink",
+const SUBMIT_KEYS = {
+  email: "submit",
+  on_screen: "submitOnScreen",
+  hosted: "submitLink",
 } as const satisfies Record<ProofingChannel, string>;
 
 function SendForm({
@@ -156,6 +160,7 @@ function SendForm({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const create = useCreateRequestMutation(slug);
+  const settings = useProofingSettingsQuery(slug);
   // A flow matched against the sender's own photo is the API's to send: this
   // form has no photo to give it.
   const { sendable, initial } = externalFlows(flows);
@@ -164,44 +169,74 @@ function SendForm({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [nameOn, setNameOn] = useState(false);
+  const [passOn, setPassOn] = useState(false);
   const [picked, setPicked] = useState("");
   const [touched, setTouched] = useState(false);
   const [channel, setChannel] = useState<ProofingChannel>("email");
   const navigate = useNavigate();
-  const {
-    flowId,
-    mailable,
-    matchable,
-    expectedBirthDate: expected,
-    delivery,
-    emailMissing,
-    nameMissing,
-  } = sendFormDecision({
+
+  if (sendable.length === 0) {
+    return (
+      <Modal
+        title={t("identityProofing.send.title")}
+        closeLabel={t("common.close")}
+        onClose={onCancel}
+      >
+        <p className="text-ink-soft text-[13px]">
+          {photoOnly
+            ? t("identityProofing.send.referencePhotoFlows")
+            : isAdmin
+              ? t("identityProofing.send.noFlowsAdmin")
+              : t("identityProofing.send.noFlowsMember")}
+        </p>
+      </Modal>
+    );
+  }
+
+  // The flow the dialog was opened from is not asked for again, unless it
+  // cannot be sent from here: the list then shows the flow it falls back to.
+  const askFlow =
+    startFlowId === undefined || !sendable.some((f) => f.id === startFlowId);
+  const { flowId, mailable, matchable, delivery } = sendFormDecision({
     sendable,
     initial: start,
     picked,
     channel,
+  });
+  const picks = sendable.find((f) => f.id === flowId);
+  const mailMinutes = mailLifetimeMinutes(
+    picks,
+    settings.data?.sessionTtlSeconds,
+  );
+  const fields = sendRequestFields({
+    delivery,
+    matchable,
+    nameOn,
+    passOn,
     email,
     name,
     birthDate,
   });
-  const onScreen = delivery === "on_screen";
+  const showEmailError = touched && fields.missing.email;
+  const showNameError = touched && fields.missing.name;
+  const showBirthDateError = touched && fields.missing.birthDate;
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
     setTouched(true);
-    if (emailMissing || nameMissing || flowId === "") {
+    if (Object.values(fields.missing).includes(true) || flowId === "") {
       return;
     }
-    if (onScreen) {
+    if (delivery === "on_screen") {
       // The session starts on the page, once the person has picked an app.
       void navigate(
         `/${slug}/identity-proofing/verify?${new URLSearchParams({ flow: flowId }).toString()}`,
         {
           state: {
-            name: name.trim(),
-            email: email.trim(),
-            birthDate: expected || undefined,
+            name: fields.name,
+            email: fields.email,
+            birthDate: fields.birthDate,
           },
         },
       );
@@ -209,9 +244,9 @@ function SendForm({
     }
     create.mutate(
       {
-        email: email.trim(),
-        name: name.trim(),
-        birthDate: expected || undefined,
+        email: fields.email,
+        name: fields.name,
+        birthDate: fields.birthDate,
         flowId,
         channel: delivery,
       },
@@ -226,208 +261,304 @@ function SendForm({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className={HINT}>
-        {t(`identityProofing.send.${HINT_KEYS[delivery]}`)}
-      </p>
-      {sendable.length === 0 ? (
-        <NoFlowsNote photoOnly={photoOnly} isAdmin={isAdmin} />
-      ) : (
-        <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
-          {photoOnly && (
-            <p className={HINT}>
-              {t("identityProofing.send.referencePhotoFlows")}
-            </p>
-          )}
-          <fieldset className="flex flex-col gap-2">
-            <legend className={`${LABEL} mb-1`}>
-              {t("identityProofing.send.channel")}
-            </legend>
-            {SEND_CHANNELS.map((option) => {
-              const checked = delivery === option.value;
-              const disabled = option.value === "email" && !mailable;
-              return (
-                <label
-                  key={option.value}
-                  className={[
-                    "rounded-yivi flex items-start gap-3 border p-3",
-                    disabled
-                      ? "cursor-not-allowed opacity-60"
-                      : "cursor-pointer",
-                    checked
-                      ? "border-primary bg-highlight"
-                      : "border-line-strong bg-surface",
-                  ].join(" ")}
-                >
-                  <input
-                    type="radio"
-                    name="proofing-channel"
-                    value={option.value}
-                    checked={checked}
-                    disabled={disabled}
-                    aria-labelledby={`${CHANNEL_ID}-${option.key}`}
-                    aria-describedby={`${CHANNEL_ID}-${option.key}-hint`}
-                    onChange={() => setChannel(option.value)}
-                    className="mt-1"
-                  />
-                  <span className="flex flex-col gap-0.5">
-                    <span
-                      id={`${CHANNEL_ID}-${option.key}`}
-                      className="text-ink text-[13.5px] font-semibold"
-                    >
-                      {t(`identityProofing.send.channels.${option.key}.title`)}
-                    </span>
-                    <span
-                      id={`${CHANNEL_ID}-${option.key}-hint`}
-                      className={HINT}
-                    >
-                      {t(`identityProofing.send.channels.${option.key}.hint`)}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-            {!mailable && (
-              <p className={HINT}>
-                {t("identityProofing.send.diplomasOnScreen")}
-              </p>
-            )}
-          </fieldset>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="proofing-subject-email" className={LABEL}>
-              {onScreen
-                ? t("identityProofing.send.emailOptional")
-                : t("identityProofing.send.email")}
-            </label>
-            <Input
-              id="proofing-subject-email"
-              type="email"
-              autoComplete="off"
-              value={email}
-              aria-invalid={touched && emailMissing}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            {touched && emailMissing && (
-              <p className={ERROR}>
-                {t("identityProofing.send.emailRequired")}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="proofing-subject-name" className={LABEL}>
-              {t("identityProofing.send.name")}
-            </label>
-            <Input
-              id="proofing-subject-name"
-              autoComplete="off"
-              value={name}
-              aria-invalid={touched && nameMissing}
-              aria-describedby="proofing-subject-name-hint"
-              onChange={(event) => setName(event.target.value)}
-            />
-            <p id="proofing-subject-name-hint" className={HINT}>
-              {t("identityProofing.send.nameHint")}
-            </p>
-            {touched && nameMissing && (
-              <p className={ERROR}>{t("identityProofing.send.nameRequired")}</p>
-            )}
-          </div>
-          {matchable && (
-            <div className="flex flex-col gap-1">
-              <label htmlFor="proofing-subject-birth-date" className={LABEL}>
-                {t("identityProofing.send.birthDate")}
-              </label>
-              <Input
-                id="proofing-subject-birth-date"
-                type="date"
-                autoComplete="off"
-                value={birthDate}
-                aria-describedby="proofing-subject-birth-date-hint"
-                onChange={(event) => setBirthDate(event.target.value)}
-              />
-              <p id="proofing-subject-birth-date-hint" className={HINT}>
-                {t("identityProofing.send.birthDateHint")}
-              </p>
-            </div>
-          )}
-          <div className="flex flex-col gap-1">
+    <Modal
+      title={t("identityProofing.send.title")}
+      closeLabel={t("common.close")}
+      onClose={onCancel}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel}>
+            {t("identityProofing.send.cancel")}
+          </Button>
+          <Button type="submit" form={SEND_FORM} loading={create.isPending}>
+            {t(`identityProofing.send.${SUBMIT_KEYS[delivery]}`)}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={SEND_FORM}
+        className="flex flex-col gap-5"
+        onSubmit={submit}
+        noValidate
+      >
+        {photoOnly && (
+          <p className={HINT}>
+            {t("identityProofing.send.referencePhotoFlows")}
+          </p>
+        )}
+        {askFlow && (
+          <div className="flex flex-col gap-1.5">
             <label htmlFor="proofing-subject-flow" className={LABEL}>
               {t("identityProofing.send.flow")}
             </label>
-            <select
+            <ChevronSelect
               id="proofing-subject-flow"
-              className={SELECT_CLASS}
               value={flowId}
-              onChange={(event) => setPicked(event.target.value)}
+              onChange={setPicked}
             >
               {sendable.map((flow) => (
                 <option key={flow.id} value={flow.id}>
                   {flow.name}
                 </option>
               ))}
-            </select>
+            </ChevronSelect>
           </div>
-          {create.isError && (
-            <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
+        )}
+        <fieldset className="flex flex-col gap-2.5">
+          <legend className={`${LABEL} mb-1`}>
+            {t("identityProofing.send.channel")}
+          </legend>
+          {SEND_CHANNELS.map((option) => (
+            <ChannelOption
+              key={option.value}
+              option={option}
+              checked={delivery === option.value}
+              disabled={option.value === "email" && !mailable}
+              onSelect={() => setChannel(option.value)}
+              hintNote={
+                option.value === "email" && mailMinutes !== undefined
+                  ? t("identityProofing.send.mailLifetime", {
+                      minutes: mailMinutes,
+                    })
+                  : undefined
+              }
+              footer={
+                option.value === "email" &&
+                delivery === "email" && (
+                  <>
+                    <label htmlFor="proofing-subject-email" className={LABEL}>
+                      {t("identityProofing.send.email")}
+                    </label>
+                    <Input
+                      id="proofing-subject-email"
+                      type="email"
+                      autoComplete="off"
+                      placeholder={t("identityProofing.send.emailPlaceholder")}
+                      value={email}
+                      aria-invalid={showEmailError}
+                      aria-describedby={
+                        showEmailError ? EMAIL_ERROR_ID : undefined
+                      }
+                      onChange={(event) => setEmail(event.target.value)}
+                    />
+                    {showEmailError && (
+                      <p id={EMAIL_ERROR_ID} className={ERROR}>
+                        {t("identityProofing.send.emailRequired")}
+                      </p>
+                    )}
+                  </>
+                )
+              }
+            />
+          ))}
+          {!mailable && (
+            <p className={HINT}>
+              {t("identityProofing.send.diplomasOnScreen")}
+            </p>
           )}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onCancel}>
-              {t("identityProofing.send.cancel")}
-            </Button>
-            <SubmitButton delivery={delivery} busy={create.isPending} />
+        </fieldset>
+        <div className="border-line flex flex-col gap-4 border-t pt-4.5">
+          <div className="flex flex-col gap-3">
+            <SwitchRow
+              checked={fields.nameShown}
+              disabled={fields.passing}
+              title={t("identityProofing.send.addName.title")}
+              hint={t("identityProofing.send.addName.hint")}
+              note={
+                fields.passing
+                  ? t("identityProofing.send.addName.passNote")
+                  : undefined
+              }
+              onChange={setNameOn}
+            />
+            {fields.nameShown && (
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="proofing-subject-name" className={LABEL}>
+                  {t("identityProofing.send.name")}{" "}
+                  <span className="text-ink-soft font-normal">
+                    {t("identityProofing.send.required")}
+                  </span>
+                </label>
+                <Input
+                  id="proofing-subject-name"
+                  autoComplete="off"
+                  value={name}
+                  aria-invalid={showNameError}
+                  aria-describedby={showNameError ? NAME_ERROR_ID : undefined}
+                  onChange={(event) => setName(event.target.value)}
+                />
+                {showNameError && (
+                  <p id={NAME_ERROR_ID} className={ERROR}>
+                    {t("identityProofing.send.nameRequired")}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
-        </form>
-      )}
+          {matchable && (
+            <div className="flex flex-col gap-3">
+              <SwitchRow
+                checked={fields.passing}
+                title={t("identityProofing.send.onlyThisPerson.title")}
+                hint={t("identityProofing.send.onlyThisPerson.hint")}
+                onChange={setPassOn}
+              />
+              {fields.passing && (
+                <div className="flex w-50 flex-col gap-1.5">
+                  <label
+                    htmlFor="proofing-subject-birth-date"
+                    className={LABEL}
+                  >
+                    {t("identityProofing.send.birthDate")}{" "}
+                    <span className="text-ink-soft font-normal">
+                      {t("identityProofing.send.required")}
+                    </span>
+                  </label>
+                  <Input
+                    id="proofing-subject-birth-date"
+                    type="date"
+                    autoComplete="off"
+                    value={birthDate}
+                    aria-invalid={showBirthDateError}
+                    aria-describedby={
+                      showBirthDateError ? BIRTH_DATE_ERROR_ID : undefined
+                    }
+                    onChange={(event) => setBirthDate(event.target.value)}
+                  />
+                  {showBirthDateError && (
+                    <p id={BIRTH_DATE_ERROR_ID} className={ERROR}>
+                      {t("identityProofing.send.birthDateRequired")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {create.isError && (
+          <p className={ERROR}>{proofingErrorMessage(create.error, t)}</p>
+        )}
+      </form>
+    </Modal>
+  );
+}
+
+// A radio card for one way to get the QR code. The footer sits outside the
+// label so its field is not part of the radio's name.
+function ChannelOption({
+  option,
+  checked,
+  disabled,
+  onSelect,
+  hintNote,
+  footer,
+}: {
+  option: (typeof SEND_CHANNELS)[number];
+  checked: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  hintNote?: string;
+  footer: React.ReactNode;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const titleId = useId();
+  const hintId = useId();
+
+  return (
+    <div
+      className={[
+        "rounded-yivi has-[input[type=radio]:focus-visible]:ring-ink/10 flex flex-col gap-3.5 border px-4 py-3.5 has-[input[type=radio]:focus-visible]:ring-3",
+        checked ? "border-ink bg-surface-2" : "border-line-strong bg-surface",
+        disabled ? "opacity-60" : "",
+      ].join(" ")}
+    >
+      <label
+        className={`flex items-start gap-3 ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+      >
+        <input
+          type="radio"
+          name="proofing-channel"
+          value={option.value}
+          checked={checked}
+          disabled={disabled}
+          aria-labelledby={titleId}
+          aria-describedby={hintId}
+          onChange={onSelect}
+          className="accent-ink mt-0.5 h-[18px] w-[18px] flex-none"
+        />
+        <span className="flex flex-col gap-0.5">
+          <span id={titleId} className={LABEL}>
+            {t(`identityProofing.send.channels.${option.key}.title`)}
+          </span>
+          <span id={hintId} className={OPTION_HINT}>
+            {t(`identityProofing.send.channels.${option.key}.hint`)}
+            {hintNote && ` ${hintNote}`}
+          </span>
+        </span>
+      </label>
+      {footer && <div className="flex flex-col gap-1.5 pl-7.5">{footer}</div>}
     </div>
   );
 }
 
-// Why the form has nothing to send: only flows matched against the sender's
-// own photo, or none the sender may use.
-function NoFlowsNote({
-  photoOnly,
-  isAdmin,
+// The note says why the switch cannot be changed.
+function SwitchRow({
+  checked,
+  disabled = false,
+  title,
+  hint,
+  note,
+  onChange,
 }: {
-  photoOnly: boolean;
-  isAdmin: boolean;
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  hint: string;
+  note?: string;
+  onChange: (checked: boolean) => void;
 }): React.JSX.Element {
-  const { t } = useTranslation();
-  let reason: string = t("identityProofing.send.noFlowsMember");
-  if (photoOnly) {
-    reason = t("identityProofing.send.referencePhotoFlows");
-  } else if (isAdmin) {
-    reason = t("identityProofing.send.noFlowsAdmin");
-  }
-  return <p className="text-ink-soft text-[13px]">{reason}</p>;
-}
+  const titleId = useId();
+  const hintId = useId();
+  const noteId = useId();
 
-// The form's submit button, as the delivery has it: the on-screen session
-// starts on the next page, so only a mail or a link waits on the send.
-function SubmitButton({
-  delivery,
-  busy,
-}: {
-  delivery: ProofingChannel;
-  busy: boolean;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  if (delivery === "on_screen") {
-    return (
-      <Button type="submit" icon="scan_qrcode">
-        {t("identityProofing.send.submitOnScreen")}
-      </Button>
-    );
-  }
-  if (delivery === "hosted") {
-    return (
-      <Button type="submit" loading={busy}>
-        {t("identityProofing.send.submitLink")}
-      </Button>
-    );
-  }
   return (
-    <Button type="submit" icon="email" loading={busy}>
-      {t("identityProofing.send.submit")}
-    </Button>
+    <label
+      className={`flex items-start justify-between gap-4 ${disabled ? "cursor-default" : "cursor-pointer"}`}
+    >
+      <span className="flex flex-col gap-0.5">
+        <span id={titleId} className={LABEL}>
+          {title}
+        </span>
+        <span id={hintId} className={OPTION_HINT}>
+          {hint}
+        </span>
+        {note && (
+          <span id={noteId} className={HINT}>
+            {note}
+          </span>
+        )}
+      </span>
+      <span className="relative mt-0.5 h-6 w-11 flex-none">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={checked}
+          disabled={disabled}
+          aria-labelledby={titleId}
+          aria-describedby={note ? `${hintId} ${noteId}` : hintId}
+          onChange={(event) => onChange(event.target.checked)}
+          className="peer absolute inset-0 m-0 h-6 w-11 cursor-[inherit] opacity-0"
+        />
+        <span
+          aria-hidden="true"
+          className="bg-line-strong peer-checked:bg-ink peer-focus-visible:outline-ink absolute inset-0 rounded-full transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-disabled:opacity-60 motion-reduce:transition-none"
+        />
+        <span
+          aria-hidden="true"
+          className="bg-surface shadow-card absolute top-0.5 left-0.5 h-5 w-5 rounded-full transition-transform peer-checked:translate-x-5 motion-reduce:transition-none"
+        />
+      </span>
+    </label>
   );
 }
