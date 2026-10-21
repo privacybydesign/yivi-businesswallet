@@ -687,7 +687,11 @@ export const en = {
       submitLink: "Create link",
       linkTitle: "Link created",
       linkHint:
-        "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears under Sessions.",
+        "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears on the People tab.",
+      linkOpen: {
+        label: "Open in new tab",
+        newTab: "(opens a new tab)",
+      },
       linkDone: "Done",
       email: "E-mail address",
       emailPlaceholder: "name@example.nl",

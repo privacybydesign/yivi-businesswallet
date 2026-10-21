@@ -1179,8 +1179,10 @@ A member makes the same link from the wallet: "Copy a link" in the Verify a
 person dialog (`channel: hosted` on `POST .../requests`, which answers
 `hostedUrl`; for an external person only), for a
 person not present and a flow the mail cannot carry (diplomas); the dialog
-shows the link to copy (`SecretReveal`) once it has closed. No redirect: the page ends on its
-own done screen.
+shows the link to copy (`SecretReveal`) once it has closed, on one line, with
+"Open in new tab" beside Done. Opening it only loads the page (`GET`
+`/proof/{token}` reads); the link is used by `start`, when an app is picked.
+No redirect: the page ends on its own done screen.
 
 A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).

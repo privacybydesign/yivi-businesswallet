@@ -27,6 +27,10 @@ const MARK_SIZES = {
 const MARK_PALETTE = ["#1F5B4A", "#26307A", "#8B2332", "#3F3F46"] as const;
 const MARK_HASH_MULTIPLIER = 31;
 
+// A link that looks like Button's secondary/md: Button renders only <button>.
+const OPEN_LINK_BUTTON =
+  "rounded-yivi font-display border-line-strong bg-surface text-ink hover:bg-surface-3 mr-auto inline-flex h-9 items-center justify-center border px-3.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors duration-150";
+
 function markColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -165,6 +169,7 @@ export function SecretReveal({
   secret,
   footnote,
   doneLabel,
+  link,
   onClose,
 }: {
   title: string;
@@ -174,6 +179,9 @@ export function SecretReveal({
   footnote?: string;
   // The close button's label; "I have stored it" when absent.
   doneLabel?: string;
+  // A secret that is a link: kept on one line, and opened in a new tab from
+  // beside the close button.
+  link?: { openLabel: string; newTabNote: string };
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -186,14 +194,29 @@ export function SecretReveal({
       onClose={onClose}
       dismissible={false}
       footer={
-        <Button size="sm" onClick={onClose}>
-          {doneLabel ?? t("identityProofing.secret.done")}
-        </Button>
+        <>
+          {link && (
+            <a
+              href={secret}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={OPEN_LINK_BUTTON}
+            >
+              {link.openLabel}{" "}
+              <span className="sr-only">{link.newTabNote}</span>
+            </a>
+          )}
+          <Button onClick={onClose}>
+            {doneLabel ?? t("identityProofing.secret.done")}
+          </Button>
+        </>
       }
     >
       <p className="text-ink-soft text-[13px]">{hint}</p>
       <div className="border-line bg-surface-2 mt-3 flex items-center gap-2 rounded-lg border p-3">
-        <code className="min-w-0 flex-1 font-mono text-[12.5px] break-all">
+        <code
+          className={`min-w-0 flex-1 font-mono text-[12.5px] ${link ? "truncate" : "break-all"}`}
+        >
           {secret}
         </code>
         <Button

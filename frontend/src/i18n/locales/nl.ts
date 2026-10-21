@@ -705,7 +705,11 @@ export const nl: Translation<typeof en> = {
       submitLink: "Link maken",
       linkTitle: "Link gemaakt",
       linkHint:
-        "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt onder Sessies.",
+        "Stuur deze link naar de persoon, bijvoorbeeld via chat. Hij kan één keer worden gestart, binnen 72 uur; de uitkomst verschijnt op het tabblad Personen.",
+      linkOpen: {
+        label: "Openen in nieuw tabblad",
+        newTab: "(opent een nieuw tabblad)",
+      },
       linkDone: "Klaar",
       email: "E-mailadres",
       emailPlaceholder: "naam@example.nl",

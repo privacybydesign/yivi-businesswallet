@@ -36,9 +36,10 @@ const BIRTH_DATE_ERROR_ID = "proofing-subject-birth-date-error";
 // The "Verify a person" button and its dialog: any member sends an external
 // person a request (the person needs no account), and an admin also a data
 // request (See my data, Delete my data). A hosted link is shown to copy once
-// the dialog has closed, so closing that dialog cannot discard it. flowId is
-// the flow the button belongs to: the dialog then sends on it, and asks
-// neither what to send nor the flow.
+// the dialog has closed, so closing that dialog cannot discard it. Opening it
+// in a new tab only loads the page: the link is used when the person picks an
+// app there. flowId is the flow the button belongs to: the dialog then sends
+// on it, and asks neither what to send nor the flow.
 export function VerifyPerson({
   slug,
   isAdmin,
@@ -75,6 +76,10 @@ export function VerifyPerson({
           hint={t("identityProofing.send.linkHint")}
           secret={link}
           doneLabel={t("identityProofing.send.linkDone")}
+          link={{
+            openLabel: t("identityProofing.send.linkOpen.label"),
+            newTabNote: t("identityProofing.send.linkOpen.newTab"),
+          }}
           onClose={() => setLink(undefined)}
         />
       )}
