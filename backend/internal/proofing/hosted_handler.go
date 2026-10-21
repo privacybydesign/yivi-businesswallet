@@ -151,6 +151,29 @@ type hostedProgressResponse struct {
 	// DataMatchesKept is how many sessions an approved erasure kept, so its
 	// person is not told everything was deleted when it was not.
 	DataMatchesKept *int `json:"dataMatchesKept,omitempty"`
+	// LegalRetention is why a "delete my data" request was declined by the
+	// org's legal retention; absent otherwise.
+	LegalRetention *hostedLegalRetention `json:"legalRetention,omitempty"`
+}
+
+// hostedLegalRetention is what the person is told about a declined erasure:
+// the org's reason in each language the page speaks, and the date from which
+// all their data can be erased.
+type hostedLegalRetention struct {
+	Until  time.Time `json:"until"`
+	Reason struct {
+		EN string `json:"en"`
+		NL string `json:"nl"`
+	} `json:"reason"`
+}
+
+func newHostedLegalRetention(n *LegalNotice) *hostedLegalRetention {
+	if n == nil {
+		return nil
+	}
+	out := &hostedLegalRetention{Until: n.Until}
+	out.Reason.EN, out.Reason.NL = n.ReasonEN, n.ReasonNL
+	return out
 }
 
 func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
@@ -163,6 +186,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
+		LegalRetention: newHostedLegalRetention(req.LegalNotice),
 	}
 }
 
@@ -321,7 +345,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
-	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.RetentionOverride)
+	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
 
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {

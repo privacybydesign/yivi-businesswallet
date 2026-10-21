@@ -42,6 +42,9 @@ type Provider interface {
 	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
 	CancelSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
 	DeleteSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
+	// SetSessionsRetention changes how long the engine keeps sessions once
+	// they ended, from what each was created with (SessionInput.Retention).
+	SetSessionsRetention(ctx context.Context, t proofingprovider.Tenant, sessionIDs []string, retention time.Duration) error
 }
 
 // verifier is the OpenID4VP verifier a Yivi request's disclosure runs at
@@ -84,6 +87,7 @@ type requestStore interface {
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 	DeferPurge(ctx context.Context, id uuid.UUID) error
+	IdentitySessions(ctx context.Context, orgID uuid.UUID) (map[time.Duration][]string, error)
 	ClearExpiredProofedNames(ctx context.Context) (int64, error)
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
@@ -117,6 +121,7 @@ type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
 	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error)
 	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
+	SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error)
 	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
@@ -215,28 +220,71 @@ func orgTenant(orgID uuid.UUID) proofingprovider.Tenant {
 // engine too) always runs first.
 const retentionGrace = 24 * time.Hour
 
+// baseRetention is how long a session is kept once it ended, apart from the
+// law: the flow's own override when it set one, else the org's data retention.
+func (s Settings) baseRetention(override time.Duration) time.Duration {
+	if override > 0 {
+		return override
+	}
+	return s.Session.DataRetention()
+}
+
 // engineRetention is how long the engine keeps a session once it ended: the
 // flow's own override when it set one, else the org's data retention for an
 // external person's request, or proofedNameRetention for a member's (settings
-// nil), plus grace: the retention setPurgeAt purges the request after.
-func engineRetention(settings *Settings, override time.Duration) time.Duration {
+// nil); for an external identity check never less than the legal retention;
+// plus grace: the retention setPurgeAt purges the request after.
+func engineRetention(settings *Settings, kind FlowKind, override time.Duration) time.Duration {
 	retention := proofedNameRetention
 	if settings != nil {
-		retention = settings.Session.DataRetention()
-	}
-	if override > 0 {
+		retention = settings.baseRetention(override)
+	} else if override > 0 {
 		retention = override
+	}
+	if settings != nil && kind == FlowIdentity {
+		retention = max(retention, settings.LegalRetention.longest())
 	}
 	return retention + retentionGrace
 }
 
+// engineSessionBatch bounds how many sessions one SetSessionsRetention names.
+const engineSessionBatch = 500
+
+// syncEngineRetention gives the engine the retention of the org's unpurged
+// identity checks as the settings say now (engineRetention). The engine fixes a
+// session's retention when it creates it and deletes the finished one at that,
+// so a check sent before the legal retention was set would lose its evidence
+// long before the law allows. The engine changes only what differs, so saving
+// the same settings again repeats a run that failed.
+func (s *Service) syncEngineRetention(ctx context.Context, orgID uuid.UUID, settings Settings) error {
+	groups, err := s.requests.IdentitySessions(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	tenant := orgTenant(orgID)
+	for override, ids := range groups {
+		retention := engineRetention(&settings, FlowIdentity, override)
+		for batch := range slices.Chunk(ids, engineSessionBatch) {
+			if err := s.ips.SetSessionsRetention(ctx, tenant, batch, retention); err != nil {
+				return fmt.Errorf("proofing: set engine retention org %s: %w", orgID, err)
+			}
+		}
+	}
+	return nil
+}
+
 // subjectRetentionDays is what an external person is told about their
 // session's data on a flow: how long it is kept anywhere at most, the retention
-// that applies (engineRetention: the flow's override, else the org's) with the
-// engine's grace, rounded up to whole days.
-func subjectRetentionDays(settings Settings, override time.Duration) int {
+// that applies (the flow's override, else the org's, never less than the legal
+// retention of an identity check) with the engine's grace, rounded up to whole
+// days.
+func subjectRetentionDays(settings Settings, kind FlowKind, override time.Duration, now time.Time) int {
+	retention := settings.baseRetention(override)
+	if kind == FlowIdentity {
+		retention = max(retention, settings.LegalRetention.lasts(now))
+	}
 	day := hoursPerDay * time.Hour
-	return int((engineRetention(&settings, override) + day - 1) / day)
+	return int((retention + retentionGrace + day - 1) / day)
 }
 
 // requestTenant is the tenant req's session runs under.
@@ -283,11 +331,11 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
 			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity,
-			RetentionDays: subjectRetentionDays(settings, time.Duration(f.RetentionOverrideSeconds)*time.Second),
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
 		}
+		of.RetentionDays = subjectRetentionDays(settings, of.Kind, time.Duration(f.RetentionOverrideSeconds)*time.Second, s.now())
 		if mode, ok := diplomas[f.ID]; ok {
 			of.Diplomas = mode
 		}
@@ -583,7 +631,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	id := uuid.New()
 	input := proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-		Language: string(in.Language), Retention: engineRetention(settings, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
+		Language: string(in.Language), Retention: engineRetention(settings, kind, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
 	}
 	sess, err := s.ips.CreateSession(ctx, tenant, input)
 	if err != nil {
@@ -1127,12 +1175,23 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	if decided.Status != StatusNeedsReview {
 		return decided, nil
 	}
-	handled, err := s.handleErasure(ctx, decided)
+	// The legal retention declines an erasure that holds every session found;
+	// the org's erasure handling decides the rest.
+	declined, err := s.declineHeldErasure(ctx, decided)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: decline the erasure the legal retention holds failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return decided, err
+	}
+	if declined.Status != StatusNeedsReview {
+		return declined, nil
+	}
+	handled, err := s.handleErasure(ctx, declined)
 	if err != nil {
 		// Left in review: a reviewer decides it as any other.
 		slog.WarnContext(ctx, "identity proofing: decide an erasure as the org set failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return decided, nil
+		return declined, nil
 	}
 	return handled, nil
 }
@@ -1911,12 +1970,14 @@ func checkSettingsChange(change SessionSettingsChange) error {
 	return nil
 }
 
-// SettingsChange is a partial update of the org's session settings and
-// redirect origins; a nil field is left as it is.
+// SettingsChange is a partial update of the org's session settings, legal
+// retention and redirect origins; a nil field is left as it is. A pointer to
+// the zero LegalRetention removes the legal retention.
 type SettingsChange struct {
 	SessionTTL        *time.Duration
 	DataRetentionDays *int
 	ErasureHandling   *ErasureHandling
+	LegalRetention    *LegalRetention
 	RedirectOrigins   *[]string
 }
 
@@ -1934,6 +1995,13 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 	if err := checkSettingsChange(session); err != nil {
 		return Settings{}, err
 	}
+	var legal LegalRetention
+	if change.LegalRetention != nil {
+		legal = change.LegalRetention.tidy()
+		if err := legal.check(); err != nil {
+			return Settings{}, err
+		}
+	}
 	var origins *[]string
 	if change.RedirectOrigins != nil {
 		normalized, err := normalizeOrigins(*change.RedirectOrigins)
@@ -1942,10 +2010,28 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 		}
 		origins = &normalized
 	}
-	if session.empty() && origins == nil {
+	if session.empty() && origins == nil && change.LegalRetention == nil {
 		return s.orgSettings.Get(ctx, orgID)
 	}
-	return s.orgSettings.Save(ctx, orgID, session, origins)
+	current, err := s.orgSettings.Get(ctx, orgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	if !session.empty() || origins != nil {
+		if current, err = s.orgSettings.Save(ctx, orgID, session, origins); err != nil {
+			return Settings{}, err
+		}
+	}
+	if change.LegalRetention != nil {
+		if current, err = s.orgSettings.SaveLegalRetention(ctx, orgID, legal); err != nil {
+			return Settings{}, err
+		}
+		// Last, so a failed engine run leaves every field of the change saved.
+		if err := s.syncEngineRetention(ctx, orgID, current); err != nil {
+			return Settings{}, err
+		}
+	}
+	return current, nil
 }
 
 // Stats counts the external requests sent within statsWindow, per flow,

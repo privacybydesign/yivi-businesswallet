@@ -586,6 +586,20 @@ describe("proofing status", () => {
   });
 });
 
+describe("proofingRejectionReason", () => {
+  it("says a declined erasure is kept by law", () => {
+    const reason = proofingRejectionReason("LEGAL_RETENTION", t);
+    expect(reason).toBe(t("identityProofing.rejectionReasons.legalRetention"));
+    expect(reason).not.toBe("LEGAL_RETENTION");
+  });
+
+  it("shows a code it does not know with its code", () => {
+    expect(proofingRejectionReason("SOMETHING_NEW", t)).toBe(
+      "the check did not pass (SOMETHING_NEW)",
+    );
+  });
+});
+
 describe("proofingErrorMessage", () => {
   it("shows the proofing service's own reason for a refused flow", () => {
     const err = apiError(
@@ -620,6 +634,7 @@ describe("proofingErrorMessage", () => {
     [404, "webhook_not_found", "webhookNotFound"],
     [409, "link_started", "linkStarted"],
     [422, "address_not_found", "addressNotFound"],
+    [409, "legal_retention", "legalRetention"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);

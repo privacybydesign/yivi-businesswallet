@@ -10,7 +10,7 @@ import type {
   ProofingDataMatch,
   ProofingRequest,
 } from "../api/identity-proofing";
-import { useWhenFormatter } from "../lib/format-when";
+import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import {
   assuranceLevelLabel,
   matchTickedByDefault,
@@ -111,12 +111,14 @@ function Review({
   // The matches taken without a tick start ticked (matchTickedByDefault); the
   // reviewer unticks what must be kept and ticks any other of the person's. One
   // an automatic erasure deleted already stays ticked: it is gone.
+  // A session the law makes the org keep cannot be erased: it is never ticked.
   const [ticked, setTicked] = useState<string[]>(() =>
     matches
       .filter(
         (m) =>
           m.purgedAt !== undefined ||
-          matchTickedByDefault(request.flowKind, m.level),
+          (matchTickedByDefault(request.flowKind, m.level) &&
+            m.heldUntil === undefined),
       )
       .map((m) => m.requestId),
   );
@@ -317,6 +319,11 @@ function MatchList({
           )}
         </>
       )}
+      {selection && matches.some((m) => m.heldUntil) && (
+        <p className={`${HINT} mt-1`}>
+          {t("identityProofing.sessions.dataRequest.heldHint")}
+        </p>
+      )}
     </div>
   );
 }
@@ -337,6 +344,7 @@ function MatchRows({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
+  const formatDate = useDateFormatter();
   return (
     <ul className="border-line divide-line bg-surface divide-y rounded-lg border">
       {matches.map((m) => {
@@ -349,7 +357,7 @@ function MatchRows({
                 type="checkbox"
                 className="mt-1 h-4 w-4"
                 checked={selection.ticked.includes(m.requestId)}
-                disabled={!selection.tickable(m)}
+                disabled={!selection.tickable(m) || m.heldUntil !== undefined}
                 onChange={() => selection.onToggle(m.requestId)}
               />
             )}
@@ -362,6 +370,13 @@ function MatchRows({
                 <Tag tone={LEVEL_TONES[m.level]}>
                   {t(`identityProofing.sessions.dataRequest.levels.${m.level}`)}
                 </Tag>
+                {m.heldUntil && (
+                  <Tag tone="amber">
+                    {t("identityProofing.sessions.dataRequest.heldUntil", {
+                      date: formatDate(m.heldUntil),
+                    })}
+                  </Tag>
+                )}
                 {!selection && <MatchDecision match={m} />}
               </span>
               <span className="text-ink-soft text-[12px]">

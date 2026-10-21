@@ -42,14 +42,15 @@ function lookup(locale: unknown, key: string): unknown {
 }
 
 describe("settings tab layout", () => {
-  it("has twelve top-level tabs", () => {
-    expect(SETTINGS_TABS).toHaveLength(12);
+  it("has thirteen top-level tabs", () => {
+    expect(SETTINGS_TABS).toHaveLength(13);
   });
 
-  it("leads with Organisation and Branding", () => {
-    expect(SETTINGS_TABS.slice(0, 2).map((item) => item.key)).toEqual([
+  it("leads with Organisation, Branding and Data and privacy", () => {
+    expect(SETTINGS_TABS.slice(0, 3).map((item) => item.key)).toEqual([
       "org",
       "branding",
+      "privacy",
     ]);
   });
 
@@ -89,6 +90,19 @@ describe("resolveSettingsLocation", () => {
       section: DEFAULT_COMMUNICATION_SECTION,
     });
     expect(resolveSettingsLocation("branding").tab).toBe("branding");
+  });
+
+  it("opens Data and privacy on its own key", () => {
+    expect(resolveSettingsLocation("privacy")).toEqual({
+      tab: "privacy",
+      section: DEFAULT_COMMUNICATION_SECTION,
+    });
+    expect(
+      settingsTabParam({
+        tab: "privacy",
+        section: DEFAULT_COMMUNICATION_SECTION,
+      }),
+    ).toBe("privacy");
   });
 
   it("opens the first section for the communication tab's own key", () => {

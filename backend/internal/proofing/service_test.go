@@ -73,6 +73,8 @@ type fakeRequests struct {
 	// request from ListPurgeDue until cleared.
 	purgeDeferrals int
 	purgeDeferred  bool
+	// identitySessions is what IdentitySessions answers.
+	identitySessions map[time.Duration][]string
 }
 
 // actorLabel is the audit actor label ctx carries, "" for none.
@@ -249,6 +251,10 @@ func (f *fakeRequests) DeferPurge(context.Context, uuid.UUID) error {
 	return nil
 }
 
+func (f *fakeRequests) IdentitySessions(context.Context, uuid.UUID) (map[time.Duration][]string, error) {
+	return f.identitySessions, nil
+}
+
 func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, error) {
 	m, ok := f.members[userID]
 	if !ok {
@@ -364,6 +370,11 @@ func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Brandin
 	return f.settings, nil
 }
 
+func (f *fakeOrgSettings) SaveLegalRetention(_ context.Context, _ uuid.UUID, legal LegalRetention) (Settings, error) {
+	f.settings.LegalRetention = legal
+	return f.settings, nil
+}
+
 func (f *fakeOrgSettings) Logo(context.Context, uuid.UUID) (Logo, error) {
 	if !f.settings.Branding.HasLogo {
 		return Logo{}, ErrNoLogo
@@ -408,6 +419,20 @@ type fakeIPS struct {
 	deleteErr error
 	// decideErr fails a review decision.
 	decideErr error
+	// retentions records each SetSessionsRetention; retentionErr fails them.
+	retentions   []engineRetentionCall
+	retentionErr error
+}
+
+// engineRetentionCall is one SetSessionsRetention.
+type engineRetentionCall struct {
+	ids       []string
+	retention time.Duration
+}
+
+func (f *fakeIPS) SetSessionsRetention(_ context.Context, _ proofingprovider.Tenant, ids []string, retention time.Duration) error {
+	f.retentions = append(f.retentions, engineRetentionCall{ids: ids, retention: retention})
+	return f.retentionErr
 }
 
 func (f *fakeIPS) SessionIdentity(_ context.Context, _ proofingprovider.Tenant, _, _ string) (proofingprovider.Identity, error) {
@@ -1835,19 +1860,19 @@ func TestReviewReasonCountsChars(t *testing.T) {
 func TestEngineRetentionPrefersFlow(t *testing.T) {
 	settings := Settings{Session: SessionSettings{DataRetentionDays: 30}}
 	week, year := 7*24*time.Hour, 365*24*time.Hour
-	if got := engineRetention(&settings, week); got != week+retentionGrace {
+	if got := engineRetention(&settings, FlowIdentity, week); got != week+retentionGrace {
 		t.Errorf("a week's override = %v, want a week plus grace", got)
 	}
-	if got := engineRetention(&settings, year); got != year+retentionGrace {
+	if got := engineRetention(&settings, FlowIdentity, year); got != year+retentionGrace {
 		t.Errorf("a year's override = %v, want a year plus grace", got)
 	}
-	if got := engineRetention(&settings, 0); got != settings.Session.DataRetention()+retentionGrace {
+	if got := engineRetention(&settings, FlowIdentity, 0); got != settings.Session.DataRetention()+retentionGrace {
 		t.Errorf("no override = %v, want the org's retention plus grace", got)
 	}
-	if got := engineRetention(nil, 0); got != proofedNameRetention+retentionGrace {
+	if got := engineRetention(nil, FlowIdentity, 0); got != proofedNameRetention+retentionGrace {
 		t.Errorf("a member's = %v, want proofedNameRetention plus grace", got)
 	}
-	if got := engineRetention(nil, week); got != week+retentionGrace {
+	if got := engineRetention(nil, FlowIdentity, week); got != week+retentionGrace {
 		t.Errorf("a member's with a week's override = %v, want a week plus grace", got)
 	}
 }
@@ -1865,7 +1890,7 @@ func TestSubjectRetentionDays(t *testing.T) {
 		"an hour's flow": {time.Hour, 2},
 	}
 	for name, tc := range cases {
-		if got := subjectRetentionDays(settings, tc.override); got != tc.want {
+		if got := subjectRetentionDays(settings, FlowIdentity, tc.override, time.Now()); got != tc.want {
 			t.Errorf("%s: %d days, want %d", name, got, tc.want)
 		}
 	}
@@ -1882,8 +1907,8 @@ func TestFlowsRetention(t *testing.T) {
 	}
 	settings := f.orgSettings.settings
 	want := map[string]int{
-		appFlow.ID:  subjectRetentionDays(settings, 0),
-		chipFlow.ID: subjectRetentionDays(settings, week),
+		appFlow.ID:  subjectRetentionDays(settings, FlowIdentity, 0, f.svc.now()),
+		chipFlow.ID: subjectRetentionDays(settings, FlowIdentity, week, f.svc.now()),
 	}
 	seen := 0
 	for _, fl := range flows {

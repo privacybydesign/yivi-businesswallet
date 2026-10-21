@@ -79,14 +79,15 @@ const (
 	// the reviewer names none, as the engine does.
 	ErrorReviewRejected = "MANUAL_REVIEW_REJECTED"
 	// ErrorLegalRetention is the error code of an erasure refused because its
-	// org is bound by law to keep the data (ErasureKeep).
+	// org is bound by law to keep the data: its erasure handling is ErasureKeep,
+	// or its legal retention holds every session found.
 	ErrorLegalRetention = "LEGAL_RETENTION"
-	// automaticReviewer is who decided a data request the org's
-	// ErasureHandling decided without a reviewer.
+	// automaticReviewer is who decided a data request the org's ErasureHandling
+	// or legal retention decided without a reviewer.
 	automaticReviewer = "automatic"
 	// The reasons an automatic decision records, as a reviewer's would.
 	erasedAutomaticallyReason = "Erased automatically: every session found was proven to be this person's."
-	keptByLawReason           = "Kept automatically: the organization is bound by law to keep this data."
+	keptByLawReason           = "Kept automatically: the organisation is bound by law to keep this data."
 )
 
 var (
@@ -97,6 +98,9 @@ var (
 	// ErrDataFlowForMember is a data request flow offered to, or sent to, a
 	// member: only external people ask for their data.
 	ErrDataFlowForMember = errors.New("proofing: a data request flow is for external people")
+	// ErrLegalRetention is an erasure that takes a session still within the
+	// org's legal retention.
+	ErrLegalRetention = errors.New("proofing: the session is within the legal retention")
 	// ErrExportUnavailable is an export of a request that is not an approved
 	// "see my data" request, or whose download window passed.
 	ErrExportUnavailable = errors.New("proofing: no data export is available for this session")
@@ -116,6 +120,14 @@ type DataMatch struct {
 	Level          MatchLevel
 	// Approved is the reviewer's choice; nil until the decision.
 	Approved *bool
+	// HeldUntil is when the org's legal retention lets the session be erased;
+	// nil when none applies.
+	HeldUntil *time.Time
+}
+
+// held reports a session an erasure may not take yet.
+func (m DataMatch) held(now time.Time) bool {
+	return m.HeldUntil != nil && now.Before(*m.HeldUntil)
 }
 
 // NewDataMatch is a match found when a data request goes to review.
@@ -411,7 +423,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 
 	approved := []uuid.UUID{}
 	if in.Approve {
-		if approved, err = approvedMatches(matches, in.RequestIDs, req.FlowKind); err != nil {
+		if approved, err = approvedMatches(matches, in.RequestIDs, req.FlowKind, s.now()); err != nil {
 			return Request{}, err
 		}
 	}
@@ -491,8 +503,9 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 // ErrorLegalRetention; ErasureAutomatic erases its sure matches at once and
 // decides it when no unsure one is left, or leaves those to a reviewer;
 // ErasureReview leaves all of it to a reviewer. It holds the review lock, as a
-// reviewer's decision does, so the two never decide at once. A request that
-// fails here waits in review: a reviewer decides it as any other.
+// reviewer's decision does, so the two never decide at once. A session the
+// org's legal retention still holds is left alone, as no erasure takes one. A
+// request that fails here waits in review: a reviewer decides it as any other.
 func (s *Service) handleErasure(ctx context.Context, req Request) (Request, error) {
 	if req.FlowKind != FlowDataErasure || !req.External() || s.dataRequests == nil {
 		return req, nil
@@ -525,9 +538,12 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 	if err != nil {
 		return fresh, err
 	}
+	now := s.now()
 	sure, unsure := []uuid.UUID{}, false
 	for _, m := range matches {
 		switch {
+		case m.held(now):
+			// The law keeps it: no one erases it yet.
 		case sureMatch(m.Level):
 			sure = append(sure, m.RequestID)
 		case m.PurgedAt == nil:
@@ -545,28 +561,107 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 	return s.requests.Get(ctx, fresh.OrganizationID, fresh.ID)
 }
 
+// declineHeldErasure declines a proven "delete my data" request at once when
+// the org's legal retention holds every session still found: nothing could be
+// erased, so nobody need decide. It holds the review lock, as a reviewer's
+// decision does, so the two never decide at once. A request that fails here
+// waits in review: a reviewer decides it as any other, and approvedMatches
+// takes no session the legal retention holds.
+func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request, error) {
+	if req.FlowKind != FlowDataErasure || req.Status != StatusNeedsReview || s.dataRequests == nil {
+		return req, nil
+	}
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
+	if err != nil || !settings.LegalRetention.set() {
+		return req, err
+	}
+	release, err := s.requests.LockReview(ctx, req.ID)
+	if err != nil {
+		return req, err
+	}
+	defer release()
+	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		return req, err
+	}
+	if fresh.Status != StatusNeedsReview || fresh.session == nil || fresh.session.EndedAt != nil || fresh.PurgedAt != nil {
+		return fresh, nil
+	}
+	matches, err := s.dataRequests.Matches(ctx, fresh)
+	if err != nil {
+		return fresh, err
+	}
+	now, found := s.now(), 0
+	for _, m := range matches {
+		if m.PurgedAt != nil {
+			continue
+		}
+		if !m.held(now) {
+			return fresh, nil
+		}
+		found++
+	}
+	if found == 0 {
+		return fresh, nil
+	}
+	return s.decideDataRequest(ctx, fresh, automaticReviewer,
+		ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
+}
+
+// withLegalNotice sets the LegalNotice of an erasure the legal retention
+// declined: the reason the org gave, and when the last session found can be
+// erased. Without a legal retention, or a session it still holds, it is left
+// as it is.
+func (s *Service) withLegalNotice(ctx context.Context, req Request) (Request, error) {
+	if req.FlowKind != FlowDataErasure || req.ErrorCode != ErrorLegalRetention || req.PurgedAt != nil || s.dataRequests == nil {
+		return req, nil
+	}
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
+	if err != nil || !settings.LegalRetention.set() {
+		return req, err
+	}
+	matches, err := s.dataRequests.Matches(ctx, req)
+	if err != nil {
+		return req, err
+	}
+	var until time.Time
+	for _, m := range matches {
+		if m.held(s.now()) && m.HeldUntil.After(until) {
+			until = *m.HeldUntil
+		}
+	}
+	if until.IsZero() {
+		return req, nil
+	}
+	req.LegalNotice = &LegalNotice{Until: until, ReasonEN: settings.LegalRetention.ReasonEN, ReasonNL: settings.LegalRetention.ReasonNL}
+	return req, nil
+}
+
 // approvedMatches checks a reviewer's approved sessions against the matches.
 // nil approves the ones taken without a tick: for an erasure the sure ones
 // (sureMatch: read off a verified chip as the requester), for "see my data"
 // the ones proven with the same document. Any other match is taken only by a
-// reviewer's own tick. A match an automatic erasure purged already is
-// approved whatever the list says: it is erased.
-func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind) ([]uuid.UUID, error) {
-	ids := make([]uuid.UUID, 0, len(matches))
-	for _, m := range matches {
-		ids = append(ids, m.RequestID)
-	}
+// reviewer's own tick. An erasure takes no session still within the legal
+// retention: nil leaves it out, and a tick on one is ErrLegalRetention. A match
+// an automatic erasure purged already is approved whatever the list says: it is
+// erased.
+func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind, now time.Time) ([]uuid.UUID, error) {
+	erasable := func(m DataMatch) bool { return kind != FlowDataErasure || !m.held(now) }
 	out := []uuid.UUID{}
 	if approved == nil {
 		for _, m := range matches {
-			if m.Level == MatchStrong || (kind == FlowDataErasure && sureMatch(m.Level)) {
+			if (m.Level == MatchStrong || (kind == FlowDataErasure && sureMatch(m.Level))) && erasable(m) {
 				out = append(out, m.RequestID)
 			}
 		}
 	}
 	for _, id := range approved {
-		if !slices.Contains(ids, id) {
+		i := slices.IndexFunc(matches, func(m DataMatch) bool { return m.RequestID == id })
+		if i < 0 {
 			return nil, fmt.Errorf("%w: session %s is not one of this request's matches", ErrInvalidInput, id)
+		}
+		if !erasable(matches[i]) {
+			return nil, ErrLegalRetention
 		}
 		if !slices.Contains(out, id) {
 			out = append(out, id)

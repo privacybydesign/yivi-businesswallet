@@ -19,6 +19,7 @@ export const COMMUNICATION_SECTIONS = [
 export const SETTINGS_TABS = [
   { key: "org", labelKey: "settings.tabOrg" },
   { key: "branding", labelKey: "settings.tabBranding" },
+  { key: "privacy", labelKey: "settings.tabPrivacy" },
   { key: "mandates", labelKey: "settings.tabMandates" },
   { key: "identity", labelKey: "settings.tabIdentity" },
   { key: "screening", labelKey: "settings.tabScreening" },

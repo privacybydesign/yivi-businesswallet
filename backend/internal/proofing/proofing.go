@@ -206,6 +206,9 @@ type Settings struct {
 	OrgName  string
 	Session  SessionSettings
 	Branding Branding
+	// LegalRetention is the least the org keeps an identity check's data, when
+	// the law says so.
+	LegalRetention LegalRetention
 	// RedirectOrigins are the origins (scheme://host[:port]) a hosted page may
 	// send its subject back to and be embedded on.
 	RedirectOrigins []string
@@ -318,6 +321,10 @@ type Request struct {
 	// DataMatchesKept is how many of an approved erasure's matched sessions
 	// were kept, not erased; nil for any other request.
 	DataMatchesKept *int
+	// LegalNotice is why a FlowDataErasure request was declined by the org's
+	// legal retention, for its person's page; nil otherwise, and set only on
+	// the hosted reads (withLegalNotice).
+	LegalNotice *LegalNotice
 	// CancelledAt is when an API caller cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
 	CancelledAt     *time.Time

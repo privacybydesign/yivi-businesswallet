@@ -6429,7 +6429,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request is not under review (`not_under_review`), decided already or its session ended.
+          description: >-
+            The request is not under review (`not_under_review`), decided already or its session
+            ended; or an approved erasure names a session still within the organisation's legal
+            retention (`legal_retention`).
           content:
             application/json:
               schema:
@@ -6842,9 +6845,10 @@ paths:
         Requires organisation membership. What the organisation set once for all its flows:
         `sessionTtlSeconds` (how long each session runs), `dataRetentionDays` (how long an
         approved external person's name is kept), `erasureHandling` (how "delete my data"
-        requests are decided), `branding` (with `logoUri` and `hidePoweredBy`) and
-        `allowedRedirectOrigins`. An organisation that set nothing reads the defaults: 600
-        seconds, 30 days, review, no branding and no origins.
+        requests are decided), `legalRetention` (what the law makes the organisation keep, or
+        null), `branding` (with `logoUri` and `hidePoweredBy`) and `allowedRedirectOrigins`.
+        An organisation that set nothing reads the defaults: 600 seconds, 30 days, review, no
+        legal retention, no branding and no origins.
       responses:
         '200':
           description: The settings.
@@ -6859,6 +6863,10 @@ paths:
                     sessionTtlSeconds: 600
                     dataRetentionDays: 30
                     erasureHandling: review
+                    legalRetention:
+                      months: 60
+                      reasonEn: The Wwft requires us to keep proof of identity for five years.
+                      reasonNl: De Wwft verplicht ons het identiteitsbewijs vijf jaar te bewaren.
                     branding:
                       displayName: Acme Verzekeringen
                       primaryColor: "#1f6feb"
@@ -6883,12 +6891,18 @@ paths:
         `review` (default) by a reviewer; `automatic` erases the sessions proven to be the
         person's at once and leaves a reviewer only those found by e-mail address or name;
         `keep` refuses each one with `LEGAL_RETENTION`, for an organisation bound by law to
-        keep the data. `allowedRedirectOrigins` replaces the origins (`https://host[:port]`, or
-        `http` on a loopback host; the host a DNS name or an IP address; at most 10) a hosted
-        page may send its subject back to and be embedded on. An absent field is left as it is;
-        a body with none is 400 `invalid_body`, and a value outside these options 400
-        `invalid_input`. Every field is checked before any is saved, so a refused update
-        changes nothing. The answer is the settings after the change.
+        keep the data. `legalRetention` (`months` 1 to 600, with a `reasonEn` and a
+        `reasonNl`, both required) is how long the law makes the organisation keep the data of
+        every identity check, counted from the check's end; null removes it. It is the least
+        any flow keeps that data: a check is purged at the later of its flow's retention and
+        this, and a "delete my data" request takes no session before it has passed, so an
+        `automatic` erasure leaves such a session too. A change moves the purge time of the
+        organisation's unpurged external checks. `allowedRedirectOrigins` replaces the origins
+        (`https://host[:port]`, or `http` on a loopback host; the host a DNS name or an IP
+        address; at most 10) a hosted page may send its subject back to and be embedded on.
+        An absent field is left as it is; a body with none is 400 `invalid_body`, and a value
+        outside these options 400 `invalid_input`. Every field is checked before any is saved,
+        so a refused update changes nothing. The answer is the settings after the change.
       requestBody:
         required: true
         content:
@@ -6902,6 +6916,10 @@ paths:
                   sessionTtlSeconds: 300
                   dataRetentionDays: 90
                   erasureHandling: automatic
+                  legalRetention:
+                    months: 60
+                    reasonEn: The Wwft requires us to keep proof of identity for five years.
+                    reasonNl: De Wwft verplicht ons het identiteitsbewijs vijf jaar te bewaren.
                   allowedRedirectOrigins: [https://portal.acme.example]
       responses:
         '200':
@@ -8260,7 +8278,8 @@ paths:
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         in 30 days, an identity check within the data retention), `LEGAL_RETENTION` (an
-        erasure refused because the organisation is bound by law to keep the data) and
+        erasure refused because the organisation is bound by law to keep the data: its erasure
+        handling is `keep`, or its legal retention holds every session found) and
         `ORG_PAUSED` (a review left open when a platform admin paused the organisation's proofing). The
         session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
@@ -10509,7 +10528,8 @@ components:
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
             short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time) and
-            `LEGAL_RETENTION` (an erasure the organisation must refuse by law); others come from
+            `LEGAL_RETENTION` (an erasure refused because the organisation must keep the data by law: its erasure
+            handling is `keep`, or its legal retention holds every session found); others come from
             the session itself
             (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
             `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
@@ -11114,6 +11134,14 @@ components:
               approved:
                 type: boolean
                 description: The reviewer's choice; absent until the decision.
+              heldUntil:
+                type: string
+                format: date-time
+                description: >-
+                  When the organisation's legal retention lets an erasure take the session;
+                  absent when none applies or it passed, and on a request that is not an
+                  erasure. An erasure approval naming a session before then is 409
+                  `legal_retention`.
             required: [requestId, sessionId, flowName, status, createdAt, level]
       required: [flowKind, matches]
     ProofingDataExport:
@@ -11684,6 +11712,11 @@ components:
           type: string
           enum: [review, automatic, keep]
           description: How the organisation's "delete my data" requests are decided once the person is proven.
+        legalRetention:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ProofingLegalRetention'
+          description: What the law makes the organisation keep; null for none.
         branding:
           $ref: '#/components/schemas/ProofingBranding'
         allowedRedirectOrigins:
@@ -11691,7 +11724,27 @@ components:
           description: Where a hosted page may send its subject back to and be embedded on.
           items:
             type: string
-      required: [sessionTtlSeconds, dataRetentionDays, erasureHandling, branding, allowedRedirectOrigins]
+      required: [sessionTtlSeconds, dataRetentionDays, erasureHandling, legalRetention, branding, allowedRedirectOrigins]
+    ProofingLegalRetention:
+      type: object
+      additionalProperties: false
+      description: >-
+        How long the organisation must keep the data of every identity check by law, counted
+        from the check's end, and why.
+      properties:
+        months:
+          type: integer
+          minimum: 1
+          maximum: 600
+        reasonEn:
+          type: string
+          maxLength: 500
+          description: Shown to a person whose "delete my data" request it declines, in English.
+        reasonNl:
+          type: string
+          maxLength: 500
+          description: The same, in Dutch.
+      required: [months, reasonEn, reasonNl]
     ProofingUpdateSettings:
       type: object
       additionalProperties: false
@@ -11707,6 +11760,10 @@ components:
         erasureHandling:
           type: string
           enum: [review, automatic, keep]
+        legalRetention:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ProofingLegalRetention'
         allowedRedirectOrigins:
           type: array
           maxItems: 10
@@ -11927,6 +11984,25 @@ components:
         dataMatchesKept:
           type: integer
           description: On an approved erasure, how many of the person's matched sessions were kept, not deleted.
+        legalRetention:
+          type: object
+          description: >-
+            Why a "delete my data" session was declined (`errorCode` `LEGAL_RETENTION`): the
+            organisation's reason in each language, and the date from which all the person's
+            data can be erased. Absent otherwise.
+          properties:
+            until:
+              type: string
+              format: date-time
+            reason:
+              type: object
+              properties:
+                en:
+                  type: string
+                nl:
+                  type: string
+              required: [en, nl]
+          required: [until, reason]
       required: [status, linkExpiresAt, started, addressGiven]
     ProofingHostedView:
       allOf:

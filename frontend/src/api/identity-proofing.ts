@@ -332,11 +332,26 @@ const proofingBrandingSchema = z.object({
 
 export type ProofingBranding = z.infer<typeof proofingBrandingSchema>;
 
+// How long the law makes the org keep the data of every identity check,
+// counted from the check's end, and why, in the languages the person's page
+// speaks.
+const proofingLegalRetentionSchema = z.object({
+  months: z.number(),
+  reasonEn: z.string(),
+  reasonNl: z.string(),
+});
+
+export type ProofingLegalRetention = z.infer<
+  typeof proofingLegalRetentionSchema
+>;
+
 // What the org set once for all its flows.
 const proofingSettingsSchema = z.object({
   sessionTtlSeconds: z.number(),
   dataRetentionDays: z.number(),
   erasureHandling: z.enum(ERASURE_HANDLINGS).catch("review"),
+  // Null without one.
+  legalRetention: proofingLegalRetentionSchema.nullable(),
   branding: proofingBrandingSchema,
   // Where a hosted page may send its subject back to and be embedded on.
   allowedRedirectOrigins: z.array(z.string()),
@@ -372,6 +387,8 @@ export interface ProofingSettingsUpdate {
   sessionTtlSeconds?: number;
   dataRetentionDays?: number;
   erasureHandling?: ErasureHandling;
+  // Null removes it.
+  legalRetention?: ProofingLegalRetention | null;
   allowedRedirectOrigins?: string[];
 }
 
@@ -953,6 +970,9 @@ const proofingDataMatchSchema = z.object({
   // An unknown level reads as the weakest, never ticked by default.
   level: z.enum(["strong", "probable", "email", "name"]).catch("name"),
   approved: z.boolean().optional(),
+  // When the org's legal retention lets an erasure take the session; absent
+  // when none applies or it passed.
+  heldUntil: z.string().optional(),
 });
 
 export type ProofingDataMatch = z.infer<typeof proofingDataMatchSchema>;
@@ -1048,6 +1068,8 @@ export interface ProofingProgress {
   // Until when the subject can enter their address, once approved and while
   // they have not.
   addressUntil?: string;
+  // Why a declined erasure is kept, on a hosted link.
+  legalRetention?: HostedLegalRetention;
 }
 
 export function startProofingYivi(
@@ -1122,6 +1144,13 @@ export function getProofingYiviDisclosure(
   });
 }
 
+const hostedLegalRetentionSchema = z.object({
+  until: z.string(),
+  reason: z.object({ en: z.string(), nl: z.string() }),
+});
+
+export type HostedLegalRetention = z.infer<typeof hostedLegalRetentionSchema>;
+
 // A hosted link's progress: its status and, until it settles, when the link
 // (not started) or its session (started) ends.
 const hostedProgressSchema = z.object({
@@ -1140,6 +1169,9 @@ const hostedProgressSchema = z.object({
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
   dataMatchesKept: z.number().optional(),
+  // Why a "delete my data" request was declined by the org's legal retention:
+  // its reason in each language, and when all the person's data can go.
+  legalRetention: hostedLegalRetentionSchema.optional(),
 });
 
 export type HostedProgress = z.infer<typeof hostedProgressSchema>;

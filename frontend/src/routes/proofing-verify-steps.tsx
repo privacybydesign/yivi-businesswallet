@@ -21,6 +21,7 @@ import type {
   DiplomaVerdict,
   ProofingBranding,
   HostedDiploma,
+  HostedLegalRetention,
   ProofingApp,
   ProofingMethod,
   ProofingProgress,
@@ -47,6 +48,7 @@ import {
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
+import { legalReasonIn } from "../lib/legal-retention";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
@@ -1217,6 +1219,37 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
   return code ?? t("identityProofing.errors.generic");
 }
 
+// A "delete my data" request the org's legal retention declined: the org's
+// reason in the language of the page, and the date all the data can go.
+function LegalRetentionOutcome({
+  legal,
+  actions,
+}: {
+  legal: HostedLegalRetention;
+  actions?: React.ReactNode;
+}): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const formatDate = useDateFormatter();
+  return (
+    <Outcome
+      tone="error"
+      icon="invalid"
+      title={t("identityProofing.onScreen.outcome.legalRetention.title")}
+      message={legalReasonIn(legal.reason, i18n.language)}
+      action={
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-ink text-[13.5px]">
+            {t("identityProofing.onScreen.outcome.legalRetention.until", {
+              date: formatDate(legal.until),
+            })}
+          </p>
+          {actions}
+        </div>
+      }
+    />
+  );
+}
+
 function SessionOutcome({
   progress,
   actions,
@@ -1256,6 +1289,14 @@ function SessionOutcome({
         />
       );
     case "rejected":
+      if (progress.legalRetention) {
+        return (
+          <LegalRetentionOutcome
+            legal={progress.legalRetention}
+            actions={actions}
+          />
+        );
+      }
       return (
         <Outcome
           tone="error"

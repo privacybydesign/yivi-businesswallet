@@ -39,7 +39,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	r.subject_user_id, COALESCE(r.flow_version, 0),
-	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days,
+	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
@@ -59,15 +59,31 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 // Art. 12(3)'s month to answer. Its purge comes up then (lapseReview).
 const dataRequestReviewDays = 30
 
+// settledAt is when an external request ended, for what is counted from it:
+// cancelled, its session ended, decided, or else its running session's or
+// unstarted link's cap.
+const settledAt = `COALESCE(r.cancelled_at, r.ips_session_ended_at,
+			CASE WHEN r.status IN ('approved', 'rejected')
+				OR (r.status = 'needs_review' AND r.flow_kind = 'identity') THEN r.completed_at END,
+			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
+			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)`
+
+// legalHeldUntil is when an external identity check may be erased under its
+// org's legal retention: that long after it ended. NULL for any other request,
+// one already purged, and an org with no legal retention.
+const legalHeldUntil = `CASE WHEN r.subject_kind = 'external' AND r.flow_kind = 'identity' AND r.purged_at IS NULL
+		THEN ` + settledAt + ` + make_interval(months => st.legal_retention_months) END`
+
 // setPurgeAt stores purge_at on the requests r its WHERE (appended, over $1)
 // selects; $2 is dataRequestReviewDays and $3 proofedNameRetention in seconds.
 // It is the one rule for when a request is purged, so ListPurgeDue reads an
 // index instead of computing it for every unpurged row:
 //   - its retention (its flow's override, else the org's data_retention_days
 //     for an external person's, else proofedNameRetention: a member's, or an
-//     org that saved no settings) after it
-//     settled: cancelled, its session ended, decided, or else its running
-//     session's or unstarted link's cap. A cap is stored before it passes; the
+//     org that saved no settings) after it settled (settledAt), and for an
+//     external identity check never before the org's legal retention has
+//     passed. The later of two moments, not of two intervals: PostgreSQL
+//     compares a month to 30 days. A cap is stored before it passes; the
 //     purge asks purge_at <= now(), which holds only after the cap anyway,
 //     since a retention is never zero. An identity review counts as settled
 //     when it went there: undecided, it is kept no longer than a decided one,
@@ -76,20 +92,19 @@ const dataRequestReviewDays = 30
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
-// The org's retention is read in the statement: OrgSettingsStore.Save
-// sets it again for the org's requests (refreshOrgPurgeAt). $3 is
-// defaultDataRetentionDays.
+// The org's retention is read in the statement: OrgSettingsStore.Save and
+// SaveLegalRetention set it again for the org's requests (refreshOrgPurgeAt).
+// $3 is defaultDataRetentionDays.
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
-		COALESCE(r.cancelled_at, r.ips_session_ended_at,
-			CASE WHEN r.status IN ('approved', 'rejected')
-				OR (r.status = 'needs_review' AND r.flow_kind = 'identity') THEN r.completed_at END,
-			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
-			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)
+		GREATEST(` + settledAt + `
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),
 				CASE WHEN r.subject_kind = 'external' THEN make_interval(days => (
 					SELECT st.data_retention_days FROM identity_proofing_settings st
 					WHERE st.organization_id = r.organization_id)) END,
 				make_interval(secs => $3)),
+			CASE WHEN r.subject_kind = 'external' AND r.flow_kind = 'identity' THEN ` + settledAt + `
+				+ (SELECT make_interval(months => st.legal_retention_months) FROM identity_proofing_settings st
+					WHERE st.organization_id = r.organization_id) END),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
 			THEN r.completed_at + make_interval(days => $2) END,
 		CASE WHEN r.status = 'approved' AND r.flow_kind = 'data_erasure' THEN r.completed_at END)
@@ -111,8 +126,8 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 }
 
 // refreshOrgPurgeAt stores purge_at again for every unpurged external request
-// of org id that follows the org's retention (no flow override): that retention
-// changed. The caller holds the org's settings
+// of org id: its retention or its legal retention changed, which a flow's own
+// retention does not escape. The caller holds the org's settings
 // (lockSettings, settingsLockWrite), which a request insert waits on
 // (settingsLockCreate), so no request is created against the old retention
 // while this runs and stays stale. It locks the rows in id order before it
@@ -120,16 +135,42 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 func refreshOrgPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) error {
 	if _, err := q.Exec(ctx, `SELECT id FROM identity_proofing_requests
 		WHERE organization_id = $1 AND subject_kind = 'external' AND purged_at IS NULL
-			AND retention_override_seconds IS NULL
 		ORDER BY id FOR NO KEY UPDATE`, id); err != nil {
 		return fmt.Errorf("proofing: lock requests org %s: %w", id, err)
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL
-		AND r.retention_override_seconds IS NULL`,
+	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL`,
 		id, dataRequestReviewDays, proofedNameRetention.Seconds()); err != nil {
 		return fmt.Errorf("proofing: set purge time org %s: %w", id, err)
 	}
 	return nil
+}
+
+// IdentitySessions lists the engine sessions of the org's unpurged external
+// identity checks, grouped by the retention override each was sent with (0 for
+// none).
+func (s *RequestStore) IdentitySessions(ctx context.Context, orgID uuid.UUID) (map[time.Duration][]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT COALESCE(retention_override_seconds, 0), array_agg(ips_session_id)
+		FROM identity_proofing_requests
+		WHERE organization_id = $1 AND subject_kind = 'external' AND flow_kind = 'identity'
+			AND purged_at IS NULL AND ips_session_id IS NOT NULL
+		GROUP BY 1`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list identity sessions org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+	out := map[time.Duration][]string{}
+	for rows.Next() {
+		var seconds int
+		var ids []string
+		if err := rows.Scan(&seconds, &ids); err != nil {
+			return nil, fmt.Errorf("proofing: scan identity sessions org %s: %w", orgID, err)
+		}
+		out[time.Duration(seconds)*time.Second] = ids
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proofing: list identity sessions org %s: %w", orgID, err)
+	}
+	return out, nil
 }
 
 // requestFrom joins a request to its sender and its org's settings.
@@ -144,18 +185,22 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
 	var nameCT, birthDateCT, addressCT []byte
-	var retentionDays, overrideSeconds *int
+	var retentionDays, legalMonths, overrideSeconds *int
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
-		&r.SubjectKind, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
+		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds,
 		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
+	// A name is personal data of the check, kept as long as the law says.
+	if legalMonths != nil && r.External() && r.FlowKind == FlowIdentity {
+		r.NameRetention = max(r.NameRetention, LegalRetention{Months: *legalMonths}.longest())
+	}
 	var err error
 	if r.ProofedName, err = s.openSealed(r.ID, "proofed name", nameCT); err != nil {
 		return Request{}, err

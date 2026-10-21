@@ -34,6 +34,9 @@ type fakeDataRequests struct {
 	identityKeys map[uuid.UUID]SubjectIdentity
 	matchingBusy bool
 	saveErr      error
+	// heldUntil is when the legal retention lets a matched session be erased;
+	// SaveMatches stamps it on the matches it stores.
+	heldUntil map[uuid.UUID]time.Time
 }
 
 func (f *fakeDataRequests) FlowKind(_ context.Context, _ uuid.UUID, flowID string) (FlowKind, error) {
@@ -96,7 +99,11 @@ func (f *fakeDataRequests) SaveMatches(_ context.Context, _ Request, matches []N
 	f.saved = matches
 	f.matches = nil
 	for _, m := range matches {
-		f.matches = append(f.matches, DataMatch{RequestID: m.RequestID, Level: m.Level})
+		match := DataMatch{RequestID: m.RequestID, Level: m.Level}
+		if until, ok := f.heldUntil[m.RequestID]; ok {
+			match.HeldUntil = &until
+		}
+		f.matches = append(f.matches, match)
 	}
 	return nil
 }
@@ -250,11 +257,11 @@ func TestDataRequestMatchesByName(t *testing.T) {
 func TestApprovedSkipsEmailMatches(t *testing.T) {
 	strong, email, name := uuid.New(), uuid.New(), uuid.New()
 	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: email, Level: MatchEmail}, {RequestID: name, Level: MatchName}}
-	got, err := approvedMatches(matches, nil, FlowDataAccess)
+	got, err := approvedMatches(matches, nil, FlowDataAccess, time.Time{})
 	if err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
 		t.Errorf("approvedMatches(nil) = %v, %v; want only the identity match", got, err)
 	}
-	got, err = approvedMatches(matches, []uuid.UUID{email}, FlowDataAccess)
+	got, err = approvedMatches(matches, []uuid.UUID{email}, FlowDataAccess, time.Time{})
 	if err != nil || !slices.Equal(got, []uuid.UUID{email}) {
 		t.Errorf("approvedMatches(email) = %v, %v; want the ticked e-mail match", got, err)
 	}
@@ -368,18 +375,18 @@ func TestDataErasurePurgesApproved(t *testing.T) {
 func TestApprovedTakesSureMatches(t *testing.T) {
 	strong, probable, email := uuid.New(), uuid.New(), uuid.New()
 	matches := []DataMatch{{RequestID: strong, Level: MatchStrong}, {RequestID: probable, Level: MatchProbable}, {RequestID: email, Level: MatchEmail}}
-	if got, err := approvedMatches(matches, nil, FlowDataAccess); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+	if got, err := approvedMatches(matches, nil, FlowDataAccess, time.Time{}); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
 		t.Errorf("see my data approvedMatches(nil) = %v, %v; want the strong match", got, err)
 	}
-	if got, err := approvedMatches(matches, nil, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{strong, probable}) {
+	if got, err := approvedMatches(matches, nil, FlowDataErasure, time.Time{}); err != nil || !slices.Equal(got, []uuid.UUID{strong, probable}) {
 		t.Errorf("erasure approvedMatches(nil) = %v, %v; want the strong and the probable match", got, err)
 	}
-	if got, err := approvedMatches(matches, []uuid.UUID{email}, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{email}) {
+	if got, err := approvedMatches(matches, []uuid.UUID{email}, FlowDataErasure, time.Time{}); err != nil || !slices.Equal(got, []uuid.UUID{email}) {
 		t.Errorf("erasure ticking the e-mail match = %v, %v; want it taken", got, err)
 	}
 	now := time.Now()
 	erased := []DataMatch{{RequestID: strong, Level: MatchStrong, PurgedAt: &now}, {RequestID: email, Level: MatchEmail}}
-	if got, err := approvedMatches(erased, []uuid.UUID{}, FlowDataErasure); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
+	if got, err := approvedMatches(erased, []uuid.UUID{}, FlowDataErasure, time.Time{}); err != nil || !slices.Equal(got, []uuid.UUID{strong}) {
 		t.Errorf("erasure ticking nothing after an automatic erasure = %v, %v; want the erased match", got, err)
 	}
 	if kept := keptMatches(erased, []uuid.UUID{strong}); kept != 1 {

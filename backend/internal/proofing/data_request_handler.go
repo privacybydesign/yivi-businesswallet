@@ -59,6 +59,10 @@ type dataMatchResponse struct {
 	Level          MatchLevel `json:"level"`
 	// Approved is the reviewer's choice; absent until the decision.
 	Approved *bool `json:"approved,omitempty"`
+	// HeldUntil is when the org's legal retention lets an erasure take the
+	// session; absent when none applies or it passed, and on any request but
+	// an erasure.
+	HeldUntil *time.Time `json:"heldUntil,omitempty"`
 }
 
 func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
@@ -71,12 +75,17 @@ func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	out := dataMatchesResponse{FlowKind: req.FlowKind, Matches: make([]dataMatchResponse, 0, len(matches))}
+	now := time.Now()
 	for _, m := range matches {
-		out.Matches = append(out.Matches, dataMatchResponse{
+		item := dataMatchResponse{
 			RequestID: m.RequestID.String(), SessionID: publicSessionID(m.RequestID), FlowName: m.FlowName,
 			Status: m.Status, Method: m.Method, AssuranceLevel: m.AssuranceLevel, EIDASLevel: m.EIDASLevel,
 			CreatedAt: m.CreatedAt, CompletedAt: m.CompletedAt, PurgedAt: m.PurgedAt, Level: m.Level, Approved: m.Approved,
-		})
+		}
+		if req.FlowKind == FlowDataErasure && m.held(now) {
+			item.HeldUntil = m.HeldUntil
+		}
+		out.Matches = append(out.Matches, item)
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil

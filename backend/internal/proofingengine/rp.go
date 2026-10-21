@@ -858,6 +858,20 @@ func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token strin
 	return nil
 }
 
+// SetSessionsRetention sets how long the engine keeps the tenant's sessions ids
+// once they ended, in place of what each was created with
+// (SessionInput.Retention); it must be positive. A session already gone is left
+// out.
+func (s *Server) SetSessionsRetention(_ context.Context, t pp.Tenant, ids []string, retention time.Duration) error {
+	if retention < time.Second {
+		return rejected(http.StatusBadRequest, "retention must be at least a second")
+	}
+	if err := s.sessions.SetRetention(t.ID, ids, retention); err != nil {
+		return fmt.Errorf("proofingengine: set session retention: %w", err)
+	}
+	return nil
+}
+
 // SubmitReference hands the engine the subject's verified OpenID4VP
 // disclosure, which decides a Yivi-method session.
 func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token string, ref pp.Reference) (pp.YiviDisclosure, error) {

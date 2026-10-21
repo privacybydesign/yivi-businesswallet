@@ -25,6 +25,7 @@ import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
 import { BrandingPanel } from "./proofing-branding";
+import { PrivacySettingsPanel } from "./settings-privacy";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
@@ -167,6 +168,8 @@ function SettingsPanel({
       return <OrgProfileSettings org={org} />;
     case "branding":
       return <BrandingPanel slug={slug} orgName={org.name} />;
+    case "privacy":
+      return <PrivacySettingsPanel slug={slug} />;
     case "mandates":
       return <MandateSettings slug={slug} />;
     case "identity":

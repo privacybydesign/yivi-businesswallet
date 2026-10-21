@@ -132,6 +132,9 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Hosted{}, err
 	}
+	if req, err = s.withLegalNotice(ctx, req); err != nil {
+		return Hosted{}, err
+	}
 	return Hosted{Request: req, Settings: settings, Flow: flow, FlowSettings: flowSettings}, nil
 }
 
@@ -153,7 +156,10 @@ func (s *Service) HostedStatus(ctx context.Context, token string) (Request, erro
 	if err != nil {
 		return Request{}, err
 	}
-	return s.readReconciled(ctx, req)
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	return s.withLegalNotice(ctx, req)
 }
 
 func (s *Service) StartHosted(ctx context.Context, token string, method proofingprovider.Method) (Sent, error) {
@@ -251,7 +257,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	tenant := orgTenant(req.OrganizationID)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
-		Language: string(req.Language), Retention: engineRetention(&settings, req.RetentionOverride), ReferencePhoto: photo,
+		Language: string(req.Language), Retention: engineRetention(&settings, req.FlowKind, req.RetentionOverride), ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)

@@ -593,6 +593,8 @@ export const nl: Translation<typeof en> = {
       exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
       mandateWithdrawn:
         "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
+      legalRetention:
+        "Een sessie die je volgens de wet moet bewaren kan nog niet verwijderd worden. Vink die uit.",
       tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
@@ -816,6 +818,10 @@ export const nl: Translation<typeof en> = {
           message:
             "Je hebt bewezen wie je bent, maar je verzoek is niet ingewilligd.",
         },
+        legalRetention: {
+          title: "Je gegevens kunnen nog niet verwijderd worden",
+          until: "Al je gegevens kunnen vanaf {{date}} verwijderd worden.",
+        },
         expired: {
           title: "Sessie beëindigd",
           message: "De controle is niet op tijd afgerond.",
@@ -895,6 +901,9 @@ export const nl: Translation<typeof en> = {
         erased: "Verwijderd",
         approved: "Goedgekeurd",
         kept: "Bewaard",
+        heldUntil: "Wettelijk bewaard tot {{date}}",
+        heldHint:
+          "Sessies die je volgens de wet moet bewaren kunnen nog niet verwijderd worden, dus je kunt ze niet aanvinken. Een verzoek om ze te verwijderen wordt geweigerd tot de getoonde datum.",
         download: "Gegevens downloaden",
         downloadUntil: "Beschikbaar tot {{date}}",
         downloadClosed: "De download was beschikbaar tot {{date}}.",
@@ -946,6 +955,10 @@ export const nl: Translation<typeof en> = {
         "Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
       retention_other:
         "Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
+      retentionLegal:
+        "Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard, zoals de wet vereist. Het resultaat en het auditspoor blijven.",
+      retentionOwnLegal:
+        "Je ziet de sessies die jij verstuurde. Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard.",
       retentionOwn_one:
         "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist.",
       retentionOwn_other:
@@ -1085,6 +1098,46 @@ export const nl: Translation<typeof en> = {
         privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
         footer: "Identiteitscontrole door Yivi",
       },
+    },
+    legalRetention: {
+      title: "Wettelijke bewaartermijn",
+      hint_one:
+        "Zonder wettelijke termijn worden persoonsgegevens {{count}} dag na afloop van een controle gewist.",
+      hint_other:
+        "Zonder wettelijke termijn worden persoonsgegevens {{count}} dagen na afloop van een controle gewist.",
+      switch:
+        "We moeten deze gegevens volgens de wet een bepaalde tijd bewaren",
+      switchHint:
+        "Bijvoorbeeld wanneer een sectorwet je verplicht een identiteitsbewijs te bewaren.",
+      keepFor: "Bewaren gedurende",
+      unit: "Eenheid",
+      units: {
+        years: "jaar",
+        months: "maanden",
+      },
+      period: {
+        years_one: "{{count}} jaar",
+        years_other: "{{count}} jaar",
+        months_one: "{{count}} maand",
+        months_other: "{{count}} maanden",
+      },
+      countedFrom: "Geteld vanaf het einde van elke controle.",
+      amountInvalid:
+        "Vul een geheel getal in van minstens 1, en hooguit 50 jaar.",
+      reason: "Reden, getoond aan de persoon",
+      reasonEn: "English",
+      reasonNl: "Nederlands",
+      reasonRequired:
+        "Geef de reden in beide talen, elk hooguit {{max}} tekens.",
+      changes: {
+        title: "Wat dit verandert",
+        keep: "Elke flow bewaart persoonsgegevens minstens {{period}}. Een flow mag ze langer bewaren, niet korter.",
+        erase:
+          "Mijn gegevens verwijderen wordt geweigerd gedurende de {{period}} na afloop van een controle. De persoon ziet de reden en de datum waarop de gegevens verwijderd kunnen worden.",
+        access: "Mijn gegevens inzien blijft werken.",
+      },
+      discard: "Verwerpen",
+      save: "Opslaan",
     },
     developers: {
       title: "Ontwikkelaars",
@@ -2327,6 +2380,7 @@ export const nl: Translation<typeof en> = {
     tabIdentity: "Identiteit",
     tabScreening: "Screening (VOG)",
     tabBranding: "Huisstijl",
+    tabPrivacy: "Gegevens en privacy",
     tabTheme: "Wallet-thema",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",

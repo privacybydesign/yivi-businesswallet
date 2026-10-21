@@ -232,9 +232,10 @@ func (s *DataRequestStore) SaveMatches(ctx context.Context, req Request, matches
 func (s *DataRequestStore) Matches(ctx context.Context, req Request) ([]DataMatch, error) {
 	rows, err := s.db.Query(ctx, `SELECT m.matched_request_id, r.flow_name, r.status, COALESCE(r.method, ''),
 			COALESCE(r.assurance_level, ''), COALESCE(r.eidas_level, ''), r.created_at, r.completed_at, r.purged_at,
-			m.level, m.approved
+			m.level, m.approved, `+legalHeldUntil+`
 		FROM identity_proofing_request_matches m
 		JOIN identity_proofing_requests r ON r.id = m.matched_request_id AND r.organization_id = m.organization_id
+		LEFT JOIN identity_proofing_settings st ON st.organization_id = r.organization_id
 		WHERE m.request_id = $1 AND m.organization_id = $2
 		ORDER BY m.level DESC, r.created_at DESC`, req.ID, req.OrganizationID)
 	if err != nil {
@@ -243,7 +244,7 @@ func (s *DataRequestStore) Matches(ctx context.Context, req Request) ([]DataMatc
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DataMatch, error) {
 		var m DataMatch
 		err := row.Scan(&m.RequestID, &m.FlowName, &m.Status, &m.Method, &m.AssuranceLevel, &m.EIDASLevel,
-			&m.CreatedAt, &m.CompletedAt, &m.PurgedAt, &m.Level, &m.Approved)
+			&m.CreatedAt, &m.CompletedAt, &m.PurgedAt, &m.Level, &m.Approved, &m.HeldUntil)
 		return m, err
 	})
 	if err != nil {

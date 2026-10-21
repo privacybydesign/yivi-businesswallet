@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { request } from "./http";
-import { getHostedProofing, getProofingFlows } from "./identity-proofing";
+import {
+  getHostedProofing,
+  getHostedProofingStatus,
+  getProofingFlows,
+  getProofingSettings,
+} from "./identity-proofing";
 
 // The subject is told the retention the server works out (the flow's, else
 // the org's): the pages read it from these two responses, so their schemas
@@ -116,5 +121,56 @@ describe("a value the backend adds", () => {
     expect(schema.parse({ ...hostedPage, flow })).toMatchObject({
       flow: { diplomaMode: "required", kind: "identity" },
     });
+  });
+});
+
+// What the law makes the org keep is read from the settings, and told to a
+// person whose erasure it declined through their link's progress.
+describe("the legal retention", () => {
+  const branding = hostedPage.organization.branding;
+  const settings = {
+    sessionTtlSeconds: 600,
+    dataRetentionDays: 30,
+    erasureHandling: "review",
+    legalRetention: null,
+    branding,
+    allowedRedirectOrigins: [],
+  };
+  const legal = { months: 60, reasonEn: "The Wwft.", reasonNl: "De Wwft." };
+
+  beforeEach(() => {
+    vi.mocked(request).mockReset();
+  });
+
+  it("comes with the settings, null without one", async () => {
+    await getProofingSettings("acme");
+    const schema = lastSchema();
+    expect(schema.parse(settings)).toMatchObject({ legalRetention: null });
+    expect(schema.parse({ ...settings, legalRetention: legal })).toMatchObject({
+      legalRetention: legal,
+    });
+    const missing: Record<string, unknown> = { ...settings };
+    delete missing.legalRetention;
+    expect(() => schema.parse(missing)).toThrow();
+  });
+
+  it("comes with the link's progress of a declined erasure", async () => {
+    await getHostedProofingStatus("token");
+    const schema = lastSchema();
+    const progress = {
+      status: "rejected",
+      errorCode: "LEGAL_RETENTION",
+      linkExpiresAt: "2026-10-19T12:00:00Z",
+      started: true,
+      addressGiven: false,
+    };
+    const notice = {
+      until: "2031-10-19T12:00:00Z",
+      reason: { en: "The Wwft.", nl: "De Wwft." },
+    };
+    expect(schema.parse(progress)).not.toHaveProperty("legalRetention");
+    expect(schema.parse({ ...progress, legalRetention: notice })).toMatchObject(
+      { legalRetention: notice },
+    );
   });
 });

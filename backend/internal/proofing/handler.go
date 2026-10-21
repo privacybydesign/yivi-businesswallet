@@ -742,6 +742,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's holder is matched against them"}
 	case errors.Is(err, ErrDataFlowForMember):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}
+	case errors.Is(err, ErrLegalRetention):
+		return &respond.APIError{Status: http.StatusConflict, Code: "legal_retention", Message: "a session within the organisation's legal retention cannot be erased yet"}
 	case errors.Is(err, ErrExportUnavailable):
 		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
 	case errors.Is(err, ErrRedirectNotAllowed):

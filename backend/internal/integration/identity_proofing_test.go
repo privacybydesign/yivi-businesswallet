@@ -471,6 +471,11 @@ type proofingSettingsResp struct {
 		LogoURI        string `json:"logoUri"`
 		HidePoweredBy  bool   `json:"hidePoweredBy"`
 	} `json:"branding"`
+	LegalRetention *struct {
+		Months   int    `json:"months"`
+		ReasonEN string `json:"reasonEn"`
+		ReasonNL string `json:"reasonNl"`
+	} `json:"legalRetention"`
 	AllowedRedirectOrigins []string `json:"allowedRedirectOrigins"`
 }
 
@@ -660,6 +665,86 @@ func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string,
 		t.Errorf("branding saved with removeLogo = %+v, want no logo", removed.Branding)
 	}
 	wantProofingError(t, "removed logo", env.do(http.MethodGet, base+"/settings/logo", nil), http.StatusNotFound, "not_found")
+}
+
+// The org's legal retention is a floor for every flow's retention: it is told
+// to the external person on each flow, replaces nothing else, and is removed
+// by null. A bad one changes nothing.
+func TestLegalRetentionHTTPFlow(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	base := "/api/v1/orgs/acme/identity-proofing"
+	env.proofingFlow("acme", "Passport only")
+
+	const defaultRetentionDays = 30
+	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
+	if settings.LegalRetention != nil {
+		t.Errorf("default legal retention = %+v; want null", settings.LegalRetention)
+	}
+
+	for name, body := range map[string]string{
+		"no months":        `{"legalRetention":{"months":0,"reasonEn":"a","reasonNl":"b"}}`,
+		"too many months":  `{"legalRetention":{"months":601,"reasonEn":"a","reasonNl":"b"}}`,
+		"no English":       `{"legalRetention":{"months":60,"reasonEn":"","reasonNl":"b"}}`,
+		"no Dutch":         `{"legalRetention":{"months":60,"reasonEn":"a"}}`,
+		"an empty object":  `{"legalRetention":{}}`,
+		"valid beside bad": `{"dataRetentionDays":90,"legalRetention":{"months":60,"reasonEn":"a"}}`,
+	} {
+		wantProofingError(t, name, env.patchSettings("acme", body), http.StatusBadRequest, "invalid_input")
+	}
+	for name, body := range map[string]string{
+		"an unknown field": `{"legalRetention":{"months":60,"reasonEn":"a","reasonNl":"b","years":5}}`,
+		"a string":         `{"legalRetention":"five years"}`,
+	} {
+		wantProofingError(t, name, env.patchSettings("acme", body), http.StatusBadRequest, "invalid_body")
+	}
+	settings = decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
+	if settings.LegalRetention != nil || settings.DataRetentionDays != defaultRetentionDays {
+		t.Errorf("settings after rejected updates = %+v; want the defaults", settings)
+	}
+	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 0 {
+		t.Errorf("settings_updated audits = %d, want 0", n)
+	}
+
+	const reasonEN, reasonNL = "The Wwft requires us to keep proof of identity for five years.", "De Wwft verplicht ons het identiteitsbewijs vijf jaar te bewaren."
+	update := fmt.Sprintf(`{"legalRetention":{"months":60,"reasonEn":%q,"reasonNl":%q}}`, reasonEN, reasonNL)
+	resp := env.patchSettings("acme", update)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save legal retention = %d, want 200", resp.StatusCode)
+	}
+	settings = decodeJSON[proofingSettingsResp](t, resp)
+	if legal := settings.LegalRetention; legal == nil || legal.Months != 60 || legal.ReasonEN != reasonEN || legal.ReasonNL != reasonNL {
+		t.Fatalf("legal retention = %+v; want five years with both reasons", legal)
+	}
+	if settings.DataRetentionDays != defaultRetentionDays {
+		t.Errorf("retention = %d days; want the org's own kept", settings.DataRetentionDays)
+	}
+	// Five years are 1826 or 1827 days, and the engine's grace adds one.
+	flows := decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
+	if len(flows) != 1 || flows[0].RetentionDays < 1827 || flows[0].RetentionDays > 1828 {
+		t.Errorf("flows = %+v; want a retention of about five years", flows)
+	}
+
+	// A change of another setting leaves it; saving it again changes nothing.
+	kept := decodeJSON[proofingSettingsResp](t, env.patchSettings("acme", `{"dataRetentionDays":90}`))
+	if kept.LegalRetention == nil || kept.LegalRetention.Months != 60 {
+		t.Errorf("legal retention after another change = %+v; want it kept", kept.LegalRetention)
+	}
+	_ = env.patchSettings("acme", update).Body.Close()
+	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
+		t.Errorf("settings_updated audits = %d, want 2 (legal retention, retention)", n)
+	}
+
+	removed := decodeJSON[proofingSettingsResp](t, env.patchSettings("acme", `{"legalRetention":null}`))
+	if removed.LegalRetention != nil {
+		t.Errorf("legal retention after null = %+v; want none", removed.LegalRetention)
+	}
+	flows = decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
+	if len(flows) != 1 || flows[0].RetentionDays != 90+1 {
+		t.Errorf("flows = %+v; want the org's retention again", flows)
+	}
 }
 
 type proofingAPIKeyResp struct {

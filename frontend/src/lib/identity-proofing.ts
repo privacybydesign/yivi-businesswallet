@@ -1021,6 +1021,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
     // admin call, though the role still shows the admin's tabs.
     case "mandate_withdrawn":
       return t("identityProofing.errors.mandateWithdrawn");
+    case "legal_retention":
+      return t("identityProofing.errors.legalRetention");
     // too_large is a diploma upload's, payload_too_large a branding logo's.
     case "too_large":
     case "payload_too_large":

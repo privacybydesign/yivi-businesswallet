@@ -36,7 +36,8 @@ const settingsColumns = `o.id, o.name, s.session_ttl_seconds, s.data_retention_d
 	COALESCE(s.text_color, ''), COALESCE(s.surface_color, ''), COALESCE(s.border_color, ''), COALESCE(s.link_color, ''),
 	COALESCE(s.success_color, ''), COALESCE(s.warning_color, ''), COALESCE(s.error_color, ''), COALESCE(s.topbar_color, ''),
 	COALESCE(s.font_family, ''),
-	s.logo_bytes IS NOT NULL, COALESCE(s.hide_powered_by, false), s.updated_at, COALESCE(s.allowed_redirect_origins, '{}')`
+	s.logo_bytes IS NOT NULL, COALESCE(s.hide_powered_by, false), s.updated_at, COALESCE(s.allowed_redirect_origins, '{}'),
+	COALESCE(s.legal_retention_months, 0), COALESCE(s.legal_retention_reason_en, ''), COALESCE(s.legal_retention_reason_nl, '')`
 
 const settingsFrom = ` FROM organizations o
 	LEFT JOIN identity_proofing_settings s ON s.organization_id = o.id`
@@ -100,11 +101,11 @@ func scanSettings(row pgx.CollectableRow) (Settings, error) {
 	var ttlSeconds, retentionDays *int
 	var erasureHandling *ErasureHandling
 	var updatedAt *time.Time
-	b := &s.Branding
+	b, legal := &s.Branding, &s.LegalRetention
 	err := row.Scan(&s.OrganizationID, &s.OrgName, &ttlSeconds, &retentionDays, &erasureHandling,
 		&b.DisplayName, &b.PrimaryColor, &b.SecondaryColor, &b.SupportContact, &b.PrivacyURL,
 		&b.TextColor, &b.SurfaceColor, &b.BorderColor, &b.LinkColor, &b.SuccessColor, &b.WarningColor, &b.ErrorColor,
-		&b.TopbarColor, &b.FontFamily, &b.HasLogo, &b.HidePoweredBy, &updatedAt, &s.RedirectOrigins)
+		&b.TopbarColor, &b.FontFamily, &b.HasLogo, &b.HidePoweredBy, &updatedAt, &s.RedirectOrigins, &legal.Months, &legal.ReasonEN, &legal.ReasonNL)
 	if ttlSeconds != nil {
 		s.Session.SessionTTL = time.Duration(*ttlSeconds) * time.Second
 	}
@@ -204,6 +205,44 @@ func saveSession(ctx context.Context, q database.Querier, orgID uuid.UUID, befor
 		return refreshOrgPurgeAt(ctx, q, orgID)
 	}
 	return nil
+}
+
+// SaveLegalRetention replaces the org's legal retention (the zero value
+// removes it) and audits identity_proofing.settings_updated with before and
+// after. A change moves the purge time of the org's requests, which are stored
+// again under the same lock as a retention change. Saving the legal retention
+// it has changes and audits nothing.
+func (s *OrgSettingsStore) SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error) {
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
+			return err
+		}
+		before, err := getSettings(ctx, q, orgID)
+		if err != nil {
+			return err
+		}
+		if before.LegalRetention == legal {
+			return nil
+		}
+		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
+				(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl)
+			VALUES ($1, NULLIF($2, 0), NULLIF($3, ''), NULLIF($4, ''))
+			ON CONFLICT (organization_id) DO UPDATE SET
+				legal_retention_months = EXCLUDED.legal_retention_months,
+				legal_retention_reason_en = EXCLUDED.legal_retention_reason_en,
+				legal_retention_reason_nl = EXCLUDED.legal_retention_reason_nl, updated_at = now()`,
+			orgID, legal.Months, legal.ReasonEN, legal.ReasonNL); err != nil {
+			return fmt.Errorf("proofing: save legal retention org %s: %w", orgID, err)
+		}
+		if err := refreshOrgPurgeAt(ctx, q, orgID); err != nil {
+			return err
+		}
+		return s.recordUpdated(ctx, q, orgID, before.LegalRetention.auditFields(), legal.auditFields())
+	})
+	if err != nil {
+		return Settings{}, err
+	}
+	return s.Get(ctx, orgID)
 }
 
 // SaveBranding replaces the org's branding, and its logo as logo says, and

@@ -14,15 +14,18 @@ import type {
   ProofingImage,
   ProofingRequest,
   ProofingResult,
+  ProofingSettings,
 } from "../api/identity-proofing";
 import { isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import {
   AUDIT_TONE_CLASSES,
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
+import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   addressVerificationNote,
   assuranceLevelLabel,
@@ -57,6 +60,28 @@ const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
+
+// Whose sessions the list shows: an admin sees every one, a member their own.
+type SessionScope = "all" | "own";
+
+// How long the sessions' personal data is kept: the legal retention when the
+// org has one, else its data retention.
+function retentionNote(
+  settings: ProofingSettings,
+  scope: SessionScope,
+  t: TFunction,
+): string {
+  if (settings.legalRetention) {
+    const period = legalPeriodLabel(settings.legalRetention.months, t);
+    return scope === "all"
+      ? t("identityProofing.sessions.retentionLegal", { period })
+      : t("identityProofing.sessions.retentionOwnLegal", { period });
+  }
+  const count = settings.dataRetentionDays;
+  return scope === "all"
+    ? t("identityProofing.sessions.retention", { count })
+    : t("identityProofing.sessions.retentionOwn", { count });
+}
 
 // The sessions sent to external people. A member sees the ones they sent, an
 // admin every one; an admin also decides the ones waiting for review.
@@ -134,13 +159,7 @@ function SessionsList({
         </fieldset>
         {settings.data && (
           <p className="text-muted text-[12px]">
-            {isAdmin
-              ? t("identityProofing.sessions.retention", {
-                  count: settings.data.dataRetentionDays,
-                })
-              : t("identityProofing.sessions.retentionOwn", {
-                  count: settings.data.dataRetentionDays,
-                })}
+            {retentionNote(settings.data, isAdmin ? "all" : "own", t)}
           </p>
         )}
       </div>

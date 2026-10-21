@@ -388,6 +388,11 @@ func (s *Stub) DeleteSession(_ context.Context, t Tenant, sessionID, sessionToke
 	return nil
 }
 
+// SetSessionsRetention does nothing: the stub keeps no session past its end.
+func (*Stub) SetSessionsRetention(context.Context, Tenant, []string, time.Duration) error {
+	return nil
+}
+
 // SessionHandover hands out a fresh claim link while an Idem session runs; the
 // stub has no devices, so its app is never still active.
 func (s *Stub) SessionHandover(_ context.Context, t Tenant, sessionID, sessionToken string) (Claim, error) {

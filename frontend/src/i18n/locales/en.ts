@@ -575,6 +575,8 @@ export const en = {
       exportUnavailable: "This data can no longer be downloaded.",
       mandateWithdrawn:
         "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
+      legalRetention:
+        "A session the law makes you keep cannot be erased yet. Untick it.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
     },
@@ -796,6 +798,10 @@ export const en = {
           title: "Request refused",
           message: "You proved who you are, but your request was not granted.",
         },
+        legalRetention: {
+          title: "Your data cannot be deleted yet",
+          until: "All your data can be deleted from {{date}}.",
+        },
         expired: {
           title: "Session ended",
           message: "The check was not finished in time.",
@@ -872,6 +878,9 @@ export const en = {
         erased: "Erased",
         approved: "Approved",
         kept: "Kept",
+        heldUntil: "Kept by law until {{date}}",
+        heldHint:
+          "Sessions the law makes you keep cannot be erased yet, so they cannot be ticked. A request to delete them is declined until the date shown.",
         download: "Download the data",
         downloadUntil: "Available until {{date}}",
         downloadClosed: "The download was available until {{date}}.",
@@ -922,6 +931,10 @@ export const en = {
         "Personal data is purged {{count}} day after a session ends. The result and the audit trail stay.",
       retention_other:
         "Personal data is purged {{count}} days after a session ends. The result and the audit trail stay.",
+      retentionLegal:
+        "Personal data of identity checks is kept for at least {{period}} after they end, as the law requires. The result and the audit trail stay.",
+      retentionOwnLegal:
+        "You see the sessions you sent. Personal data of identity checks is kept for at least {{period}} after they end.",
       retentionOwn_one:
         "You see the sessions you sent. Personal data is purged {{count}} day after a session ends.",
       retentionOwn_other:
@@ -1059,6 +1072,45 @@ export const en = {
         privacy: "How your data is handled: {{url}}",
         footer: "Identity check by Yivi",
       },
+    },
+    legalRetention: {
+      title: "Legal retention",
+      hint_one:
+        "Without a legal period, personal data is purged {{count}} day after a check ends.",
+      hint_other:
+        "Without a legal period, personal data is purged {{count}} days after a check ends.",
+      switch: "We must keep this data by law for a set time",
+      switchHint:
+        "For example when a sector law requires you to keep proof of identity.",
+      keepFor: "Keep for",
+      unit: "Unit",
+      units: {
+        years: "years",
+        months: "months",
+      },
+      period: {
+        years_one: "{{count}} year",
+        years_other: "{{count}} years",
+        months_one: "{{count}} month",
+        months_other: "{{count}} months",
+      },
+      countedFrom: "Counted from the end of each check.",
+      amountInvalid:
+        "Enter a whole number of at least 1, and at most 50 years.",
+      reason: "Reason, shown to the person",
+      reasonEn: "English",
+      reasonNl: "Nederlands",
+      reasonRequired:
+        "Give the reason in both languages, at most {{max}} characters each.",
+      changes: {
+        title: "What this changes",
+        keep: "Every flow keeps personal data for at least {{period}}. A flow can keep it longer, not shorter.",
+        erase:
+          "Delete my data is declined during the {{period}} after a check ends. The person sees the reason and the date their data can be deleted.",
+        access: "See my data keeps working.",
+      },
+      discard: "Discard",
+      save: "Save",
     },
     developers: {
       title: "Developers",
@@ -2272,6 +2324,7 @@ export const en = {
     tabIdentity: "Identity",
     tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
+    tabPrivacy: "Data and privacy",
     tabTheme: "Wallet theme",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
