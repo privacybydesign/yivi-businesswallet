@@ -29,8 +29,8 @@ import { absoluteApiUrl } from "../api/http";
 import { ProofingPausedNotice } from "./proofing-pause";
 
 const ERROR = "text-error text-[12.5px]";
-// The recent sessions table shows the newest few; the rest are on the Sessions
-// page.
+// The recent sessions table shows the newest few; the rest are on the All
+// people page.
 const RECENT_SESSIONS = 6;
 const RECENT_COLUMNS = 5;
 const ALERT_ICON_SIZE = 14;
@@ -224,7 +224,7 @@ function RecentSessions({
           </span>
         </div>
         <Link
-          to={`/${slug}/identity-proofing/sessions`}
+          to={`/${slug}/identity-proofing/people`}
           className="text-ink text-[12.5px] font-semibold hover:underline"
         >
           {t("identityProofing.overview.recent.viewAll")}
@@ -263,7 +263,7 @@ function RecentSessions({
             </Table.State>
           ) : (
             recent.map((request) => {
-              const sessionPath = `/${slug}/identity-proofing/sessions?session=${request.id}`;
+              const sessionPath = `/${slug}/identity-proofing/people?session=${request.id}`;
               return (
                 <Table.Row
                   key={request.id}
@@ -278,7 +278,7 @@ function RecentSessions({
                       className="text-ink font-semibold hover:underline"
                     >
                       {requestSubject(request).name ||
-                        t("identityProofing.overview.recent.noName")}
+                        t("identityProofing.requests.noName")}
                     </Link>
                   </Table.Cell>
                   <Table.Cell className="text-ink-soft min-w-40">

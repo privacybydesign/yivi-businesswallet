@@ -1176,10 +1176,35 @@ export function isProofingStep(value: string): value is ProofingStep {
   return PROOFING_STEPS.includes(value);
 }
 
-// The Sessions tab's filters: every session, or one outcome; "review" is the
-// review queue. Pending and in progress show under "all" only.
+// A flow version's steps in words, in the order the app runs them; a step the
+// wallet has no copy for shows as it is.
+export function flowStepLabels(
+  flow: {
+    steps: readonly string[];
+    diplomaMode?: DiplomaMode | undefined;
+    addressMode?: AddressMode | undefined;
+  },
+  t: TFunction,
+): string[] {
+  const labels = flow.steps.map((step) =>
+    isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
+  );
+  // The wallet's own steps, after the app's: given in the browser.
+  if (flow.addressMode === "required") {
+    labels.push(t("identityProofingFlows.steps.address"));
+  }
+  if (flow.diplomaMode === "required") {
+    labels.push(t("identityProofingFlows.steps.diploma_upload"));
+  }
+  return labels;
+}
+
+// The people lists' filters: every session, or one outcome; "review" is the
+// review queue and "in_progress" a session its subject has not finished.
+// Cancelled sessions show under "all" only.
 export const SESSION_FILTERS = [
   "all",
+  "in_progress",
   "review",
   "verified",
   "failed",
@@ -1187,18 +1212,22 @@ export const SESSION_FILTERS = [
 ] as const;
 export type SessionFilter = (typeof SESSION_FILTERS)[number];
 
-const FILTER_STATUS: Record<Exclude<SessionFilter, "all">, string> = {
-  review: "needs_review",
-  verified: "approved",
-  failed: "rejected",
-  expired: "expired",
+const FILTER_STATUSES: Record<
+  Exclude<SessionFilter, "all">,
+  readonly string[]
+> = {
+  in_progress: ["pending", "in_progress"],
+  review: ["needs_review"],
+  verified: ["approved"],
+  failed: ["rejected"],
+  expired: ["expired"],
 };
 
 export function matchesSessionFilter(
   status: string,
   filter: SessionFilter,
 ): boolean {
-  return filter === "all" || FILTER_STATUS[filter] === status;
+  return filter === "all" || FILTER_STATUSES[filter].includes(status);
 }
 
 export function sessionFilterCounts(
@@ -1208,11 +1237,44 @@ export function sessionFilterCounts(
     requests.filter((r) => matchesSessionFilter(r.status, filter)).length;
   return {
     all: requests.length,
+    in_progress: count("in_progress"),
     review: count("review"),
     verified: count("verified"),
     failed: count("failed"),
     expired: count("expired"),
   };
+}
+
+// The flows requests were sent on, by name: what a flow filter offers. The
+// requests are newest first and each keeps the name its flow had when it was
+// sent, so the first one seen names the flow as it is now.
+export function requestFlows(
+  requests: readonly { flowId: string; flowName: string }[],
+): { id: string; name: string }[] {
+  const names = new Map<string, string>();
+  for (const r of requests) {
+    if (!names.has(r.flowId)) {
+      names.set(r.flowId, r.flowName);
+    }
+  }
+
+  return [...names]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const SECONDS_PER_DAY = 86_400;
+
+// How many days after a check ends a flow's personal data is purged: the flow's
+// own retention when it sets one, else the org's.
+export function flowPurgeDays(
+  flow: { retentionOverrideSeconds?: number | undefined },
+  settings: { dataRetentionDays: number },
+): number {
+  const override = flow.retentionOverrideSeconds ?? 0;
+  return override > 0
+    ? Math.ceil(override / SECONDS_PER_DAY)
+    : settings.dataRetentionDays;
 }
 
 const MS_PER_SECOND = 1000;

@@ -25,13 +25,16 @@ const SELECT_CLASS =
 // The "Verify a person" button and its dialog: any member sends an external
 // person a request (an e-mail address and an optional name; the person needs no
 // account). A hosted link is shown to copy once the dialog has closed, so
-// closing that dialog cannot discard it.
+// closing that dialog cannot discard it. flowId is the flow the form starts on,
+// when the button belongs to one.
 export function VerifyPerson({
   slug,
   isAdmin,
+  flowId,
 }: {
   slug: string;
   isAdmin: boolean;
+  flowId?: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const [sending, setSending] = useState(false);
@@ -46,6 +49,7 @@ export function VerifyPerson({
         <SendModal
           slug={slug}
           isAdmin={isAdmin}
+          startFlowId={flowId}
           onClose={() => setSending(false)}
           onLink={(url) => {
             setSending(false);
@@ -71,11 +75,13 @@ export function VerifyPerson({
 function SendModal({
   slug,
   isAdmin,
+  startFlowId,
   onClose,
   onLink,
 }: {
   slug: string;
   isAdmin: boolean;
+  startFlowId?: string;
   onClose: () => void;
   onLink: (url: string) => void;
 }): React.JSX.Element {
@@ -99,6 +105,7 @@ function SendModal({
           slug={slug}
           flows={flows.data}
           isAdmin={isAdmin}
+          startFlowId={startFlowId}
           onSent={onClose}
           onLink={onLink}
           onCancel={onClose}
@@ -134,6 +141,7 @@ function SendForm({
   slug,
   flows,
   isAdmin,
+  startFlowId,
   onSent,
   onLink,
   onCancel,
@@ -141,6 +149,7 @@ function SendForm({
   slug: string;
   flows: ProofingFlow[];
   isAdmin: boolean;
+  startFlowId?: string;
   onSent: () => void;
   onLink: (url: string) => void;
   onCancel: () => void;
@@ -150,6 +159,7 @@ function SendForm({
   // A flow matched against the sender's own photo is the API's to send: this
   // form has no photo to give it.
   const { sendable, initial } = externalFlows(flows);
+  const start = sendable.find((f) => f.id === startFlowId) ?? initial;
   const photoOnly = flows.some((f) => f.needsReferencePhoto);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -168,7 +178,7 @@ function SendForm({
     nameMissing,
   } = sendFormDecision({
     sendable,
-    initial,
+    initial: start,
     picked,
     channel,
     email,

@@ -8,15 +8,18 @@ one set of API keys and one webhook endpoint, and no customers (§1). The
 sidebar's "Identity proofing" section holds up to three pages under
 `/{org}/identity-proofing`: **Overview** (the last 30 days' external sessions
 counted, the newest ones, the org's flows with their sessions, and an alert
-for a failing webhook) and, admin-only, **Flows** (full flow configuration,
-versioned, which flows members may use, and the default flow) and
+for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
+with the people each identified in 30 days, the default flow and which flows
+members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
+with **People** and **Versions** tabs, **Edit flow** and "Verify a person") and
 **Developers** (tabs: API and webhook, and Session settings, a temporary
 home). The API and webhook tab holds the **API tokens**
 table (name, created with who by, last used, revoke; revoked ones are not
-listed), the **Webhook endpoint** and its **Recent deliveries**. The **Sessions** list
-(`/{org}/identity-proofing/sessions`, opened from the Overview;
-`?session=<id>` opens a row) is not in the sidebar. "Verify a person" in the
-header of the Overview and of Sessions opens the send form, for any member. Only a
+listed), the **Webhook endpoint** and its **Recent deliveries**. The **All people** list
+(`/{org}/identity-proofing/people`, opened from the Overview;
+`?session=<id>` opens a row) is not in the sidebar; a flow's People tab is the
+same table narrowed to that flow. "Verify a person" in the
+header of the Overview, of All people and of a flow opens the send form, for any member. Only a
 platform admin pauses an org's proofing, after which no request can be sent
 (`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
 request from their member detail page (admin-only, like that page). The people
@@ -69,8 +72,9 @@ public API and the API key routes), `apikey_store.go` (keys),
 settings; `settings_store.go` is the flow selection),
 `webhook*.go` (endpoint, outbox, deliverer), `internal/safehttp` (the SSRF
 guard every externally supplied URL goes through),
-`frontend/src/routes/identity-proofing-flows.tsx` (admin: flow editor, versions,
-selection), `frontend/src/routes/proofing-sessions.tsx` (the sessions list,
+`frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table and
+the flow editor), `identity-proofing-flow.tsx` (a flow's page: People and
+Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
 details and review), `proofing-send.tsx` (the Verify a person dialog),
 `proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
 tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
@@ -229,7 +233,7 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - The rate limits (`apiCallLimit`, `APISessionLimit`) and the hosted page's
     (`hostedCallLimit`) are per org.
 - **Flows live in the engine** (`proofingengine/flow`), versioned per org; the
-  wallet's "Proofing flows" page edits them through `proofing.Service`, and it is
+  wallet's "Flows" pages edit them through `proofing.Service`, and it is
   `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
     `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
@@ -480,7 +484,7 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   every request of the org. `GET requests?subjectUserId=` narrows either view to
   the requests proofing one member, and `?subjectKind=external|member` to those
   sent to external people or to members; the list's cap of 200 applies after
-  the narrowing, so the Sessions page and the Overview ask for `external`.
+  the narrowing, so the All people page and the Overview ask for `external`.
 - **Customers were removed from the model** (thirteen migrations,
   `20261021100000` to `20261021101200`, after the newest one that touched
   customers, `20261019120000`;
@@ -764,7 +768,7 @@ post-review outcome stay the system's.
   `referencePhoto` (the sender's own photo of the person, §14), and
   `documentImage` / `documentImageBack` (the document's front and back). A flow
   that does not keep face photos has dropped the face images after the match.
-  The Sessions page (`proofing-sessions.tsx`) reads it when
+  The people table (`proofing-people.tsx`) reads it when
   an admin opens an approved, rejected or in-review row and folds
   it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
@@ -1097,7 +1101,7 @@ provider, so keyed on org and flow id with no foreign key): `enabled` (off: a
 hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
 with another `language` is 400; the page keeps to them), and `completion`
 (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
-Admins edit them under "Hosted page" on a flow in the flows page, with a
+Admins edit them under "Hosted page" in a flow's Edit flow view, with a
 preview of the overview step in the org's branding. No row is the defaults.
 **Theme:** the page applies the org's branding `primaryColor` through
 `applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
@@ -1143,7 +1147,7 @@ the reviews such an org still had open. Audit events recorded with
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
 end it, §3). The reviewer sees the person's identity and check results (an
-audited result read). An admin decides it on the Sessions page (filter
+audited result read). An admin decides it on the All people page or the flow's People tab (filter
 "Needs review", also counted on the overview): approve or reject (optionally
 with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
@@ -1416,7 +1420,7 @@ only: the engine knows nothing of it.
   `session.diploma_added`) and `diploma_rejected` (reason only:
   `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
   Shown in the request responses, the public API's `result`, and the
-  Sessions page. `Purge` deletes them with the rest.
+  people table. `Purge` deletes them with the rest.
 
 
 ## 13. One known person (expected subject)
@@ -1455,7 +1459,7 @@ proofs whoever scans, and the wallet holds the outcome to the person.
   view alike) answers the wallet's rejection and code with no identity or
   images: the other person is never shown (`ASSURANCE_NOT_MET` likewise).
 - **Shown.** `expectedSubject` on the request, the public API's session
-  and its webhooks; "Expected person" in the Sessions page's details; the
+  and its webhooks; "Expected person" in the people table's details; the
   reason in words (`proofingRejectionReason`).
 
 ## 14. The org's own photo (reference photo)
@@ -1495,7 +1499,7 @@ holder's change of bank account).
 - **In the result.** The session's result marks `faceReference:
   relying_party` (the evidence reads `reference_photo`, not `emrtd`) and,
   when the flow requests the selfie, releases the photo beside it
-  (`referencePhoto`), kept and purged with the selfie: the Sessions page
+  (`referencePhoto`), kept and purged with the selfie: the people table
   shows "Photo sent with the request" next to the selfie. The public API's result
   carries no image, as ever.
 

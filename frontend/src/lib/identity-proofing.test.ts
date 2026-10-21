@@ -29,6 +29,8 @@ import {
   reviewSubmitStep,
   matchTickedByDefault,
   externalFlows,
+  flowPurgeDays,
+  flowStepLabels,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -43,8 +45,10 @@ import {
   isProofingStep,
   isRequestedAttribute,
   proofingErrorMessage,
+  matchesSessionFilter,
   proofingStatsBy,
   proofingStatusLabel,
+  requestFlows,
   requestSubject,
   sendableFlows,
   sessionDurationSeconds,
@@ -750,6 +754,89 @@ describe("proofing stats", () => {
   });
 });
 
+describe("requestFlows", () => {
+  it("lists each flow once, by name", () => {
+    expect(
+      requestFlows([
+        { flowId: "b", flowName: "Ticket check" },
+        { flowId: "a", flowName: "Age check" },
+        { flowId: "b", flowName: "Ticket check" },
+      ]),
+    ).toEqual([
+      { id: "a", name: "Age check" },
+      { id: "b", name: "Ticket check" },
+    ]);
+    expect(requestFlows([])).toEqual([]);
+  });
+
+  it("names a renamed flow by its newest request", () => {
+    expect(
+      requestFlows([
+        { flowId: "a", flowName: "Age check 2026" },
+        { flowId: "a", flowName: "Age check" },
+      ]),
+    ).toEqual([{ id: "a", name: "Age check 2026" }]);
+  });
+});
+
+describe("flowPurgeDays", () => {
+  const org = { dataRetentionDays: 30 };
+
+  it("purges after the org's retention unless the flow sets its own", () => {
+    expect(flowPurgeDays({}, org)).toBe(30);
+    expect(flowPurgeDays({ retentionOverrideSeconds: 0 }, org)).toBe(30);
+    expect(flowPurgeDays({ retentionOverrideSeconds: 7 * 86_400 }, org)).toBe(
+      7,
+    );
+  });
+
+  it("rounds a part of a day up", () => {
+    expect(flowPurgeDays({ retentionOverrideSeconds: 86_401 }, org)).toBe(2);
+  });
+});
+
+describe("flowStepLabels", () => {
+  it("names each step in the order given", () => {
+    expect(
+      flowStepLabels(
+        { steps: ["document_capture", "nfc_read", "face_verification"] },
+        t,
+      ),
+    ).toEqual(["Scan the document", "Read the document's chip", "Face check"]);
+  });
+
+  it("adds the wallet's diploma upload after the app's steps", () => {
+    expect(
+      flowStepLabels(
+        { steps: ["face_verification"], diplomaMode: "required" },
+        t,
+      ),
+    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
+    expect(
+      flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
+    ).toEqual(["Face check"]);
+  });
+
+  it("adds the address entry before the diploma upload", () => {
+    expect(
+      flowStepLabels(
+        {
+          steps: ["face_verification"],
+          addressMode: "required",
+          diplomaMode: "required",
+        },
+        t,
+      ),
+    ).toEqual(["Face check", "Enter the address", "Upload diplomas (DUO)"]);
+  });
+
+  it("shows a step it has no copy for as it is", () => {
+    expect(flowStepLabels({ steps: ["video_call"] }, t)).toEqual([
+      "video_call",
+    ]);
+  });
+});
+
 describe("known flow values", () => {
   it("recognises only values the wallet has copy for", () => {
     expect(isRequestedAttribute("dg1")).toBe(true);
@@ -759,7 +846,7 @@ describe("known flow values", () => {
   });
 });
 
-describe("sessions tab", () => {
+describe("people lists", () => {
   const sent = "2026-09-25T10:00:00Z";
   const expires = "2026-09-25T10:10:00Z";
 
@@ -770,17 +857,27 @@ describe("sessions tab", () => {
       "rejected",
       "expired",
       "pending",
+      "in_progress",
+      "cancelled",
       "needs_review",
     ];
     expect(sessionFilterCounts(statuses.map((status) => ({ status })))).toEqual(
       {
-        all: 6,
+        all: 8,
+        in_progress: 2,
         review: 1,
         verified: 2,
         failed: 1,
         expired: 1,
       },
     );
+  });
+
+  it("shows a cancelled session under all only", () => {
+    expect(matchesSessionFilter("cancelled", "all")).toBe(true);
+    expect(matchesSessionFilter("cancelled", "in_progress")).toBe(false);
+    expect(matchesSessionFilter("pending", "in_progress")).toBe(true);
+    expect(matchesSessionFilter("approved", "in_progress")).toBe(false);
   });
 
   it("times a session to its outcome or its expiry", () => {

@@ -476,7 +476,6 @@ export const nl: Translation<typeof en> = {
         scopeOwn: "door jou verstuurd",
         viewAll: "Alles bekijken",
         person: "Persoon",
-        noName: "Geen naam opgegeven",
         flow: "Flow",
         result: "Resultaat",
         started: "Gestart",
@@ -504,6 +503,7 @@ export const nl: Translation<typeof en> = {
     requests: {
       empty: "Nog geen verzoeken.",
       subject: "Persoon",
+      noName: "Geen naam opgegeven",
       flow: "Flow",
       requestedBy: "Aangevraagd door",
       assurance: "Betrouwbaarheid",
@@ -840,10 +840,13 @@ export const nl: Translation<typeof en> = {
         again: "Opnieuw verifiëren",
       },
     },
+    people: {
+      title: "Alle personen",
+      subtitle: "Iedereen naar wie je een controle stuurde, op elke flow.",
+      allFlows: "Alle flows",
+      details: "Details",
+    },
     sessions: {
-      title: "Sessies",
-      subtitle:
-        "Identiteitscontroles die je hebt verstuurd naar personen buiten je organisatie.",
       review: {
         title: "Beoordeling afronden",
         hint: "De controles konden niet zelf beslissen. Jouw besluit rondt de sessie af en gaat naar je webhook-endpoint.",
@@ -908,7 +911,7 @@ export const nl: Translation<typeof en> = {
         downloadUntil: "Beschikbaar tot {{date}}",
         downloadClosed: "De download was beschikbaar tot {{date}}.",
       },
-      method: "Methode",
+      method: "App",
       timeline: "Tijdlijn",
       noEvents: "Nog niets vastgelegd.",
       identity: {
@@ -943,33 +946,33 @@ export const nl: Translation<typeof en> = {
           failed: "Mislukt",
         },
       },
-      filterLabel: "Sessies filteren",
       filters: {
-        all: "Alle {{count}}",
-        review: "Te beoordelen {{count}}",
-        verified: "Geverifieerd {{count}}",
-        failed: "Mislukt {{count}}",
-        expired: "Verlopen {{count}}",
+        all: "Alle ({{count}})",
+        in_progress: "Bezig ({{count}})",
+        review: "Te beoordelen ({{count}})",
+        verified: "Geverifieerd ({{count}})",
+        failed: "Mislukt ({{count}})",
+        expired: "Verlopen ({{count}})",
       },
       retention_one:
-        "Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
+        "Persoonsgegevens worden {{count}} dag na afloop van een controle gewist. Het resultaat en het auditspoor blijven.",
       retention_other:
-        "Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist. Het resultaat en het auditspoor blijven.",
+        "Persoonsgegevens worden {{count}} dagen na afloop van een controle gewist. Het resultaat en het auditspoor blijven.",
       retentionLegal:
         "Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard, zoals de wet vereist. Het resultaat en het auditspoor blijven.",
       retentionOwnLegal:
-        "Je ziet de sessies die jij verstuurde. Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard.",
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens van identiteitscontroles worden minstens {{period}} na afloop bewaard.",
       retentionOwn_one:
-        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een sessie gewist.",
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens worden {{count}} dag na afloop van een controle gewist.",
       retentionOwn_other:
-        "Je ziet de sessies die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een sessie gewist.",
+        "Je ziet de controles die jij verstuurde. Persoonsgegevens worden {{count}} dagen na afloop van een controle gewist.",
       viaApiKey: "API-token · {{name}}",
-      session: "Sessie",
       result: "Resultaat",
       started: "Gestart",
       duration: "Duur",
-      details: "Details van sessie {{id}}",
-      fullId: "Sessie-id",
+      details: "Details van controle {{id}}",
+      flowVersion: "Flowversie",
+      fullId: "Referentie",
       reason: "Reden",
       completed: "Afgerond",
       purgeAt: "Persoonsgegevens gewist op",
@@ -1252,21 +1255,37 @@ export const nl: Translation<typeof en> = {
     },
   },
   identityProofingFlows: {
-    title: "Verificatieflows",
+    title: "Flows",
     subtitle:
-      "Bepaal de controles en gegevens van elke flow, bewaar de versies en kies welke flows leden mogen gebruiken.",
+      "Een flow bepaalt welke gegevens worden gevraagd en het minimale betrouwbaarheidsniveau. Open een flow om te zien welke personen hij heeft geïdentificeerd.",
     adminOnly:
       "Alleen een beheerder van deze organisatie kan verificatieflows beheren.",
     notCompletable: "Kan niet vanuit de wallet verstuurd worden",
     referencePhoto: "Eigen foto, via API",
     versionShort: "v{{version}}",
-    edit: "Bewerken",
+    versionLong: "Versie {{version}}",
+    edit: "Flow bewerken",
+    columns: {
+      flow: "Flow",
+      assurance: "Betrouwbaarheid",
+      people: "Personen, 30 dagen",
+      preselected: "Voorgeselecteerd",
+      members: "Leden mogen gebruiken",
+      open: "Openen",
+    },
+    open: "{{name}} openen",
     selection: {
-      title: "Flows",
-      hint: "Leden versturen verzoeken met de flows die hier aangevinkt zijn. De standaardflow is de flow waarop een verzoekformulier start, voor leden en voor de API; leden hoeven hem niet te mogen gebruiken. Een flow bewerken slaat een nieuwe versie op, die nieuwe verzoeken vanaf dan gebruiken.",
       empty: "Nog geen flows. Maak er een aan met Nieuwe flow.",
       default: "Standaard",
+      members: "Leden",
       save: "Beschikbare flows opslaan",
+    },
+    page: {
+      notFound: "Deze flow bestaat niet.",
+      backToFlows: "Terug naar de flows",
+      defaultFlow: "Standaardflow",
+      tabsLabel: "Flow",
+      people: "Personen",
     },
     hosted: {
       title: "Gehoste pagina",

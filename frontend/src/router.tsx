@@ -3,6 +3,7 @@ import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
 import type { HeldAttestationClaims } from "./api/attestations";
+import type { ProofingFlow } from "./api/identity-proofing";
 import { credentialDisplayName } from "./lib/credential-display";
 import {
   organizationMemberQueryKey,
@@ -10,6 +11,7 @@ import {
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
+import { proofingFlowsQueryKey } from "./api/identity-proofing.queries";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -26,10 +28,11 @@ import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
+import IdentityProofingFlow from "./routes/identity-proofing-flow";
 import IdentityProofingFlows from "./routes/identity-proofing-flows";
 import IdentityProofingOverview from "./routes/identity-proofing-overview";
 import ProofingVerify from "./routes/proofing-verify";
-import ProofingSessions from "./routes/proofing-sessions";
+import ProofingPeople from "./routes/proofing-people";
 import Developers from "./routes/developers";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
@@ -75,8 +78,19 @@ const identityProofingCrumb: RouteHandle = {
 const identityProofingFlowsCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofingFlows.title"),
 };
-const proofingSessionsCrumb: RouteHandle = {
-  crumb: ({ t }) => t("identityProofing.sessions.title"),
+const identityProofingFlowCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const flows = queryClient.getQueryData<ProofingFlow[]>(
+      proofingFlowsQueryKey(params.orgSlug ?? ""),
+    );
+    return (
+      flows?.find((flow) => flow.id === params.flowId)?.name ??
+      t("identityProofingFlows.title")
+    );
+  },
+};
+const proofingPeopleCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.people.title"),
 };
 const developersCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofing.developers.title"),
@@ -216,13 +230,20 @@ export const router = createBrowserRouter([
                       { index: true, Component: IdentityProofingOverview },
                       {
                         path: "flows",
-                        Component: IdentityProofingFlows,
                         handle: identityProofingFlowsCrumb,
+                        children: [
+                          { index: true, Component: IdentityProofingFlows },
+                          {
+                            path: ":flowId",
+                            Component: IdentityProofingFlow,
+                            handle: identityProofingFlowCrumb,
+                          },
+                        ],
                       },
                       {
-                        path: "sessions",
-                        Component: ProofingSessions,
-                        handle: proofingSessionsCrumb,
+                        path: "people",
+                        Component: ProofingPeople,
+                        handle: proofingPeopleCrumb,
                       },
                       {
                         path: "developers",
