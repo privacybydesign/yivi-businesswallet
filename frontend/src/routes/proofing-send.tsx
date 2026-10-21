@@ -20,8 +20,7 @@ import {
   verifySearch,
 } from "../lib/identity-proofing";
 import type { SendKind } from "../lib/identity-proofing";
-import { Button, Input, Modal } from "../ui";
-import { ChevronSelect } from "./flow-editor-parts";
+import { Button, Input, Modal, Select } from "../ui";
 import { SecretReveal } from "./proofing-ui";
 
 const LABEL = "text-ink text-[14px] font-semibold";
@@ -340,17 +339,17 @@ function SendForm({
             <label htmlFor="proofing-subject-flow" className={LABEL}>
               {t("identityProofing.send.flow")}
             </label>
-            <ChevronSelect
+            <Select
               id="proofing-subject-flow"
               value={flowId}
-              onChange={setPicked}
+              onChange={(event) => setPicked(event.target.value)}
             >
               {sendable.map((flow) => (
                 <option key={flow.id} value={flow.id}>
                   {flow.name}
                 </option>
               ))}
-            </ChevronSelect>
+            </Select>
           </div>
         )}
         {flowPending && (

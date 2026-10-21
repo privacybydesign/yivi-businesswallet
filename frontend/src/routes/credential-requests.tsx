@@ -33,7 +33,7 @@ import {
   validateCredentialRequest,
 } from "../lib/credential-request";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, ConfirmDialog, Modal, Tag, TopBar } from "../ui";
+import { Button, Card, ConfirmDialog, Modal, Select, Tag, TopBar } from "../ui";
 
 const ADMIN_ROLE = "admin";
 const FORM_ID = "credential-request-form";
@@ -527,9 +527,8 @@ function RequestForm({
             <label htmlFor="credential-request-from" className={FIELD_LABEL}>
               {t("credentialRequests.form.from")}
             </label>
-            <select
+            <Select
               id="credential-request-from"
-              className={`${control("ok")} h-9`}
               value={from}
               onChange={(event) => setFrom(event.target.value)}
             >
@@ -541,7 +540,7 @@ function RequestForm({
                   {address.address}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
 

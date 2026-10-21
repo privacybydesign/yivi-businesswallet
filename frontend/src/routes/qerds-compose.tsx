@@ -10,7 +10,7 @@ import {
 import { useOrganizationQuery } from "../api/organization.queries";
 import { ApiError } from "../api/http";
 import { formatBytes } from "../lib/qerds";
-import { Button, Card, Icon, TopBar } from "../ui";
+import { Button, Card, Icon, Select, TopBar } from "../ui";
 import * as React from "react";
 
 const FORM_ID = "qerds-compose-form";
@@ -257,9 +257,8 @@ export default function QerdsCompose(): React.JSX.Element {
         <Card className="flex flex-col gap-5 p-5">
           <Field id="qerds-from" label={t("qerds.compose.from")}>
             {addressOptions.length > 0 ? (
-              <select
+              <Select
                 id="qerds-from"
-                className={`${control(false)} h-9`}
                 value={selectedFrom}
                 onChange={(event) => setSender(event.target.value)}
               >
@@ -272,7 +271,7 @@ export default function QerdsCompose(): React.JSX.Element {
                       : address.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : (
               <input
                 id="qerds-from"
@@ -295,8 +294,8 @@ export default function QerdsCompose(): React.JSX.Element {
               // Explicit picker for the interim address book (until the European
               // Digital Directory); the free-text input below still accepts any
               // address.
-              <select
-                className={`${control(false)} mb-2 h-9`}
+              <Select
+                className="mb-2 w-full"
                 value=""
                 onChange={(event) => {
                   if (event.target.value !== "") {
@@ -311,7 +310,7 @@ export default function QerdsCompose(): React.JSX.Element {
                     {contact.name} — {contact.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
             <input
               id="qerds-recipient"

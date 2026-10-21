@@ -12,7 +12,7 @@ import type {
 } from "../api/provisioning";
 import { errorCode } from "../lib/api-error";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -190,9 +190,8 @@ function ProvisioningForm({
           <label htmlFor="provisioning-source" className={LABEL}>
             {t("provisioningSettings.source")}
           </label>
-          <select
+          <Select
             id="provisioning-source"
-            className={`${TEXTAREA_CLASS} h-9 py-0`}
             value={source}
             onChange={(event) => setSource(event.target.value)}
           >
@@ -201,7 +200,7 @@ function ProvisioningForm({
                 {sourceLabel(id)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-1">

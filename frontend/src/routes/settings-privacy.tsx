@@ -29,14 +29,11 @@ import type {
   LegalRetentionLoss,
   LegalRetentionUnit,
 } from "../lib/legal-retention";
-import { Button, Card, ConfirmDialog, Icon, Input } from "../ui";
+import { Button, Card, ConfirmDialog, Input, Select } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
-const SELECT =
-  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 h-9 w-36 appearance-none border pr-10 pl-3 text-[13.5px] outline-none focus:ring-3";
-const CHEVRON_SIZE = 12;
 const TEXTAREA =
   "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-20 w-full max-w-xl border px-3 py-2 font-mono text-[13px] outline-none focus:ring-3";
 const AMOUNT_ID = "legal-amount";
@@ -289,28 +286,21 @@ function LegalRetentionCard({
                         onChange={(e) => set("amount", e.target.value)}
                       />
                     </div>
-                    <div className="relative">
-                      <select
-                        id="legal-unit"
-                        aria-label={t("identityProofing.legalRetention.unit")}
-                        className={SELECT}
-                        value={draft.unit}
-                        onChange={(e) =>
-                          set("unit", e.target.value as LegalRetentionUnit)
-                        }
-                      >
-                        {LEGAL_RETENTION_UNITS.map((unit) => (
-                          <option key={unit} value={unit}>
-                            {t(`identityProofing.legalRetention.units.${unit}`)}
-                          </option>
-                        ))}
-                      </select>
-                      <Icon
-                        name="chevron_down"
-                        size={CHEVRON_SIZE}
-                        className="pointer-events-none absolute top-3 right-4"
-                      />
-                    </div>
+                    <Select
+                      id="legal-unit"
+                      aria-label={t("identityProofing.legalRetention.unit")}
+                      className="w-36"
+                      value={draft.unit}
+                      onChange={(e) =>
+                        set("unit", e.target.value as LegalRetentionUnit)
+                      }
+                    >
+                      {LEGAL_RETENTION_UNITS.map((unit) => (
+                        <option key={unit} value={unit}>
+                          {t(`identityProofing.legalRetention.units.${unit}`)}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                   {flagged.includes("amount") ? (
                     <p id={AMOUNT_HINT_ID} className={ERROR}>

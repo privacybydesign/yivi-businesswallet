@@ -36,7 +36,7 @@ import type {
   OwnReview,
   RejectReasonKey,
 } from "../lib/proofing-reviews";
-import { Button, Icon, Tag, TopBar } from "../ui";
+import { Button, Icon, Select, Tag, TopBar } from "../ui";
 import {
   BackToReviews,
   ClosedNote,
@@ -48,10 +48,6 @@ import {
   ReviewSection,
 } from "./proofing-review-parts";
 
-// Mirrors the Input base so the reason for a rejection reads as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink h-10 w-full appearance-none border pr-10 pl-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
-const CHEVRON_SIZE = 12;
 const WARNING_ICON_SIZE = 18;
 // The tag colour of an automatic check's outcome.
 const OUTCOME_TONES = {
@@ -386,32 +382,24 @@ function CheckDecision({
           <label htmlFor={`${idPrefix}-wrong`} className={REVIEW_FIELD_LABEL}>
             {t("identityProofing.reviews.check.decision.wrong")}
           </label>
-          <div className="relative">
-            <select
-              id={`${idPrefix}-wrong`}
-              value={draft.rejectReason}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  rejectReason: event.target.value as RejectReasonKey,
-                })
-              }
-              className={SELECT_CLASS}
-            >
-              {REJECT_REASONS.map(({ key }) => (
-                <option key={key} value={key}>
-                  {t(
-                    `identityProofing.reviews.check.decision.wrongOptions.${key}`,
-                  )}
-                </option>
-              ))}
-            </select>
-            <Icon
-              name="chevron_down"
-              size={CHEVRON_SIZE}
-              className="pointer-events-none absolute top-3.5 right-4"
-            />
-          </div>
+          <Select
+            id={`${idPrefix}-wrong`}
+            value={draft.rejectReason}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                rejectReason: event.target.value as RejectReasonKey,
+              })
+            }
+          >
+            {REJECT_REASONS.map(({ key }) => (
+              <option key={key} value={key}>
+                {t(
+                  `identityProofing.reviews.check.decision.wrongOptions.${key}`,
+                )}
+              </option>
+            ))}
+          </Select>
         </div>
       )}
       <div className="flex flex-col gap-1.5">

@@ -18,7 +18,7 @@ import {
   reviewRightShown,
 } from "../lib/review-right";
 import { ApiError } from "../api/http";
-import { Button, Card, TopBar } from "../ui";
+import { Button, Card, Select, TopBar } from "../ui";
 import * as React from "react";
 
 const FORM_ID = "member-edit-form";
@@ -142,14 +142,13 @@ function EditForm({
           >
             <label className="flex flex-col gap-1.5">
               <span className={FIELD_LABEL}>{t("common.role")}</span>
-              <select
-                className={CONTROL}
+              <Select
                 value={role}
                 onChange={(event) => setRole(event.target.value)}
               >
                 <option value="member">{t("memberInvite.roleMember")}</option>
                 <option value="admin">{t("memberInvite.roleAdmin")}</option>
-              </select>
+              </Select>
             </label>
 
             <div className="flex flex-col gap-1.5">
@@ -184,8 +183,7 @@ function EditForm({
 
             <label className="flex flex-col gap-1.5">
               <span className={FIELD_LABEL}>{t("common.department")}</span>
-              <select
-                className={CONTROL}
+              <Select
                 value={departmentId}
                 onChange={(event) => setDepartmentId(event.target.value)}
               >
@@ -195,13 +193,12 @@ function EditForm({
                     {department.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
 
             <label className="flex flex-col gap-1.5">
               <span className={FIELD_LABEL}>{t("memberEdit.memberType")}</span>
-              <select
-                className={CONTROL}
+              <Select
                 value={memberType}
                 onChange={(event) =>
                   setMemberType(event.target.value as MemberType)
@@ -213,7 +210,7 @@ function EditForm({
                 <option value="external">
                   {t("memberEdit.memberTypeExternal")}
                 </option>
-              </select>
+              </Select>
               <span className="text-ink-soft text-[12px]">
                 {t("memberEdit.memberTypeHint")}
               </span>

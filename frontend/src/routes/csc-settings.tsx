@@ -8,16 +8,13 @@ import {
 } from "../api/csc.queries";
 import type { CscSettings } from "../api/csc";
 import { ApiError } from "../api/http";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const CONFLICT_STATUS = 409;
 const BAD_GATEWAY_STATUS = 502;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
-// Mirrors the Input base so the provider-kind select reads as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 py-2 text-[13.5px] leading-relaxed transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-10";
 
 function apiMessage(error: Error): string {
   if (
@@ -140,9 +137,8 @@ function ConfigForm({
           <label htmlFor="csc-provider-kind" className={LABEL}>
             {t("cscSettings.providerKind")}
           </label>
-          <select
+          <Select
             id="csc-provider-kind"
-            className={SELECT_CLASS}
             value={providerKind}
             onChange={(event) => handleKindChange(event.target.value)}
           >
@@ -151,7 +147,7 @@ function ConfigForm({
                 {providerKindLabel(kind.id, t)}
               </option>
             ))}
-          </select>
+          </Select>
           <p className={HINT}>{t("cscSettings.sampleHint")}</p>
         </div>
 

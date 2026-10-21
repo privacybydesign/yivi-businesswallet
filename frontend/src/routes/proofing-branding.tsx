@@ -18,7 +18,7 @@ import {
 } from "../lib/identity-proofing";
 import { useLogoPreview } from "../lib/use-logo-preview";
 import { absoluteApiUrl } from "../api/http";
-import { Button, Card } from "../ui";
+import { Button, Card, Select } from "../ui";
 import {
   BrandingFields,
   CAPTION,
@@ -31,8 +31,6 @@ import {
 import type { BrandingDraft } from "./proofing-branding-fields";
 import { ColorField as ThemeColorField } from "./theme-settings";
 
-const SELECT =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full max-w-[220px] border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 // Each further colour's label, the org theme settings' own.
 const THEME_COLOR_LABELS = {
   textColor: "themeSettings.textColor",
@@ -284,8 +282,8 @@ function WhiteLabelFields({
             />
           ))}
           <span className={CAPTION}>{t("themeSettings.font")}</span>
-          <select
-            className={SELECT}
+          <Select
+            className="w-full max-w-[220px]"
             value={draft.fontFamily}
             onChange={(e) => onChange({ fontFamily: e.target.value })}
             aria-label={t("themeSettings.font")}
@@ -300,7 +298,7 @@ function WhiteLabelFields({
                 {option.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
     </div>

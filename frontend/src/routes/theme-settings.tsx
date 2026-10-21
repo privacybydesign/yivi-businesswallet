@@ -14,7 +14,7 @@ import {
   primaryContrastFloor,
   readableForeground,
 } from "../lib/theme";
-import { Button, Card } from "../ui";
+import { Button, Card, Select } from "../ui";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -294,8 +294,8 @@ function ThemeForm({
           {t("themeSettings.typographyGroup")}
         </span>
         <span className={EYEBROW}>{t("themeSettings.font")}</span>
-        <select
-          className={`${CONTROL} max-w-[220px]`}
+        <Select
+          className="w-full max-w-[220px]"
           value={fontFamily}
           onChange={(event) => setFontFamily(event.target.value)}
           aria-label={t("themeSettings.font")}
@@ -310,7 +310,7 @@ function ThemeForm({
               {option.name}
             </option>
           ))}
-        </select>
+        </Select>
 
         <span className={GROUP_LABEL}>{t("themeSettings.logoGroup")}</span>
         <span className={EYEBROW}>{t("themeSettings.logo")}</span>

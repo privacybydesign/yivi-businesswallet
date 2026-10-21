@@ -53,6 +53,7 @@ import {
   ConfirmDialog,
   Icon,
   Input,
+  Select,
   Table,
   Tag,
   TopBar,
@@ -562,10 +563,6 @@ function IssuedTab({
   );
 }
 
-// Toolbar control: the source filter dropdown shares the app's form-control styling.
-const FILTER_SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
-
 // The credential offers waiting on the organization. An offer that arrived over
 // QERDS is not in the wallet yet — accepting is what redeems it, declining leaves
 // it unredeemed for good. Renders nothing when there is nothing to decide, so the
@@ -852,8 +849,8 @@ function HeldTab({
             );
           })}
         </div>
-        <select
-          className={FILTER_SELECT_CLASS}
+        <Select
+          className="w-auto"
           value={source}
           aria-label={t("attestations.held.filters.source")}
           onChange={(event) => setFilter("source", event.target.value)}
@@ -864,7 +861,7 @@ function HeldTab({
               {heldSourceLabel(value, t)}
             </option>
           ))}
-        </select>
+        </Select>
         {filtered && (
           <Button variant="ghost" size="sm" onClick={resetView}>
             {t("attestations.held.reset")}

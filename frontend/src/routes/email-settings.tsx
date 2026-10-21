@@ -15,7 +15,7 @@ import {
   smtpAuthMechanismOptions,
 } from "../api/email";
 import { ApiError } from "../api/http";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const DECIMAL_RADIX = 10;
@@ -23,8 +23,6 @@ const CONFLICT_STATUS = 409;
 const DEFAULT_SMTP_PORT = 587;
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
-const CONTROL =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 // Plausible address check only; the backend is the authority.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -169,9 +167,8 @@ function SmtpForm({
           <label htmlFor="email-auth-mechanism" className={LABEL}>
             {t("emailSettings.authMechanism")}
           </label>
-          <select
+          <Select
             id="email-auth-mechanism"
-            className={CONTROL}
             value={authMechanism}
             onChange={(event) => {
               setAuthMechanism(event.target.value);
@@ -187,7 +184,7 @@ function SmtpForm({
                 </option>
               ),
             )}
-          </select>
+          </Select>
           {usesOAuth && (
             <span id="email-mechanism-hint" className={HINT}>
               {t("emailSettings.xoauth2Hint")}

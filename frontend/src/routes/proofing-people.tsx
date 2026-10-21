@@ -55,7 +55,7 @@ import {
   ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Card, Icon, Table, Tag, TopBar } from "../ui";
+import { Card, Icon, Select, Table, Tag, TopBar } from "../ui";
 import { ResultTag } from "./proofing-ui";
 import { DataRequestTag } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
@@ -64,10 +64,6 @@ import { VerifyPerson } from "./proofing-send";
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 const LABEL = "text-ink text-[13px] font-semibold";
-// Mirrors the Input base so the filters read as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 appearance-none border pr-10 pl-4 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
-const CHEVRON_SIZE = 12;
 // Person, result, app, started and the details button; the flow and who
 // requested it come on top.
 const BASE_COLUMNS = 5;
@@ -177,60 +173,46 @@ export function PeopleList({
               <label htmlFor="people-flow-filter" className={LABEL}>
                 {t("identityProofing.requests.flow")}
               </label>
-              <div className="relative min-w-0 flex-1 sm:flex-none">
-                <select
-                  id="people-flow-filter"
-                  value={flowFilter}
-                  onChange={(event) => setFlowFilter(event.target.value)}
-                  className={`${SELECT_CLASS} w-full sm:w-64`}
-                >
-                  <option value="">
-                    {t("identityProofing.people.allFlows")}
+              <Select
+                id="people-flow-filter"
+                value={flowFilter}
+                onChange={(event) => setFlowFilter(event.target.value)}
+                className="min-w-0 flex-1 sm:w-64 sm:flex-none"
+              >
+                <option value="">
+                  {t("identityProofing.people.allFlows")}
+                </option>
+                {requestFlows(everyone.data ?? []).map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
                   </option>
-                  {requestFlows(everyone.data ?? []).map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-                <Icon
-                  name="chevron_down"
-                  size={CHEVRON_SIZE}
-                  className="pointer-events-none absolute top-3 right-4"
-                />
-              </div>
+                ))}
+              </Select>
             </div>
           )}
           <div className="flex items-center gap-2.5">
             <label htmlFor="people-result-filter" className={LABEL}>
               {t("identityProofing.sessions.result")}
             </label>
-            <div className="relative min-w-0 flex-1 sm:flex-none">
-              <select
-                id="people-result-filter"
-                value={filter}
-                onChange={(event) =>
-                  setFilter(
-                    SESSION_FILTERS.find((key) => key === event.target.value) ??
-                      "all",
-                  )
-                }
-                className={`${SELECT_CLASS} w-full sm:w-56`}
-              >
-                {SESSION_FILTERS.map((key) => (
-                  <option key={key} value={key}>
-                    {t(`identityProofing.sessions.filters.${key}`, {
-                      number: listedCount(counts[key], capped, t),
-                    })}
-                  </option>
-                ))}
-              </select>
-              <Icon
-                name="chevron_down"
-                size={CHEVRON_SIZE}
-                className="pointer-events-none absolute top-3 right-4"
-              />
-            </div>
+            <Select
+              id="people-result-filter"
+              value={filter}
+              onChange={(event) =>
+                setFilter(
+                  SESSION_FILTERS.find((key) => key === event.target.value) ??
+                    "all",
+                )
+              }
+              className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+            >
+              {SESSION_FILTERS.map((key) => (
+                <option key={key} value={key}>
+                  {t(`identityProofing.sessions.filters.${key}`, {
+                    number: listedCount(counts[key], capped, t),
+                  })}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         {settings.data && retentionOf.kind !== "unknown" && (

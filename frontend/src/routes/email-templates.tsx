@@ -37,7 +37,7 @@ import {
   type MailTemplateProblem,
   type MailTemplateTextField,
 } from "../lib/mail-template";
-import { Button, Card, ConfirmDialog, Input, Table, Tag } from "../ui";
+import { Button, Card, ConfirmDialog, Input, Select, Table, Tag } from "../ui";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -859,9 +859,9 @@ export function EmailTemplatesPanel({
           <label htmlFor="mail-template-locale" className={EYEBROW}>
             {t("mailTemplates.language")}
           </label>
-          <select
+          <Select
             id="mail-template-locale"
-            className={`${CONTROL} h-9 max-w-[220px]`}
+            className="w-full max-w-[220px]"
             value={locale}
             onChange={(event) => {
               setLocale(event.target.value as MailLocale);
@@ -872,7 +872,7 @@ export function EmailTemplatesPanel({
                 {t(`mailTemplates.locales.${option}`)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         <div className="mt-4">

@@ -9,14 +9,12 @@ import type {
   IdentitySettingsInput,
   OverdueConsequence,
 } from "../api/organization";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
 const SECTION = "text-ink text-[13px] font-semibold";
-const CONTROL =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 
 // The intervals an admin picks from, in months. `null` is "never": that member
 // type has no deadline at all, which is the shipped default.
@@ -155,9 +153,8 @@ function IdentityForm({
               <label htmlFor="identity-employee-interval" className={LABEL}>
                 {t("identitySettings.employeeInterval")}
               </label>
-              <select
+              <Select
                 id="identity-employee-interval"
-                className={CONTROL}
                 value={employeeMonths === null ? "off" : String(employeeMonths)}
                 onChange={(event) =>
                   setEmployeeMonths(
@@ -175,15 +172,14 @@ function IdentityForm({
                     {intervalLabel(months)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="identity-external-interval" className={LABEL}>
                 {t("identitySettings.externalInterval")}
               </label>
-              <select
+              <Select
                 id="identity-external-interval"
-                className={CONTROL}
                 value={externalMonths === null ? "off" : String(externalMonths)}
                 onChange={(event) =>
                   setExternalMonths(
@@ -201,7 +197,7 @@ function IdentityForm({
                     {intervalLabel(months)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <p className={HINT}>{t("identitySettings.intervalHint")}</p>
@@ -275,9 +271,8 @@ function IdentityForm({
           <label htmlFor="identity-credential-age" className={LABEL}>
             {t("identitySettings.credentialMaxAgeDays")}
           </label>
-          <select
+          <Select
             id="identity-credential-age"
-            className={CONTROL}
             value={credentialAge === null ? "off" : String(credentialAge)}
             onChange={(event) =>
               setCredentialAge(
@@ -295,7 +290,7 @@ function IdentityForm({
                 {credentialAgeLabel(days)}
               </option>
             ))}
-          </select>
+          </Select>
           <p className={HINT}>{t("identitySettings.credentialMaxAgeHint")}</p>
         </fieldset>
 

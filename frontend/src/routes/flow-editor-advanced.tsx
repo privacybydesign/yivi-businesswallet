@@ -36,13 +36,8 @@ import {
 } from "../lib/issuing-countries";
 import { SUPPORTED_LANGUAGES } from "../i18n";
 import type { Language } from "../i18n";
-import {
-  ChevronSelect,
-  ERROR,
-  HINT,
-  OptionRow,
-  Section,
-} from "./flow-editor-parts";
+import { Select } from "../ui";
+import { ERROR, HINT, OptionRow, Section } from "./flow-editor-parts";
 import type { OptionLock } from "./flow-editor-parts";
 import { FaceMatchThreshold } from "./flow-editor-threshold";
 
@@ -211,10 +206,12 @@ function StepsSection({
         <label htmlFor="flow-lifetime" className={LABEL}>
           {t("identityProofingFlows.editor.steps.lifetime")}
         </label>
-        <ChevronSelect
+        <Select
           id="flow-lifetime"
           value={String(draft.sessionTtlSeconds)}
-          onChange={(value) => update({ sessionTtlSeconds: Number(value) })}
+          onChange={(event) =>
+            update({ sessionTtlSeconds: Number(event.target.value) })
+          }
         >
           <option value={FOLLOW_ORG}>
             {orgTtl === undefined
@@ -230,7 +227,7 @@ function StepsSection({
               })}
             </option>
           ))}
-        </ChevronSelect>
+        </Select>
         <span className={HINT}>
           {t("identityProofingFlows.editor.steps.lifetimeHint")}
         </span>
@@ -346,13 +343,17 @@ function DocumentsSection({
             <label htmlFor="flow-country-add" className="sr-only">
               {t("identityProofingFlows.editor.documents.add")}
             </label>
-            <ChevronSelect
+            <Select
               id="flow-country-add"
               value=""
-              onChange={(code) =>
-                code !== "" &&
-                update({ issuingCountries: [...draft.issuingCountries, code] })
-              }
+              onChange={(event) => {
+                const code = event.target.value;
+                if (code === "") {
+                  return;
+                }
+
+                update({ issuingCountries: [...draft.issuingCountries, code] });
+              }}
             >
               <option value="">
                 {t("identityProofingFlows.editor.documents.addPlaceholder")}
@@ -362,7 +363,7 @@ function DocumentsSection({
                   {choice.name}
                 </option>
               ))}
-            </ChevronSelect>
+            </Select>
             <p className={HINT}>
               {t("identityProofingFlows.editor.documents.addHint")}
             </p>
@@ -702,17 +703,19 @@ function PrivacySection({
           <label htmlFor="flow-retention" className={LABEL}>
             {t("identityProofingFlows.editor.privacy.retention")}
           </label>
-          <ChevronSelect
+          <Select
             id="flow-retention"
             value={String(draft.retentionSeconds)}
-            onChange={(value) => update({ retentionSeconds: Number(value) })}
+            onChange={(event) =>
+              update({ retentionSeconds: Number(event.target.value) })
+            }
           >
             {retentionChoices(draft.retentionSeconds).map((seconds) => (
               <option key={seconds} value={seconds}>
                 {retentionLabel(seconds)}
               </option>
             ))}
-          </ChevronSelect>
+          </Select>
           <span className={HINT}>
             {t("identityProofingFlows.editor.privacy.retentionHint")}
           </span>
@@ -721,14 +724,15 @@ function PrivacySection({
           <label htmlFor="flow-bsn" className={LABEL}>
             {t("identityProofingFlows.editor.privacy.bsn")}
           </label>
-          <ChevronSelect
+          <Select
             id="flow-bsn"
             value={draft.bsnPolicy}
-            onChange={(value) =>
+            onChange={(event) =>
               update({
                 bsnPolicy:
-                  BSN_POLICIES.find((policy) => policy === value) ??
-                  draft.bsnPolicy,
+                  BSN_POLICIES.find(
+                    (policy) => policy === event.target.value,
+                  ) ?? draft.bsnPolicy,
               })
             }
           >
@@ -737,7 +741,7 @@ function PrivacySection({
                 {t(`identityProofingFlows.bsnPolicies.${policy}`)}
               </option>
             ))}
-          </ChevronSelect>
+          </Select>
           <span className={HINT}>
             {t("identityProofingFlows.editor.privacy.bsnHint")}
           </span>

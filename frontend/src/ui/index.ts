@@ -9,6 +9,7 @@ export { Toaster } from "./toaster";
 export { Breadcrumbs } from "./breadcrumb";
 export type { CrumbContext, RouteHandle } from "./breadcrumb";
 export { Input } from "./input";
+export { Select } from "./select";
 export { Avatar } from "./avatar";
 export { Stat } from "./stat";
 export { TaskEmpty, TaskRow, TaskSection } from "./task-list";
