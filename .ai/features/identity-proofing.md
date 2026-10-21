@@ -243,6 +243,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - Derived by the engine (`ageOverOf`) from the date of birth read off the
       chip, never the MRZ scan alone: `flow.Validate` requires `nfc_read`, and
       `AgeOver` set exactly with the attribute.
+    - Never with `dg1`, which carries the date of birth: `flow.Validate`
+      refuses both, and in the editor ticking one unticks the other. A data
+      request or diploma flow, which needs `dg1`, cannot tick it.
     - `over` holds from the birthday the holder turns `age`, on the UTC date
       the session finishes (born 29 February: 1 March in a common year).
     - It decides no outcome: an approved minor is approved with `over: false`;

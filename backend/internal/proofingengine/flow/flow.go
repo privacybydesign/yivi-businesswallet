@@ -413,6 +413,9 @@ const AttributeAgeOver = "age_over"
 // MaxAgeOver is the highest age a flow can ask the holder to be over.
 const MaxAgeOver = 120
 
+// attributeDocument is the document data AttributeAgeOver replaces.
+const attributeDocument = "dg1"
+
 // DocumentTypeEUDrivingLicence is the other spelling of an EU driving
 // licence: mrtdEvidence's documentType for a licence chip.
 const DocumentTypeEUDrivingLicence = "eu_driving_licence"
@@ -629,7 +632,8 @@ func validate(fd FlowDefinition) error {
 }
 
 // validateAgeOver refuses AttributeAgeOver without the chip read it is derived
-// from or an age to answer for, and an age without the attribute.
+// from or an age to answer for, next to the document data it replaces, and an
+// age without the attribute.
 func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	if !slices.Contains(fd.RequestedAttributes, AttributeAgeOver) {
 		if fd.AgeOver != 0 {
@@ -639,6 +643,9 @@ func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	}
 	if !seenSteps[StepNFCRead] {
 		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
+	}
+	if slices.Contains(fd.RequestedAttributes, attributeDocument) {
+		return fmt.Errorf("flow: %q replaces %q, which releases the date of birth: request one of them", AttributeAgeOver, attributeDocument)
 	}
 	if fd.AgeOver < 1 || fd.AgeOver > MaxAgeOver {
 		return fmt.Errorf("flow: ageOver must be between 1 and %d", MaxAgeOver)

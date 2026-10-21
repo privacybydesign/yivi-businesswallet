@@ -20,7 +20,9 @@ import {
   BSN_POLICIES,
   FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
+  ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
+  EXCLUSIVE_ATTRIBUTES,
   MAX_AGE_OVER,
   asksAge,
   attributeAvailable,
@@ -107,7 +109,7 @@ export function FlowEditor({
   }
 
   // Choosing a data request or required diplomas ticks Document data, which
-  // then stays ticked (identityRequired).
+  // then stays ticked (identityRequired), and unticks the age check it excludes.
   function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
     setFlowKind(kind);
     setDiplomaMode(mode);
@@ -115,7 +117,9 @@ export function FlowEditor({
       setDraft((current) => ({
         ...current,
         requestedAttributes: new Set([
-          ...current.requestedAttributes,
+          ...[...current.requestedAttributes].filter(
+            (value) => value !== ATTRIBUTE_AGE_OVER,
+          ),
           ATTRIBUTE_DOCUMENT,
         ]),
       }));
@@ -126,6 +130,9 @@ export function FlowEditor({
     const next = new Set(draft.requestedAttributes);
     if (on) {
       next.add(value);
+      // The age check replaces the document data, which carries the date of
+      // birth: ticking one unticks the other.
+      next.delete(EXCLUSIVE_ATTRIBUTES[value] ?? "");
     } else {
       next.delete(value);
     }
@@ -382,8 +389,9 @@ export function FlowEditor({
               // Once ticked: an older version without it can still tick it.
               const locked =
                 requiresIdentity &&
-                value === ATTRIBUTE_DOCUMENT &&
-                draft.requestedAttributes.has(value);
+                (value === ATTRIBUTE_AGE_OVER ||
+                  (value === ATTRIBUTE_DOCUMENT &&
+                    draft.requestedAttributes.has(value)));
               return (
                 <Checkbox
                   key={value}

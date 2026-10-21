@@ -881,6 +881,12 @@ export const ATTRIBUTE_AGE_OVER = "age_over";
 // (flow.MaxAgeOver).
 const DEFAULT_AGE_OVER = 18;
 export const MAX_AGE_OVER = 120;
+// The attribute each one cannot be requested with: the age check replaces the
+// document data (flow.validateAgeOver).
+export const EXCLUSIVE_ATTRIBUTES: Readonly<Record<string, string>> = {
+  [ATTRIBUTE_AGE_OVER]: ATTRIBUTE_DOCUMENT,
+  [ATTRIBUTE_DOCUMENT]: ATTRIBUTE_AGE_OVER,
+};
 
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1), which a request for one known person is matched

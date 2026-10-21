@@ -1338,7 +1338,7 @@ export const en = {
     attributeHints: {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
       age_over:
-        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Not the date itself, nor the name. Use it instead of Name and document details.",
+        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Not the date itself, nor the name. Ticking it unticks Name and document details.",
       dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
