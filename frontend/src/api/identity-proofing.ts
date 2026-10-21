@@ -134,6 +134,7 @@ const proofingFlowSchema = z.object({
   keepFacePhotos: z.boolean().optional(),
   blurBsn: z.boolean().optional(),
   retentionOverrideSeconds: z.number().optional(),
+  sessionTtlSeconds: z.number().optional(),
   assuranceTiers: z.array(assuranceTierSchema).optional(),
   legalBasis: z.string().optional(),
   processingPurpose: z.string().optional(),
@@ -245,6 +246,7 @@ export interface ProofingFlowSpec {
   keepFacePhotos?: boolean;
   blurBsn?: boolean;
   retentionOverrideSeconds?: number;
+  sessionTtlSeconds?: number;
   assuranceTiers?: ProofingAssuranceTier[];
   legalBasis?: string;
   processingPurpose?: string;

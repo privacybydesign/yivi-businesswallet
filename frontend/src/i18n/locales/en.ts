@@ -1291,16 +1291,13 @@ export const en = {
       diploma_upload: "Upload diplomas (DUO)",
     },
     bsnPolicies: {
-      retrieve: "Release the BSN",
-      mask: "Release it masked",
+      retrieve: "Keep the full BSN",
+      mask: "Keep the last 3 digits",
       omit: "Leave it out",
     },
     assuranceLevels: {
       low: "Low",
       substantial: "Substantial",
-    },
-    faceProviders: {
-      regula: "Regula",
     },
     checks: {
       passiveAuth: "The chip's data is genuine and unaltered",
@@ -1322,11 +1319,11 @@ export const en = {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
       age_over:
         "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Never the date itself: ticked with Name and document details, those come without the date of birth.",
-      dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
+      dg11: "Only when the chip stores them; many do not.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
       document_image:
-        "The front and back of the document (only the photo page of a passport), as taken: the BSN printed on it is not blurred yet.",
+        "The front and back of an ID card or driving licence, or the photo page of a passport.",
       selfie: "The photo of the person's face taken during the face check.",
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
@@ -1349,73 +1346,10 @@ export const en = {
       kind: "Type",
       title: "New flow",
       editTitle: "Edit {{name}}",
-      hint: "A flow is the steps a session walks through, the result data the proofing service returns, and the checks that score its assurance.",
-      editHint:
-        "Saving creates version {{version}} and activates it immediately. Requests already sent keep the version they started on.",
       name: "Name",
       namePlaceholder: "NL passport + selfie",
       create: "Create flow",
       saveVersion: "Save as version {{version}}",
-      stepsTitle: "Flow steps",
-      documentCaptureHint:
-        "The person photographs the code lines on their passport, ID card or Dutch driving licence with the Idem app, which unlocks the chip. Always together with reading the chip.",
-      nfcReadHint:
-        "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
-      documentPhotoHint:
-        "The person photographs the front and back of their ID card or driving licence, or the photo page of their passport, in the Idem app.",
-      faceVerificationHint:
-        "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
-      stepsOrder: "Will be sent in this order: {{steps}}",
-      addressHint:
-        "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
-      diplomaUploadHint:
-        "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
-      faceLocationNative:
-        "The face check runs in the app: the person has no browser step.",
-      faceProvider: "Face check provider",
-      faceProviderHint:
-        "Regula checks liveness in the app and the wallet matches the face against the chip photo.",
-      faceWithoutChip:
-        "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
-      dataTitle: "Requested result data",
-      identityLocked:
-        "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
-      dataHint:
-        "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
-      checksTitle: "Required checks",
-      checksHint:
-        "Checking the chip's data is required when the chip is read, and the face match with the face check, so they are locked on; the copy check and the live-person check stay optional.",
-      faceMatchThreshold: "Face match threshold",
-      faceMatchThresholdHint:
-        "0–1, blank is pass/fail only. Only applies with the face check.",
-      documentsTitle: "Accepted documents",
-      documentTypes: "Accepted document types",
-      documentTypesHint:
-        "Comma-separated: P (passport), I (ID card), residence_permit, drivers_license (Dutch driving licence). Blank accepts any.",
-      issuingCountries: "Accepted issuing countries",
-      issuingCountriesHint:
-        "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",
-      policyTitle: "Assurance and privacy",
-      assuranceLevel: "Required assurance level",
-      assuranceLevelHint:
-        "With a required level the session is held to it: one that falls short is rejected. Without one the session still reports the level its checks reached. A face step whose liveness check or face match fails rejects the session either way. A session can reach a higher level than required. Only a face checked by Regula can reach Substantial.",
-      assuranceLevelNeeds: {
-        low: "Low needs the chip read with its data verified. Turn those settings on to save the flow.",
-        substantial:
-          "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Turn those settings on to save the flow.",
-      },
-      none: "(none)",
-      defaultOption: "(default: {{option}})",
-      yes: "Yes",
-      no: "No",
-      bsnPolicy: "BSN policy override",
-      retentionSeconds: "Retention override (seconds)",
-      retentionSecondsHint:
-        "Set, it replaces the organisation's retention for this flow's sessions; blank or 0 keeps the organisation's.",
-      keepFacePhotos: "Keep face photos override",
-      keepFacePhotosHint:
-        "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
-      blurBsn: "Blur BSN override",
       ageOver: "Minimum age",
       ageOverOption: "{{age}} or older",
       ageOverHint:
@@ -1425,13 +1359,133 @@ export const en = {
         steps: "Pick at least one step.",
         assuranceLevel:
           "This flow cannot reach the required level: turn on what the level needs, or lower it.",
-        issuingCountries:
-          "Use 3-letter country codes such as NLD, separated by commas.",
+        documentTypes: "Tick at least one document type.",
+        issuingCountries: "Add a country, or choose Any country.",
         faceMatchThreshold: "Enter a number from 0 to 1.",
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
         identity:
-          "A data request or diploma flow needs the name and date of birth: turn on the document scan and tick Name and document details.",
+          "A data request or diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
+      },
+    },
+    editor: {
+      orgDefault: "Organisation default",
+      nameHint:
+        "Only you and your colleagues see this name. The person being checked never sees it.",
+      level: "Identity proofing level",
+      levelHint:
+        "The identity proofing part of an eIDAS level of assurance (Implementing Regulation 2015/1502).",
+      levels: {
+        none: {
+          title: "None",
+          hint: "No level is required. The person does the steps under Advanced settings; the result says which level they reached.",
+        },
+        low: {
+          title: "Low",
+          hint: "The person scans the chip in their passport or ID card with their phone. No selfie.",
+          caveat:
+            "Shows the document is genuine, not that the person scanning it is its owner or that the chip is the original.",
+        },
+        substantial: {
+          title: "Substantial",
+          hint: "The person scans their passport or ID card, holds it to their phone so the chip is read, and takes a selfie. A check that falls short is rejected.",
+        },
+      },
+      regula:
+        "Documents and faces are checked by Regula, in the Idem or Yivi app.",
+      advanced: {
+        title: "Advanced settings",
+        hint: "Steps, documents, what you receive, privacy.",
+      },
+      locks: {
+        required: "Required for {{level}}",
+        mandatory: "This is mandatory for {{level}}",
+        passiveAuth: "Always on when the chip is read",
+        faceMatch: "Always on with the face check",
+      },
+      steps: {
+        title: "What the person does",
+        hint: "Steps in the order they happen.",
+        scanAndRead: "Scan and read the document",
+        scanAndReadHint:
+          "The person scans the code lines of their passport, ID card or Dutch driving licence, then holds it to the phone so the chip is read.",
+        addressHint:
+          "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
+        photoHint:
+          "The front and back of an ID card or driving licence, or the photo page of a passport.",
+        faceHint:
+          "A selfie, checked to be a live person and compared with the photo on the chip.",
+        diplomaHint:
+          "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
+        faceWithoutChip:
+          "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
+        lifetime: "QR code lifetime",
+        lifetimeHint:
+          "After this the session expires and a new request is needed.",
+        lifetimeDefault: "Organisation default ({{minutes}} minutes)",
+        minutes_one: "{{count}} minute",
+        minutes_other: "{{count}} minutes",
+      },
+      documents: {
+        title: "Which documents",
+        hint: "A document that is not ticked is refused.",
+        types: "Document types",
+        passport: "Passport",
+        id_card: "Identity card",
+        residence_permit: "Residence permit",
+        drivers_license: "Dutch driving licence",
+        countries: "Issuing countries",
+        any: "Any country",
+        only: "Only these countries",
+        add: "Add a country",
+        addPlaceholder: "Add a country",
+        addHint: "Pick from the list of countries that issue documents.",
+        remove: "Remove {{country}}",
+        removeLabel: "Remove",
+      },
+      receive: {
+        title: "What you receive",
+        hint: "With nothing ticked you only get the outcome.",
+        identityLocked:
+          "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
+      },
+      checks: {
+        title: "Checks",
+        hint: "A failed check rejects the session. The face match uses Regula's threshold.",
+      },
+      privacy: {
+        title: "Privacy",
+        hint: "How long data is kept and what is hidden.",
+        retention: "Keep personal data for",
+        retentionHint:
+          "Never shorter than a legal period set in Settings › Data and privacy.",
+        retentionDefault: "Organisation default ({{days}} days)",
+        retentionSeconds_one: "{{count}} second",
+        retentionSeconds_other: "{{count}} seconds",
+        bsn: "BSN",
+        bsnHint: "Keep the full BSN only if the law allows you to process it.",
+        blackOutBsn: "Black out the BSN on document photos",
+        keepFacePhotos: "Keep face photos after the match",
+        keepFacePhotosHint:
+          "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
+      },
+      footer:
+        "Saving creates version {{version}}. Requests already sent keep their version.",
+      countries: {
+        EUE: "European Union (laissez-passer)",
+        GBD: "British overseas territories citizen",
+        GBN: "British National (Overseas)",
+        GBO: "British overseas citizen",
+        GBP: "British protected person",
+        GBS: "British subject",
+        UNA: "United Nations specialised agency",
+        UNK: "United Nations mission in Kosovo (UNMIK)",
+        UNO: "United Nations",
+        XCC: "Caribbean Community (CARICOM)",
+        XES: "Organisation of Eastern Caribbean States",
+        XMP: "Mercosur",
+        XOM: "Sovereign Military Order of Malta",
+        XPO: "Interpol",
       },
     },
   },

@@ -557,6 +557,9 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	if in.Name == "" || len(in.Steps) == 0 {
 		return in, fmt.Errorf("%w: a flow needs a name and at least one step", ErrInvalidInput)
 	}
+	if !sessionTTLAllowed(in.SessionTTLSeconds) {
+		return in, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
+	}
 	in.SelfieLocation = ""
 	if !hasFaceStep(in.Steps) {
 		in.FaceProvider = ""
@@ -570,6 +573,15 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 		return in, fmt.Errorf("%w: unknown face provider %q", ErrInvalidInput, in.FaceProvider)
 	}
 	return in, nil
+}
+
+// flowSessionTTL is how long a session of f runs: the flow's own lifetime when
+// it sets one, else orgTTL.
+func flowSessionTTL(f proofingprovider.Flow, orgTTL time.Duration) time.Duration {
+	if f.SessionTTLSeconds == 0 {
+		return orgTTL
+	}
+	return time.Duration(f.SessionTTLSeconds) * time.Second
 }
 
 // Requester is who sends a request: a member, or the org's software calling
@@ -639,6 +651,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
+	ttl = flowSessionTTL(flow, ttl)
 	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
 	}
@@ -2021,6 +2034,15 @@ func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding,
 // Logo returns the org's logo, or ErrNoLogo.
 func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
 	return s.orgSettings.Logo(ctx, orgID)
+}
+
+// sessionTTLAllowed is whether a flow may set seconds as its session lifetime:
+// 0 for none, else one of SessionTTLOptions. Compared in seconds, so a huge
+// value cannot wrap to an option.
+func sessionTTLAllowed(seconds int) bool {
+	return seconds == 0 || slices.ContainsFunc(SessionTTLOptions, func(option time.Duration) bool {
+		return int(option/time.Second) == seconds
+	})
 }
 
 // checkSettingsChange reports whether every session setting in change is one of

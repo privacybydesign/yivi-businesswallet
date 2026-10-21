@@ -337,6 +337,10 @@ type FlowDefinition struct {
 	// kept, replacing the customer's retention and the engine default. A session
 	// stamps it at creation, so a later edit does not change it.
 	RetentionOverride time.Duration `json:"RetentionOverride"`
+	// SessionTTL, when set, is how long a session of this flow runs, replacing
+	// the org's session lifetime. The wallet reads it when it creates a session;
+	// the engine only keeps it.
+	SessionTTL time.Duration `json:"SessionTTL"`
 	// AssuranceTiers override DefaultAssuranceTiers: the percentage-of-checks
 	// ladder a session's achieved score maps onto, as opposed to the eIDAS level
 	// RequiredAssuranceLevel demands. Empty uses the default.
@@ -400,6 +404,11 @@ const MaxRetentionOverride = MaxRetentionOverrideDays * day
 
 // MaxRetentionOverrideDays is MaxRetentionOverride in days.
 const MaxRetentionOverrideDays = 365
+
+// MaxSessionTTL is the longest a flow's session may run: the engine's own cap
+// on any session (Config.SessionMaxLifetime). It also keeps the override
+// within a Duration.
+const MaxSessionTTL = 15 * time.Minute
 
 // DocumentTypeDrivingLicence is an EU driving licence's document type, which
 // has no MRZ document code; the app reports it at document_capture. The
@@ -624,6 +633,9 @@ func validate(fd FlowDefinition) error {
 	}
 	if fd.RetentionOverride < 0 || fd.RetentionOverride > MaxRetentionOverride {
 		return fmt.Errorf("flow: retentionOverride must be between 0 and %d days", MaxRetentionOverride/day)
+	}
+	if fd.SessionTTL < 0 || fd.SessionTTL > MaxSessionTTL {
+		return fmt.Errorf("flow: sessionTtl must be between 0 and %d minutes", MaxSessionTTL/time.Minute)
 	}
 
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {

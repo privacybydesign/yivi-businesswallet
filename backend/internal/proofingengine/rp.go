@@ -41,6 +41,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		RequiredAssuranceLevel: flow.AssuranceLevel(in.RequiredAssuranceLevel),
 		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
+		SessionTTL:        time.Duration(in.SessionTTLSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
 		AgeOver: in.AgeOver,
 	}
@@ -75,7 +76,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
-		LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
+		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
 		AgeOver: fd.AgeOver,
 	}
 	for _, st := range fd.Steps {
@@ -128,13 +129,19 @@ func isValidation(err error) bool {
 // seconds.
 const maxRetentionOverrideSeconds = int(flow.MaxRetentionOverride / time.Second)
 
+// maxSessionTTLSeconds is flow.MaxSessionTTL in the spec's seconds.
+const maxSessionTTLSeconds = int(flow.MaxSessionTTL / time.Second)
+
 // checkFlowSpec refuses what toDefinition cannot carry over faithfully, and a
-// face provider this server lacks. A retention past the bound is refused on
-// the seconds: converted first, a huge value would wrap to a Duration that
-// flow.Validate accepts.
+// face provider this server lacks. A retention or session lifetime past its
+// bound is refused on the seconds: converted first, a huge value would wrap to
+// a Duration that flow.Validate accepts.
 func (s *Server) checkFlowSpec(in pp.FlowSpec) error {
 	if in.RetentionOverrideSeconds < 0 || in.RetentionOverrideSeconds > maxRetentionOverrideSeconds {
 		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: retentionOverride must be between 0 and %d days", flow.MaxRetentionOverrideDays))
+	}
+	if in.SessionTTLSeconds < 0 || in.SessionTTLSeconds > maxSessionTTLSeconds {
+		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: sessionTtl must be between 0 and %d minutes", flow.MaxSessionTTL/time.Minute))
 	}
 	return s.checkFaceProvider(in)
 }

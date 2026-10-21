@@ -5091,8 +5091,8 @@ paths:
         step and the only provider; anything else is refused),
         `requestedAttributes`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
-        `blurBsn`, `retentionOverrideSeconds`, `assuranceTiers`, `legalBasis` and
-        `processingPurpose`. Face capture is always set to the app (`selfieLocation` is
+        `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
+        `legalBasis` and `processingPurpose`. Face capture is always set to the app (`selfieLocation` is
         overwritten). An empty `name` or `steps`, or an unknown `faceProvider`, is 400
         `invalid_input`. The proofing engine validates the combination (including `regula` on a
         deployment without Regula) and its refusal is returned as 422 `rejected_by_provider`.
@@ -10983,6 +10983,12 @@ components:
           description: >-
             How long the flow's finished sessions keep their data, at most a year. Set, it
             applies in place of the organisation's data retention; absent, the organisation's applies.
+        sessionTtlSeconds:
+          type: integer
+          enum: [120, 300, 600]
+          description: >-
+            How long a session of this flow runs. Absent, the organisation's session lifetime
+            applies. Any other value is 400 `invalid_input`.
         assuranceTiers:
           type: array
           items:

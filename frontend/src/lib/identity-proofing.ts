@@ -117,9 +117,9 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //     it is in the flow, and cleared otherwise; none is forced on.
 //   - Assurance (flow.LevelRequirements): low needs nfc.passive_auth;
 //     substantial also nfc.chip_auth, face.match and face.liveness with Regula.
-//     The level is only a minimum and turns nothing on: a draft whose settings
-//     cannot reach it is refused. High is never reachable. The engine explains
-//     a refusal.
+//     Picking a level ticks what it needs and locks it (withAssuranceLevel);
+//     a draft that still cannot reach its level is refused. High is never
+//     reachable. The engine explains a refusal.
 export const STEP_DOCUMENT_CAPTURE = "document_capture";
 export const STEP_NFC_READ = "nfc_read";
 export const STEP_DOCUMENT_PHOTO = "document_photo";
@@ -129,19 +129,19 @@ export const CHECK_CHIP_AUTH = "nfc.chip_auth";
 export const CHECK_FACE_MATCH = "face.match";
 export const CHECK_LIVENESS = "face.liveness";
 
-// The requested data the service's admin page offers, and the step that
-// produces each: the document scan gives the document and holder (dg1), the
-// chip read the age check, its extras, photo and check results, the face step
-// its selfie and biometrics.
+// The requested data the service's admin page offers, in the order the editor
+// lists them, and the step that produces each: the document scan gives the
+// document and holder (dg1), the chip read the age check, its extras, photo and
+// check results, the face step its selfie and biometrics.
 export const REQUESTED_ATTRIBUTES = [
   { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
   { value: "age_over", step: STEP_NFC_READ },
+  { value: "chip_checks", step: STEP_NFC_READ },
+  { value: "biometrics", step: STEP_FACE_VERIFICATION },
   { value: "dg11", step: STEP_NFC_READ },
   { value: "dg2", step: STEP_NFC_READ },
-  { value: "chip_checks", step: STEP_NFC_READ },
-  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
   { value: "selfie", step: STEP_FACE_VERIFICATION },
-  { value: "biometrics", step: STEP_FACE_VERIFICATION },
+  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
 ] as const;
 
 // The requested data of a flow that releases nothing but the outcome
@@ -165,7 +165,36 @@ export function assuranceLevelLabel(level: string, t: TFunction): string {
     : level;
 }
 
-export const BSN_POLICIES = ["retrieve", "mask", "omit"] as const;
+// In the order the editor offers them, the one that keeps least first.
+export const BSN_POLICIES = ["omit", "mask", "retrieve"] as const;
+type BsnPolicy = (typeof BSN_POLICIES)[number];
+
+// A new flow leaves the BSN out. A stored flow without a policy is shown as
+// what the proofing engine does with it (an unset policy leaves the BSN out,
+// privacy.DefaultBSNPolicy), so the editor says what the engine does.
+const NEW_FLOW_BSN_POLICY: BsnPolicy = "omit";
+const UNSET_BSN_POLICY: BsnPolicy = "omit";
+
+// The kinds of document the editor lets a flow accept, and what each goes by
+// on a chip: the ICAO 9303 code "P" for a passport; an ID card is "I" or "ID",
+// the second letter being the issuer's choice; a residence permit and an EU
+// driving licence go by the engine's own kind names.
+export const DOCUMENT_KINDS = [
+  "passport",
+  "id_card",
+  "residence_permit",
+  "drivers_license",
+] as const;
+type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+const DOCUMENT_CODES: Record<DocumentKind, readonly string[]> = {
+  passport: ["P"],
+  id_card: ["I", "ID"],
+  residence_permit: ["residence_permit"],
+  drivers_license: ["drivers_license"],
+};
+
+type CountryScope = "any" | "only";
 
 // What verifies the face step; a new flow starts on the first, Regula. The
 // wallet runs no face engine of its own, so there is no "engine", and the
@@ -212,10 +241,11 @@ export function yiviAppAvailable(flow: {
   );
 }
 
-// "" is the proofing service's default: omit for the BSN policy, off for the
-// covers.
+// "" is no requirement.
 export type Inherit<T extends string> = "" | T;
-export type Tristate = "" | "true" | "false";
+
+// A flow's retention or session lifetime of 0 sets none: the org's applies.
+export const FOLLOW_ORG = 0;
 
 export interface ProofingFlowDraft {
   name: string;
@@ -226,20 +256,27 @@ export interface ProofingFlowDraft {
   chipAuthentication: boolean;
   liveness: boolean;
   faceProvider: FaceProvider;
-  // A decimal 0..1 as typed; "" is pass/fail only.
+  // A decimal 0..1 as stored; "" is pass/fail only. The editor shows no field
+  // for it, so a stored one is kept.
   faceMatchThreshold: string;
   requestedAttributes: ReadonlySet<string>;
   // Whole years as typed, the age the age check answers for.
   ageOver: string;
-  // Comma-separated lists as typed; empty accepts any.
-  acceptedDocumentTypes: string;
-  acceptedIssuingCountries: string;
+  // Every kind ticked accepts any document.
+  documentKinds: ReadonlySet<DocumentKind>;
+  // Document codes of a stored version that no kind covers, kept as stored.
+  otherDocumentTypes: readonly string[];
+  countryScope: CountryScope;
+  // ICAO codes in the order picked; only sent with the scope "only".
+  issuingCountries: readonly string[];
   assuranceLevel: Inherit<AssuranceLevel>;
-  bsnPolicy: Inherit<(typeof BSN_POLICIES)[number]>;
-  keepFacePhotos: Tristate;
-  blurBsn: Tristate;
-  // Whole seconds as typed; "" or 0 is no override.
-  retentionSeconds: string;
+  bsnPolicy: BsnPolicy;
+  blackOutBsn: boolean;
+  keepFacePhotos: boolean;
+  // Whole seconds the flow keeps its finished sessions; 0 follows the org's.
+  retentionSeconds: number;
+  // How long a session of the flow runs; 0 follows the org's.
+  sessionTtlSeconds: number;
   // Settings the service's editor does not show, carried over unchanged from
   // the version being edited.
   carried: Pick<
@@ -270,7 +307,7 @@ export function draftSteps(draft: ProofingFlowDraft): string[] {
 // The draft settings a level needs, as the proofing engine requires them
 // (flow.LevelRequirements): low a chip read whose data verifies; substantial
 // also the copy check and a live face matched by Regula against the chip photo.
-type LevelRequirement = Partial<
+export type LevelRequirement = Partial<
   Pick<
     ProofingFlowDraft,
     | "documentAndChip"
@@ -299,8 +336,26 @@ export function levelRequirement(
   return level === "" ? {} : LEVEL_REQUIREMENTS[level];
 }
 
-// Whether the draft's own settings can reach its required level. The level
-// changes no setting: a draft that cannot reach it is not saved.
+// The draft at a level, with what the level needs ticked. The rest stays as it
+// was, so a setting a lower level leaves free keeps its value.
+export function withAssuranceLevel(
+  draft: ProofingFlowDraft,
+  level: Inherit<AssuranceLevel>,
+): ProofingFlowDraft {
+  return { ...draft, ...levelRequirement(level), assuranceLevel: level };
+}
+
+// Whether the draft's level needs a setting on, which locks it.
+export function lockedByLevel(
+  draft: ProofingFlowDraft,
+  setting: keyof LevelRequirement,
+): boolean {
+  return levelRequirement(draft.assuranceLevel)[setting] !== undefined;
+}
+
+// Whether the draft's own settings can reach its required level. Picking a
+// level ticks what it needs (withAssuranceLevel); a draft that still cannot
+// reach it is not saved.
 export function reachesAssuranceLevel(draft: ProofingFlowDraft): boolean {
   return Object.entries(levelRequirement(draft.assuranceLevel)).every(
     ([setting, value]) => draft[setting as keyof LevelRequirement] === value,
@@ -318,7 +373,8 @@ export function attributeAvailable(
 
 // A new flow starts like the service's editor: every step the Idem app runs
 // and every requested data item on, the mandatory checks on. The document
-// photo starts off: the app cannot take it yet.
+// photo starts off: the app cannot take it yet. It leaves the BSN out, blacks
+// it out on document photos and keeps no face photos.
 export function emptyFlowDraft(): ProofingFlowDraft {
   return {
     name: "",
@@ -337,13 +393,16 @@ export function emptyFlowDraft(): ProofingFlowDraft {
       ),
     ),
     ageOver: String(DEFAULT_AGE_OVER),
-    acceptedDocumentTypes: "",
-    acceptedIssuingCountries: "",
+    documentKinds: new Set(DOCUMENT_KINDS),
+    otherDocumentTypes: [],
+    countryScope: "any",
+    issuingCountries: [],
     assuranceLevel: "",
-    bsnPolicy: "",
-    keepFacePhotos: "",
-    blurBsn: "",
-    retentionSeconds: "",
+    bsnPolicy: NEW_FLOW_BSN_POLICY,
+    blackOutBsn: true,
+    keepFacePhotos: false,
+    retentionSeconds: FOLLOW_ORG,
+    sessionTtlSeconds: FOLLOW_ORG,
     carried: {},
   };
 }
@@ -355,18 +414,17 @@ function oneOf<T extends string>(
   return values.includes(value as T) ? (value as T) : "";
 }
 
-function tristate(value: boolean | undefined): Tristate {
-  return value === undefined ? "" : value ? "true" : "false";
-}
-
 // A flow as any list returns it, without the list's own selection flags: what
 // the editor needs to seed a new version.
 export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 
-// The editor state for a new version of an existing flow, as stored.
+// The editor state for a new version of an existing flow, as stored, with what
+// its level needs ticked.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
   const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
+  const storedTypes = flow.acceptedDocumentTypes ?? [];
+  const storedCountries = flow.acceptedIssuingCountries ?? [];
   const draft: ProofingFlowDraft = {
     name: flow.name,
     documentAndChip:
@@ -380,29 +438,32 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceMatchThreshold: threshold === undefined ? "" : String(threshold),
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
-    acceptedDocumentTypes: (flow.acceptedDocumentTypes ?? []).join(", "),
-    acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
+    documentKinds: new Set(
+      DOCUMENT_KINDS.filter(
+        (kind) =>
+          storedTypes.length === 0 ||
+          DOCUMENT_CODES[kind].some((code) => storedTypes.includes(code)),
+      ),
+    ),
+    otherDocumentTypes: storedTypes.filter(
+      (type) =>
+        !DOCUMENT_KINDS.some((kind) => DOCUMENT_CODES[kind].includes(type)),
+    ),
+    countryScope: storedCountries.length === 0 ? "any" : "only",
+    issuingCountries: storedCountries,
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
-    bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy),
-    keepFacePhotos: tristate(flow.keepFacePhotos),
-    blurBsn: tristate(flow.blurBsn),
-    retentionSeconds: flow.retentionOverrideSeconds
-      ? String(flow.retentionOverrideSeconds)
-      : "",
+    bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy) || UNSET_BSN_POLICY,
+    blackOutBsn: flow.blurBsn ?? false,
+    keepFacePhotos: flow.keepFacePhotos ?? false,
+    retentionSeconds: flow.retentionOverrideSeconds ?? FOLLOW_ORG,
+    sessionTtlSeconds: flow.sessionTtlSeconds ?? FOLLOW_ORG,
     carried: {
       legalBasis: flow.legalBasis,
       processingPurpose: flow.processingPurpose,
       assuranceTiers: flow.assuranceTiers,
     },
   };
-  return draft;
-}
-
-function list(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item !== "");
+  return withAssuranceLevel(draft, draft.assuranceLevel);
 }
 
 // A draft the editor cannot send, with the field to fix; null when valid. The
@@ -412,14 +473,10 @@ export type FlowDraftError =
   | "steps"
   | "identity"
   | "assuranceLevel"
+  | "documentTypes"
   | "issuingCountries"
   | "faceMatchThreshold"
-  | "ageOver"
-  | "retentionSeconds";
-
-// An issuing country as a flow takes it: three letters (ICAO 9303). Whether
-// a country has the code is the engine's check (flow.ValidIssuingCountry).
-const ISSUING_COUNTRY = /^[A-Z]{3}$/;
+  | "ageOver";
 
 // requiresIdentity is identityRequired for the flow's kind and diplomas.
 export function flowDraftError(
@@ -444,11 +501,10 @@ export function flowDraftError(
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
   }
-  if (
-    !list(draft.acceptedIssuingCountries).every((country) =>
-      ISSUING_COUNTRY.test(country.toUpperCase()),
-    )
-  ) {
+  if (draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0) {
+    return "documentTypes";
+  }
+  if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
     return "issuingCountries";
   }
   if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
@@ -460,12 +516,6 @@ export function flowDraftError(
   if (ageOverInvalid(draft)) {
     return "ageOver";
   }
-  if (draft.retentionSeconds.trim() !== "") {
-    const seconds = Number(draft.retentionSeconds);
-    if (!Number.isInteger(seconds) || seconds < 0) {
-      return "retentionSeconds";
-    }
-  }
   return null;
 }
 
@@ -475,6 +525,22 @@ function ageOverInvalid(draft: ProofingFlowDraft): boolean {
   if (!asksAge(draft)) return false;
   const age = Number(draft.ageOver);
   return !Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER;
+}
+
+// The document codes a draft accepts: every kind ticked and no other code is
+// any document, which an empty list says.
+function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
+  const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
+  if (
+    ticked.length === DOCUMENT_KINDS.length &&
+    draft.otherDocumentTypes.length === 0
+  ) {
+    return [];
+  }
+  return [
+    ...ticked.flatMap((kind) => DOCUMENT_CODES[kind]),
+    ...draft.otherDocumentTypes,
+  ];
 }
 
 // The request body for a draft, as the service's editor builds it. Call only
@@ -506,14 +572,14 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     requiredChecks,
     requestedAttributes:
       requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
-    // Uppercased to match the MRZ's capitals; the engine ignores case for
-    // document types (drivers_license), compares countries exactly.
-    acceptedDocumentTypes: list(draft.acceptedDocumentTypes).map((type) =>
-      type.toUpperCase(),
-    ),
-    acceptedIssuingCountries: list(draft.acceptedIssuingCountries).map(
-      (country) => country.toUpperCase(),
-    ),
+    acceptedDocumentTypes: acceptedDocumentTypes(draft),
+    acceptedIssuingCountries:
+      draft.countryScope === "only"
+        ? draft.issuingCountries.map((country) => country.toUpperCase())
+        : [],
+    bsnPolicy: draft.bsnPolicy,
+    blurBsn: draft.blackOutBsn,
+    keepFacePhotos: draft.keepFacePhotos,
   };
   if (draft.faceVerification) {
     spec.faceProvider = draft.faceProvider;
@@ -526,18 +592,11 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.assuranceLevel !== "") {
     spec.requiredAssuranceLevel = draft.assuranceLevel;
   }
-  if (draft.bsnPolicy !== "") {
-    spec.bsnPolicy = draft.bsnPolicy;
+  if (draft.retentionSeconds > 0) {
+    spec.retentionOverrideSeconds = draft.retentionSeconds;
   }
-  if (draft.keepFacePhotos !== "") {
-    spec.keepFacePhotos = draft.keepFacePhotos === "true";
-  }
-  if (draft.blurBsn !== "") {
-    spec.blurBsn = draft.blurBsn === "true";
-  }
-  const retention = Number(draft.retentionSeconds);
-  if (draft.retentionSeconds.trim() !== "" && retention > 0) {
-    spec.retentionOverrideSeconds = retention;
+  if (draft.sessionTtlSeconds > 0) {
+    spec.sessionTtlSeconds = draft.sessionTtlSeconds;
   }
   if (asksAge(draft)) {
     spec.ageOver = Number(draft.ageOver);
@@ -1311,6 +1370,25 @@ export function flowPurgeDays(
   return override > 0
     ? Math.ceil(override / SECONDS_PER_DAY)
     : settings.dataRetentionDays;
+}
+
+// The days a flow may keep its finished sessions, besides following the org's
+// retention (0).
+const FLOW_RETENTION_DAYS = [1, 30, 90] as const;
+
+// The retentions a flow's picker offers, in seconds. A flow whose own is none
+// of the offered days keeps it as a choice, so opening it changes nothing.
+export function retentionChoices(current: number): number[] {
+  const offered = FLOW_RETENTION_DAYS.map((days) => days * SECONDS_PER_DAY);
+  const own = current > 0 && !offered.includes(current) ? [current] : [];
+  return [FOLLOW_ORG, ...[...offered, ...own].sort((a, b) => a - b)];
+}
+
+// Seconds as whole days; undefined for a part of a day.
+export function wholeDays(seconds: number): number | undefined {
+  return seconds % SECONDS_PER_DAY === 0
+    ? seconds / SECONDS_PER_DAY
+    : undefined;
 }
 
 const MS_PER_SECOND = 1000;

@@ -254,6 +254,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if settings.Session.SessionTTL != 0 {
 		ttl = settings.Session.SessionTTL
 	}
+	ttl = flowSessionTTL(flow, ttl)
 	tenant := orgTenant(req.OrganizationID)
 	retention := engineRetention(&settings, req.FlowKind, req.RetentionOverride)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{

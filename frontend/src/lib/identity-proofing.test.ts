@@ -10,6 +10,7 @@ import {
   MAX_LISTED_REQUESTS,
 } from "../api/identity-proofing";
 import {
+  DOCUMENT_KINDS,
   PROOFING_REJECTION_CODES,
   addressLookup,
   addressVerificationNote,
@@ -38,6 +39,10 @@ import {
   attributeAvailable,
   draftFromFlow,
   draftSteps,
+  lockedByLevel,
+  retentionChoices,
+  wholeDays,
+  withAssuranceLevel,
   editedFlowSelection,
   emptyFlowDraft,
   flowDraftError,
@@ -104,7 +109,7 @@ describe("flowSpecFromDraft", () => {
       name: "Passport check",
       steps: ["document_capture", "nfc_read"],
       requiredChecks: ["nfc.passive_auth"],
-      requestedAttributes: ["dg1", "dg11", "dg2", "chip_checks"],
+      requestedAttributes: ["dg1", "chip_checks", "dg11", "dg2"],
     });
     expect(spec.checkThresholds).toBeUndefined();
   });
@@ -137,7 +142,7 @@ describe("flowSpecFromDraft", () => {
     );
     expect(spec.steps).toEqual(["face_verification"]);
     expect(spec.requiredChecks).toEqual(["face.match"]);
-    expect(spec.requestedAttributes).toEqual(["selfie", "biometrics"]);
+    expect(spec.requestedAttributes).toEqual(["biometrics", "selfie"]);
   });
 
   it("lets optional data be deselected", () => {
@@ -147,30 +152,209 @@ describe("flowSpecFromDraft", () => {
     expect(spec.requestedAttributes).toEqual(["dg1", "biometrics"]);
   });
 
-  it("sends only the overrides the admin set", () => {
+  it("sends what the admin chose, the BSN and redaction always explicit", () => {
     const spec = flowSpecFromDraft(
       draft({
-        acceptedDocumentTypes: "P, I ,",
-        acceptedIssuingCountries: "nld, bel",
+        documentKinds: new Set(["passport"]),
+        countryScope: "only",
+        issuingCountries: ["NLD", "bel"],
         assuranceLevel: "substantial",
         bsnPolicy: "mask",
-        keepFacePhotos: "false",
-        retentionSeconds: "3600",
+        blackOutBsn: false,
+        keepFacePhotos: true,
+        retentionSeconds: 3600,
+        sessionTtlSeconds: 300,
       }),
     );
     expect(spec).toMatchObject({
-      acceptedDocumentTypes: ["P", "I"],
+      acceptedDocumentTypes: ["P"],
       acceptedIssuingCountries: ["NLD", "BEL"],
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "mask",
-      keepFacePhotos: false,
+      blurBsn: false,
+      keepFacePhotos: true,
       retentionOverrideSeconds: 3600,
+      sessionTtlSeconds: 300,
     });
-    expect(spec.blurBsn).toBeUndefined();
+  });
+
+  it("follows the org where the admin chose nothing", () => {
+    const spec = flowSpecFromDraft(draft());
+    expect(spec.retentionOverrideSeconds).toBeUndefined();
+    expect(spec.sessionTtlSeconds).toBeUndefined();
+    expect(spec.requiredAssuranceLevel).toBeUndefined();
+    expect(spec.acceptedDocumentTypes).toEqual([]);
+    expect(spec.acceptedIssuingCountries).toEqual([]);
+  });
+
+  it("leaves the BSN out, blacks it out and keeps no face photos in a new flow", () => {
+    expect(flowSpecFromDraft(draft())).toMatchObject({
+      bsnPolicy: "omit",
+      blurBsn: true,
+      keepFacePhotos: false,
+    });
+  });
+});
+
+describe("accepted documents", () => {
+  const stored = {
+    id: "f",
+    version: 1,
+    active: true,
+    name: "F",
+    steps: ["document_capture", "nfc_read"],
+    createdAt: "2026-09-28T00:00:00Z",
+    completable: true,
+  };
+
+  it("accepts any document with every kind ticked, as a new flow does", () => {
+    expect(flowSpecFromDraft(draft()).acceptedDocumentTypes).toEqual([]);
+  });
+
+  it("names the codes of the kinds that are ticked", () => {
+    const only = (kind: (typeof DOCUMENT_KINDS)[number]): string[] =>
+      flowSpecFromDraft(draft({ documentKinds: new Set([kind]) }))
+        .acceptedDocumentTypes ?? [];
+    expect(only("passport")).toEqual(["P"]);
+    expect(only("id_card")).toEqual(["I", "ID"]);
+    expect(only("residence_permit")).toEqual(["residence_permit"]);
+    expect(only("drivers_license")).toEqual(["drivers_license"]);
+  });
+
+  it("refuses a flow that accepts no kind", () => {
+    expect(flowDraftError(draft({ documentKinds: new Set() }))).toBe(
+      "documentTypes",
+    );
+  });
+
+  it("reads a stored list back as kinds and keeps a code no kind covers", () => {
+    expect(draftFromFlow(stored).documentKinds).toEqual(
+      new Set(DOCUMENT_KINDS),
+    );
+    const mixed = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "IR"],
+    });
+    expect(mixed.documentKinds).toEqual(new Set(["passport"]));
+    expect(mixed.otherDocumentTypes).toEqual(["IR"]);
+    expect(flowSpecFromDraft(mixed).acceptedDocumentTypes).toEqual(["P", "IR"]);
+    // Not every kind ticked, next to a code of its own: no longer any document.
+    const all = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "ID", "IR"],
+    });
+    expect(flowSpecFromDraft(all).acceptedDocumentTypes).toEqual([
+      "P",
+      "I",
+      "ID",
+      "IR",
+    ]);
+  });
+});
+
+describe("issuing countries", () => {
+  it("sends none for any country, whatever was picked before", () => {
+    const picked = draft({ issuingCountries: ["NLD"], countryScope: "any" });
+    expect(flowSpecFromDraft(picked).acceptedIssuingCountries).toEqual([]);
+  });
+
+  it("needs a country once only some are accepted", () => {
     expect(
-      flowSpecFromDraft(draft({ retentionSeconds: "0" }))
-        .retentionOverrideSeconds,
-    ).toBeUndefined();
+      flowDraftError(draft({ countryScope: "only", issuingCountries: [] })),
+    ).toBe("issuingCountries");
+    expect(
+      flowDraftError(
+        draft({ countryScope: "only", issuingCountries: ["NLD"] }),
+      ),
+    ).toBeNull();
+  });
+
+  it("reads a stored list as the chosen countries", () => {
+    const flow = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["nfc_read", "document_capture"],
+      createdAt: "2026-09-28T00:00:00Z",
+      completable: true,
+    };
+    expect(draftFromFlow(flow)).toMatchObject({
+      countryScope: "any",
+      issuingCountries: [],
+    });
+    expect(
+      draftFromFlow({ ...flow, acceptedIssuingCountries: ["NLD", "BEL"] }),
+    ).toMatchObject({
+      countryScope: "only",
+      issuingCountries: ["NLD", "BEL"],
+    });
+  });
+});
+
+describe("what a stored flow without a setting shows", () => {
+  const flow = {
+    id: "f",
+    version: 1,
+    active: true,
+    name: "F",
+    steps: ["nfc_read", "document_capture"],
+    createdAt: "2026-09-28T00:00:00Z",
+    completable: true,
+  };
+
+  it("shows what the engine does with it: the BSN left out, the face photos dropped, nothing blacked out", () => {
+    expect(draftFromFlow(flow)).toMatchObject({
+      bsnPolicy: "omit",
+      blackOutBsn: false,
+      keepFacePhotos: false,
+      retentionSeconds: 0,
+      sessionTtlSeconds: 0,
+    });
+  });
+
+  it("shows what it sets", () => {
+    expect(
+      draftFromFlow({
+        ...flow,
+        bsnPolicy: "mask",
+        blurBsn: true,
+        keepFacePhotos: true,
+        retentionOverrideSeconds: 86_400,
+        sessionTtlSeconds: 120,
+      }),
+    ).toMatchObject({
+      bsnPolicy: "mask",
+      blackOutBsn: true,
+      keepFacePhotos: true,
+      retentionSeconds: 86_400,
+      sessionTtlSeconds: 120,
+    });
+  });
+});
+
+describe("retentionChoices", () => {
+  const day = 86_400;
+
+  it("offers the org's retention and 1, 30 and 90 days", () => {
+    expect(retentionChoices(0)).toEqual([0, day, 30 * day, 90 * day]);
+    expect(retentionChoices(30 * day)).toEqual([0, day, 30 * day, 90 * day]);
+  });
+
+  it("keeps a retention of the flow's own as a choice, in order", () => {
+    expect(retentionChoices(7 * day)).toEqual([
+      0,
+      day,
+      7 * day,
+      30 * day,
+      90 * day,
+    ]);
+    expect(retentionChoices(3600)).toContain(3600);
+  });
+
+  it("counts whole days only", () => {
+    expect(wholeDays(7 * day)).toBe(7);
+    expect(wholeDays(3600)).toBeUndefined();
   });
 });
 
@@ -285,7 +469,7 @@ describe("draftFromFlow", () => {
       checkThresholds: { "face.match": 0.7 },
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "omit",
-      keepFacePhotos: true,
+      keepFacePhotos: false,
       retentionOverrideSeconds: 86_400,
       assuranceTiers: [{ level: "low", minPercent: 0 }],
       legalBasis: "consent",
@@ -298,16 +482,15 @@ describe("draftFromFlow", () => {
     expect(edited).toMatchObject({
       documentAndChip: true,
       faceVerification: true,
-      // Kept as stored, though substantial needs them: the editor refuses to
-      // save it until they are turned on, rather than turning them on itself.
-      chipAuthentication: false,
-      liveness: false,
+      // Not stored, but substantial needs them: they are ticked, and locked.
+      chipAuthentication: true,
+      liveness: true,
       faceMatchThreshold: "0.7",
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
-      keepFacePhotos: "true",
-      blurBsn: "",
-      retentionSeconds: "86400",
+      keepFacePhotos: false,
+      blackOutBsn: false,
+      retentionSeconds: 86_400,
     });
     expect(flowSpecFromDraft(edited)).toMatchObject({
       requestedAttributes: ["dg1", "selfie"],
@@ -318,16 +501,73 @@ describe("draftFromFlow", () => {
 });
 
 describe("assurance level", () => {
-  it("turns nothing on: a draft that cannot reach its level is refused", () => {
-    const chipOnly = draft({ faceVerification: false });
-    expect(flowDraftError({ ...chipOnly, assuranceLevel: "low" })).toBeNull();
+  const chipOnly = draft({ faceVerification: false });
+
+  it("ticks what the level needs and leaves the rest as it was", () => {
+    const low = withAssuranceLevel(chipOnly, "low");
+    expect(low).toMatchObject({
+      assuranceLevel: "low",
+      documentAndChip: true,
+      faceVerification: false,
+      chipAuthentication: false,
+    });
+    const substantial = withAssuranceLevel(low, "substantial");
+    expect(substantial).toMatchObject({
+      assuranceLevel: "substantial",
+      documentAndChip: true,
+      chipAuthentication: true,
+      faceVerification: true,
+      liveness: true,
+      faceProvider: "regula",
+    });
+    expect(reachesAssuranceLevel(substantial)).toBe(true);
+    // Back down, what Substantial ticked stays ticked, now free to change.
+    const back = withAssuranceLevel(substantial, "low");
+    expect(back.faceVerification).toBe(true);
+    expect(lockedByLevel(back, "faceVerification")).toBe(false);
+  });
+
+  it("locks what the level needs: the chip read for Low, more for Substantial", () => {
+    const locked = (level: "" | "low" | "substantial") =>
+      (
+        [
+          "documentAndChip",
+          "chipAuthentication",
+          "faceVerification",
+          "liveness",
+        ] as const
+      ).filter((setting) =>
+        lockedByLevel(withAssuranceLevel(draft(), level), setting),
+      );
+    expect(locked("")).toEqual([]);
+    expect(locked("low")).toEqual(["documentAndChip"]);
+    expect(locked("substantial")).toEqual([
+      "documentAndChip",
+      "chipAuthentication",
+      "faceVerification",
+      "liveness",
+    ]);
+  });
+
+  it("sends the level with what it needs", () => {
+    expect(
+      flowSpecFromDraft(withAssuranceLevel(chipOnly, "substantial")),
+    ).toMatchObject({
+      steps: ["document_capture", "nfc_read", "face_verification"],
+      requiredChecks: [
+        "nfc.passive_auth",
+        "nfc.chip_auth",
+        "face.match",
+        "face.liveness",
+      ],
+      requiredAssuranceLevel: "substantial",
+    });
+  });
+
+  it("still refuses a draft that cannot reach its level", () => {
     const short = { ...chipOnly, assuranceLevel: "substantial" as const };
     expect(reachesAssuranceLevel(short)).toBe(false);
     expect(flowDraftError(short)).toBe("assuranceLevel");
-    expect(flowSpecFromDraft(short).steps).toEqual([
-      "document_capture",
-      "nfc_read",
-    ]);
     expect(
       flowDraftError(draft({ documentAndChip: false, assuranceLevel: "low" })),
     ).toBe("assuranceLevel");
@@ -343,34 +583,10 @@ describe("assurance level", () => {
     expect(
       flowDraftError({ ...full, assuranceLevel: "substantial" }),
     ).toBeNull();
-    expect(flowSpecFromDraft({ ...full, assuranceLevel: "low" })).toMatchObject(
-      {
-        requiredChecks: [
-          "nfc.passive_auth",
-          "nfc.chip_auth",
-          "face.match",
-          "face.liveness",
-        ],
-        requiredAssuranceLevel: "low",
-      },
-    );
   });
 
   it("needs nothing without a level", () => {
     expect(reachesAssuranceLevel(draft({ documentAndChip: false }))).toBe(true);
-  });
-});
-
-describe("accepted documents", () => {
-  it("sends document types and countries in capitals, as the engine compares them", () => {
-    const spec = flowSpecFromDraft(
-      draft({
-        acceptedDocumentTypes: "p, id",
-        acceptedIssuingCountries: "nld",
-      }),
-    );
-    expect(spec.acceptedDocumentTypes).toEqual(["P", "ID"]);
-    expect(spec.acceptedIssuingCountries).toEqual(["NLD"]);
   });
 });
 
@@ -405,15 +621,8 @@ describe("flowDraftError", () => {
   it("points at the field to fix", () => {
     expect(flowDraftError(draft())).toBeNull();
     expect(flowDraftError(draft({ name: " " }))).toBe("name");
-    // Countries are 3-letter codes; whether one exists is the engine's check.
     expect(
-      flowDraftError(draft({ acceptedIssuingCountries: "nld, DEU" })),
-    ).toBeNull();
-    expect(flowDraftError(draft({ acceptedIssuingCountries: "NL" }))).toBe(
-      "issuingCountries",
-    );
-    expect(
-      flowDraftError(draft({ acceptedIssuingCountries: "NLD, Nederland" })),
+      flowDraftError(draft({ countryScope: "only", issuingCountries: [] })),
     ).toBe("issuingCountries");
     expect(
       flowDraftError(
@@ -422,9 +631,6 @@ describe("flowDraftError", () => {
     ).toBe("steps");
     expect(flowDraftError(draft({ faceMatchThreshold: "1.5" }))).toBe(
       "faceMatchThreshold",
-    );
-    expect(flowDraftError(draft({ retentionSeconds: "-1" }))).toBe(
-      "retentionSeconds",
     );
   });
 });

@@ -1089,6 +1089,61 @@ func TestCreateFlowFaceProvider(t *testing.T) {
 	}
 }
 
+// A flow's own session lifetime replaces the org's, in the session and in the
+// mail's validity; a flow without one follows the org's.
+func TestFlowSessionLifetime(t *testing.T) {
+	f := newFixture()
+	f.orgSettings.settings.Session.SessionTTL = 5 * time.Minute
+	f.ips.flows[0].SessionTTLSeconds = int((2 * time.Minute) / time.Second)
+
+	f.send(t)
+	f.sendExternal(t, "anna@example.org", "")
+
+	if got := f.ips.sessions[0].TTL; got != 2*time.Minute {
+		t.Errorf("session of a flow with its own lifetime = %v, want 2m0s", got)
+	}
+	if got := f.mailer.sent[0].validFor; got != 2*time.Minute {
+		t.Errorf("mail valid for %v, want the flow's 2m0s", got)
+	}
+	if got := f.ips.sessions[1].TTL; got != 5*time.Minute {
+		t.Errorf("session of a flow without one = %v, want the org's 5m0s", got)
+	}
+}
+
+func TestHostedFlowSessionLifetime(t *testing.T) {
+	f := newFixture()
+	f.orgSettings.settings.Session.SessionTTL = 5 * time.Minute
+	f.ips.flows[0].SessionTTLSeconds = int((2 * time.Minute) / time.Second)
+	_, token := f.sendHosted(t)
+
+	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err != nil {
+		t.Fatalf("StartHosted: %v", err)
+	}
+	if got := f.ips.sessions[0].TTL; got != 2*time.Minute {
+		t.Errorf("hosted session = %v, want the flow's 2m0s", got)
+	}
+}
+
+func TestFlowSessionTTLAllowed(t *testing.T) {
+	spec := proofingprovider.FlowSpec{Name: "Chip", Steps: []string{"document_capture", "nfc_read"}}
+	for seconds, want := range map[int]bool{
+		0: true, 120: true, 300: true, 600: true,
+		-120: false, 60: false, 900: false,
+		// Multiplied by time.Second this wraps to two minutes.
+		1<<55 + 120: false,
+	} {
+		f := newFixture()
+		spec.SessionTTLSeconds = seconds
+		_, err := f.svc.CreateFlow(context.Background(), testOrg, spec)
+		if got := err == nil; got != want {
+			t.Errorf("CreateFlow(sessionTtlSeconds %d) = %v, want accepted %v", seconds, err, want)
+		}
+		if err != nil && !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("CreateFlow(sessionTtlSeconds %d) = %v, want ErrInvalidInput", seconds, err)
+		}
+	}
+}
+
 func TestEditUnknownFlowIsNotFound(t *testing.T) {
 	f := newFixture()
 	_, err := f.svc.EditFlow(context.Background(), testOrg, "nope", proofingprovider.FlowSpec{Name: "x", Steps: []string{"nfc_read"}})

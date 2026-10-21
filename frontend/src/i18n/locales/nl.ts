@@ -1319,16 +1319,13 @@ export const nl: Translation<typeof en> = {
       diploma_upload: "Diploma's uploaden (DUO)",
     },
     bsnPolicies: {
-      retrieve: "BSN vrijgeven",
-      mask: "Gemaskeerd vrijgeven",
+      retrieve: "Het volledige BSN bewaren",
+      mask: "De laatste 3 cijfers bewaren",
       omit: "Weglaten",
     },
     assuranceLevels: {
       low: "Laag",
       substantial: "Substantieel",
-    },
-    faceProviders: {
-      regula: "Regula",
     },
     checks: {
       passiveAuth: "De gegevens op de chip zijn echt en ongewijzigd",
@@ -1350,11 +1347,11 @@ export const nl: Translation<typeof en> = {
       dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
       age_over:
         "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
-      dg11: "Alleen als het document ze op de chip heeft staan; veel documenten niet. Het BSN volgt het BSN-beleid hieronder.",
+      dg11: "Alleen als de chip ze bevat; veel chips niet.",
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
       document_image:
-        "De voor- en achterkant van het document (bij een paspoort alleen de fotopagina), zoals gemaakt: het BSN daarop wordt nog niet vervaagd.",
+        "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
       selfie:
         "De foto van het gezicht die tijdens de gezichtscontrole is gemaakt.",
       biometrics:
@@ -1378,73 +1375,10 @@ export const nl: Translation<typeof en> = {
       kind: "Type",
       title: "Nieuwe flow",
       editTitle: "{{name}} bewerken",
-      hint: "Een flow bepaalt de stappen van een sessie, de resultaatgegevens die de verificatiedienst teruggeeft en de controles die de betrouwbaarheid bepalen.",
-      editHint:
-        "Opslaan maakt versie {{version}} en zet die meteen actief. Verzoeken die al verstuurd zijn houden de versie waarmee ze begonnen.",
       name: "Naam",
       namePlaceholder: "NL-paspoort + selfie",
       create: "Flow aanmaken",
       saveVersion: "Opslaan als versie {{version}}",
-      stepsTitle: "Stappen",
-      documentCaptureHint:
-        "De persoon fotografeert met de Idem-app de coderegels op het paspoort, de ID-kaart of het Nederlandse rijbewijs; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
-      nfcReadHint:
-        "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
-      documentPhotoHint:
-        "De persoon fotografeert in de Idem-app de voor- en achterkant van de ID-kaart of het rijbewijs, of de fotopagina van het paspoort.",
-      faceVerificationHint:
-        "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
-      stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
-      addressHint:
-        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
-      diplomaUploadHint:
-        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
-      faceLocationNative:
-        "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
-      faceProvider: "Aanbieder gezichtscontrole",
-      faceProviderHint:
-        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto.",
-      faceWithoutChip:
-        "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
-      dataTitle: "Gevraagde resultaatgegevens",
-      identityLocked:
-        "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
-      dataHint:
-        "Bepaalt welke resultaatgegevens de verificatiedienst teruggeeft. Alleen gegevens van een stap in deze flow kunnen worden gevraagd; zonder vinkje wordt alleen de uitkomst teruggegeven. De wallet bewaart zelf alleen de uitkomst en het betrouwbaarheidsniveau.",
-      checksTitle: "Vereiste controles",
-      checksHint:
-        "De controle van de chipgegevens is verplicht als de chip wordt gelezen, en de gezichtsvergelijking bij de gezichtscontrole, dus die staan vast aan; de kopiecontrole en de controle op een levend persoon blijven optioneel.",
-      faceMatchThreshold: "Drempel gezichtsvergelijking",
-      faceMatchThresholdHint:
-        "0–1, leeg is alleen geslaagd/gezakt. Alleen bij de gezichtscontrole.",
-      documentsTitle: "Geaccepteerde documenten",
-      documentTypes: "Geaccepteerde documenttypen",
-      documentTypesHint:
-        "Gescheiden door komma's: P (paspoort), I (ID-kaart), residence_permit (verblijfsvergunning), drivers_license (Nederlands rijbewijs). Leeg accepteert alles.",
-      issuingCountries: "Geaccepteerde landen van uitgifte",
-      issuingCountriesHint:
-        "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",
-      policyTitle: "Betrouwbaarheid en privacy",
-      assuranceLevel: "Vereist betrouwbaarheidsniveau",
-      assuranceLevelHint:
-        "Met een vereist niveau wordt de sessie daaraan gehouden: een sessie die tekortschiet wordt afgewezen. Zonder vereist niveau meldt de sessie nog steeds welk niveau de controles haalden. Een gezichtsstap waarvan de levendheidscontrole of de gezichtsvergelijking mislukt, wijst de sessie hoe dan ook af. Een sessie kan een hoger niveau halen dan vereist. Alleen een gezicht dat Regula controleert kan Substantieel halen.",
-      assuranceLevelNeeds: {
-        low: "Laag vereist het lezen van de chip met geverifieerde chipgegevens. Zet die instellingen aan om de flow op te slaan.",
-        substantial:
-          "Substantieel vereist het lezen van de chip met geverifieerde chipgegevens en kopiecontrole, en een levend gezicht dat Regula met de chipfoto vergelijkt. Zet die instellingen aan om de flow op te slaan.",
-      },
-      none: "(geen)",
-      defaultOption: "(standaard: {{option}})",
-      yes: "Ja",
-      no: "Nee",
-      bsnPolicy: "BSN-beleid overschrijven",
-      retentionSeconds: "Bewaartermijn overschrijven (seconden)",
-      retentionSecondsHint:
-        "Ingevuld vervangt dit de bewaartermijn van de organisatie voor de sessies van deze flow; leeg of 0 houdt die van de organisatie aan.",
-      keepFacePhotos: "Gezichtsfoto's bewaren overschrijven",
-      keepFacePhotosHint:
-        "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
-      blurBsn: "BSN vervagen overschrijven",
       ageOver: "Minimumleeftijd",
       ageOverOption: "{{age}} jaar of ouder",
       ageOverHint:
@@ -1454,13 +1388,134 @@ export const nl: Translation<typeof en> = {
         steps: "Kies minstens één stap.",
         assuranceLevel:
           "Deze flow kan het vereiste niveau niet halen: zet aan wat het niveau vereist, of verlaag het.",
-        issuingCountries:
-          "Gebruik landcodes van drie letters zoals NLD, gescheiden door komma's.",
+        documentTypes: "Vink minstens één documenttype aan.",
+        issuingCountries: "Voeg een land toe, of kies Elk land.",
         faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
         retentionSeconds: "Vul een heel aantal seconden in.",
         ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
         identity:
           "Een gegevensverzoek of diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
+      },
+    },
+    editor: {
+      orgDefault: "Standaard van de organisatie",
+      nameHint:
+        "Alleen jij en je collega's zien deze naam. De persoon die wordt gecontroleerd ziet hem nooit.",
+      level: "Niveau van identiteitsverificatie",
+      levelHint:
+        "Het deel identiteitsverificatie van een eIDAS-betrouwbaarheidsniveau (uitvoeringsverordening 2015/1502).",
+      levels: {
+        none: {
+          title: "Geen",
+          hint: "Er is geen niveau vereist. De persoon doet de stappen onder Geavanceerde instellingen; het resultaat zegt welk niveau is gehaald.",
+        },
+        low: {
+          title: "Laag",
+          hint: "De persoon scant met de telefoon de chip in het paspoort of de ID-kaart. Geen selfie.",
+          caveat:
+            "Laat zien dat het document echt is, niet dat de persoon die scant de eigenaar is of dat de chip het origineel is.",
+        },
+        substantial: {
+          title: "Substantieel",
+          hint: "De persoon scant het paspoort of de ID-kaart, houdt het tegen de telefoon zodat de chip wordt gelezen, en maakt een selfie. Een controle die tekortschiet wordt afgewezen.",
+        },
+      },
+      regula:
+        "Documenten en gezichten worden gecontroleerd door Regula, in de Idem- of Yivi-app.",
+      advanced: {
+        title: "Geavanceerde instellingen",
+        hint: "Stappen, documenten, wat je ontvangt, privacy.",
+      },
+      locks: {
+        required: "Vereist voor {{level}}",
+        mandatory: "Dit is verplicht voor {{level}}",
+        passiveAuth: "Altijd aan als de chip wordt gelezen",
+        faceMatch: "Altijd aan bij de gezichtscontrole",
+      },
+      steps: {
+        title: "Wat de persoon doet",
+        hint: "Stappen in de volgorde waarin ze gebeuren.",
+        scanAndRead: "Het document scannen en lezen",
+        scanAndReadHint:
+          "De persoon scant de coderegels van het paspoort, de ID-kaart of het Nederlandse rijbewijs en houdt het document daarna tegen de telefoon zodat de chip wordt gelezen.",
+        addressHint:
+          "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
+        photoHint:
+          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
+        faceHint:
+          "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
+        diplomaHint:
+          "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
+        faceWithoutChip:
+          "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
+        lifetime: "Geldigheid QR-code",
+        lifetimeHint:
+          "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+        lifetimeDefault: "Standaard van de organisatie ({{minutes}} minuten)",
+        minutes_one: "{{count}} minuut",
+        minutes_other: "{{count}} minuten",
+      },
+      documents: {
+        title: "Welke documenten",
+        hint: "Een document dat niet is aangevinkt wordt geweigerd.",
+        types: "Documenttypen",
+        passport: "Paspoort",
+        id_card: "Identiteitskaart",
+        residence_permit: "Verblijfsvergunning",
+        drivers_license: "Nederlands rijbewijs",
+        countries: "Landen van uitgifte",
+        any: "Elk land",
+        only: "Alleen deze landen",
+        add: "Een land toevoegen",
+        addPlaceholder: "Een land toevoegen",
+        addHint: "Kies uit de lijst van landen die documenten uitgeven.",
+        remove: "{{country}} verwijderen",
+        removeLabel: "Verwijderen",
+      },
+      receive: {
+        title: "Wat je ontvangt",
+        hint: "Zonder vinkjes krijg je alleen de uitkomst.",
+        identityLocked:
+          "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
+      },
+      checks: {
+        title: "Controles",
+        hint: "Een mislukte controle wijst de sessie af. De gezichtsvergelijking gebruikt de drempel van Regula.",
+      },
+      privacy: {
+        title: "Privacy",
+        hint: "Hoe lang gegevens worden bewaard en wat wordt afgeschermd.",
+        retention: "Persoonsgegevens bewaren gedurende",
+        retentionHint:
+          "Nooit korter dan een wettelijke termijn die is ingesteld onder Instellingen › Gegevens en privacy.",
+        retentionDefault: "Standaard van de organisatie ({{days}} dagen)",
+        retentionSeconds_one: "{{count}} seconde",
+        retentionSeconds_other: "{{count}} seconden",
+        bsn: "BSN",
+        bsnHint:
+          "Bewaar het volledige BSN alleen als de wet je toestaat het te verwerken.",
+        blackOutBsn: "Het BSN op documentfoto's zwart maken",
+        keepFacePhotos: "Gezichtsfoto's bewaren na de vergelijking",
+        keepFacePhotosHint:
+          "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
+      },
+      footer:
+        "Opslaan maakt versie {{version}}. Verzoeken die al zijn verstuurd houden hun versie.",
+      countries: {
+        EUE: "Europese Unie (laissez-passer)",
+        GBD: "Burger van een Brits overzees gebiedsdeel",
+        GBN: "Brits staatsburger (overzee)",
+        GBO: "Brits overzees burger",
+        GBP: "Brits beschermd persoon",
+        GBS: "Brits onderdaan",
+        UNA: "Gespecialiseerd agentschap van de Verenigde Naties",
+        UNK: "VN-missie in Kosovo (UNMIK)",
+        UNO: "Verenigde Naties",
+        XCC: "Caribische Gemeenschap (CARICOM)",
+        XES: "Organisatie van Oost-Caribische Staten",
+        XMP: "Mercosur",
+        XOM: "Soevereine Militaire Orde van Malta",
+        XPO: "Interpol",
       },
     },
   },

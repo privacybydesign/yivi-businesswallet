@@ -29,8 +29,8 @@ request from their member detail page (admin-only, like that page). The people
 an org verifies are its members, or external people with no login: an e-mail
 address and an optional name, a request without a `userId`. The org's own
 backend can send to them through the public API with one of its keys. Sending
-creates an engine session (2, 5 or 10 minutes, the org's session lifetime for an
-external person) and mails its vcmrtd deep link as a QR code
+creates an engine session (2, 5 or 10 minutes: the flow's own lifetime when it
+sets one, else the org's session lifetime for an external person) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
 outcome lands on the request, in the audit log and, for an external person, at
 the org's webhook.
@@ -75,9 +75,10 @@ public API and the API key routes), `apikey_store.go` (keys),
 settings; `settings_store.go` is the flow selection),
 `webhook*.go` (endpoint, outbox, deliverer), `internal/safehttp` (the SSRF
 guard every externally supplied URL goes through),
-`frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table and
-the flow editor), `identity-proofing-flow.tsx` (a flow's page: People and
-Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
+`frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table),
+`flow-editor.tsx` + `flow-editor-advanced.tsx` + `flow-editor-parts.tsx` (the
+flow editor), `frontend/src/lib/issuing-countries.ts` (its country list),
+`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
 details and review), `proofing-send.tsx` (the Verify a person dialog),
 `proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
 tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
@@ -220,7 +221,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   request. The org holds (§4 has the detail):
   - **Settings**, one row per org (`identity_proofing_settings`,
     `OrgSettingsStore` in `org_settings_store.go`, `Settings` in `proofing.go`):
-    session (QR) lifetime 2, 5 or 10 minutes; data retention 7, 30, 90, 180 or
+    session (QR) lifetime 2, 5 or 10 minutes, which a flow may replace with its
+    own (`SessionTTLSeconds` on the flow, §2); data retention 7, 30, 90, 180 or
     365 days (default 7); how "delete my data" requests are decided (`review`
     or `automatic`, default `review`); a legal retention; branding (display
     name, colours, font, logo, support contact, privacy URL, hide "powered
@@ -239,7 +241,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   wallet's "Flows" pages edit them through `proofing.Service`, and it is
   `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
-    `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
+    `nfc_read` (NFC chip read) toggle as a pair, shown as one step, "Scan and
+    read the document"; `document_photo` (a photo of
     the printed page, `POST /app/{token}/steps/document_photo`) stands
     alone; `face_verification` is one step. `draftSteps` lists
     `document_photo` between `document_capture` and `nfc_read`: the Idem app
@@ -255,7 +258,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
-    codes. Each item is available only with its step and cleared otherwise;
+    codes, in the order of `REQUESTED_ATTRIBUTES`. Each item is available only
+    with its step and cleared otherwise;
     none is forced on. With none ticked the editor saves `outcome_only`, which
     releases the outcome only (status and assurance), as the subject is told.
     A flow saved without a list releases everything its steps collect
@@ -317,7 +321,16 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
     UNA, UNK, XOM, XPO, XCC, XES, XMP, RKS and the GBD/GBN/GBO/GBP/GBS
     variants). A German document writes "D", which counts as DEU
-    (`flow.IssuingStateCode`). The editor checks the 3-letter form first.
+    (`flow.IssuingStateCode`). The editor picks them from a list, never typed
+    (`lib/issuing-countries.ts`: the ISO countries named in the page's language
+    and ICAO's own codes named by the editor), and a Go test beside
+    `ValidIssuingCountry` holds every code on it to the engine's. "Any country"
+    saves an empty list.
+  - Document types: `acceptedDocumentTypes` is a list of ICAO document codes;
+    the editor offers Passport (`P`) and Identity card (`I`, `ID`). Both ticked
+    saves an empty list, which accepts any document, because the Yivi route
+    refuses a flow that lists types (`openid4vpverifier.proofingQuery` asks no
+    document type). A code of a stored version that neither kind covers is kept.
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
@@ -366,10 +379,14 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - substantial: low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
       the face matched by Regula against the chip's portrait (DG2, a
       licence's DG6).
-  - **The level is a minimum, nothing more.** Picking one turns no step, check
-    or provider on. A flow whose settings cannot reach it is not saved
-    (`reachesAssuranceLevel` in the editor, `flow.Validate` in the engine).
-    `draftFromFlow` loads a version as stored.
+  - **Picking a level ticks what it needs and locks it** (`withAssuranceLevel`,
+    `lockedByLevel`): Low the chip read and its genuineness check, Substantial
+    also the copy check and the face check with liveness. The rest stays free,
+    and what a higher level ticked stays ticked when a lower one is picked.
+    `draftFromFlow` applies the level too, so a stored version is consistent
+    with its locks. A flow whose settings still cannot reach the level is not
+    saved (`reachesAssuranceLevel` in the editor, `flow.Validate` in the
+    engine).
   - **The level a session achieves** is the highest whose checks all verified
     on the evidence it produced (`computeEIDASAssuranceLevel`):
     - computed without the required level, so it can come out higher;
@@ -414,11 +431,25 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     approved by the engine without comparing (create already refused it on
     a flow above low); one reported with no level counts as low
     (`yiviEIDASLevel`).
-  - Overrides: BSN policy, keep face photos and blur BSN (default/true/false),
-    and retention in seconds, which replaces the org's data retention for the
-    flow's sessions of external people. An unset BSN policy is `omit` (`privacy.DefaultBSNPolicy`):
-    an organisation may process a BSN only where a law allows it, so keeping
-    one is the flow's choice. Unset keep face photos and blur BSN are off.
+  - Privacy and timing, always saved explicitly by the editor:
+    - BSN policy, "Leave it out" (`omit`, a new flow's), "Keep the last 3
+      digits" (`mask`) or "Keep the full BSN" (`retrieve`). The engine reads a
+      flow without a policy as `omit` (`privacy.DefaultBSNPolicy`), so the
+      editor shows a stored flow with none as that (`UNSET_BSN_POLICY`): an
+      organisation may process a BSN only where a law allows it, so keeping
+      one is the flow's choice.
+    - "Black out the BSN on document photos" is `blurBsn` (on in a new flow),
+      which fills the printed BSN region solid.
+    - "Keep face photos after the match" is `keepFacePhotos` (off in a new
+      flow): off pixelates the chip portrait and the selfie once the match
+      ran.
+    - Retention in days (the org's, 1, 30 or 90; stored in seconds, and a
+      stored value that is none of them stays a choice), which replaces the
+      org's data retention for the flow's sessions of external people.
+    - The session (QR) lifetime (the org's, 2, 5 or 10 minutes), saved on the
+      flow version.
+  - The face match threshold has no field in the editor: a stored one is carried
+    over unchanged.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always
@@ -591,15 +622,17 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 
 ## 2. The mail is the session
 
-A session runs the org's session lifetime (2, 5 or 10 minutes; a member's runs
-`SessionTTL`, 10) within the
+A session runs its flow's own lifetime when the flow sets one, else the org's
+session lifetime (2, 5 or 10 minutes; a member's runs the flow's, else
+`SessionTTL`, 10; `flowSessionTTL`) within the
 engine's hard cap `SessionMaxLifetime` (15), and its claim, the `handover`
 token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
 claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
 expiry), so the mailed QR works for the whole session.
 
-**Send.** `CreateRequest` creates the engine session (`TTL` = the org's
-`session_ttl_seconds` for an external person, else `proofing.SessionTTL` (600);
+**Send.** `CreateRequest` creates the engine session (`TTL` = the flow's
+`sessionTtlSeconds`, else the org's `session_ttl_seconds` for an external person,
+else `proofing.SessionTTL` (600);
 client reference = the request id), stores the request
 with `link_expires_at` = the session's expiry, attaches the session
 (`AttachSession`, audited `identity_proofing.session_created`; `flow_version`

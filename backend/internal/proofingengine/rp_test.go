@@ -58,6 +58,28 @@ func TestSessionIdentityEvidence(t *testing.T) {
 	}
 }
 
+func TestSessionTTLBoundsRefused(t *testing.T) {
+	s := &Server{}
+	for _, seconds := range []int{-1, maxSessionTTLSeconds + 1, 1 << 62} {
+		spec := pp.FlowSpec{Name: "x", Steps: []string{"document_capture"}, SessionTTLSeconds: seconds}
+		var refused *pp.RejectedError
+		if _, err := s.CreateFlow(context.Background(), pp.Tenant{ID: "org"}, spec); !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
+			t.Errorf("CreateFlow(sessionTtlSeconds %d) = %v, want 400", seconds, err)
+		}
+	}
+}
+
+func TestSessionTTLRoundTrips(t *testing.T) {
+	spec := pp.FlowSpec{Name: "x", Steps: []string{"document_capture", "nfc_read"}, SessionTTLSeconds: 300}
+	fd := toDefinition("org", "f1", spec)
+	if fd.SessionTTL != 5*time.Minute {
+		t.Errorf("definition's session TTL = %v, want 5m0s", fd.SessionTTL)
+	}
+	if got := toFlow(fd).SessionTTLSeconds; got != 300 {
+		t.Errorf("flow's sessionTtlSeconds = %d, want 300", got)
+	}
+}
+
 // A session's retention changes to a positive one, never to the engine's
 // default: 0 would drop the flow's own.
 func TestSetSessionsRetention(t *testing.T) {

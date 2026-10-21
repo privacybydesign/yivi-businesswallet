@@ -417,6 +417,21 @@ func TestValidatePositiveRetention(t *testing.T) {
 	}
 }
 
+func TestValidateSessionTTL(t *testing.T) {
+	for ttl, refused := range map[time.Duration]bool{
+		0: false, 2 * time.Minute: false, MaxSessionTTL: false,
+		-time.Minute: true, MaxSessionTTL + time.Second: true,
+	} {
+		fd := validFlow()
+		fd.SessionTTL = ttl
+		if refused {
+			wantRefused(t, fd, "sessionTtl must be between")
+		} else if err := Validate(fd); err != nil {
+			t.Errorf("Validate(sessionTtl %v) = %v, want nil", ttl, err)
+		}
+	}
+}
+
 func TestValidateUnknownSelfie(t *testing.T) {
 	fd := validFlow()
 	fd.SelfieLocation = "phone"
