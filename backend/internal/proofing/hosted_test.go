@@ -317,3 +317,31 @@ func TestHostedViewLeavesOutFlowLabels(t *testing.T) {
 		t.Errorf("hosted view = %s, want no flow name %q", w.Body.String(), appFlow.Name)
 	}
 }
+
+// The hosted page gets the reasons of every language, and an object even for a
+// flow saved before reasons existed, so the page can tell none from a failure.
+func TestHostedViewCarriesReasons(t *testing.T) {
+	d := newDiplomaFixture(DiplomasOff)
+	_, token := d.sendHosted(t)
+	view := func() string {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		return w.Body.String()
+	}
+
+	const noReasons = `"attributeReasons":{}`
+	if body := view(); !strings.Contains(body, noReasons) {
+		t.Errorf("hosted view of a flow without reasons = %s, want %s", body, noReasons)
+	}
+
+	i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == appFlow.ID })
+	d.ips.flows[i].AttributeReasons = documentReasons()
+	const withReasons = `"attributeReasons":{"dg1":{"en":"` + reasonDocumentEN + `","nl":"` + reasonDocumentNL + `"}}`
+	if body := view(); !strings.Contains(body, withReasons) {
+		t.Errorf("hosted view = %s, want %s", body, withReasons)
+	}
+}

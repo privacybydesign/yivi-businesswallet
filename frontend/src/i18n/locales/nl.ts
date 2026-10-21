@@ -757,6 +757,7 @@ export const nl: Translation<typeof en> = {
         intro:
           "Je bevestigt je identiteit met je paspoort of identiteitskaart. {{name}} ontvangt:",
         noData: "Alleen de uitkomst: of je identiteit is geverifieerd.",
+        why: "Waarom:",
         retention_one:
           "Deze gegevens worden uiterlijk {{count}} dag na afloop van de controle verwijderd.",
         retention_other:
@@ -1516,7 +1517,7 @@ export const nl: Translation<typeof en> = {
       },
       receive: {
         title: "Wat je ontvangt",
-        hint: "Zonder vinkjes krijg je alleen de uitkomst.",
+        hint: "Zonder vinkjes krijg je alleen de uitkomst. Elk onderdeel dat je aanvinkt heeft een reden nodig in elke taal van de gehoste pagina; de persoon leest die voor ze beginnen.",
         identityLocked:
           "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
         ageOver: "Minimumleeftijd",
@@ -1525,6 +1526,8 @@ export const nl: Translation<typeof en> = {
           "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
         ageOverLocked:
           "Uit bij verplichte diploma's: die worden met de geboortedatum vergeleken.",
+        reason: "Waarom je het nodig hebt · {{language}}",
+        reasonMissing: "Vul ook de reden in voor {{language}}.",
       },
       checks: {
         title: "Controles",

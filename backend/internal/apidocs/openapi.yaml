@@ -5093,11 +5093,11 @@ paths:
         Requires an administrator role in the organisation. The flow configuration: `name`,
         `steps`, and optionally `faceProvider` (`regula`, the default for a flow with a face
         step and the only provider; anything else is refused),
-        `requestedAttributes`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
+        `requestedAttributes`, `attributeReasons`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
         `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
         `legalBasis` and `processingPurpose`. Face capture is always set to the app (`selfieLocation` is
-        overwritten). An empty `name` or `steps`, or an unknown `faceProvider`, is 400
+        overwritten). An empty `name` or `steps`, an unknown `faceProvider`, or a missing `attributeReasons` entry, is 400
         `invalid_input`. The proofing engine validates the combination (including `regula` on a
         deployment without Regula) and its refusal is returned as 422 `rejected_by_provider`.
         Creates version 1; the answer is the flow with `completable` and `needsReferencePhoto`.
@@ -5235,9 +5235,9 @@ paths:
       description: >-
         Requires an administrator role in the organisation. Same body as creating a flow; it is
         stored as the next version and made the active one. Requests already sent keep the
-        version their session pinned. An empty `name` or `steps`, or an unknown `faceProvider`,
-        is 400 `invalid_input`. A data request flow, or one requiring diplomas, keeps `dg1` in
-        `requestedAttributes` (422 `flow_no_identity`).
+        version their session pinned. An empty `name` or `steps`, an unknown `faceProvider`,
+        or a missing `attributeReasons` entry is 400 `invalid_input`. A data request flow, or
+        one requiring diplomas, keeps `dg1` in `requestedAttributes` (422 `flow_no_identity`).
       requestBody:
         required: true
         content:
@@ -7621,7 +7621,7 @@ paths:
         is rate-limited per organisation, across all its links. `organization` (its `name`,
         `branding`, whose `logoUri` is this
         link's logo route, and `dataRetentionDays`), `flow` (its `name`, `requestedAttributes`,
-        `requiredAssuranceLevel`, `yiviAvailable`, `diplomaMode` and `retentionDays`, the most
+        `attributeReasons`, `requiredAssuranceLevel`, `yiviAvailable`, `diplomaMode` and `retentionDays`, the most
         days the session's data is kept), the extracts added so far
         (`diplomas`), and the progress: `status`, `errorCode`, `method`, `started`,
         `completedAt`, `diplomasUntil` and `linkExpiresAt` (the link's end until started, then
@@ -7669,6 +7669,10 @@ paths:
                       name: Onboarding
                       requiredAssuranceLevel: substantial
                       requestedAttributes: [dg1, dg2, selfie]
+                      attributeReasons:
+                        dg1:
+                          en: To check who you are and your date of birth.
+                          nl: Om te controleren wie je bent en je geboortedatum.
                       yiviAvailable: true
                       diplomaMode: "off"
                       addressMode: "off"
@@ -11092,6 +11096,19 @@ components:
           minimum: 1
           maximum: 120
           description: The age, in years, `age_over` answers for; set exactly when `requestedAttributes` has `age_over`.
+        attributeReasons:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: string
+              maxLength: 300
+          description: >-
+            Why each requested attribute is collected, by attribute and then language (`en`,
+            `nl`): what the person reads before they start. Every attribute in `requestedAttributes`
+            other than `outcome_only` needs a reason in each language the flow's hosted page
+            offers (every supported one until its admin sets them), or the flow is refused (400
+            `invalid_input`). A flow saved before reasons existed has none.
         selfieLocation:
           type: string
           description: Ignored; the wallet always sets the face capture to the app.
@@ -12310,6 +12327,15 @@ components:
                   type: array
                   items:
                     type: string
+                attributeReasons:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  description: >-
+                    Why each requested attribute is collected, by attribute and language. Empty
+                    for a flow saved without reasons.
                 yiviAvailable:
                   type: boolean
                   description: >-
@@ -12332,7 +12358,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [requestedAttributes, yiviAvailable, diplomaMode, addressMode, retentionDays]
+              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.

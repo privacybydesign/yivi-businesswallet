@@ -7,6 +7,7 @@ import {
 import type {
   AddressMode,
   AddressVerification,
+  AttributeReasons,
   DataRequestKind,
   DiplomaMode,
   FlowKind,
@@ -171,6 +172,10 @@ export const REQUESTED_ATTRIBUTES = [
 // steps collect, so a flow with no data ticked sends this instead.
 export const OUTCOME_ONLY = "outcome_only";
 
+// The longest reason a flow gives for an item, in each language
+// (maxAttributeReasonLength).
+export const MAX_ATTRIBUTE_REASON_CHARS = 300;
+
 // The eIDAS levels the proofing engine can claim (flow.LevelRequirements);
 // high is not among them.
 export const ASSURANCE_LEVELS = ["low", "substantial"] as const;
@@ -315,6 +320,9 @@ export interface ProofingFlowDraft {
   requestedAttributes: ReadonlySet<string>;
   // Whole years as typed, the age the age check answers for.
   ageOver: string;
+  // Why each item is collected. An unticked item keeps what was typed, so
+  // ticking it again brings it back; only the collected ones are saved.
+  attributeReasons: AttributeReasons;
   // Every kind ticked accepts any document.
   documentKinds: ReadonlySet<DocumentKind>;
   // Document codes of a stored version that no kind covers, kept as stored.
@@ -468,12 +476,29 @@ export function attributeAvailable(
   return attr !== undefined && draftSteps(draft).includes(attr.step);
 }
 
+// The requested data a draft collects: ticked, with its step in the draft.
+export function collectedAttributes(draft: ProofingFlowDraft): string[] {
+  return REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+    (value) =>
+      draft.requestedAttributes.has(value) && attributeAvailable(draft, value),
+  );
+}
+
+// The reason a draft gives for an item in a language; "" when there is none.
+export function draftReason(
+  draft: ProofingFlowDraft,
+  attribute: string,
+  locale: string,
+): string {
+  return (draft.attributeReasons[attribute]?.[locale] ?? "").trim();
+}
+
 // A new flow starts with every step the Idem app runs on and the mandatory
 // checks on, and receives nothing but the outcome until an item is ticked
-// (data minimisation; a data request or required diplomas tick Name and
-// document details, identityRequired). The document photo starts off: the
-// app cannot take it yet. It accepts any document, leaves the BSN out, blacks
-// it out on document photos and keeps no face photos.
+// (data minimisation; required diplomas tick Name and document details,
+// identityRequired), so it asks no reason yet. The document photo starts off:
+// the app cannot take it yet. It accepts any document, leaves the BSN out,
+// blacks it out on document photos and keeps no face photos.
 export function emptyFlowDraft(): ProofingFlowDraft {
   return {
     name: "",
@@ -486,6 +511,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     faceMatchThreshold: null,
     requestedAttributes: new Set(),
     ageOver: String(DEFAULT_AGE_OVER),
+    attributeReasons: {},
     documentKinds: new Set(DOCUMENT_KINDS),
     otherDocumentTypes: [],
     storedDocumentTypes: null,
@@ -531,6 +557,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceMatchThreshold: flow.checkThresholds?.[CHECK_FACE_MATCH] ?? null,
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
+    attributeReasons: flow.attributeReasons ?? {},
     documentKinds: storedDocumentKinds(storedTypes),
     otherDocumentTypes: storedTypes.filter(
       (type) => documentKindOf(type) === undefined,
@@ -563,12 +590,17 @@ export type FlowDraftError =
   | "documentTypes"
   | "issuingCountries"
   | "faceMatchThreshold"
-  | "ageOver";
+  | "ageOver"
+  | "reasons";
 
 // requiresIdentity is identityRequired for the flow's kind and diplomas.
+// locales are the ones the flow's hosted page offers: every item the draft
+// collects needs a reason in each. A page that names none offers every
+// supported language.
 export function flowDraftError(
   draft: ProofingFlowDraft,
   requiresIdentity = false,
+  locales: readonly string[] = SUPPORTED_LANGUAGES,
 ): FlowDraftError | null {
   if (draft.name.trim() === "") {
     return "name";
@@ -601,7 +633,11 @@ export function flowDraftError(
   if (ageOverInvalid(draft)) {
     return "ageOver";
   }
-  return null;
+
+  const unexplained = collectedAttributes(draft).some((attribute) =>
+    locales.some((locale) => draftReason(draft, attribute, locale) === ""),
+  );
+  return unexplained ? "reasons" : null;
 }
 
 // Whether draft's age check asks an age the service refuses
@@ -658,12 +694,7 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
       requiredChecks.push(CHECK_LIVENESS);
     }
   }
-  const requestedAttributes: string[] = REQUESTED_ATTRIBUTES.map(
-    (a) => a.value,
-  ).filter(
-    (value) =>
-      draft.requestedAttributes.has(value) && attributeAvailable(draft, value),
-  );
+  const requestedAttributes = collectedAttributes(draft);
   const spec: ProofingFlowSpec = {
     ...draft.carried,
     name: draft.name.trim(),
@@ -686,6 +717,12 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.faceVerification && draft.faceMatchThreshold !== null) {
     spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
   }
+
+  const reasons = savedReasons(draft, requestedAttributes);
+  if (Object.keys(reasons).length > 0) {
+    spec.attributeReasons = reasons;
+  }
+
   if (draft.assuranceLevel !== "") {
     spec.requiredAssuranceLevel = draft.assuranceLevel;
   }
@@ -727,6 +764,29 @@ export function asksAge(draft: ProofingFlowDraft): boolean {
     draft.requestedAttributes.has(ATTRIBUTE_AGE_OVER) &&
     attributeAvailable(draft, ATTRIBUTE_AGE_OVER)
   );
+}
+
+// The reasons a draft saves: those it gave for the items it collects, in every
+// language it holds, trimmed.
+function savedReasons(
+  draft: ProofingFlowDraft,
+  collected: readonly string[],
+): AttributeReasons {
+  const saved: AttributeReasons = {};
+  for (const attribute of collected) {
+    const given = Object.keys(draft.attributeReasons[attribute] ?? {}).flatMap(
+      (locale) => {
+        const text = draftReason(draft, attribute, locale);
+        return text === "" ? [] : [[locale, text] as const];
+      },
+    );
+    if (given.length === 0) {
+      continue;
+    }
+
+    saved[attribute] = Object.fromEntries(given);
+  }
+  return saved;
 }
 
 // The flows a member may send a request on, and the one the form starts on:
@@ -1800,6 +1860,17 @@ export function hostedDraftDirty(
     draft.completion !== seed.completion ||
     draft.locales.join() !== seed.locales.join()
   );
+}
+
+// The reason an item is collected, in the language the person reads: "nl-NL"
+// reads Dutch. None when the flow gives none in it, so the page says nothing
+// rather than something in a language the person may not read.
+export function reasonIn(
+  reasons: Readonly<Record<string, string>> | undefined,
+  language: string,
+): string | undefined {
+  const text = reasons?.[language.split("-")[0].toLowerCase()]?.trim();
+  return text === "" ? undefined : text;
 }
 
 // The text colour readable on a #rrggbb fill (WCAG relative luminance): the

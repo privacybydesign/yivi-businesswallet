@@ -300,6 +300,12 @@ type FlowDefinition struct {
 	// AgeOver is the age, in years, AttributeAgeOver answers for: set exactly
 	// when that attribute is requested.
 	AgeOver int `json:"AgeOver"`
+	// AttributeReasons is why each requested attribute is collected, by
+	// attribute and then language, as the person reads it before they start. A
+	// version saved before reasons existed has none; which languages the
+	// reasons must cover is the wallet's to check, as it holds the hosted
+	// page's languages.
+	AttributeReasons map[string]map[string]string `json:"AttributeReasons"`
 	// SelfieLocation is who runs the face step (empty is the browser); Validate
 	// refuses it without a face step.
 	SelfieLocation StepLocation `json:"SelfieLocation"`

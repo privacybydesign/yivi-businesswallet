@@ -41,6 +41,10 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
+  MAX_ATTRIBUTE_REASON_CHARS,
+  collectedAttributes,
+  draftReason,
+  reasonIn,
   mailLifetimeMinutes,
   readsIdentity,
   sendableByMail,
@@ -111,8 +115,22 @@ function apiError(status: number, code: string, message: string): ApiError {
   return new ApiError(status, "", "/api/v1/x", { error: message, code });
 }
 
+// A reason for every item in every language, so a test's draft is refused
+// only for what the test is about.
+const EXPLAINED = Object.fromEntries(
+  REQUESTED_ATTRIBUTES.map(({ value }) => [
+    value,
+    { en: `Why ${value}`, nl: `Waarom ${value}` },
+  ]),
+);
+
 function draft(patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft {
-  return { ...emptyFlowDraft(), name: "  Passport check ", ...patch };
+  return {
+    ...emptyFlowDraft(),
+    name: "  Passport check ",
+    attributeReasons: EXPLAINED,
+    ...patch,
+  };
 }
 
 // Every item What you receive offers, ticked, but the age check, which
@@ -722,6 +740,142 @@ describe("ageOverChoices", () => {
     expect(ageOverChoices(draft({ ageOver: "17" }))).toEqual([
       12, 16, 17, 18, 21, 65,
     ]);
+  });
+});
+
+describe("attribute reasons", () => {
+  const chipOnly = draft({ faceVerification: false });
+  const bare = (patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft =>
+    draft({ attributeReasons: {}, ...patch });
+
+  it("asks a new flow for a reason on every item it starts with", () => {
+    expect(flowDraftError({ ...emptyFlowDraft(), name: "F" })).toBe("reasons");
+  });
+
+  it("wants each collected item explained in every language the page offers", () => {
+    expect(flowDraftError(bare(), false, ["en", "nl"])).toBe("reasons");
+    expect(flowDraftError(draft(), false, ["en", "nl"])).toBeNull();
+
+    const dutchMissing = draft({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { en: "To check your age." },
+      },
+    });
+    expect(flowDraftError(dutchMissing, false, ["en", "nl"])).toBe("reasons");
+    expect(flowDraftError(dutchMissing, false, ["en"])).toBeNull();
+  });
+
+  it("counts a blank reason as none", () => {
+    const blank = draft({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { en: "  ", nl: "Om te controleren." },
+      },
+    });
+    expect(flowDraftError(blank, false, ["en", "nl"])).toBe("reasons");
+    expect(draftReason(blank, "dg1", "en")).toBe("");
+  });
+
+  it("asks nothing for an item that is not collected", () => {
+    const outcomeOnly = bare({ requestedAttributes: new Set() });
+    expect(flowDraftError(outcomeOnly, false, ["en", "nl"])).toBeNull();
+
+    // Selfie stays ticked while its step is off, and is not collected.
+    const stepOff = draft({
+      faceVerification: false,
+      attributeReasons: { ...EXPLAINED, selfie: {}, biometrics: {} },
+    });
+    expect(flowDraftError(stepOff, false, ["en", "nl"])).toBeNull();
+  });
+
+  it("lists the data a draft collects in the editor's order", () => {
+    expect(collectedAttributes(chipOnly)).toEqual([
+      "dg1",
+      "chip_checks",
+      "dg11",
+      "dg2",
+    ]);
+    expect(
+      collectedAttributes(bare({ requestedAttributes: new Set() })),
+    ).toEqual([]);
+  });
+
+  it("sends the trimmed reasons of the collected items only", () => {
+    const spec = flowSpecFromDraft(
+      draft({
+        faceVerification: false,
+        attributeReasons: {
+          ...EXPLAINED,
+          dg1: { en: "  To check your age. ", nl: "Om je leeftijd te zien." },
+        },
+      }),
+    );
+    expect(spec.attributeReasons).toEqual({
+      dg1: { en: "To check your age.", nl: "Om je leeftijd te zien." },
+      chip_checks: EXPLAINED.chip_checks,
+      dg11: EXPLAINED.dg11,
+      dg2: EXPLAINED.dg2,
+    });
+  });
+
+  it("sends none for a flow that collects nothing", () => {
+    const spec = flowSpecFromDraft(draft({ requestedAttributes: new Set() }));
+    expect(spec.requestedAttributes).toEqual([OUTCOME_ONLY]);
+    expect(spec).not.toHaveProperty("attributeReasons");
+  });
+
+  it("starts from the reasons a flow has, and from none for one saved before", () => {
+    const flow = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["nfc_read", "document_capture"],
+      requestedAttributes: ["dg1"],
+      createdAt: "2026-09-28T00:00:00Z",
+      completable: true,
+    };
+    expect(draftFromFlow(flow).attributeReasons).toEqual({});
+    expect(flowDraftError(draftFromFlow(flow), false, ["en", "nl"])).toBe(
+      "reasons",
+    );
+
+    const explained = { ...flow, attributeReasons: { dg1: EXPLAINED.dg1 } };
+    expect(draftFromFlow(explained).attributeReasons).toEqual({
+      dg1: EXPLAINED.dg1,
+    });
+    expect(
+      flowDraftError(draftFromFlow(explained), false, ["en", "nl"]),
+    ).toBeNull();
+  });
+
+  it("reads the reason in the page's language and never another", () => {
+    const reasons = { en: "To check your age.", nl: "Om je leeftijd te zien." };
+    expect(reasonIn(reasons, "nl")).toBe(reasons.nl);
+    expect(reasonIn(reasons, "nl-NL")).toBe(reasons.nl);
+    expect(reasonIn(reasons, "EN")).toBe(reasons.en);
+    expect(reasonIn({ en: "To check your age." }, "nl")).toBeUndefined();
+    expect(reasonIn({ nl: "  " }, "nl")).toBeUndefined();
+    expect(reasonIn(undefined, "en")).toBeUndefined();
+  });
+});
+
+// The longest reason the editor takes is the one the backend accepts.
+describe("attribute reason bound mirrors backend/internal/proofing", () => {
+  it("allows reasons as long as the backend does", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofing/flow_reasons.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const found = /maxAttributeReasonLength\s*=\s*(\d+)/.exec(source);
+    expect(found, "maxAttributeReasonLength is declared").not.toBeNull();
+    expect(MAX_ATTRIBUTE_REASON_CHARS).toBe(Number(found![1]));
   });
 });
 

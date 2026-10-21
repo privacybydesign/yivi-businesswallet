@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   useCreateProofingFlowMutation,
   useEditProofingFlowMutation,
+  useProofingFlowHostedQuery,
   useProofingSettingsQuery,
   useSaveFlowAddressMutation,
   useSaveFlowDiplomasMutation,
@@ -21,6 +22,7 @@ import {
   flowSpecFromDraft,
   identityRequired,
   proofingErrorMessage,
+  selectedLocales,
   withAssuranceLevel,
   withIdentity,
 } from "../lib/identity-proofing";
@@ -30,6 +32,7 @@ import type {
   FlowDraftError,
   ProofingFlowDraft,
 } from "../lib/identity-proofing";
+import { SUPPORTED_LANGUAGES } from "../i18n";
 import { Button, Card, Icon, Input } from "../ui";
 import { AdvancedSettings } from "./flow-editor-advanced";
 import { ERROR, HINT } from "./flow-editor-parts";
@@ -49,6 +52,7 @@ const ADVANCED_ERRORS: ReadonlySet<FlowDraftError> = new Set([
   "documentTypes",
   "issuingCountries",
   "ageOver",
+  "reasons",
 ]);
 
 // The levels the editor offers, as the draft holds them: "" is none.
@@ -93,6 +97,16 @@ export function FlowEditor({
   );
   const save = editing || saved ? edit : create;
   const settings = useProofingSettingsQuery(slug);
+  // The languages the flow's hosted page offers; a flow not saved yet has
+  // every one. Each item the flow collects is explained in all of them.
+  const hosted = useProofingFlowHostedQuery(
+    slug,
+    saved?.flow.id ?? editing?.id ?? "",
+  );
+  const offered = selectedLocales(hosted.data?.locales ?? []);
+  const locales = SUPPORTED_LANGUAGES.filter((locale) =>
+    offered.includes(locale),
+  );
   // Kept by the wallet, not the proofing service: saved after the flow.
   const saveDiplomas = useSaveFlowDiplomasMutation(slug);
   const savedDiplomas: DiplomaMode = editing?.diplomaMode ?? "off";
@@ -108,7 +122,7 @@ export function FlowEditor({
   const address = addressMode;
   const diplomas = diplomaMode;
   const requiresIdentity = identityRequired(diplomas);
-  const invalid = flowDraftError(draft, requiresIdentity);
+  const invalid = flowDraftError(draft, requiresIdentity, locales);
   const shown = touched ? invalid : null;
   const version = (editing?.version ?? 0) + 1;
 
@@ -284,6 +298,7 @@ export function FlowEditor({
                 draft={draft}
                 update={update}
                 settings={settings.data}
+                locales={locales}
                 diplomaMode={diplomaMode}
                 onDiploma={chooseDiplomas}
                 diplomaError={

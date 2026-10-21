@@ -34,6 +34,10 @@ type FlowSpec struct {
 	// AgeOver is the age, in years, age_over answers for; set exactly when
 	// age_over is requested.
 	AgeOver int `json:"ageOver,omitempty"`
+	// AttributeReasons is why each requested attribute is collected, by
+	// attribute and then language (en, nl): what the person reads before they
+	// start. A flow saved before reasons existed has none.
+	AttributeReasons map[string]map[string]string `json:"attributeReasons,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`

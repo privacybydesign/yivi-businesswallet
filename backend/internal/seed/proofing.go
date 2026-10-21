@@ -161,6 +161,21 @@ var (
 	// learns their name and that they are of age, never their date of birth
 	// (the age check withholds it from dg1).
 	cmAttributes = []string{"dg1", flow.AttributeAgeOver, "chip_checks", "biometrics"}
+	// cmReasons are what the person reads under each of them.
+	cmReasons = map[string]map[string]string{
+		"dg1": {
+			"en": "To check you are 18 or older and to put your name on the ticket.",
+			"nl": "Om te controleren dat je 18 of ouder bent, en voor je naam op het ticket.",
+		},
+		"chip_checks": {
+			"en": "To make sure your document is real.",
+			"nl": "Om te controleren dat je document echt is.",
+		},
+		"biometrics": {
+			"en": "To make sure the ticket goes to the document's holder.",
+			"nl": "Om te controleren dat het ticket naar de houder van het document gaat.",
+		},
+	}
 )
 
 // demoRetentionDays and shortRetentionDays are how long a demo org's flows
@@ -250,7 +265,7 @@ var demoProofingOrgs = []demoProofingOrg{
 			{def: flow.FlowDefinition{
 				Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
 				FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
-				RequestedAttributes: cmAttributes, AgeOver: cmAgeOver,
+				RequestedAttributes: cmAttributes, AgeOver: cmAgeOver, AttributeReasons: cmReasons,
 				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
 			}},
 		},

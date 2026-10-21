@@ -334,6 +334,20 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       person's row details in the people table ("18 or older: Yes/No"), on a
       flow's People tab and on All people. The Idem app's consent screen
       names the age from the app session view's `ageOver`.
+  - **Reasons.** Every item a flow lists, other than `outcome_only`, has a
+    reason, required in each language the flow's hosted page offers (§7, every
+    supported one until an admin sets them), and the person reads it under the
+    item as "Why: ...", in the page's language. A version stores them as
+    `attributeReasons` (item, then language, at most
+    `maxAttributeReasonLength` characters each). `Service.CreateFlow` and
+    `EditFlow` check them against the hosted languages (`withReasons`, 400
+    `invalid_input`); the engine only stores them, as the languages are the
+    wallet's. A flow saved before reasons existed keeps working: its page shows
+    no "Why" line, and the editor asks for the reasons at the next save. The
+    same holds for a language added on the Hosted page tab later: the reasons
+    are asked for at the next save, and until then the page shows no line in
+    it. A save that lists no items (the engine reads that as everything its
+    steps collect) is not checked; the editor always lists them.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
@@ -1188,8 +1202,8 @@ A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link). It never shows the flow's name or
-its assurance level, and the hosted view leaves both out of its `flow`: the
+what is collected, why, retention, privacy link). It never shows the flow's name
+or its assurance level, and the hosted view leaves both out of its `flow`: the
 token alone opens it. The retention it states is the
 server's `retentionDays` (hosted view `flow`, flow list):
 `subjectRetentionDays`, the flow's override else the org's days, plus the

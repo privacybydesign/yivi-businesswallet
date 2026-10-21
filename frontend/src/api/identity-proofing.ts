@@ -118,6 +118,15 @@ const hostedDiplomaSchema = proofingDiplomaSchema.pick({
 
 export type HostedDiploma = z.infer<typeof hostedDiplomaSchema>;
 
+// Why each requested item is collected, by item and then language: what the
+// person reads before they start.
+const attributeReasonsSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.string()),
+);
+
+export type AttributeReasons = z.infer<typeof attributeReasonsSchema>;
+
 // A flow version as the proofing service stores it. The id is stable across
 // versions; exactly one version is active, the one new requests run.
 const proofingFlowSchema = z.object({
@@ -128,6 +137,8 @@ const proofingFlowSchema = z.object({
   steps: z.array(z.string()),
   requestedAttributes: z.array(z.string()).optional(),
   ageOver: z.number().optional(),
+  // Absent for a version saved before reasons existed.
+  attributeReasons: attributeReasonsSchema.optional(),
   selfieLocation: z.string().optional(),
   // "regula", "engine", or absent for the proofing service's default.
   faceProvider: z.string().optional(),
@@ -246,6 +257,7 @@ export interface ProofingFlowSpec {
   steps: string[];
   requestedAttributes?: string[];
   ageOver?: number;
+  attributeReasons?: AttributeReasons;
   faceProvider?: string;
   acceptedDocumentTypes?: string[];
   acceptedIssuingCountries?: string[];
@@ -1300,6 +1312,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   // the org's internal labels.
   flow: z.object({
     requestedAttributes: z.array(z.string()),
+    // Empty for a flow saved without reasons.
+    attributeReasons: attributeReasonsSchema,
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,

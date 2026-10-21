@@ -481,6 +481,11 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
+	// A new flow's hosted page has the defaults until its admin sets it.
+	in, err = withReasons(in, DefaultFlowHosted())
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
 	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlow(ctx, tenant, in)
 	if err != nil {
@@ -511,6 +516,14 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 	}
 	if required && !releasesIdentity(in.RequestedAttributes) {
 		return proofingprovider.Flow{}, ErrFlowNoIdentity
+	}
+	hosted, err := s.flowHosted(ctx, org.ID, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	in, err = withReasons(in, hosted)
+	if err != nil {
+		return proofingprovider.Flow{}, err
 	}
 	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlowVersion(ctx, tenant, id, in)

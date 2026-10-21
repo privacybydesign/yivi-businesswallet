@@ -229,7 +229,10 @@ type hostedViewResponse struct {
 	// this page, and the person's page shows neither.
 	Flow struct {
 		RequestedAttributes []string `json:"requestedAttributes"`
-		YiviAvailable       bool     `json:"yiviAvailable"`
+		// AttributeReasons is why each requested attribute is collected, by
+		// attribute and language; empty for a flow saved without reasons.
+		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
+		YiviAvailable    bool                         `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -345,6 +348,10 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.RequestedAttributes = f.RequestedAttributes
 	if out.Flow.RequestedAttributes == nil {
 		out.Flow.RequestedAttributes = []string{}
+	}
+	out.Flow.AttributeReasons = f.AttributeReasons
+	if out.Flow.AttributeReasons == nil {
+		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)

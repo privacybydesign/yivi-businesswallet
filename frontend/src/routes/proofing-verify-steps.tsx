@@ -17,6 +17,7 @@ import type {
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
+  AttributeReasons,
   DiplomaMode,
   DiplomaVerdict,
   ProofingBranding,
@@ -40,6 +41,7 @@ import {
   proofingErrorMessage,
   proofingRejectionReason,
   dataRequestRefusal,
+  reasonIn,
   secondsUntil,
   sessionView,
   verifyErrorMessage,
@@ -75,6 +77,9 @@ export interface VerifyOrg {
 // What the flow collects, as the steps show it.
 export interface VerifyFlowInfo {
   requestedAttributes?: string[];
+  // Why each item is collected, by item and language; none for a flow saved
+  // before reasons existed.
+  attributeReasons?: AttributeReasons;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
   // Whether the subject is asked for their postal address afterwards.
@@ -142,20 +147,32 @@ export function Overview({
   // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
 }): React.JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const name = org.branding.displayName || org.name;
   const items: DataDisclosureItem[] = (flow.requestedAttributes ?? [])
     .filter(isRequestedAttribute)
-    .map((value) => ({
-      icon: ATTRIBUTE_ICONS[value],
-      label: t(`identityProofingFlows.attributes.${value}`),
-      // The age check withholds the date of birth from the document data.
-      detail:
-        value === ATTRIBUTE_DOCUMENT &&
-        flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
-          ? t("identityProofing.onScreen.attributeDetails.dg1WithoutBirthDate")
-          : t(`identityProofing.onScreen.attributeDetails.${value}`),
-    }));
+    .map((value) => {
+      const reason = reasonIn(flow.attributeReasons?.[value], i18n.language);
+      return {
+        icon: ATTRIBUTE_ICONS[value],
+        label: t(`identityProofingFlows.attributes.${value}`),
+        // The age check withholds the date of birth from the document data.
+        detail:
+          value === ATTRIBUTE_DOCUMENT &&
+          flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
+            ? t(
+                "identityProofing.onScreen.attributeDetails.dg1WithoutBirthDate",
+              )
+            : t(`identityProofing.onScreen.attributeDetails.${value}`),
+        reason:
+          reason === undefined
+            ? undefined
+            : {
+                label: t("identityProofing.onScreen.overview.why"),
+                text: reason,
+              },
+      };
+    });
   if (flow.addressMode !== undefined && flow.addressMode !== "off") {
     items.push({
       icon: "personal",

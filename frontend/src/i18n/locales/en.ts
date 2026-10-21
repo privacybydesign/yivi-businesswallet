@@ -739,6 +739,7 @@ export const en = {
         intro:
           "You check your identity with your passport or ID card. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
+        why: "Why:",
         retention_one:
           "This data is deleted at most {{count}} day after the check ends.",
         retention_other:
@@ -1486,7 +1487,7 @@ export const en = {
       },
       receive: {
         title: "What you receive",
-        hint: "With nothing ticked you only get the outcome.",
+        hint: "With nothing ticked you only get the outcome. Every item you tick needs a reason in each language of the hosted page; the person reads it before they start.",
         identityLocked:
           "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
         ageOver: "Minimum age",
@@ -1495,6 +1496,8 @@ export const en = {
           "Age check only answers whether the person is this age or older on the day of the check.",
         ageOverLocked:
           "Off with required diplomas: they are checked against the date of birth.",
+        reason: "Why you need it · {{language}}",
+        reasonMissing: "Fill in the reason in {{language}} too.",
       },
       checks: {
         title: "Checks",

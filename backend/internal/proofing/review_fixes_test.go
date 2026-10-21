@@ -36,9 +36,15 @@ func TestRequiredDiplomasNeedIdentity(t *testing.T) {
 // edited and rolled back freely.
 func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	ctx := context.Background()
-	noIdentity := proofingprovider.FlowSpec{Name: "Enrol", Steps: []string{"document_capture", "nfc_read"}, RequestedAttributes: []string{"dg2"}}
+	reasons := documentReasons()
+	reasons["dg2"] = reasons[attributeDocument]
+	noIdentity := proofingprovider.FlowSpec{
+		Name: "Enrol", Steps: []string{"document_capture", "nfc_read"}, RequestedAttributes: []string{"dg2"},
+		AttributeReasons: map[string]map[string]string{"dg2": reasons["dg2"]},
+	}
 	withIdentity := noIdentity
 	withIdentity.RequestedAttributes = []string{attributeDocument, "dg2"}
+	withIdentity.AttributeReasons = reasons
 
 	d := newFixture()
 	d.svc.flowDiplomaSettings = &fakeFlowDiplomas{modes: map[string]DiplomaMode{chipFlow.ID: DiplomasRequired}}

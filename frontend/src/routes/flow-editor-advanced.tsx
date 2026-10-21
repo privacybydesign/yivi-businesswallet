@@ -12,12 +12,14 @@ import {
   BSN_POLICIES,
   DOCUMENT_KINDS,
   FOLLOW_ORG,
+  MAX_ATTRIBUTE_REASON_CHARS,
   REQUESTED_ATTRIBUTES,
   SESSION_TTL_OPTIONS_SECONDS,
   ageOverChoices,
   asksAge,
   assuranceLevelLabel,
   attributeAvailable,
+  draftReason,
   lockedByLevel,
   retentionChoices,
   ttlMinutes,
@@ -32,6 +34,7 @@ import {
   issuingCountryChoices,
   issuingCountryName,
 } from "../lib/issuing-countries";
+import type { Language } from "../i18n";
 import {
   ChevronSelect,
   ERROR,
@@ -44,7 +47,13 @@ import { FaceMatchThreshold } from "./flow-editor-threshold";
 
 const LABEL = "text-[14px] font-semibold";
 // Lines a field up under an option's label: past its checkbox and the gap.
-const UNDER_OPTION = "pl-[30px]";
+const UNDER_OPTION = "ml-[30px]";
+// A reason field is a plain input: Input's own border would win over the
+// error one.
+const REASON_FIELD =
+  "rounded-yivi bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:ring-3";
+const REASON_FIELD_OK = "border-line-strong focus:border-ink focus:ring-ink/10";
+const REASON_FIELD_ERR = "border-error focus:border-error focus:ring-error/10";
 const RADIO = "h-[18px] w-[18px] flex-none accent-ink";
 
 interface AdvancedSettingsProps {
@@ -60,6 +69,9 @@ interface AdvancedSettingsProps {
   addressError: string | null;
   // Whether the flow must read the name and date of birth: required diplomas.
   requiresIdentity: boolean;
+  // The languages the flow's hosted page offers: each ticked item is
+  // explained in every one.
+  locales: readonly Language[];
   // The field the editor refused to save, once it was tried.
   error: FlowDraftError | null;
 }
@@ -68,7 +80,7 @@ interface AdvancedSettingsProps {
 export function AdvancedSettings(
   props: AdvancedSettingsProps,
 ): React.JSX.Element {
-  const { draft, update, settings, error } = props;
+  const { draft, update, settings, locales, error } = props;
 
   return (
     <>
@@ -78,6 +90,7 @@ export function AdvancedSettings(
         draft={draft}
         update={update}
         requiresIdentity={props.requiresIdentity}
+        locales={locales}
         error={error}
       />
       <ChecksSection draft={draft} update={update} />
@@ -364,57 +377,100 @@ function ReceiveSection({
   draft,
   update,
   requiresIdentity,
+  locales,
   error,
 }: {
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   requiresIdentity: boolean;
+  locales: readonly Language[];
   error: FlowDraftError | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
+
+  function setReason(value: string, locale: string, text: string): void {
+    update({
+      attributeReasons: {
+        ...draft.attributeReasons,
+        [value]: { ...draft.attributeReasons[value], [locale]: text },
+      },
+    });
+  }
 
   return (
     <Section
       title={t("identityProofingFlows.editor.receive.title")}
       hint={t("identityProofingFlows.editor.receive.hint")}
     >
-      {REQUESTED_ATTRIBUTES.map(({ value }) => {
-        const available = attributeAvailable(draft, value);
-        const ticked = draft.requestedAttributes.has(value);
-        // Once ticked, Document data stays on: an older version without it can
-        // still tick it.
-        const locked =
-          requiresIdentity && value === ATTRIBUTE_DOCUMENT && ticked;
-        // Once unticked, the age check stays off: it withholds the date of
-        // birth the flow needs.
-        const ageLock =
-          requiresIdentity && value === ATTRIBUTE_AGE_OVER && !ticked
-            ? { note: t("identityProofingFlows.editor.receive.ageOverLocked") }
-            : undefined;
-        return (
-          <React.Fragment key={value}>
-            <OptionRow
-              id={`flow-attr-${value}`}
-              checked={available && ticked}
-              disabled={!available || locked}
-              label={t(`identityProofingFlows.attributes.${value}`)}
-              hint={t(`identityProofingFlows.attributeHints.${value}`)}
-              lock={ageLock}
-              onChange={() =>
-                update({
-                  requestedAttributes: toggled(
-                    draft.requestedAttributes,
-                    value,
-                  ),
-                })
-              }
-            />
-            {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
-              <MinimumAge draft={draft} update={update} error={error} />
-            )}
-          </React.Fragment>
-        );
-      })}
+      <div className="flex flex-col">
+        {REQUESTED_ATTRIBUTES.map(({ value }) => {
+          const available = attributeAvailable(draft, value);
+          const ticked = available && draft.requestedAttributes.has(value);
+          // Once ticked, Document data stays on: an older version without it
+          // can still tick it.
+          const locked =
+            requiresIdentity &&
+            value === ATTRIBUTE_DOCUMENT &&
+            draft.requestedAttributes.has(value);
+          // Once unticked, the age check stays off: it withholds the date of
+          // birth the flow needs.
+          const ageLock =
+            requiresIdentity &&
+            value === ATTRIBUTE_AGE_OVER &&
+            !draft.requestedAttributes.has(value)
+              ? {
+                  note: t("identityProofingFlows.editor.receive.ageOverLocked"),
+                }
+              : undefined;
+          return (
+            <div
+              key={value}
+              className="border-line flex flex-col gap-3 border-t py-3.5"
+            >
+              <OptionRow
+                id={`flow-attr-${value}`}
+                checked={ticked}
+                disabled={!available || locked}
+                label={t(`identityProofingFlows.attributes.${value}`)}
+                hint={t(`identityProofingFlows.attributeHints.${value}`)}
+                lock={ageLock}
+                onChange={() =>
+                  update({
+                    requestedAttributes: toggled(
+                      draft.requestedAttributes,
+                      value,
+                    ),
+                  })
+                }
+              />
+              {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
+                <MinimumAge draft={draft} update={update} error={error} />
+              )}
+              {ticked && (
+                <div
+                  role="group"
+                  aria-label={t(`identityProofingFlows.attributes.${value}`)}
+                  className={`${UNDER_OPTION} grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3`}
+                >
+                  {locales.map((locale) => (
+                    <ReasonField
+                      key={locale}
+                      id={`flow-attr-${value}-reason-${locale}`}
+                      locale={locale}
+                      text={draft.attributeReasons[value]?.[locale] ?? ""}
+                      missing={
+                        error === "reasons" &&
+                        draftReason(draft, value, locale) === ""
+                      }
+                      onChange={(text) => setReason(value, locale, text)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
       {requiresIdentity && (
         <p className={HINT}>
           {t("identityProofingFlows.editor.receive.identityLocked")}
@@ -464,6 +520,50 @@ function MinimumAge({
       {error === "ageOver" && (
         <p role="alert" className={ERROR}>
           {t("identityProofingFlows.new.errors.ageOver")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ReasonField({
+  id,
+  locale,
+  text,
+  missing,
+  onChange,
+}: {
+  id: string;
+  locale: Language;
+  text: string;
+  missing: boolean;
+  onChange: (text: string) => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const language = t(`common.languageName.${locale}`);
+  const errorId = `${id}-error`;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-semibold">
+        {t("identityProofingFlows.editor.receive.reason", { language })}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={text}
+        maxLength={MAX_ATTRIBUTE_REASON_CHARS}
+        aria-required
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? errorId : undefined}
+        className={`${REASON_FIELD} ${missing ? REASON_FIELD_ERR : REASON_FIELD_OK}`}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {missing && (
+        <p id={errorId} role="alert" className={ERROR}>
+          {t("identityProofingFlows.editor.receive.reasonMissing", {
+            language,
+          })}
         </p>
       )}
     </div>

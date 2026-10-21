@@ -57,6 +57,7 @@ const hostedPage = {
   flow: {
     name: "Onboarding",
     requestedAttributes: [],
+    attributeReasons: {},
     yiviAvailable: true,
     diplomaMode: "off",
     addressMode: "off",

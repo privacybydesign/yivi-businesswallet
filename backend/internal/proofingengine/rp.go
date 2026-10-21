@@ -58,6 +58,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		fd.AssuranceTiers = append(fd.AssuranceTiers, flow.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
 	}
 	fd.RequestedAttributes = in.RequestedAttributes
+	fd.AttributeReasons = in.AttributeReasons
 	return fd
 }
 
@@ -71,7 +72,7 @@ func toSteps(in []string) []flow.Step {
 
 func toFlow(fd flow.FlowDefinition) pp.Flow {
 	spec := pp.FlowSpec{
-		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd),
+		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd), AttributeReasons: fd.AttributeReasons,
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
