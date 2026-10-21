@@ -61,15 +61,15 @@ var (
 	ErrAddressLookupUnavailable = errors.New("proofing: the Dutch address register cannot be reached")
 )
 
-// addressLookup is the Dutch address register (addresslookup.PDOK).
-type addressLookup interface {
+// addressFinder is the Dutch address register (addresslookup.PDOK).
+type addressFinder interface {
 	Find(ctx context.Context, postalCode string, houseNumber int) ([]addresslookup.Address, error)
 }
 
 // SetAddressLookup sets the register addresses are checked against and
 // filled in from; call before serving. Without one, a Dutch address is kept
 // AddressUnchecked and nothing is looked up.
-func (s *Service) SetAddressLookup(l addressLookup) { s.addressLookup = l }
+func (s *Service) SetAddressLookup(l addressFinder) { s.addressLookup = l }
 
 // AddressVerification is how an address was checked when it was entered.
 type AddressVerification string

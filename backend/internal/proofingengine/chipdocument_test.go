@@ -148,7 +148,7 @@ func td1DG1(code, issuingState, nationality string) []byte {
 // A TD1 card's DG1 gives its kind: a residence permit by its code, an
 // identity card by holder and issuer matching, and neither for another
 // state's card.
-func TestDocumentFromEvidenceTD1Kind(t *testing.T) {
+func TestDocFromEvidenceTD1Kind(t *testing.T) {
 	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name                      string
