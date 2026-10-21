@@ -163,9 +163,9 @@ var (
 	// matched against its portrait.
 	substantialChecks = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness}
 	faceChecks        = []flow.Check{flow.CheckFaceMatch, flow.CheckFaceLiveness}
-	// cmAttributes leave out every image: CM checks a real, adult person and
-	// keeps no photo of them.
-	cmAttributes = []string{"dg1", "chip_checks", "biometrics"}
+	// cmAttributes leave out every image and the document data: CM checks a
+	// real, adult person and learns only that they are of age.
+	cmAttributes = []string{flow.AttributeAgeOver, "chip_checks", "biometrics"}
 )
 
 // demoRetentionDays and shortRetentionDays are how long a demo customer
@@ -175,6 +175,9 @@ const (
 	demoRetentionDays  = 30
 	shortRetentionDays = 7
 )
+
+// cmAgeOver is the age a CM ticket buyer must be.
+const cmAgeOver = 18
 
 // chipAndFace is an eIDAS substantial flow: the document's chip read in the
 // Idem app (passport, identity card or Dutch driving licence) and a live face
@@ -269,13 +272,13 @@ var demoProofingOrgs = []demoProofingOrg{
 	{
 		slug: cmSlug,
 		flows: []demoProofingFlow{
-			// Buying a ticket: a real, live person of age. Only the chip's data
-			// and the checks come back, never an image.
+			// Buying a ticket: a real, live person of age. Only whether they
+			// are of age and the checks come back, never their data or an image.
 			{def: flow.FlowDefinition{
 				Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
 				FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
-				RequestedAttributes: cmAttributes,
-				LegalBasis:          privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
+				RequestedAttributes: cmAttributes, AgeOver: cmAgeOver,
+				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
 			}},
 		},
 		customers: []demoProofingCustomer{

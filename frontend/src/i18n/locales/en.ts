@@ -834,6 +834,8 @@ export const en = {
       },
       attributeDetails: {
         dg1: "Your name, date of birth and nationality, and the document's number and expiry date.",
+        age_over:
+          "Only whether you are old enough, worked out from your document's chip: not your date of birth or name.",
         dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
         dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",
@@ -1010,6 +1012,9 @@ export const en = {
         name: "Name",
         birthDate: "Date of birth",
         nationality: "Nationality",
+        ageOver: "{{age}} or older",
+        ageOverYes: "Yes",
+        ageOverNo: "No",
         document: "Document",
         passiveAuth: "Chip authenticity",
         faceMatch: "Face match",
@@ -1322,6 +1327,7 @@ export const en = {
     },
     attributes: {
       dg1: "Name and document details",
+      age_over: "Age check only",
       dg11: "Place of birth and personal number (BSN)",
       dg2: "Personal photo from the chip",
       chip_checks: "Chip check results",
@@ -1331,6 +1337,8 @@ export const en = {
     },
     attributeHints: {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
+      age_over:
+        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Not the date itself, nor the name. Use it instead of Name and document details.",
       dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
@@ -1425,6 +1433,9 @@ export const en = {
       keepFacePhotosHint:
         "Off: the portrait, selfie and customer's photo are dropped once the face match is done; its verdicts stay. Turn it on only for a customer that must keep them.",
       blurBsn: "Blur BSN override",
+      ageOver: "Minimum age",
+      ageOverHint:
+        "Age check only answers whether the person is this age or older on the day of the check.",
       errors: {
         name: "Give the flow a name.",
         steps: "Pick at least one step.",
@@ -1434,6 +1445,7 @@ export const en = {
           "Use 3-letter country codes such as NLD, separated by commas.",
         faceMatchThreshold: "Enter a number from 0 to 1.",
         retentionSeconds: "Enter a whole number of seconds.",
+        ageOver: "Enter a whole number of years from 1 to 120.",
         identity:
           "A data request or diploma flow needs the name and date of birth: turn on the document scan and tick Name and document details.",
       },

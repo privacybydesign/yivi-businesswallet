@@ -852,6 +852,8 @@ export const nl: Translation<typeof en> = {
       },
       attributeDetails: {
         dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
+        age_over:
+          "Alleen of je oud genoeg bent, bepaald uit de chip van je document: niet je geboortedatum of naam.",
         dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
         dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",
@@ -1033,6 +1035,9 @@ export const nl: Translation<typeof en> = {
         name: "Naam",
         birthDate: "Geboortedatum",
         nationality: "Nationaliteit",
+        ageOver: "{{age}} jaar of ouder",
+        ageOverYes: "Ja",
+        ageOverNo: "Nee",
         document: "Document",
         passiveAuth: "Echtheid chip",
         faceMatch: "Gezichtsvergelijking",
@@ -1350,6 +1355,7 @@ export const nl: Translation<typeof en> = {
     },
     attributes: {
       dg1: "Naam en documentgegevens",
+      age_over: "Alleen leeftijdscontrole",
       dg11: "Geboorteplaats en persoonsnummer (BSN)",
       dg2: "Pasfoto van de chip",
       chip_checks: "Uitkomst chipcontroles",
@@ -1359,6 +1365,8 @@ export const nl: Translation<typeof en> = {
     },
     attributeHints: {
       dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
+      age_over:
+        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Niet de datum zelf en niet de naam. Gebruik het in plaats van Naam en documentgegevens.",
       dg11: "Alleen als het document ze op de chip heeft staan; veel documenten niet. Het BSN volgt het BSN-beleid hieronder.",
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
@@ -1454,6 +1462,9 @@ export const nl: Translation<typeof en> = {
       keepFacePhotosHint:
         "Uit: het portret, de selfie en de foto van de klant verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een klant die ze moet bewaren.",
       blurBsn: "BSN vervagen overschrijven",
+      ageOver: "Minimumleeftijd",
+      ageOverHint:
+        "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
       errors: {
         name: "Geef de flow een naam.",
         steps: "Kies minstens één stap.",
@@ -1463,6 +1474,7 @@ export const nl: Translation<typeof en> = {
           "Gebruik landcodes van drie letters zoals NLD, gescheiden door komma's.",
         faceMatchThreshold: "Vul een getal van 0 tot 1 in.",
         retentionSeconds: "Vul een heel aantal seconden in.",
+        ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
         identity:
           "Een gegevensverzoek of diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
       },

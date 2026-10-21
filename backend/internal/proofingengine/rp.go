@@ -42,6 +42,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
+		AgeOver: in.AgeOver,
 	}
 	for _, c := range in.RequiredChecks {
 		fd.RequiredChecks = append(fd.RequiredChecks, flow.Check(c))
@@ -75,6 +76,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
+		AgeOver: fd.AgeOver,
 	}
 	for _, st := range fd.Steps {
 		spec.Steps = append(spec.Steps, string(st))
@@ -482,12 +484,13 @@ type resultView struct {
 		Disclosure *struct {
 			Source string `json:"source"`
 		} `json:"disclosure"`
-		Photo             *imageView `json:"photo"`
-		Selfie            *imageView `json:"selfie"`
-		ReferencePhoto    *imageView `json:"referencePhoto"`
-		FaceReference     string     `json:"faceReference"`
-		DocumentImage     *imageView `json:"documentImage"`
-		DocumentImageBack *imageView `json:"documentImageBack"`
+		AgeOver           *pp.AgeOver `json:"ageOver"`
+		Photo             *imageView  `json:"photo"`
+		Selfie            *imageView  `json:"selfie"`
+		ReferencePhoto    *imageView  `json:"referencePhoto"`
+		FaceReference     string      `json:"faceReference"`
+		DocumentImage     *imageView  `json:"documentImage"`
+		DocumentImageBack *imageView  `json:"documentImageBack"`
 	} `json:"result"`
 	Devices []struct {
 		Role string `json:"role"`
@@ -623,6 +626,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
 	}
 	out.Evidence = ev
+	out.AgeOver = res.AgeOver
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return out, nil

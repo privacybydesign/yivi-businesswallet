@@ -213,7 +213,10 @@ type apiFlowResponse struct {
 	Version                int      `json:"version"`
 	RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
 	RequestedAttributes    []string `json:"requestedAttributes"`
-	Default                bool     `json:"default"`
+	// AgeOver is the age age_over answers for; absent when the flow does not
+	// request it.
+	AgeOver int  `json:"ageOver,omitempty"`
+	Default bool `json:"default"`
 	// flowNeedsReferencePhoto is a flow that matches the face without reading
 	// the chip: every session on it carries a referencePhoto.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
@@ -233,7 +236,7 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 		}
 		out = append(out, apiFlowResponse{
 			ID: f.ID, Name: f.Name, Version: f.Version, RequiredAssuranceLevel: f.RequiredAssuranceLevel,
-			RequestedAttributes: attrs, Default: f.Default, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow),
+			RequestedAttributes: attrs, AgeOver: f.AgeOver, Default: f.Default, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow),
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)
@@ -475,6 +478,15 @@ type apiIdentity struct {
 	FamilyName  string `json:"familyName,omitempty"`
 	BirthDate   string `json:"birthDate,omitempty"`
 	Nationality string `json:"nationality,omitempty"`
+	// AgeOver is set for a flow that requests age_over, which releases it
+	// instead of the birth date.
+	AgeOver *apiAgeOver `json:"ageOver,omitempty"`
+}
+
+// apiAgeOver is whether the holder is Age or older on the day of the check.
+type apiAgeOver struct {
+	Age  int  `json:"age"`
+	Over bool `json:"over"`
 }
 
 type apiEvidenceEntry struct {
@@ -583,6 +595,9 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		out.Identity = &apiIdentity{
 			GivenName: identity.GivenName, FamilyName: identity.FamilyName,
 			BirthDate: identity.BirthDate, Nationality: identity.Nationality,
+		}
+		if a := identity.AgeOver; a != nil {
+			out.Identity.AgeOver = &apiAgeOver{Age: a.Age, Over: a.Over}
 		}
 	}
 	if ev := identity.Evidence; ev != nil {

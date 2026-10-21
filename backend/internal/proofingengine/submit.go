@@ -112,6 +112,8 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		}
 	}
 
+	req.AgeOver = ageOverOf(sess, fd, s.cfg.Now())
+
 	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
 	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
 

@@ -63,6 +63,7 @@ const (
 	attrBiometrics    = "biometrics"
 	attrSelfie        = "selfie"         // live selfie captured during face verification
 	attrDocumentImage = "document_image" // visual (VIZ) capture of the document
+	attrAgeOver       = flow.AttributeAgeOver
 	// attrOutcomeOnly is a flow's whole list when the admin chose to release no
 	// data: it names no result attribute, so nothing but the outcome (status,
 	// assurance) is released.
@@ -154,6 +155,9 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	}
 	if req.Device != nil {
 		result["device"] = req.Device
+	}
+	if req.AgeOver != nil && attrRequested(sess, attrAgeOver) {
+		result["ageOver"] = req.AgeOver
 	}
 
 	// Released whatever was requested, like device: how well the session was

@@ -193,6 +193,8 @@ type appResultRequest struct {
 	MrtdEvidence      *mrtdEvidenceRequest `json:"mrtdEvidence,omitempty"`
 	Biometrics        *biometricsInfo      `json:"biometrics,omitempty"`
 	Device            *deviceInfo          `json:"device,omitempty"`
+	// AgeOver is the flow's age answered from the chip's date of birth.
+	AgeOver *ageOverInfo `json:"ageOver,omitempty"`
 }
 
 // documentInfo is the identity read off the document's MRZ/DG1, plus the DG11

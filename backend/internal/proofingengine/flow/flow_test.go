@@ -25,6 +25,34 @@ func TestValidateMinimalFlow(t *testing.T) {
 	}
 }
 
+func TestValidateAgeOver(t *testing.T) {
+	ok := validFlow()
+	ok.RequestedAttributes, ok.AgeOver = []string{AttributeAgeOver}, 18
+	if err := Validate(ok); err != nil {
+		t.Fatalf("Validate(age_over 18) = %v, want nil", err)
+	}
+	noChip := ok
+	noChip.Steps = []Step{StepDocumentPhoto}
+	noChip.RequiredChecks = nil
+	noAge, tooOld, ageOnly := ok, ok, validFlow()
+	noAge.AgeOver = 0
+	tooOld.AgeOver = MaxAgeOver + 1
+	ageOnly.AgeOver = 18
+	for name, tc := range map[string]struct {
+		fd   FlowDefinition
+		want string
+	}{
+		"no chip read":          {noChip, "requires nfc_read"},
+		"no age":                {noAge, "ageOver must be between"},
+		"too old":               {tooOld, "ageOver must be between"},
+		"age without attribute": {ageOnly, "ageOver set without"},
+	} {
+		if err := Validate(tc.fd); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Validate(%s) = %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
 func TestValidateRequiresName(t *testing.T) {
 	fd := validFlow()
 	fd.Name = "  "

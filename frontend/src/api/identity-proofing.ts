@@ -121,6 +121,7 @@ const proofingFlowSchema = z.object({
   name: z.string(),
   steps: z.array(z.string()),
   requestedAttributes: z.array(z.string()).optional(),
+  ageOver: z.number().optional(),
   selfieLocation: z.string().optional(),
   // "regula", "engine", or absent for the proofing service's default.
   faceProvider: z.string().optional(),
@@ -228,6 +229,7 @@ export interface ProofingFlowSpec {
   name: string;
   steps: string[];
   requestedAttributes?: string[];
+  ageOver?: number;
   faceProvider?: string;
   acceptedDocumentTypes?: string[];
   acceptedIssuingCountries?: string[];
@@ -1013,6 +1015,8 @@ const proofingResultSchema = z.object({
       familyName: z.string().optional(),
       birthDate: z.string().optional(),
       nationality: z.string().optional(),
+      // Only whether the holder is age or older, for a flow that asks it.
+      ageOver: z.object({ age: z.number(), over: z.boolean() }).optional(),
     })
     .optional(),
   evidence: z.array(

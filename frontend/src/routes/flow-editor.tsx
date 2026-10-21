@@ -21,6 +21,8 @@ import {
   FACE_PROVIDERS,
   REQUESTED_ATTRIBUTES,
   ATTRIBUTE_DOCUMENT,
+  MAX_AGE_OVER,
+  asksAge,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -395,6 +397,24 @@ export function FlowEditor({
               );
             })}
           </div>
+          {asksAge(draft) && (
+            <Field
+              id="proofing-flow-age-over"
+              label={t("identityProofingFlows.new.ageOver")}
+              hint={t("identityProofingFlows.new.ageOverHint")}
+              error={fieldError("ageOver")}
+            >
+              <Input
+                id="proofing-flow-age-over"
+                type="number"
+                min={1}
+                max={MAX_AGE_OVER}
+                step={1}
+                value={draft.ageOver}
+                onChange={(event) => update({ ageOver: event.target.value })}
+              />
+            </Field>
+          )}
           <p className={HINT}>{t("identityProofingFlows.new.dataHint")}</p>
           {requiresIdentity && (
             <p className={HINT}>

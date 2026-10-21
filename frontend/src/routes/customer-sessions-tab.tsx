@@ -666,6 +666,20 @@ function IdentityRows({
             {t("customers.sessions.identity.nationality")}
           </dt>
           <dd>{identity.nationality || "—"}</dd>
+          {identity.ageOver && (
+            <>
+              <dt className="text-muted">
+                {t("customers.sessions.identity.ageOver", {
+                  age: identity.ageOver.age,
+                })}
+              </dt>
+              <dd>
+                {identity.ageOver.over
+                  ? t("customers.sessions.identity.ageOverYes")
+                  : t("customers.sessions.identity.ageOverNo")}
+              </dd>
+            </>
+          )}
         </>
       ) : (
         <dd className="text-ink-soft sm:col-span-2">

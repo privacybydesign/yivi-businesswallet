@@ -75,6 +75,18 @@ function draft(patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft {
 }
 
 describe("flowSpecFromDraft", () => {
+  it("sends the age check with its age instead of the document data", () => {
+    const spec = flowSpecFromDraft(
+      draft({
+        requestedAttributes: new Set(["age_over", "chip_checks"]),
+        ageOver: "16",
+      }),
+    );
+    expect(spec.requestedAttributes).toEqual(["age_over", "chip_checks"]);
+    expect(spec.ageOver).toBe(16);
+    expect(flowSpecFromDraft(draft()).ageOver).toBeUndefined();
+  });
+
   it("sends the document scan and chip scan as a pair with passive auth locked on", () => {
     const spec = flowSpecFromDraft(draft({ faceVerification: false }));
     expect(spec).toMatchObject({
@@ -341,6 +353,20 @@ describe("accepted documents", () => {
 });
 
 describe("flowDraftError", () => {
+  it("needs a whole minimum age with the age check", () => {
+    const age = (ageOver: string) =>
+      draft({ requestedAttributes: new Set(["age_over"]), ageOver });
+    expect(flowDraftError(age("18"))).toBeNull();
+    for (const bad of ["", "0", "17.5", "121"]) {
+      expect(flowDraftError(age(bad))).toBe("ageOver");
+    }
+    expect(
+      flowDraftError(
+        draft({ requestedAttributes: new Set(["dg1"]), ageOver: "" }),
+      ),
+    ).toBeNull();
+  });
+
   it("points at the field to fix", () => {
     expect(flowDraftError(draft())).toBeNull();
     expect(flowDraftError(draft({ name: " " }))).toBe("name");

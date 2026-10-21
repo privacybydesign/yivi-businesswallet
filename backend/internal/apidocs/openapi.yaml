@@ -10964,7 +10964,10 @@ components:
           type: array
           items:
             type: string
-          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, …); empty is the outcome only.
+          description: What the result may carry (`dg1` the document data with name and birth date, `dg2` the chip photo, `selfie`, `age_over` only whether the person is `ageOver` or older, …); empty is the outcome only.
+        ageOver:
+          type: integer
+          description: The age `age_over` answers for; absent when the flow does not request it.
         default:
           type: boolean
           description: The flow a session without `flowId` runs.
@@ -11173,6 +11176,17 @@ components:
               type: string
             nationality:
               type: string
+            ageOver:
+              type: object
+              description: >-
+                For a flow that requests `age_over`: whether the person is `age` or older on the
+                day of the check, derived from the chip's date of birth, which is not released.
+              properties:
+                age:
+                  type: integer
+                over:
+                  type: boolean
+              required: [age, over]
         evidence:
           type: array
           items:
@@ -11425,8 +11439,16 @@ components:
           type: array
           items:
             type: string
-            enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image]
-          description: What a session's result may carry; absent or empty releases the outcome only (the assurance summary, no data).
+            enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image, age_over]
+          description: >-
+            What a session's result may carry; absent or empty releases the outcome only (the
+            assurance summary, no data). `age_over` releases only whether the person is `ageOver`
+            or older, derived from the chip's date of birth; it needs `nfc_read`.
+        ageOver:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: The age, in years, `age_over` answers for; set exactly when `requestedAttributes` has `age_over`.
         selfieLocation:
           type: string
           description: Ignored; the wallet always sets the face capture to the app.

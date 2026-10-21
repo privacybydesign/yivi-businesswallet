@@ -95,6 +95,7 @@ const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
+  age_over: "birthdate",
   dg11: "personal",
   dg2: "view",
   chip_checks: "lock",

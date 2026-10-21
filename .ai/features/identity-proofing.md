@@ -237,6 +237,20 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     A flow saved without a list releases everything its steps collect
     (`requestedAttributesOf`), and a flow read back always lists what it
     releases.
+  - Age check (`age_over`, "Age check only"): releases only whether the holder
+    is the flow's `AgeOver` (1..120 years, the editor starts at 18) or older,
+    as `ageOver: {age, over}`, instead of `dg1`.
+    - Derived by the engine (`ageOverOf`) from the date of birth read off the
+      chip, never the MRZ scan alone: `flow.Validate` requires `nfc_read`, and
+      `AgeOver` set exactly with the attribute.
+    - `over` holds from the birthday the holder turns `age`, on the UTC date
+      the session finishes (born 29 February: 1 March in a common year).
+    - It decides no outcome: an approved minor is approved with `over: false`;
+      the relying party decides.
+    - Off in a new flow, never in a flow without a list (`attributesForSteps`).
+    - Reaches the customer API and admin result as `identity.ageOver`, and the
+      Sessions tab. The Idem app's consent screen shows the raw key until the
+      app labels it.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,

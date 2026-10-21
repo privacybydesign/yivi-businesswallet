@@ -130,10 +130,11 @@ export const CHECK_LIVENESS = "face.liveness";
 
 // The requested data the service's admin page offers, and the step that
 // produces each: the document scan gives the document and holder (dg1), the
-// chip read its extras, photo and check results, the face step its selfie and
-// biometrics.
+// chip read the age check, its extras, photo and check results, the face step
+// its selfie and biometrics.
 export const REQUESTED_ATTRIBUTES = [
   { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
+  { value: "age_over", step: STEP_NFC_READ },
   { value: "dg11", step: STEP_NFC_READ },
   { value: "dg2", step: STEP_NFC_READ },
   { value: "chip_checks", step: STEP_NFC_READ },
@@ -222,6 +223,8 @@ export interface ProofingFlowDraft {
   // A decimal 0..1 as typed; "" is pass/fail only.
   faceMatchThreshold: string;
   requestedAttributes: ReadonlySet<string>;
+  // Whole years as typed, the age the age check answers for.
+  ageOver: string;
   // Comma-separated lists as typed; empty accepts any.
   acceptedDocumentTypes: string;
   acceptedIssuingCountries: string;
@@ -320,7 +323,14 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
     faceMatchThreshold: "",
-    requestedAttributes: new Set(REQUESTED_ATTRIBUTES.map((a) => a.value)),
+    // The age check releases less than the document data it would sit next
+    // to, so it starts off.
+    requestedAttributes: new Set(
+      REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+        (value) => value !== ATTRIBUTE_AGE_OVER,
+      ),
+    ),
+    ageOver: String(DEFAULT_AGE_OVER),
     acceptedDocumentTypes: "",
     acceptedIssuingCountries: "",
     assuranceLevel: "",
@@ -363,6 +373,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
     faceMatchThreshold: threshold === undefined ? "" : String(threshold),
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
+    ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
     acceptedDocumentTypes: (flow.acceptedDocumentTypes ?? []).join(", "),
     acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
@@ -397,6 +408,7 @@ export type FlowDraftError =
   | "assuranceLevel"
   | "issuingCountries"
   | "faceMatchThreshold"
+  | "ageOver"
   | "retentionSeconds";
 
 // An issuing country as a flow takes it: three letters (ICAO 9303). Whether
@@ -437,6 +449,12 @@ export function flowDraftError(
     const value = Number(draft.faceMatchThreshold);
     if (!Number.isFinite(value) || value < 0 || value > 1) {
       return "faceMatchThreshold";
+    }
+  }
+  if (asksAge(draft)) {
+    const age = Number(draft.ageOver);
+    if (!Number.isInteger(age) || age < 1 || age > MAX_AGE_OVER) {
+      return "ageOver";
     }
   }
   if (draft.retentionSeconds.trim() !== "") {
@@ -510,7 +528,18 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.retentionSeconds.trim() !== "" && retention > 0) {
     spec.retentionOverrideSeconds = retention;
   }
+  if (asksAge(draft)) {
+    spec.ageOver = Number(draft.ageOver);
+  }
   return spec;
+}
+
+// Whether the draft releases the age check, which needs an age.
+export function asksAge(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.requestedAttributes.has(ATTRIBUTE_AGE_OVER) &&
+    attributeAvailable(draft, ATTRIBUTE_AGE_OVER)
+  );
 }
 
 // The flows a member may send a request on, and the one the form starts on:
@@ -844,6 +873,14 @@ export function sendableByMail(
 
 // The document data a flow releases: the holder's name and date of birth.
 export const ATTRIBUTE_DOCUMENT = "dg1";
+
+// The age check: only whether the holder is the flow's age or older, derived
+// from the chip's date of birth (flow.AttributeAgeOver).
+export const ATTRIBUTE_AGE_OVER = "age_over";
+// The age a new age check answers for, and the highest the service takes
+// (flow.MaxAgeOver).
+const DEFAULT_AGE_OVER = 18;
+export const MAX_AGE_OVER = 120;
 
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1), which a request for one known person is matched

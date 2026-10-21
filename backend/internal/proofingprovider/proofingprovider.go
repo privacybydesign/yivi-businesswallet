@@ -26,11 +26,14 @@ type FlowSpec struct {
 	Name  string   `json:"name"`
 	Steps []string `json:"steps"`
 	// RequestedAttributes limits what a session result may carry (dg1, dg11, dg2,
-	// selfie, chip_checks, biometrics, document_image). Empty releases everything
+	// selfie, chip_checks, biometrics, document_image, age_over). Empty releases everything
 	// the steps collect, ["outcome_only"] the outcome only; a flow read back
 	// always lists what it releases. The wallet never reads the data itself,
 	// only the outcome.
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
+	// AgeOver is the age, in years, age_over answers for; set exactly when
+	// age_over is requested.
+	AgeOver int `json:"ageOver,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`
@@ -178,6 +181,9 @@ type Identity struct {
 	FullFamilyName string
 	BirthDate      string
 	Nationality    string
+	// AgeOver is whether the holder is the flow's age or older, derived from
+	// the chip's date of birth; nil when the flow did not request age_over.
+	AgeOver *AgeOver
 	// Evidence is what the identity rests on; nil while there is no result.
 	Evidence *Evidence
 	// Photo is the document's portrait (the chip's DG2, or the disclosed
@@ -193,6 +199,13 @@ type Identity struct {
 	// printed BSN blurred under the tenant's policy.
 	DocumentImage     *Image
 	DocumentImageBack *Image
+}
+
+// AgeOver answers age_over: whether the holder is Age or older, without the
+// date of birth it comes from.
+type AgeOver struct {
+	Age  int  `json:"age"`
+	Over bool `json:"over"`
 }
 
 // Image is a face image as the engine releases it: already converted to a format a
