@@ -143,6 +143,10 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
     icon: "settings",
     tone: "blue",
   },
+  "identity_proofing.flow_branding_configured": {
+    icon: "settings",
+    tone: "blue",
+  },
   "identity_proofing.flow_diplomas_configured": {
     icon: "settings",
     tone: "blue",
@@ -487,6 +491,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingWebhookRemoved");
     case "identity_proofing.flow_hosted_configured":
       return t("auditLog.actions.identityProofingFlowHostedConfigured");
+    case "identity_proofing.flow_branding_configured":
+      return t("auditLog.actions.identityProofingFlowBrandingConfigured");
     case "identity_proofing.flow_diplomas_configured":
       return t("auditLog.actions.identityProofingFlowDiplomasConfigured");
     case "identity_proofing.diploma_added":

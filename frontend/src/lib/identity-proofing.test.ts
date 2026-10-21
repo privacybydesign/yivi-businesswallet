@@ -2,8 +2,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
-import i18n from "../i18n";
-import type { ProofingFlow, WebhookDelivery } from "../api/identity-proofing";
+import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
+import type {
+  ProofingBranding,
+  ProofingFlow,
+  ProofingFlowBranding,
+  WebhookDelivery,
+} from "../api/identity-proofing";
 import {
   DIPLOMA_MODES,
   ERASURE_HANDLINGS,
@@ -23,6 +28,9 @@ import {
   hostedErrorMessage,
   identityRequired,
   proofingRejectionReason,
+  effectiveBranding,
+  savedLocales,
+  selectedLocales,
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
@@ -1945,5 +1953,95 @@ describe("deliveriesPollInterval", () => {
     expect(typeof firstSend).toBe("number");
     expect(typeof retrying).toBe("number");
     expect(firstSend as number).toBeLessThan(retrying as number);
+  });
+});
+
+describe("effective branding", () => {
+  const org: ProofingBranding = {
+    displayName: "Acme",
+    primaryColor: "#111111",
+    secondaryColor: "#222222",
+    textColor: "#333333",
+    surfaceColor: "#444444",
+    borderColor: "#555555",
+    linkColor: "#666666",
+    successColor: "#777777",
+    warningColor: "#888888",
+    errorColor: "#999999",
+    topbarColor: "#aaaaaa",
+    fontFamily: "Open Sans, sans-serif",
+    supportContact: "help@acme.example",
+    privacyUrl: "https://acme.example/privacy",
+    logoUri: "/org-logo",
+    hidePoweredBy: true,
+  };
+  const none: ProofingFlowBranding = {
+    custom: true,
+    displayName: "",
+    primaryColor: "",
+    supportContact: "",
+    privacyUrl: "",
+    logoUri: "",
+  };
+
+  it("is the org's when the flow is not custom, whatever it holds", () => {
+    expect(
+      effectiveBranding(org, { ...none, custom: false, displayName: "Trips" }),
+    ).toEqual(org);
+  });
+
+  it("is the org's when a custom flow sets nothing", () => {
+    expect(effectiveBranding(org, none)).toEqual(org);
+  });
+
+  it("takes each field the flow sets and the org's for the rest", () => {
+    expect(
+      effectiveBranding(org, {
+        ...none,
+        displayName: "Acme Trips",
+        logoUri: "/flow-logo",
+      }),
+    ).toEqual({
+      ...org,
+      displayName: "Acme Trips",
+      logoUri: "/flow-logo",
+    });
+  });
+
+  it("keeps the org's powered-by line", () => {
+    expect(
+      effectiveBranding({ ...org, hidePoweredBy: false }, none).hidePoweredBy,
+    ).toBe(false);
+  });
+
+  it("keeps the org's white-label colours and font", () => {
+    const own = { ...none, primaryColor: "#abcdef" };
+    expect(effectiveBranding(org, own)).toEqual({
+      ...org,
+      primaryColor: "#abcdef",
+    });
+  });
+});
+
+describe("hosted page languages", () => {
+  it("shows every language ticked when none is saved", () => {
+    expect(selectedLocales([])).toEqual([...SUPPORTED_LANGUAGES]);
+  });
+
+  it("shows only the saved languages ticked", () => {
+    expect(selectedLocales(["nl"])).toEqual(["nl"]);
+  });
+
+  it("saves every language ticked as none", () => {
+    expect(savedLocales([...SUPPORTED_LANGUAGES])).toEqual([]);
+  });
+
+  it("saves a subset as ticked, in the order given", () => {
+    expect(savedLocales(["nl"])).toEqual(["nl"]);
+  });
+
+  it("round-trips none and a subset", () => {
+    expect(savedLocales(selectedLocales([]))).toEqual([]);
+    expect(savedLocales(selectedLocales(["en"]))).toEqual(["en"]);
   });
 });

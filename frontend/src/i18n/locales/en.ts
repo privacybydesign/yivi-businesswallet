@@ -1242,20 +1242,51 @@ export const en = {
       tabsLabel: "Flow",
       people: "People",
     },
+    editTabs: {
+      check: "Check",
+      branding: "Branding",
+      hosted: "Hosted page",
+    },
+    branding: {
+      title: "Branding for this flow",
+      hint: "Used in the proofing mail and on the hosted page of this flow.",
+      which: "Which branding",
+      same: {
+        title: "Same as the organisation",
+        noLogo: "no logo",
+        change: "Change in Settings › Branding",
+      },
+      custom: {
+        title: "Custom for this flow",
+        hint: "For a product with its own name or look. Fields you leave empty use the organisation's.",
+      },
+      orgEmpty: "Organisation's: empty",
+      logoInherited: "The organisation's logo",
+    },
     hosted: {
       title: "Hosted page",
-      enabled: "Links to a hosted page may be sent for this flow",
+      hint: "The page a person opens from a link or e-mail for this flow.",
+      enabled: "Allow sending this flow as a link",
+      enabledHint:
+        "Members can then pick “Copy a link” or e-mail when they verify a person.",
       locales: "Languages",
       localesHint:
-        "Tick none to offer every language. The page opens in the session's language, then the subject's browser language.",
+        "The page opens in the language of the request, otherwise in the person's browser language.",
+      localesRequired: "Keep at least one language.",
       completion: "When the check ends",
       completions: {
-        redirect:
-          "Send the subject to the session's redirect URL, or show a thank-you page without one",
-        done: "Always show the thank-you page (sessions may not carry a redirect URL)",
+        redirect: {
+          title: "Go back to your website",
+          hint: "To the address the request came with; a thank-you page if there is none.",
+        },
+        done: {
+          title: "Always show a thank-you page",
+          hint: "Requests can't carry a return address.",
+        },
       },
-      save: "Save hosted page",
-      preview: "Preview of the hosted page",
+      save: "Save",
+      preview: "Preview · first step",
+      previewNote: "Uses this flow's branding.",
     },
     versions: {
       title: "Versions",
@@ -2038,6 +2069,7 @@ export const en = {
       identityProofingWebhookRemoved: "Removed webhook endpoint",
       identityProofingPaused: "Paused identity proofing",
       identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
+      identityProofingFlowBrandingConfigured: "Changed a flow's branding",
       identityProofingFlowDiplomasConfigured:
         "Changed whether a flow asks for diplomas",
       identityProofingDiplomaAdded: "Added a diploma",

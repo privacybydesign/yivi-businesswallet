@@ -510,6 +510,12 @@ func (e *testEnv) patchSettings(slug, body string) *http.Response {
 // is set, the logo file.
 func (e *testEnv) putBranding(slug string, fields map[string]string, logo []byte) *http.Response {
 	e.t.Helper()
+	return e.putBrandingForm("/api/v1/orgs/"+slug+"/identity-proofing/settings/branding", fields, logo)
+}
+
+// putBrandingForm sends a branding form to path, the org's or a flow's.
+func (e *testEnv) putBrandingForm(path string, fields map[string]string, logo []byte) *http.Response {
+	e.t.Helper()
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	for name, value := range fields {
@@ -532,7 +538,7 @@ func (e *testEnv) putBranding(slug string, fields map[string]string, logo []byte
 		e.t.Fatalf("close form: %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPut, e.server.URL+"/api/v1/orgs/"+slug+"/identity-proofing/settings/branding", &body)
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, &body)
 	if err != nil {
 		e.t.Fatalf("new request: %v", err)
 	}

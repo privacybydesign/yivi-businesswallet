@@ -23,8 +23,10 @@ import {
   requestListCapped,
 } from "../lib/identity-proofing";
 import { Button, Card, Tag, TopBar } from "../ui";
+import { FlowBrandingSettings } from "./flow-branding";
 import { FlowHostedSettings } from "./flow-hosted-settings";
 import { FlowEditor } from "./flow-editor";
+import { FlowTabPanel, FlowTabs } from "./flow-tabs";
 import { PeopleList } from "./proofing-people";
 import { VerifyPerson } from "./proofing-send";
 
@@ -36,10 +38,16 @@ const DEFAULT_TAB: TabKey = "people";
 
 const TABS: TabKey[] = ["people", "versions"];
 const TAB_PARAM = "tab";
+const TAB_PREFIX = "flow-tab";
 const TABPANEL_ID = "flow-tabpanel";
 
-function tabId(tab: TabKey): string {
-  return `flow-tab-${tab}`;
+type EditTabKey = "check" | "branding" | "hosted";
+
+const EDIT_TABS: EditTabKey[] = ["check", "branding", "hosted"];
+const EDIT_TAB_PREFIX = "flow-edit-tab";
+
+function editPanelId(tab: EditTabKey): string {
+  return `flow-edit-panel-${tab}`;
 }
 
 // The label key of each check the flow editor offers; another check the
@@ -116,6 +124,7 @@ function FlowView({
   const people = useExternalRequestsQuery(slug, flow.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState(false);
+  const [editTab, setEditTab] = useState<EditTabKey>("check");
   const activeTab: TabKey =
     TABS.find((tab) => tab === searchParams.get(TAB_PARAM)) ?? DEFAULT_TAB;
   const headline = [
@@ -131,17 +140,6 @@ function FlowView({
   const count = people.data
     ? listedCount(people.data.length, requestListCapped(people.data), t)
     : undefined;
-
-  // On the focused tab, as the tablist itself takes no focus.
-  function onTabKeyDown(e: React.KeyboardEvent): void {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const i = TABS.indexOf(activeTab);
-    const delta = e.key === "ArrowRight" ? 1 : -1;
-    const next = TABS[(i + delta + TABS.length) % TABS.length];
-    setTab(next);
-    document.getElementById(tabId(next))?.focus();
-  }
 
   function setTab(tab: TabKey): void {
     setSearchParams(
@@ -165,7 +163,13 @@ function FlowView({
         actions={
           <>
             {!editing && (
-              <Button variant="secondary" onClick={() => setEditing(true)}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditTab("check");
+                  setEditing(true);
+                }}
+              >
                 {t("identityProofingFlows.edit")}
               </Button>
             )}
@@ -174,62 +178,75 @@ function FlowView({
         }
       />
       {editing ? (
-        <div className="flex flex-col gap-6 p-4 sm:p-8">
-          <FlowEditor
-            // A fresh editor per version, seeded from it.
-            key={`${flow.id}@${flow.version}`}
-            slug={slug}
-            mode={{ kind: "edit", flow }}
-            onDone={() => setEditing(false)}
+        <>
+          <FlowTabs
+            idPrefix={EDIT_TAB_PREFIX}
+            label={t("identityProofingFlows.edit")}
+            tabs={EDIT_TABS.map((tab) => ({
+              key: tab,
+              label: t(`identityProofingFlows.editTabs.${tab}`),
+            }))}
+            active={editTab}
+            onSelect={setEditTab}
+            panelId={editPanelId}
           />
-          <Card className="p-6">
-            <h2 className="font-display mb-3 text-[16px] font-bold">
-              {t("identityProofingFlows.hosted.title")}
-            </h2>
-            <FlowHostedSettings slug={slug} flow={flow} />
-          </Card>
-        </div>
+          {/* All three stay mounted, so a draft survives a switch of tab. */}
+          {EDIT_TABS.map((tab) => (
+            <FlowTabPanel
+              key={tab}
+              idPrefix={EDIT_TAB_PREFIX}
+              tab={tab}
+              id={editPanelId(tab)}
+              hidden={editTab !== tab}
+              className="p-4 sm:p-8"
+            >
+              {tab === "check" ? (
+                <FlowEditor
+                  // A fresh editor per version, seeded from it.
+                  key={`${flow.id}@${flow.version}`}
+                  slug={slug}
+                  mode={{ kind: "edit", flow }}
+                  onDone={() => setEditing(false)}
+                />
+              ) : tab === "branding" ? (
+                <FlowBrandingSettings slug={slug} flowId={flow.id} />
+              ) : (
+                <FlowHostedSettings
+                  slug={slug}
+                  flow={flow}
+                  onCancel={() => setEditing(false)}
+                />
+              )}
+            </FlowTabPanel>
+          ))}
+        </>
       ) : (
         <>
-          <div
-            role="tablist"
-            aria-label={t("identityProofingFlows.page.tabsLabel")}
-            className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
-          >
-            {TABS.map((tab) => {
-              const active = activeTab === tab;
-              return (
-                <button
-                  key={tab}
-                  id={tabId(tab)}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  aria-controls={TABPANEL_ID}
-                  tabIndex={active ? 0 : -1}
-                  onClick={() => setTab(tab)}
-                  onKeyDown={onTabKeyDown}
-                  className={[
-                    "flex h-11 items-center gap-2 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
-                    active
-                      ? "border-primary text-ink font-semibold"
-                      : "text-ink-soft hover:text-ink border-transparent font-medium",
-                  ].join(" ")}
-                >
-                  {tab === "people"
-                    ? t("identityProofingFlows.page.people")
-                    : t("identityProofingFlows.versions.title")}
-                  {tab === "people" && count !== undefined && (
-                    <span className="text-muted font-normal">{count}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <div
+          <FlowTabs
+            idPrefix={TAB_PREFIX}
+            label={t("identityProofingFlows.page.tabsLabel")}
+            tabs={TABS.map((tab) => ({
+              key: tab,
+              label:
+                tab === "people" ? (
+                  <>
+                    {t("identityProofingFlows.page.people")}
+                    {count !== undefined && (
+                      <span className="text-muted font-normal">{count}</span>
+                    )}
+                  </>
+                ) : (
+                  t("identityProofingFlows.versions.title")
+                ),
+            }))}
+            active={activeTab}
+            onSelect={setTab}
+            panelId={() => TABPANEL_ID}
+          />
+          <FlowTabPanel
+            idPrefix={TAB_PREFIX}
+            tab={activeTab}
             id={TABPANEL_ID}
-            role="tabpanel"
-            aria-labelledby={tabId(activeTab)}
             className="flex flex-col gap-4 p-4 sm:p-8"
           >
             {activeTab === "people" ? (
@@ -239,7 +256,7 @@ function FlowView({
                 <VersionHistory slug={slug} flowId={flow.id} />
               </Card>
             )}
-          </div>
+          </FlowTabPanel>
         </>
       )}
     </>

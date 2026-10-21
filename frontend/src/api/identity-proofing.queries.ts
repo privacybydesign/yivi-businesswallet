@@ -35,7 +35,9 @@ import {
   getHostedProofingStatus,
   startHostedProofing,
   declineHostedProofing,
+  getProofingFlowBranding,
   getProofingFlowHosted,
+  saveProofingFlowBranding,
   saveProofingFlowHosted,
   saveProofingFlowDiplomas,
   saveProofingFlowAddress,
@@ -78,6 +80,8 @@ import type {
   ProofingReviewInput,
   ProofingResult,
   ProofingPause,
+  ProofingFlowBranding,
+  ProofingFlowBrandingInput,
   ProofingFlowHosted,
   DiplomaMode,
   DiplomaVerdict,
@@ -212,6 +216,44 @@ export function useSaveFlowHostedMutation(
     onSuccess: (saved) => {
       toast.success(t("toasts.identityProofingHostedSettingsSaved"));
       queryClient.setQueryData(proofingFlowHostedQueryKey(slug, flowId), saved);
+    },
+  });
+}
+
+function proofingFlowBrandingQueryKey(
+  slug: string,
+  flowId: string,
+): readonly string[] {
+  return [...proofingFlowsQueryKey(slug), flowId, "branding"];
+}
+
+export function useProofingFlowBrandingQuery(
+  slug: string,
+  flowId: string,
+): UseQueryResult<ProofingFlowBranding, Error> {
+  return useQuery({
+    queryKey: proofingFlowBrandingQueryKey(slug, flowId),
+    queryFn: ({ signal }) => getProofingFlowBranding(slug, flowId, signal),
+    enabled: slug !== "" && flowId !== "",
+  });
+}
+
+export function useSaveFlowBrandingMutation(
+  slug: string,
+  flowId: string,
+): UseMutationResult<ProofingFlowBranding, Error, ProofingFlowBrandingInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveProofingFlowBranding(slug, flowId, input),
+    // The form shows a failure itself; the global toast would say it twice.
+    meta: { suppressErrorToast: true },
+    onSuccess: (saved) => {
+      toast.success(t("toasts.identityProofingBrandingSaved"));
+      queryClient.setQueryData(
+        proofingFlowBrandingQueryKey(slug, flowId),
+        saved,
+      );
     },
   });
 }

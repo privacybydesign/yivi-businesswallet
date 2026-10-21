@@ -44,7 +44,7 @@ func (s *Service) SetHostedBaseURL(u string) { s.hostedBaseURL = u }
 
 type Hosted struct {
 	Request Request
-	// Settings is the org's branding and retention.
+	// Settings is the org's retention, with the flow's branding over the org's.
 	Settings Settings
 	Flow     proofingprovider.Flow
 	// FlowSettings is the flow's hosted page settings.
@@ -129,13 +129,17 @@ func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, erro
 	if err != nil {
 		return Hosted{}, err
 	}
+	own, err := s.flowBranding(ctx, req.OrganizationID, flow.ID)
+	if err != nil {
+		return Hosted{}, err
+	}
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Hosted{}, err
 	}
 	if req, err = s.withLegalNotice(ctx, req); err != nil {
 		return Hosted{}, err
 	}
-	return Hosted{Request: req, Settings: settings, Flow: flow, FlowSettings: flowSettings}, nil
+	return Hosted{Request: req, Settings: settings.brandedFor(own), Flow: flow, FlowSettings: flowSettings}, nil
 }
 
 func (s *Service) hostedFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
@@ -343,7 +347,8 @@ func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]strin
 	return settings.RedirectOrigins, nil
 }
 
-// HostedLogo is the logo of a hosted request's org, for its page.
+// HostedLogo is the logo of a hosted request's page: its flow's own, else its
+// org's.
 func (s *Service) HostedLogo(ctx context.Context, token string) (Logo, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {
@@ -352,7 +357,11 @@ func (s *Service) HostedLogo(ctx context.Context, token string) (Logo, error) {
 	if !req.External() {
 		return Logo{}, ErrRequestNotFound
 	}
-	return s.orgSettings.Logo(ctx, req.OrganizationID)
+	own, err := s.flowBranding(ctx, req.OrganizationID, req.FlowID)
+	if err != nil {
+		return Logo{}, err
+	}
+	return s.brandLogo(ctx, req.OrganizationID, req.FlowID, own)
 }
 
 // hostedSubjectActor names who acts through a hosted link in the audit log:

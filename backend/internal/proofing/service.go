@@ -139,6 +139,12 @@ type flowHostedStore interface {
 	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error)
 }
 
+type flowBrandingStore interface {
+	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowBranding, error)
+	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowBranding, logo LogoChange) (FlowBranding, error)
+	Logo(ctx context.Context, orgID uuid.UUID, flowID string) (Logo, error)
+}
+
 // Mailer sends the proofing-request e-mail (implemented by *email.Service).
 type Mailer interface {
 	SendIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m email.ProofingMail) error
@@ -155,6 +161,9 @@ type Service struct {
 	pauses      pauseStore
 	// flowHostedSettings is each flow's hosted page settings; nil the defaults.
 	flowHostedSettings flowHostedStore
+	// flowBrandings is each flow's own branding; nil leaves every flow with
+	// the org's.
+	flowBrandings flowBrandingStore
 	// flowDiplomaSettings is each flow's DiplomaMode, diplomas the extracts
 	// requests hold; nil asks for none.
 	flowDiplomaSettings flowDiplomaStore
@@ -189,6 +198,9 @@ type Stores struct {
 	Pauses pauseStore
 	// FlowHosted holds each flow's hosted page settings; nil is the defaults.
 	FlowHosted flowHostedStore
+	// FlowBranding holds each flow's own branding; nil leaves every flow
+	// with the org's.
+	FlowBranding flowBrandingStore
 	// FlowDiplomas holds each flow's DiplomaMode and Diplomas the extracts
 	// requests hold; nil asks for none.
 	FlowDiplomas flowDiplomaStore
@@ -205,6 +217,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 	return &Service{
 		settings: stores.Settings, requests: stores.Requests, orgSettings: stores.OrgSettings, apiKeys: stores.APIKeys,
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
+		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
 		flowAddressSettings: stores.FlowAddresses,
 		ips:                 ips, verifier: verifier, mailer: mailer, now: time.Now,
@@ -736,9 +749,12 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	out.DeepLink, out.DeepLinkExpiresAt = sess.Claim.DeepLink, sess.Claim.ExpiresAt
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, settings, mailSend{
-			subject: subject, by: by, deepLink: sess.Claim.DeepLink, ttl: ttl, locale: in.Language,
-		}))
+		mail, err := s.proofingMail(ctx, org, settings, mailSend{
+			flowID: flow.ID, subject: subject, by: by, deepLink: sess.Claim.DeepLink, ttl: ttl, locale: in.Language,
+		})
+		if err == nil {
+			err = s.mailer.SendIdentityProofingRequested(ctx, org.ID, mail)
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -957,10 +973,11 @@ func releasesIdentity(attrs []string) bool {
 	return slices.Contains(attrs, attributeDocument) && !slices.Contains(attrs, attributeAgeOver)
 }
 
-// mailSend is what one proofing mail is about: the request's subject and
-// sender, the session's deep link and how long it is valid, and the language
-// the mail is in.
+// mailSend is what one proofing mail is about: the request's flow, its
+// subject and sender, the session's deep link and how long it is valid, and
+// the language the mail is in.
 type mailSend struct {
+	flowID   string
 	subject  Subject
 	by       Requester
 	deepLink string
@@ -969,22 +986,30 @@ type mailSend struct {
 }
 
 // proofingMail is the mail a request sends. A member's is the org's; an
-// external person's is signed with and styled as the org's branding, with its
-// support contact and privacy statement. A logo that cannot be read is left
-// out (the wordmark shows): a cosmetic loss must not block the send.
-func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) email.ProofingMail {
+// external person's is signed with and styled as the flow's branding over the
+// org's, with its support contact and privacy statement. A logo that cannot be
+// read is left out (the wordmark shows): a cosmetic loss must not block the
+// send. A flow's branding that cannot be read blocks it, since the mail would
+// otherwise go out in another look than the admin set.
+func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) (email.ProofingMail, error) {
+	flowID := send.flowID
 	m := email.ProofingMail{
 		To: send.subject.Email, OrgName: org.Name, RequesterName: send.by.Name, DeepLink: send.deepLink,
 		ValidFor: send.ttl, Locale: send.locale,
 	}
 	if settings == nil {
-		return m
+		return m, nil
 	}
-	m.OrgName, m.RequesterName = settings.SignedAs(), settings.SignedAs()
-	m.SupportContact, m.PrivacyURL = settings.Branding.SupportContact, settings.Branding.PrivacyURL
-	m.Brand = &email.ProofingBrand{PrimaryColor: settings.Branding.PrimaryColor}
-	if settings.Branding.HasLogo {
-		logo, err := s.orgSettings.Logo(ctx, org.ID)
+	own, err := s.flowBranding(ctx, org.ID, flowID)
+	if err != nil {
+		return email.ProofingMail{}, err
+	}
+	branded := settings.brandedFor(own)
+	m.OrgName, m.RequesterName = branded.SignedAs(), branded.SignedAs()
+	m.SupportContact, m.PrivacyURL = branded.Branding.SupportContact, branded.Branding.PrivacyURL
+	m.Brand = &email.ProofingBrand{PrimaryColor: branded.Branding.PrimaryColor}
+	if branded.Branding.HasLogo {
+		logo, err := s.brandLogo(ctx, org.ID, flowID, own)
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: logo not read, mailing the wordmark",
 				slog.String("org_id", org.ID.String()), slog.Any("error", err))
@@ -992,7 +1017,7 @@ func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings,
 			m.Brand.Logo = email.Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}
 		}
 	}
-	return m
+	return m, nil
 }
 
 // sendableFlow is the flow a new request runs, if the sender may use it: for a
@@ -1993,6 +2018,15 @@ func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, erro
 // SaveBranding replaces the org's branding. The colour is a #rrggbb hex, the
 // privacy statement an https URL; empty fields fall back.
 func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
+	b, err := checkBranding(b)
+	if err != nil {
+		return Settings{}, err
+	}
+	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
+}
+
+// checkBranding trims b's fields and refuses one that cannot be saved.
+func checkBranding(b Branding) (Branding, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
 	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
@@ -2003,32 +2037,32 @@ func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding,
 	} {
 		*color = strings.TrimSpace(*color)
 		if *color != "" && !hexColor.MatchString(*color) {
-			return Settings{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
+			return Branding{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
 		}
 	}
 	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
-		return Settings{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
 	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
 	case len(b.DisplayName) > maxDisplayNameLength:
-		return Settings{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
-		return Settings{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
-		return Settings{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
-		return Settings{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:
-		return Settings{}, fmt.Errorf("%w: the privacy statement URL is too long", ErrInvalidInput)
+		return Branding{}, fmt.Errorf("%w: the privacy statement URL is too long", ErrInvalidInput)
 	}
 	if b.PrivacyURL != "" {
 		if _, err := (safehttp.Policy{}).CheckURL(b.PrivacyURL); err != nil {
-			return Settings{}, fmt.Errorf("%w: the privacy statement must be an absolute https URL", ErrInvalidInput)
+			return Branding{}, fmt.Errorf("%w: the privacy statement must be an absolute https URL", ErrInvalidInput)
 		}
 	}
-	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
+	return b, nil
 }
 
 // Logo returns the org's logo, or ErrNoLogo.

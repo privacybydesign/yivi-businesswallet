@@ -465,6 +465,29 @@ export interface ProofingBrandingInput extends Record<
   removeLogo?: boolean;
 }
 
+// A flow's own branding over the org's: not custom is the org's, with empty
+// fields. Each field it leaves empty, and no logo, is the org's.
+const proofingFlowBrandingSchema = z.object({
+  custom: z.boolean(),
+  displayName: z.string(),
+  primaryColor: z.string(),
+  supportContact: z.string(),
+  privacyUrl: z.string(),
+  logoUri: z.string(),
+});
+
+export type ProofingFlowBranding = z.infer<typeof proofingFlowBrandingSchema>;
+
+export type ProofingFlowBrandingInput = Pick<
+  ProofingBrandingInput,
+  | "displayName"
+  | "primaryColor"
+  | "supportContact"
+  | "privacyUrl"
+  | "logo"
+  | "removeLogo"
+> & { custom: boolean };
+
 // Whether an org's identity proofing is paused by a platform admin, and by
 // whom.
 const proofingPausedBySchema = z.object({
@@ -779,13 +802,54 @@ export function saveProofingBranding(
   form.set("supportContact", input.supportContact);
   form.set("privacyUrl", input.privacyUrl);
   form.set("hidePoweredBy", String(input.hidePoweredBy));
+  setLogoFields(form, input);
+  return request(`${base(slug)}/settings/branding`, {
+    schema: proofingSettingsSchema,
+    method: "PUT",
+    body: form,
+    signal,
+  });
+}
+
+function setLogoFields(
+  form: FormData,
+  input: { logo?: File; removeLogo?: boolean },
+): void {
   if (input.logo) {
     form.set("logo", input.logo);
   } else if (input.removeLogo) {
     form.set("removeLogo", "true");
   }
-  return request(`${base(slug)}/settings/branding`, {
-    schema: proofingSettingsSchema,
+}
+
+export function getProofingFlowBranding(
+  slug: string,
+  flowId: string,
+  signal?: AbortSignal,
+): Promise<ProofingFlowBranding> {
+  return request(`${flowBase(slug, flowId)}/branding`, {
+    schema: proofingFlowBrandingSchema,
+    signal,
+  });
+}
+
+export function saveProofingFlowBranding(
+  slug: string,
+  flowId: string,
+  input: ProofingFlowBrandingInput,
+  signal?: AbortSignal,
+): Promise<ProofingFlowBranding> {
+  const form = new FormData();
+  form.set("custom", String(input.custom));
+  form.set("displayName", input.displayName);
+  form.set("primaryColor", input.primaryColor);
+  form.set("supportContact", input.supportContact);
+  form.set("privacyUrl", input.privacyUrl);
+  if (input.custom) {
+    setLogoFields(form, input);
+  }
+  return request(`${flowBase(slug, flowId)}/branding`, {
+    schema: proofingFlowBrandingSchema,
     method: "PUT",
     body: form,
     signal,

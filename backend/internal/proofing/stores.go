@@ -18,6 +18,7 @@ func NewStores(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, r
 		Events:        audit.NewReader(db),
 		Pauses:        NewPauseStore(db, recorder),
 		FlowHosted:    NewFlowHostedStore(db, recorder),
+		FlowBranding:  NewFlowBrandingStore(db, recorder),
 		FlowDiplomas:  NewFlowDiplomaStore(db, recorder),
 		Diplomas:      NewDiplomaStore(db, recorder),
 		FlowAddresses: NewFlowAddressStore(db, recorder),

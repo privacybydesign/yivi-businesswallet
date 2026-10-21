@@ -1269,21 +1269,51 @@ export const nl: Translation<typeof en> = {
       tabsLabel: "Flow",
       people: "Personen",
     },
+    editTabs: {
+      check: "Controle",
+      branding: "Huisstijl",
+      hosted: "Gehoste pagina",
+    },
+    branding: {
+      title: "Huisstijl voor deze flow",
+      hint: "Gebruikt in de verificatiemail en op de gehoste pagina van deze flow.",
+      which: "Welke huisstijl",
+      same: {
+        title: "Zelfde als de organisatie",
+        noLogo: "geen logo",
+        change: "Wijzigen onder Instellingen › Huisstijl",
+      },
+      custom: {
+        title: "Eigen huisstijl voor deze flow",
+        hint: "Voor een product met een eigen naam of uiterlijk. Velden die je leeg laat gebruiken die van de organisatie.",
+      },
+      orgEmpty: "Organisatie: leeg",
+      logoInherited: "Het logo van de organisatie",
+    },
     hosted: {
       title: "Gehoste pagina",
-      enabled:
-        "Links naar een gehoste pagina mogen voor deze flow worden verstuurd",
+      hint: "De pagina die iemand opent via een link of e-mail voor deze flow.",
+      enabled: "Toestaan dat deze flow als link wordt verstuurd",
+      enabledHint:
+        "Leden kunnen dan “Link kopiëren” of e-mail kiezen als ze iemand verifiëren.",
       locales: "Talen",
       localesHint:
-        "Vink niets aan om alle talen aan te bieden. De pagina opent in de taal van de sessie, anders in de browsertaal van de persoon.",
+        "De pagina opent in de taal van het verzoek, anders in de browsertaal van de persoon.",
+      localesRequired: "Houd minstens één taal aan.",
       completion: "Als de controle klaar is",
       completions: {
-        redirect:
-          "Stuur de persoon naar de redirect-URL van de sessie, of toon een bedankpagina als die er niet is",
-        done: "Toon altijd de bedankpagina (sessies mogen geen redirect-URL hebben)",
+        redirect: {
+          title: "Terug naar je website",
+          hint: "Naar het adres dat bij het verzoek hoort; een bedankpagina als dat er niet is.",
+        },
+        done: {
+          title: "Altijd een bedankpagina tonen",
+          hint: "Verzoeken kunnen geen terugkeeradres meegeven.",
+        },
       },
-      save: "Gehoste pagina opslaan",
-      preview: "Voorbeeld van de gehoste pagina",
+      save: "Opslaan",
+      preview: "Voorbeeld · eerste stap",
+      previewNote: "Gebruikt de huisstijl van deze flow.",
     },
     versions: {
       title: "Versies",
@@ -2083,6 +2113,8 @@ export const nl: Translation<typeof en> = {
       identityProofingPaused: "Identiteitsverificatie gepauzeerd",
       identityProofingFlowHostedConfigured:
         "Gehoste pagina van een flow gewijzigd",
+      identityProofingFlowBrandingConfigured:
+        "Huisstijl van een flow gewijzigd",
       identityProofingFlowDiplomasConfigured:
         "Gewijzigd of een flow om diploma's vraagt",
       identityProofingDiplomaAdded: "Diploma toegevoegd",

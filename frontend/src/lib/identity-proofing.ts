@@ -6,8 +6,10 @@ import type {
   AddressVerification,
   DiplomaMode,
   FlowKind,
+  ProofingBranding,
   ProofingChannel,
   ProofingFlow,
+  ProofingFlowBranding,
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
@@ -16,6 +18,7 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
+import { SUPPORTED_LANGUAGES } from "../i18n/language";
 import { errorCode } from "./api-error";
 import { auditActorLabel } from "./audit-event";
 import { fullName } from "./name";
@@ -1571,6 +1574,37 @@ export function ownEndpointDeliveries(
   return deliveries.filter((d) => d.endpointUrl !== undefined);
 }
 
+// The branding a flow's mail and hosted page wear: its own fields where it is
+// custom and set them, else the org's. "Powered by" stays the org's. Mirrors
+// Branding.over in backend/internal/proofing/flow_branding.go.
+export function effectiveBranding(
+  org: ProofingBranding,
+  own: ProofingFlowBranding,
+): ProofingBranding {
+  if (!own.custom) {
+    return org;
+  }
+  return {
+    ...org,
+    displayName: own.displayName || org.displayName,
+    primaryColor: own.primaryColor || org.primaryColor,
+    supportContact: own.supportContact || org.supportContact,
+    privacyUrl: own.privacyUrl || org.privacyUrl,
+    logoUri: own.logoUri || org.logoUri,
+  };
+}
+
+// The languages a hosted page form shows ticked: none saved is every one.
+export function selectedLocales(saved: readonly string[]): string[] {
+  return saved.length === 0 ? [...SUPPORTED_LANGUAGES] : [...saved];
+}
+
+// Every language ticked is saved as none, so a language added later is offered
+// too.
+export function savedLocales(selected: readonly string[]): string[] {
+  return selected.length === SUPPORTED_LANGUAGES.length ? [] : [...selected];
+}
+
 // The text colour readable on a #rrggbb fill (WCAG relative luminance): the
 // branding preview mirrors what the mail shell does to its button label.
 const LUMINANCE_THRESHOLD = 0.179;
@@ -1587,6 +1621,11 @@ const HEX_PAIR = 2;
 
 export function isHexColor(value: string): boolean {
   return HEX_COLOR.test(value);
+}
+
+// A colour field that holds something and not a #rrggbb; empty falls back.
+export function isInvalidColor(value: string): boolean {
+  return value !== "" && !isHexColor(value);
 }
 
 export function readableTextOn(hex: string): "#ffffff" | "#000000" {

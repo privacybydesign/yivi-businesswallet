@@ -66,14 +66,7 @@ func newBrandingResponse(slug string, s Settings) brandingResponse {
 // and a "logo" file to replace the logo or "removeLogo=true" to clear it;
 // neither keeps it.
 func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
-	r.Body = http.MaxBytesReader(w, r.Body, themesettings.MaxLogoBytes+brandingBodySlack)
-	if err := r.ParseMultipartForm(brandingFormMemory); err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "the logo is too large"}
-		}
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid multipart form"}
-	}
-	logo, err := parseLogo(r)
+	logo, err := readBrandingForm(w, r)
 	if err != nil {
 		return err
 	}
@@ -98,6 +91,25 @@ func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	return h.respondSettings(w, r, settings)
+}
+
+// readBrandingForm parses a branding form and returns what it does to the logo.
+func readBrandingForm(w http.ResponseWriter, r *http.Request) (LogoChange, error) {
+	if err := parseBrandingForm(w, r); err != nil {
+		return LogoChange{}, err
+	}
+	return parseLogo(r)
+}
+
+func parseBrandingForm(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, themesettings.MaxLogoBytes+brandingBodySlack)
+	if err := r.ParseMultipartForm(brandingFormMemory); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "the logo is too large"}
+		}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid multipart form"}
+	}
+	return nil
 }
 
 func parseLogo(r *http.Request) (LogoChange, error) {
@@ -132,11 +144,15 @@ func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
+	writeLogo(w, r, logo)
+	return nil
+}
+
+func writeLogo(w http.ResponseWriter, r *http.Request, logo Logo) {
 	themesettings.SetLogoResponseHeaders(w.Header(), logo.ContentType)
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(logo.Bytes); err != nil {
 		// The status is committed; a failed write can only be logged.
 		slog.ErrorContext(r.Context(), "proofing: write logo", slog.Any("error", err))
 	}
-	return nil
 }

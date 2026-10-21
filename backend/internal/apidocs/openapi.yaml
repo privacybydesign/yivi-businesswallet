@@ -6009,6 +6009,147 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/branding:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id.
+    get:
+      tags: [identity-proofing]
+      summary: Read a flow's own branding
+      description: >-
+        Requires an administrator role in the organisation. `custom` false is "same as the
+        organisation": the flow's mail and hosted page wear the organisation's branding and the
+        other fields are empty. `custom` true is "custom for this flow": each field it sets
+        replaces the organisation's, and an empty one, or no logo, falls back to it. These are
+        the flow's own fields, not the look it ends up with. A flow never set reads `custom:
+        false`.
+      responses:
+        '200':
+          description: The flow's own branding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowBranding'
+              examples:
+                default:
+                  summary: A flow never set
+                  value:
+                    custom: false
+                    displayName: ''
+                    primaryColor: ''
+                    supportContact: ''
+                    privacyUrl: ''
+                    logoUri: ''
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing]
+      summary: Save a flow's own branding
+      description: >-
+        Requires an administrator role in the organisation. A multipart form: `custom` (`true`
+        or `false`, required; a missing one is 400 `invalid_body`), and for a custom flow the
+        fields of the organisation's branding without "powered by", which stays the
+        organisation's: `displayName`, `primaryColor` (`#rrggbb`), `supportContact`,
+        `privacyUrl` (an https URL) and a `logo` file (PNG, JPEG, GIF or WebP, at most 512
+        KiB) or `removeLogo=true`; a field left empty falls back to the organisation's. `custom`
+        false removes the flow's branding, its logo included. The flow's proofing mail and
+        hosted page use the result. Audited `identity_proofing.flow_branding_configured` with
+        before and after (whether a logo is set, never its bytes); saving what it already holds
+        changes and audits nothing.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowBrandingForm'
+      responses:
+        '200':
+          description: The flow's own branding as saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowBranding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '413':
+          description: The logo is too large (`payload_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/branding/logo:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id.
+    get:
+      tags: [identity-proofing]
+      summary: Get a flow's own logo
+      description: >-
+        Requires an administrator role in the organisation. The logo image the flow's own
+        branding holds, served with a locked-down content security policy. A flow without
+        one is 404 `not_found`, even when the organisation has a logo the flow falls back to.
+      responses:
+        '200':
+          description: The logo image.
+          content:
+            'image/*':
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          description: The flow has no logo of its own (`not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/kind:
     parameters:
       - name: slug
@@ -11866,6 +12007,48 @@ components:
         hidePoweredBy:
           type: string
           enum: ['true', 'false']
+    ProofingFlowBranding:
+      type: object
+      properties:
+        custom:
+          type: boolean
+          description: False is the organisation's branding, and the other fields are empty.
+        displayName:
+          type: string
+        primaryColor:
+          type: string
+        supportContact:
+          type: string
+        privacyUrl:
+          type: string
+        logoUri:
+          type: string
+          description: The flow's own logo; empty without one.
+      required: [custom, displayName, primaryColor, supportContact, privacyUrl, logoUri]
+    ProofingFlowBrandingForm:
+      type: object
+      properties:
+        custom:
+          type: string
+          enum: ['true', 'false']
+        displayName:
+          type: string
+        primaryColor:
+          type: string
+          description: '`#rrggbb`; empty is the organisation''s.'
+        supportContact:
+          type: string
+        privacyUrl:
+          type: string
+          description: An https URL.
+        logo:
+          type: string
+          format: binary
+          description: PNG, JPEG, GIF or WebP, at most 512 KiB.
+        removeLogo:
+          type: string
+          enum: ['true']
+      required: [custom]
     ProofingApiKey:
       type: object
       properties:

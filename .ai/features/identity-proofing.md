@@ -11,7 +11,8 @@ counted, the newest ones, the org's flows with their sessions, and an alert
 for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
 with the people each identified in 30 days, the default flow and which flows
 members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
-with **People** and **Versions** tabs, **Edit flow** and "Verify a person") and
+with **People** and **Versions** tabs, **Edit flow** (tabs **Check**, **Branding**
+and **Hosted page**) and "Verify a person") and
 **Developers** (no tabs: the **API tokens**
 table (name, created with who by, last used, revoke; revoked ones are not
 listed), the **Webhook endpoint** and its **Recent deliveries**). The **All people** list
@@ -67,7 +68,10 @@ handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
 `frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
 `developers-webhook.tsx` (the Developers page), `proofing-branding.tsx`
-(Settings › Branding),
+(Settings › Branding) + `proofing-branding-fields.tsx` (its fields and mail
+preview, shared with a flow's), `flow_branding*.go` +
+`routes/flow-branding.tsx` (a flow's own branding), `routes/flow-tabs.tsx`
+(the flow page's tabs),
 `internal/proofing/api_handler.go` (the
 public API and the API key routes), `apikey_store.go` (keys),
 `org_settings_store.go` + `settings_handler.go` + `branding_handler.go` (the org's
@@ -1065,6 +1069,25 @@ post-review outcome stay the system's.
     member gets the org theme under the org's name. Nothing set at either level
     is no `branding`. `relyingParty` stays the org's own name next to it. The
     hosted page applies the same look (`theme` in the hosted view).
+  - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
+    org and flow, `flow_branding.go`; a row is "custom for this flow", none is
+    "same as the organisation"): `GET` and `PUT
+    /orgs/{slug}/identity-proofing/flows/{flowID}/branding` (multipart; `custom`,
+    true or false, is required) and `GET .../branding/logo`, admin only. It holds
+    the org's name, colour, logo, support contact and privacy URL; the
+    white-label colours and font and "powered by" stay the org's. Each field it
+    sets replaces the org's, and one left empty, or no logo, falls back to it
+    (`Branding.over`, mirrored by `effectiveBranding` in
+    `lib/identity-proofing.ts`). It styles the flow's proofing mail
+    (`proofingMail`: a branding that cannot be read blocks the mail, a logo that
+    cannot be read leaves the wordmark) and its hosted page (`HostedRequest`,
+    `HostedLogo`), over the org's white-label there. The on-screen page, a
+    member's mail and the Idem app still show the org's. Going back to "same
+    as the organisation" deletes the row, logo included, and checks none of
+    the form's fields or its logo upload (the handler does not read it): the
+    tab sends its hidden draft text fields in that mode too. Audited
+    `identity_proofing.flow_branding_configured` with before and after. The
+    form is the Branding tab of Edit flow, with a preview of the mail.
   - **Allowed redirect origins** (§7).
   - Branding is under Settings › Branding (the org's, for every flow; the
     wallet's own look is the separate Settings › Wallet theme).
@@ -1187,8 +1210,9 @@ provider, so keyed on org and flow id with no foreign key): `enabled` (off: a
 hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
 with another `language` is 400; the page keeps to them), and `completion`
 (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
-Admins edit them under "Hosted page" in a flow's Edit flow view, with a
-preview of the overview step in the org's branding. No row is the defaults.
+Admins edit them on the Hosted page tab of a flow's Edit flow view, with a
+preview of the overview step in the flow's branding. The languages show ticked
+when none is saved, and all ticked saves as none. No row is the defaults.
 **Theme:** the page applies the org's branding `primaryColor` through
 `applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
 org can leave off (`hide_powered_by`, Settings › Branding).
