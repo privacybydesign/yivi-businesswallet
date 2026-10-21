@@ -8,10 +8,9 @@ import { proofingErrorMessage } from "../lib/identity-proofing";
 import { TopBar } from "../ui";
 import { ApiTokensSection } from "./developers-api-keys";
 import { WebhookSection } from "./developers-webhook";
-import { BrandingTab } from "./proofing-branding";
 import { SettingsTab } from "./proofing-settings";
 
-type TabKey = "api" | "branding" | "settings";
+type TabKey = "api" | "settings";
 const DEFAULT_TAB: TabKey = "api";
 // The API reference the backend serves (internal/apidocs).
 const API_DOCS_PATH = "/api/docs";
@@ -21,14 +20,12 @@ const TABS: {
   labelKey: `identityProofing.developers.tabs.${TabKey}`;
 }[] = [
   { key: "api", labelKey: "identityProofing.developers.tabs.api" },
-  { key: "branding", labelKey: "identityProofing.developers.tabs.branding" },
   { key: "settings", labelKey: "identityProofing.developers.tabs.settings" },
 ];
 
 // What an org sets up once for identity proofing, for all its flows: the API
 // tokens and the webhook endpoint its own software uses, and, until they get
-// their own pages, the look of the mail and the hosted page and the session
-// settings. Admin only.
+// their own page, the session settings. Admin only.
 export default function Developers(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -68,7 +65,6 @@ export default function Developers(): React.JSX.Element {
     setTab(next.key);
     document.getElementById(`developers-tab-${next.key}`)?.focus();
   }
-  const showsSettings = activeTab === "branding" || activeTab === "settings";
 
   return (
     <>
@@ -130,20 +126,13 @@ export default function Developers(): React.JSX.Element {
                 <WebhookSection slug={slug} />
               </>
             )}
-            {showsSettings && settings.isPending && (
+            {activeTab === "settings" && settings.isPending && (
               <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
             )}
-            {showsSettings && settings.isError && (
+            {activeTab === "settings" && settings.isError && (
               <p className="text-error text-[12.5px]">
                 {proofingErrorMessage(settings.error, t)}
               </p>
-            )}
-            {activeTab === "branding" && settings.isSuccess && (
-              <BrandingTab
-                slug={slug}
-                orgName={org.data?.name ?? ""}
-                settings={settings.data}
-              />
             )}
             {activeTab === "settings" && settings.isSuccess && (
               <SettingsTab slug={slug} settings={settings.data} />

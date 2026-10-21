@@ -10,8 +10,8 @@ sidebar's "Identity proofing" section holds up to three pages under
 counted, the newest ones, the org's flows with their sessions, and an alert
 for a failing webhook) and, admin-only, **Flows** (full flow configuration,
 versioned, which flows members may use, and the default flow) and
-**Developers** (tabs: API and webhook, Branding and Session settings; the
-last two are temporary homes). The API and webhook tab holds the **API tokens**
+**Developers** (tabs: API and webhook, and Session settings, a temporary
+home). The API and webhook tab holds the **API tokens**
 table (name, created with who by, last used, revoke; revoked ones are not
 listed), the **Webhook endpoint** and its **Recent deliveries**. The **Sessions** list
 (`/{org}/identity-proofing/sessions`, opened from the Overview;
@@ -61,8 +61,9 @@ handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
 `frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
-`developers-webhook.tsx` + `proofing-branding.tsx` + `proofing-settings.tsx`
-(the Developers page and its tabs), `internal/proofing/api_handler.go` (the
+`developers-webhook.tsx` + `proofing-settings.tsx` (the Developers page and
+its tabs), `proofing-branding.tsx` (Settings › Branding),
+`internal/proofing/api_handler.go` (the
 public API and the API key routes), `apikey_store.go` (keys),
 `org_settings_store.go` + `settings_handler.go` + `branding_handler.go` (the org's
 settings; `settings_store.go` is the flow selection),
@@ -926,8 +927,10 @@ post-review outcome stay the system's.
     is no `branding`. `relyingParty` stays the org's own name next to it. The
     hosted page applies the same look (`theme` in the hosted view).
   - **Allowed redirect origins** (§7).
-  - The settings have no page of their own yet: branding and the session
-    settings are tabs of the Developers page.
+  - Branding is under Settings › Branding (the org's, for every flow; the
+    wallet's own look is the separate Settings › Wallet theme). The session
+    settings have no page of their own yet: they are a tab of the Developers
+    page.
 
 ## 5. No test mode
 
@@ -1051,7 +1054,7 @@ Admins edit them under "Hosted page" on a flow in the flows page, with a
 preview of the overview step in the org's branding. No row is the defaults.
 **Theme:** the page applies the org's branding `primaryColor` through
 `applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
-org can leave off (`hide_powered_by`, the Branding tab).
+org can leave off (`hide_powered_by`, Settings › Branding).
 
 ## 8. Pausing an org's proofing
 

@@ -11,7 +11,6 @@ import {
 } from "../lib/settings-tabs";
 import type { SettingsLocation } from "../lib/settings-tabs";
 import { Card, TopBar } from "../ui";
-import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IdentitySettingsPanel } from "./identity-settings";
@@ -24,6 +23,7 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
+import { BrandingPanel } from "./proofing-branding";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
@@ -100,17 +100,16 @@ export default function Settings(): React.JSX.Element {
             </p>
           </Card>
         ) : tab === "org" ? (
-          <div className="flex flex-col gap-6">
-            <OrgProfileSettings org={org.data} />
-            <DepartmentSettings slug={slug} />
-          </div>
+          <OrgProfileSettings org={org.data} />
+        ) : tab === "branding" ? (
+          <BrandingPanel slug={slug} orgName={org.data.name} />
         ) : tab === "mandates" ? (
           <MandateSettings slug={slug} />
         ) : tab === "identity" ? (
           <IdentitySettingsPanel slug={slug} />
         ) : tab === "screening" ? (
           <ScreeningSettingsPanel slug={slug} />
-        ) : tab === "branding" ? (
+        ) : tab === "theme" ? (
           <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (
           <div className="flex flex-col gap-6">

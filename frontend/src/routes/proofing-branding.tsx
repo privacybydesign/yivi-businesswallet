@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import { useSaveBrandingMutation } from "../api/identity-proofing.queries";
+import {
+  useProofingSettingsQuery,
+  useSaveBrandingMutation,
+} from "../api/identity-proofing.queries";
 import {
   PROOFING_THEME_COLOR_FIELDS,
   type ProofingThemeColorField,
@@ -24,7 +27,12 @@ const ERROR = "text-error text-[12.5px]";
 const CAPTION =
   "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 // A few starting points; any #rrggbb works.
-const PRESET_COLORS = ["#1F5B4A", "#26307A", "#8B2332", "#1A1A1A"] as const;
+const PRESET_COLORS = [
+  { color: "#1E5A47", nameKey: "identityProofing.branding.swatches.green" },
+  { color: "#22337A", nameKey: "identityProofing.branding.swatches.blue" },
+  { color: "#8E2440", nameKey: "identityProofing.branding.swatches.red" },
+  { color: "#1F1E1E", nameKey: "identityProofing.branding.swatches.black" },
+] as const;
 // Shown when the org has no colour: the Yivi default the mail falls back to.
 const FALLBACK_PREVIEW_COLOR = "#1A1A1A";
 const LOGO_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
@@ -79,10 +87,34 @@ function draftFrom(settings: ProofingSettings): Draft {
   };
 }
 
+// Settings › Branding: the org's branding as saved, then the form for it.
+export function BrandingPanel({
+  slug,
+  orgName,
+}: {
+  slug: string;
+  orgName: string;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const settings = useProofingSettingsQuery(slug);
+
+  if (settings.isPending) {
+    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
+  }
+  if (settings.isError) {
+    return (
+      <p role="alert" className={ERROR}>
+        {proofingErrorMessage(settings.error, t)}
+      </p>
+    );
+  }
+  return <BrandingTab slug={slug} orgName={orgName} settings={settings.data} />;
+}
+
 // The look of the proofing mail external people get, and of the hosted page:
 // the name it signs with, its logo and colour, and its support contact and
 // privacy statement, with a live preview beside the form.
-export function BrandingTab({
+function BrandingTab({
   slug,
   orgName,
   settings,
@@ -216,7 +248,7 @@ export function BrandingTab({
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-ink truncate text-[13px] font-semibold">
+                  <div className="text-ink text-[13px] font-semibold wrap-anywhere">
                     {draft.logo?.name ??
                       (logoUri
                         ? t("identityProofing.branding.logoSet")
@@ -393,8 +425,8 @@ function isHexOrEmpty(value: string): boolean {
   return value === "" || isHexColor(value);
 }
 
-// One of the branding's colours: a few presets, a picker and the hex itself;
-// empty falls back to the organisation's.
+// One of the branding's colours: a few named presets and the hex itself; empty
+// falls back to the organisation's.
 function ColorField({
   id,
   label,
@@ -419,14 +451,14 @@ function ColorField({
         aria-labelledby={`${id}-label`}
         className="flex min-w-0 flex-wrap items-center gap-2"
       >
-        {PRESET_COLORS.map((color) => {
+        {PRESET_COLORS.map(({ color, nameKey }) => {
           const active = value.toLowerCase() === color.toLowerCase();
           return (
             <button
               key={color}
               type="button"
               aria-pressed={active}
-              aria-label={color}
+              aria-label={t(nameKey)}
               onClick={() => onChange(color)}
               className={[
                 "h-9 w-9 rounded-md transition-shadow",
@@ -438,13 +470,6 @@ function ColorField({
             />
           );
         })}
-        <input
-          type="color"
-          aria-label={t("identityProofing.branding.customColor")}
-          value={isHexColor(value) ? value : FALLBACK_PREVIEW_COLOR}
-          onChange={(e) => onChange(e.target.value)}
-          className="border-line-strong h-9 w-9 cursor-pointer rounded-md border bg-transparent"
-        />
         <div className="ml-2 w-32">
           <Input
             value={value}

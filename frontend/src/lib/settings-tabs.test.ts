@@ -42,8 +42,15 @@ function lookup(locale: unknown, key: string): unknown {
 }
 
 describe("settings tab layout", () => {
-  it("has eleven top-level tabs", () => {
-    expect(SETTINGS_TABS).toHaveLength(11);
+  it("has twelve top-level tabs", () => {
+    expect(SETTINGS_TABS).toHaveLength(12);
+  });
+
+  it("leads with Organisation and Branding", () => {
+    expect(SETTINGS_TABS.slice(0, 2).map((item) => item.key)).toEqual([
+      "org",
+      "branding",
+    ]);
   });
 
   it("keeps the communication panels out of the top-level row", () => {
@@ -74,6 +81,14 @@ describe("resolveSettingsLocation", () => {
     for (const [value, tab, section] of LEGACY_TAB_KEYS) {
       expect(resolveSettingsLocation(value), value).toEqual({ tab, section });
     }
+  });
+
+  it("opens the wallet theme on its own key, apart from Branding", () => {
+    expect(resolveSettingsLocation("theme")).toEqual({
+      tab: "theme",
+      section: DEFAULT_COMMUNICATION_SECTION,
+    });
+    expect(resolveSettingsLocation("branding").tab).toBe("branding");
   });
 
   it("opens the first section for the communication tab's own key", () => {
