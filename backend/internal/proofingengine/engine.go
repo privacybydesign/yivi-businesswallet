@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gmrtd/gmrtd/cms"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/i18n"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
@@ -66,6 +68,10 @@ type Config struct {
 	// PublicBaseURL is the origin the Idem app reaches /api/v1/app at: the
 	// api= of every vcmrtd deep link.
 	PublicBaseURL string
+	// AppLinkURL is the https App Link / Universal Link a claim opens the Idem
+	// app with (e.g. https://idem.yivi.app/verify), before its handover= and
+	// api=; empty is the app's own vcmrtdClaimLink scheme.
+	AppLinkURL string
 
 	// Now is the clock a document's expiry date is judged against; nil is
 	// time.Now. A test sets it to read a fixture document while it was valid.
@@ -81,6 +87,10 @@ type Config struct {
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
 
+	// DrivingLicenceCertPool anchors a driving licence's Passive Authentication
+	// (mrtdverify.LoadCertPool); nil trusts no licence.
+	DrivingLicenceCertPool cms.CertPool
+
 	// BoundLoginTTL is a Yivi-method session's default lifetime;
 	// BoundLoginStableFrames the consecutive matching frames that approve
 	// it, BoundLoginMaxAttempts the usable frames before it is rejected.
@@ -91,6 +101,9 @@ type Config struct {
 	// DeviceTrail records which devices took part in a session in the org's
 	// audit log (deviceTrailEvents); nil keeps the trail in the server log only.
 	DeviceTrail DeviceTrail
+	// Branding resolves the look the Idem app gives a session; nil gives every
+	// session the app's own.
+	Branding BrandingLookup
 }
 
 // DeviceTrail is where the engine reports a session's device events: the
@@ -235,6 +248,9 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	if cfg.RegulaFaceMatchThreshold <= 0 {
 		cfg.RegulaFaceMatchThreshold = regula.DefaultMatchThreshold
 	}
+	if cfg.DrivingLicenceCertPool == nil {
+		cfg.DrivingLicenceCertPool = &cms.GenericCertPool{}
+	}
 	if cfg.BoundLoginStableFrames <= 0 {
 		cfg.BoundLoginStableFrames = 1
 	}
@@ -269,6 +285,7 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/{token}", s.handleAppSession)
 	mux.HandleFunc("GET /app/{token}/events", s.handleAppSessionEvents)
+	mux.HandleFunc("GET /app/{token}/branding/logo", s.handleBrandingLogo)
 	mux.HandleFunc("POST /app/{token}/result", s.handleAppSessionResult)
 	mux.HandleFunc("POST /app/{token}/steps/selfie", s.handleSubmitSelfieStep)
 	mux.HandleFunc("POST /app/{token}/steps/nfc", s.handleSubmitNFCStep)

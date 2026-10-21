@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
@@ -102,5 +103,19 @@ func TestConcurrentFramesBudget(t *testing.T) {
 	}
 	if current.Status != session.StatusRejected || current.ErrorCode != errCodeFaceNoMatch {
 		t.Errorf("session = %s %s, want rejected %s", current.Status, current.ErrorCode, errCodeFaceNoMatch)
+	}
+}
+
+// The disclosed credential, not its claims, tells a residence permit apart.
+func TestDisclosureDocumentKind(t *testing.T) {
+	for credential, want := range map[string]string{
+		"pbdf-staging.pbdf.passport":        flow.DocumentKindPassport,
+		"pbdf-staging.pbdf.idcard":          flow.DocumentKindIdentityCard,
+		"pbdf-staging.pbdf.residencepermit": flow.DocumentKindResidencePermit,
+		"pbdf-staging.sidn-pbdf.email":      "",
+	} {
+		if got := documentFromDisclosure(disclosureInfo{Credential: credential}).Kind; got != want {
+			t.Errorf("documentFromDisclosure(%s).Kind = %q, want %q", credential, got, want)
+		}
 	}
 }

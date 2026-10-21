@@ -474,10 +474,18 @@ func (s *Server) grantExpiry(sess session.Session, ttl time.Duration) time.Time 
 	return expiresAt
 }
 
+// vcmrtdClaimLink is the Idem app's own scheme for a claim link, used unless
+// Config.AppLinkURL names its https App Link form.
+const vcmrtdClaimLink = "vcmrtd://verify"
+
 // grantResponse is the deep link a phone scans to redeem a grant for the native
 // slot.
 func (s *Server) grantResponse(role session.DeviceRole, token string, expiresAt time.Time) handoverResponse {
-	link := "vcmrtd://verify?handover=" + url.QueryEscape(token) + "&api=" + url.QueryEscape(s.apiBaseURL())
+	base := vcmrtdClaimLink
+	if s.cfg.AppLinkURL != "" {
+		base = s.cfg.AppLinkURL
+	}
+	link := base + "?handover=" + url.QueryEscape(token) + "&api=" + url.QueryEscape(s.apiBaseURL())
 	return handoverResponse{HandoverToken: token, Role: role, ExpiresAt: expiresAt, QR: link, DeepLink: link}
 }
 

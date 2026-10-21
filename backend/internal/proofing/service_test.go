@@ -92,7 +92,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method,
 		Hosted:                 in.LinkTokenHash != nil,
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
-		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas,
+		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
 		FlowKind: in.FlowKind,
 	}
@@ -222,6 +222,14 @@ func (f *fakeRequests) ListOpenReviews(_ context.Context, _ uuid.UUID, customerI
 		return nil, nil
 	}
 	return []Request{*f.stored}, nil
+}
+
+func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) (bool, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectAddress != nil {
+		return false, nil
+	}
+	f.stored.SubjectAddress = &addr
+	return true, nil
 }
 
 func (f *fakeRequests) LockReview(context.Context, uuid.UUID) (func(), error) {
@@ -1289,6 +1297,9 @@ func TestSaveBrandingValidates(t *testing.T) {
 	f := newFixture()
 	for name, b := range map[string]CustomerBranding{
 		"colour":       {PrimaryColor: "green"},
+		"text colour":  {TextColor: "#12345"},
+		"top bar":      {TopbarColor: "red"},
+		"font":         {FontFamily: "Arial; color: red"},
 		"http privacy": {PrivacyURL: "http://initech.example/privacy"},
 		"relative":     {PrivacyURL: "/privacy"},
 	} {

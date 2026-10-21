@@ -624,8 +624,9 @@ type DataExport struct {
 
 // DataExportSession is one session in a DataExport. Only a MatchStrong one,
 // proven with the requester's own document, carries personal data (Personal:
-// Identity and Diplomas): a probable, e-mail or name match the reviewer
-// ticked may still be another person's, so it exports its facts alone.
+// its address, Identity and Diplomas): a probable, e-mail or name match the
+// reviewer ticked may still be another person's, so it exports its facts
+// alone.
 type DataExportSession struct {
 	Request  Request
 	Level    MatchLevel

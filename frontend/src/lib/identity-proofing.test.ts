@@ -7,6 +7,9 @@ import type { ProofingFlow } from "../api/identity-proofing";
 import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
 import {
   PROOFING_REJECTION_CODES,
+  addressLookup,
+  addressVerificationNote,
+  matchingAddress,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -19,6 +22,7 @@ import {
   sendableByMail,
   sessionView,
   verifyStages,
+  currentStage,
   progressPollContinues,
   reviewPollContinues,
   reviewSubmitStep,
@@ -558,6 +562,7 @@ describe("proofingErrorMessage", () => {
     [404, "organization_not_found", "organizationNotFound"],
     [404, "webhook_not_found", "webhookNotFound"],
     [409, "link_started", "linkStarted"],
+    [422, "address_not_found", "addressNotFound"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -570,6 +575,56 @@ describe("proofingErrorMessage", () => {
     expect(proofingErrorMessage(new Error("boom"), t)).toBe(
       t("identityProofing.errors.generic"),
     );
+  });
+});
+
+describe("addressLookup", () => {
+  it.each([
+    ["1015 CP", "12", { postalCode: "1015CP", houseNumber: "12" }],
+    [" 1015cp ", "12a", { postalCode: "1015CP", houseNumber: "12" }],
+    ["1015 C", "12", null],
+    ["0123 AB", "12", null],
+    ["1000", "16", null],
+    ["1015 CP", "", null],
+    ["1015 CP", "A", null],
+  ] as const)("looks %s %s up as %o", (postalCode, houseNumber, want) => {
+    expect(addressLookup(postalCode, houseNumber)).toEqual(want);
+  });
+});
+
+describe("matchingAddress", () => {
+  const at = (houseNumber: string) => ({
+    street: "Keizersgracht",
+    houseNumber,
+    postalCode: "1015 CP",
+    city: "Amsterdam",
+  });
+  const found = [at("12"), at("12A"), at("12-2")];
+
+  it.each([
+    ["12", "12"],
+    ["12 a", "12A"],
+    ["12a", "12A"],
+    ["12 2", "12-2"],
+  ])("matches %s to %s", (typed, want) => {
+    expect(matchingAddress(found, typed)?.houseNumber).toBe(want);
+  });
+
+  it("matches no address the number lacks", () => {
+    expect(matchingAddress(found, "12B")).toBeUndefined();
+  });
+});
+
+describe("addressVerificationNote", () => {
+  it.each([
+    ["verified", "verified"],
+    ["unchecked", "unchecked"],
+    ["unsupported", "unsupported"],
+    [undefined, "declared"],
+  ] as const)("says how a %s address was checked", (verification, key) => {
+    const copy = t(`customers.sessions.address.${key}`);
+    expect(copy).not.toBe(`customers.sessions.address.${key}`);
+    expect(addressVerificationNote(verification, t)).toBe(copy);
   });
 });
 
@@ -937,6 +992,9 @@ describe("sessionView", () => {
   const until = "2026-10-12T12:00:00Z";
   const running = {
     status: "pending",
+    addressMode: "off" as const,
+    addressUntil: undefined,
+    addressDone: false,
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
     diplomasDone: false,
@@ -1006,6 +1064,51 @@ describe("sessionView", () => {
         diplomasUntil: until,
       }),
     ).toBe("running");
+  });
+
+  it("asks for the address before the diplomas", () => {
+    const settled = {
+      ...running,
+      status: "approved",
+      addressMode: "required" as const,
+      addressUntil: until,
+      diplomaMode: "required" as const,
+      diplomasUntil: until,
+    };
+    expect(sessionView(settled)).toBe("address");
+    expect(sessionView({ ...settled, addressDone: true })).toBe("diplomas");
+    expect(
+      sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
+    ).toBe("outcome");
+  });
+});
+
+describe("address step", () => {
+  it("adds the address stage after the session, before the diplomas", () => {
+    expect(
+      verifyStages({ appChoice: false, address: true, diplomas: true }),
+    ).toEqual(["overview", "session", "address", "diplomas"]);
+  });
+
+  it("is at the address or diploma step while it is open", () => {
+    const at = {
+      step: "session",
+      inAddress: false,
+      inDiplomas: false,
+    } as const;
+    expect(currentStage(at)).toBe("session");
+    expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
+      "address",
+    );
+    expect(currentStage({ ...at, inDiplomas: true })).toBe("diplomas");
+  });
+
+  it("mails only a flow that asks for no address", () => {
+    expect(sendableByMail({ addressMode: "off" })).toBe(true);
+    expect(sendableByMail({ addressMode: "required" })).toBe(false);
+    expect(
+      sendableByMail({ addressMode: "required", diplomaMode: "off" }),
+    ).toBe(false);
   });
 });
 

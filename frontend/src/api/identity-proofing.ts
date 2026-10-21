@@ -30,6 +30,44 @@ export const DIPLOMA_MODES = ["off", "required"] as const;
 // than silently skipping a step the backend enforces.
 const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
 
+// Whether a flow has the address step: once their identity is approved, its
+// subject enters their postal address. It is what they declare, not read off
+// a document.
+const ADDRESS_MODES = ["off", "required"] as const;
+// An unknown mode reads as required, as diplomaModeSchema.
+const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
+export type AddressMode = z.infer<typeof addressModeSchema>;
+
+// How an address was checked when it was kept: found in the Dutch address
+// register, Dutch but the register could not be asked, or outside the
+// Netherlands. An address kept before addresses were checked has none.
+const ADDRESS_VERIFICATIONS = ["verified", "unchecked", "unsupported"] as const;
+export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
+
+// The postal address a subject entered.
+const proofingAddressSchema = z.object({
+  street: z.string(),
+  houseNumber: z.string(),
+  postalCode: z.string(),
+  city: z.string(),
+  country: z.string(),
+  verification: z.enum(ADDRESS_VERIFICATIONS).optional().catch(undefined),
+});
+
+export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
+// What the address step sends; the backend sets the verification.
+export type ProofingAddressInput = Omit<ProofingAddress, "verification">;
+
+// An address as the Dutch address register writes it.
+const registerAddressSchema = z.object({
+  street: z.string(),
+  houseNumber: z.string(),
+  postalCode: z.string(),
+  city: z.string(),
+});
+
+export type RegisterAddress = z.infer<typeof registerAddressSchema>;
+
 // What a flow's sessions are for: an identity check, or a customer's subject
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
@@ -113,6 +151,8 @@ const proofingFlowSchema = z.object({
   // list carries it.
   diplomaMode: diplomaModeSchema.optional(),
   // Absent on a single version, as diplomaMode.
+  addressMode: addressModeSchema.optional(),
+  // Absent on a single version, as diplomaMode.
   kind: flowKindSchema.optional(),
 });
 
@@ -150,6 +190,12 @@ const proofingRequestSchema = z.object({
   diplomaMode: diplomaModeSchema,
   diplomas: z.array(proofingDiplomaSchema),
   diplomasUntil: z.string().optional(),
+  // Whether the session asks for the postal address, the one entered, and
+  // until when the subject can enter it (absent until approved, and once
+  // entered).
+  addressMode: addressModeSchema,
+  address: proofingAddressSchema.optional(),
+  addressUntil: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -242,10 +288,38 @@ const webhookHealthSchema = z.object({
 
 export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
 
-// Empty strings fall back: the customer's name, the org's colour, no logo.
+// The rest of a customer's white-label, the same colours as the org theme
+// has (bar its sidebar); empty keeps the design's own.
+export const CUSTOMER_THEME_COLOR_FIELDS = [
+  "textColor",
+  "surfaceColor",
+  "borderColor",
+  "linkColor",
+  "successColor",
+  "warningColor",
+  "errorColor",
+  "topbarColor",
+] as const;
+
+export type CustomerThemeColorField =
+  (typeof CUSTOMER_THEME_COLOR_FIELDS)[number];
+
+// Empty strings fall back: in the mail, the customer's name, the org's colour, no logo.
 const proofingCustomerBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
+  // The Idem app's second colour; empty keeps the design's.
+  secondaryColor: z.string(),
+  textColor: z.string(),
+  surfaceColor: z.string(),
+  borderColor: z.string(),
+  linkColor: z.string(),
+  successColor: z.string(),
+  warningColor: z.string(),
+  errorColor: z.string(),
+  topbarColor: z.string(),
+  // A CSS font-family list, as the org theme's.
+  fontFamily: z.string(),
   supportContact: z.string(),
   privacyUrl: z.string(),
   logoUri: z.string(),
@@ -367,9 +441,14 @@ export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>;
 
 // A branding save: the text fields, and a new logo file or its removal
 // (neither keeps it).
-export interface ProofingBrandingInput {
+export interface ProofingBrandingInput extends Record<
+  CustomerThemeColorField,
+  string
+> {
   displayName: string;
   primaryColor: string;
+  secondaryColor: string;
+  fontFamily: string;
   supportContact: string;
   privacyUrl: string;
   hidePoweredBy: boolean;
@@ -543,6 +622,24 @@ export function saveProofingFlowDiplomas(
     body: { diplomaMode },
     signal,
   }).then((r) => r.diplomaMode);
+}
+
+const proofingFlowAddressSchema = z.object({
+  addressMode: addressModeSchema,
+});
+
+export function saveProofingFlowAddress(
+  slug: string,
+  flowId: string,
+  addressMode: AddressMode,
+  signal?: AbortSignal,
+): Promise<AddressMode> {
+  return request(`${flowBase(slug, flowId)}/address`, {
+    schema: proofingFlowAddressSchema,
+    method: "PUT",
+    body: { addressMode },
+    signal,
+  }).then((r) => r.addressMode);
 }
 
 const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
@@ -756,6 +853,11 @@ export function saveProofingCustomerBranding(
   const form = new FormData();
   form.set("displayName", input.displayName);
   form.set("primaryColor", input.primaryColor);
+  form.set("secondaryColor", input.secondaryColor);
+  for (const field of CUSTOMER_THEME_COLOR_FIELDS) {
+    form.set(field, input[field]);
+  }
+  form.set("fontFamily", input.fontFamily);
   form.set("supportContact", input.supportContact);
   form.set("privacyUrl", input.privacyUrl);
   form.set("hidePoweredBy", String(input.hidePoweredBy));
@@ -917,6 +1019,7 @@ const proofingResultSchema = z.object({
     z.object({
       type: z.string(),
       documentType: z.string().optional(),
+      documentKind: z.string().optional(),
       issuingState: z.string().optional(),
       expiryDate: z.string().optional(),
       passiveAuth: z.string().optional(),
@@ -1059,6 +1162,9 @@ export interface ProofingProgress {
   // sessions an approved erasure kept.
   dataExportUntil?: string;
   dataMatchesKept?: number;
+  // Until when the subject can enter their address, once approved and while
+  // they have not.
+  addressUntil?: string;
 }
 
 export function startProofingYivi(
@@ -1172,6 +1278,10 @@ const hostedProgressSchema = z.object({
   started: z.boolean(),
   // Until when the subject can add a diploma extract; absent while they cannot.
   diplomasUntil: z.string().optional(),
+  // Until when the subject can enter their address; absent while they cannot,
+  // and once they did (addressGiven).
+  addressUntil: z.string().optional(),
+  addressGiven: z.boolean(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1182,6 +1292,22 @@ export type HostedProgress = z.infer<typeof hostedProgressSchema>;
 
 // The hosted page: who asks, what the flow collects, the progress, and how
 // the page hands its subject back once settled.
+const hostedThemeSchema = z.object({
+  primaryColor: z.string(),
+  secondaryColor: z.string(),
+  textColor: z.string(),
+  surfaceColor: z.string(),
+  borderColor: z.string(),
+  linkColor: z.string(),
+  successColor: z.string(),
+  warningColor: z.string(),
+  errorColor: z.string(),
+  headerColor: z.string(),
+  fontFamily: z.string(),
+});
+
+export type HostedTheme = z.infer<typeof hostedThemeSchema>;
+
 const hostedProofingSchema = hostedProgressSchema.extend({
   // The customer's id for the session, handed back on completion.
   sessionId: z.string(),
@@ -1204,12 +1330,17 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     requestedAttributes: z.array(z.string()),
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
+    addressMode: addressModeSchema,
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
   }),
   // The diploma extracts the subject added.
   diplomas: z.array(hostedDiplomaSchema),
+  // The look the page takes, the one the Idem app shows the session in: the
+  // customer's own look when it has one, else the org's theme. "" keeps the
+  // page's own.
+  theme: hostedThemeSchema.optional(),
 });
 
 export type HostedProofing = z.infer<typeof hostedProofingSchema>;
@@ -1295,6 +1426,37 @@ export function uploadProofingDiplomas(
     method: "POST",
     body: form,
     timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+    signal,
+  });
+}
+
+// Every Dutch address at a postal code and house number typed on a verify
+// page, while it takes the address. Not retried: the next keystroke asks again.
+export function lookUpAddress(
+  target: VerifyTarget,
+  postalCode: string,
+  houseNumber: string,
+  signal?: AbortSignal,
+): Promise<RegisterAddress[]> {
+  const params = new URLSearchParams({ postalCode, houseNumber });
+  return request(`${verifyPath(target)}/address/lookup?${params.toString()}`, {
+    schema: z.object({ addresses: z.array(registerAddressSchema) }),
+    maxRetries: 0,
+    signal,
+  }).then((r) => r.addresses);
+}
+
+// Keeps the postal address entered on a verify page, after an approved
+// identity; the backend answers 204.
+export async function submitProofingAddress(
+  target: VerifyTarget,
+  address: ProofingAddressInput,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`${verifyPath(target)}/address`, {
+    schema: z.unknown(),
+    method: "POST",
+    body: address,
     signal,
   });
 }

@@ -16,7 +16,7 @@ export function Logo({
       <img
         src={src}
         alt={alt ?? ""}
-        style={{ maxHeight: LOGO_HEIGHT, maxWidth: "100%" }}
+        style={{ maxHeight: "var(--yb-logo-height)", maxWidth: "100%" }}
       />
     );
   }

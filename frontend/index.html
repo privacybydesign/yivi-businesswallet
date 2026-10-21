@@ -13,25 +13,32 @@
       // Apply the active org's cached theme before first paint, so a full reload
       // never flashes the default palette before React swaps the tenant branding
       // in. The org slug is the first path segment; the cache is written by
-      // cacheOrgTheme (src/lib/theme.ts) as { inline, css } — keep this reader in
-      // step with it. `inline` holds the mode-safe brand fills (set on the
-      // documentElement); `css` is the mode-aware block (surface/text/border/
+      // cacheOrgTheme (src/lib/theme.ts) as { inline, css, whiteLabel } — keep this reader in
+      // step with it. `inline` holds the brand fills (set on the
+      // documentElement); `css` is the derived block (surface/text/border/
       // link/status) whose `:root:root` selector wins over Vite's CSS by
-      // specificity, so injecting it here has no source-order race. Any failure
-      // is swallowed: the runtime apply then themes the app a moment later, so
-      // this is only an optimisation.
+      // specificity, so injecting it here has no source-order race;
+      // `whiteLabel` marks the white-label design. A hosted customer page
+      // (/p/<token>, src/router.tsx) is always in the white-label design. Any
+      // failure is swallowed: the runtime apply then themes the app a moment
+      // later, so this is only an optimisation. The colour scheme is always
+      // set, also on pages without an org.
       (function () {
-        try {
-          var slug = location.pathname.split("/")[1];
-          if (!slug) return;
+        var HOSTED_SEGMENT = "p";
+        var SYSTEM_PREFERENCE = "system";
+        var root = document.documentElement;
+
+        // applyCachedTheme applies the slug's cached theme and reports
+        // whether it is in the white-label design.
+        function applyCachedTheme(slug) {
+          if (!slug) return false;
           var raw = localStorage.getItem("ybw.theme." + slug);
-          if (!raw) return;
+          if (!raw) return false;
           var payload = JSON.parse(raw);
           var inline = (payload && payload.inline) || {};
-          var style = document.documentElement.style;
           for (var name in inline) {
             if (Object.prototype.hasOwnProperty.call(inline, name)) {
-              style.setProperty(name, inline[name]);
+              root.style.setProperty(name, inline[name]);
             }
           }
           if (payload && payload.css) {
@@ -42,9 +49,37 @@
             el.textContent = payload.css;
             if (!el.isConnected) document.head.appendChild(el);
           }
-        } catch (e) {
-          /* no-op: fall back to the runtime apply */
+          return Boolean(payload && payload.whiteLabel);
         }
+
+        var segment = location.pathname.split("/")[1];
+        var whiteLabel = segment === HOSTED_SEGMENT;
+        if (!whiteLabel) {
+          try {
+            whiteLabel = applyCachedTheme(segment);
+          } catch (e) {
+            /* no-op: fall back to the runtime apply */
+          }
+        }
+        if (whiteLabel) {
+          root.setAttribute("data-design", "white-label");
+        }
+        // Light or dark, resolved as resolveColorScheme (src/lib/color-scheme.ts)
+        // does: always light in the white-label design, else the switch's
+        // stored choice, else the OS.
+        var preference = SYSTEM_PREFERENCE;
+        try {
+          preference =
+            localStorage.getItem("bw.colorScheme") || SYSTEM_PREFERENCE;
+        } catch (e) {
+          /* no-op: Auto */
+        }
+        var dark =
+          !whiteLabel &&
+          (preference === "dark" ||
+            (preference !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches));
+        root.setAttribute("data-color-scheme", dark ? "dark" : "light");
       })();
     </script>
   </head>

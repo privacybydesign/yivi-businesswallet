@@ -7,8 +7,10 @@
 // Two Passive Authentication entry points:
 //
 //   - VerifyPassive is generic: it checks whatever data groups were sent
-//     against the whole trust pool. The only option for EU driving licences,
-//     whose DG1/DG6/DG13 encodings gmrtd's typed parsers cannot read.
+//     against the whole trust pool. VerifyPassiveDrivingLicence builds on it
+//     for EU driving licences, whose DG1/DG6/DG13 encodings gmrtd's typed
+//     parsers cannot read, as go-passport-issuer's PassiveAuthenticationEDL
+//     does.
 //   - VerifyPassiveICAO is for passports and ID cards: gmrtd's
 //     passiveauth.PassiveAuth on a typed document, which also checks the
 //     signer's country against DG1's and narrows the pool to that country's
@@ -19,7 +21,9 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,10 +48,11 @@ type PassiveResult struct {
 	DataGroupHashesValid bool
 	// InvalidDataGroups are the groups that failed, sorted.
 	InvalidDataGroups []string
-	// DocumentComplete is false when gmrtd's Document.Verify (VerifyPassiveICAO
-	// only) finds a data group EF.SOD lists missing, DG14 or DG15 above all: the
-	// hash check only sees what was sent, so dropping DG15 would otherwise dodge
-	// Active Authentication. Always true for VerifyPassive.
+	// DocumentComplete is false when a data group EF.SOD lists is missing that
+	// Active Authentication needs: the hash check only sees what was sent, so
+	// dropping the key would otherwise dodge it. VerifyPassiveICAO asks gmrtd's
+	// Document.Verify (DG14 or DG15 above all), VerifyPassiveDrivingLicence
+	// checks DG13. Always true for VerifyPassive.
 	DocumentComplete bool
 	// DocumentVerifyErr is Document.Verify's error, for diagnostics.
 	DocumentVerifyErr string
@@ -89,6 +94,41 @@ func VerifyPassive(efSODHex string, dataGroupsHex map[string]string, trustedCert
 	result.IssuingCSCA = issuingCSCASubject(certChain)
 	return result, nil
 }
+
+// VerifyPassiveDrivingLicence is VerifyPassive for an EU driving licence
+// (ISO/IEC 18013-3), against LoadCertPool's pool. DG1 must be sent, a
+// missing one is a bad request; and a DG13 (the Active Authentication key)
+// that EF.SOD lists but was not sent makes the document incomplete, as
+// go-passport-issuer's ActiveAuthenticationEDL refuses it.
+func VerifyPassiveDrivingLicence(efSODHex string, dataGroupsHex map[string]string, trustedCerts cms.CertPool) (PassiveResult, error) {
+	if _, ok := dataGroupsHex[drivingLicenceDG1]; !ok {
+		return PassiveResult{}, fmt.Errorf("mrtdverify: %s is mandatory for driving licence passive authentication but was not provided", drivingLicenceDG1)
+	}
+
+	result, err := VerifyPassive(efSODHex, dataGroupsHex, trustedCerts)
+	if err != nil {
+		return result, err
+	}
+
+	// VerifyPassive parsed the same EF.SOD without error.
+	sod, err := parseSOD(efSODHex)
+	if err != nil {
+		return result, err
+	}
+
+	if _, sent := dataGroupsHex[drivingLicenceAAKey]; !sent && sod.HasDgHash(drivingLicenceAAKeyNumber) {
+		result.DocumentComplete = false
+		result.DocumentVerifyErr = fmt.Sprintf("EF.SOD lists %s (the Active Authentication key) but it was not provided", drivingLicenceAAKey)
+	}
+	return result, nil
+}
+
+// The driving licence data groups VerifyPassiveDrivingLicence requires.
+const (
+	drivingLicenceDG1         = "DG1"
+	drivingLicenceAAKey       = "DG13"
+	drivingLicenceAAKeyNumber = 13
+)
 
 // VerifyPassiveICAO is VerifyPassive for passports and ID cards, with the
 // signature checked by gmrtd's passiveauth.PassiveAuth on a typed document
@@ -281,20 +321,29 @@ func PassportCertPool() (cms.CertPool, error) {
 	return passportCertPool, passportCertPoolErr
 }
 
-// CertPoolFor is the Passive Authentication anchor for the key data group:
-// DG13 (EU driving licences) gets DrivingLicenceCertPool, anything else
-// PassportCertPool.
-func CertPoolFor(aaKeyDataGroup string) (cms.CertPool, error) {
-	if aaKeyDataGroup == "DG13" {
-		return DrivingLicenceCertPool()
-	}
-	return PassportCertPool()
-}
+// DrivingLicenceIssuingState is the only issuing member state whose
+// driving-licence CSCAs LoadCertPool is given: a licence from any
+// other state cannot verify.
+const DrivingLicenceIssuingState = "NLD"
 
-// DrivingLicenceCertPool is the EU driving-licence anchor. gmrtd bundles a
-// masterlist for passports but none for licences, and nothing else supplies
-// one, so it is empty: a licence's CSCATrustChainValid is false rather than
-// the check being skipped.
-func DrivingLicenceCertPool() (cms.CertPool, error) {
-	return &cms.GenericCertPool{}, nil
+// LoadCertPool is the EU driving-licence anchor: gmrtd bundles a masterlist
+// for passports but none for licences, so it is the RDW's "CSCA NL eDL" roots
+// at paths, every generation, as go-passport-issuer-ops deploys them. A
+// certificate is PEM (generation 01) or DER (02 and 03). No paths is an empty
+// pool: a licence's CSCATrustChainValid is then false.
+func LoadCertPool(paths []string) (cms.CertPool, error) {
+	pool := &cms.GenericCertPool{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("mrtdverify: reading %s: %w", path, err)
+		}
+		if block, _ := pem.Decode(data); block != nil {
+			data = block.Bytes
+		}
+		if err := pool.Add(data); err != nil {
+			return nil, fmt.Errorf("mrtdverify: adding %s: %w", path, err)
+		}
+	}
+	return pool, nil
 }

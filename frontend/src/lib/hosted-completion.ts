@@ -1,6 +1,7 @@
 // How a hosted proofing page picks its language and hands its subject back
 // once the session settles. Pure, so the rules are unit-tested.
 
+import type { HostedTheme } from "../api/identity-proofing";
 import type { OrgTheme } from "../api/theme";
 import {
   DEFAULT_LANGUAGE,
@@ -139,27 +140,30 @@ export function originLines(text: string): string[] {
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
-// The hosted page's theme: the customer's colour as the brand colour, the rest
-// the default look; null (the default look) without a valid colour. Applied
-// through applyOrgTheme, which keeps text on it readable.
-export function hostedTheme(primaryColor: string): OrgTheme | null {
-  if (!HEX_COLOR.test(primaryColor)) {
-    return null;
-  }
+// The hosted page's theme: the white-label design in the look the Idem app
+// shows the session in (the customer's own look, else the org's theme),
+// its header as the page's header. Without one, the customer's own colour as
+// the brand colour when it has a valid one. Applied through applyOrgTheme,
+// which keeps text on it readable and drops what is not a valid colour.
+export function hostedTheme(
+  theme: HostedTheme | undefined,
+  primaryColor: string,
+): OrgTheme {
   return {
     configured: true,
-    primaryColor,
-    accentColor: "",
-    textColor: "",
-    surfaceColor: "",
-    borderColor: "",
-    linkColor: "",
-    successColor: "",
-    warningColor: "",
-    errorColor: "",
+    primaryColor:
+      theme?.primaryColor || (HEX_COLOR.test(primaryColor) ? primaryColor : ""),
+    accentColor: theme?.secondaryColor ?? "",
+    textColor: theme?.textColor ?? "",
+    surfaceColor: theme?.surfaceColor ?? "",
+    borderColor: theme?.borderColor ?? "",
+    linkColor: theme?.linkColor ?? "",
+    successColor: theme?.successColor ?? "",
+    warningColor: theme?.warningColor ?? "",
+    errorColor: theme?.errorColor ?? "",
     sidebarColor: "",
-    topbarColor: "",
-    fontFamily: "",
+    topbarColor: theme?.headerColor ?? "",
+    fontFamily: theme?.fontFamily ?? "",
     logoUri: "",
   };
 }

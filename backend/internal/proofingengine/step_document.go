@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
@@ -36,10 +37,11 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if req.ChipAccess != nil && !validChipAccessDocumentType(req.ChipAccess.DocumentType) {
-		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card or drivers_license")
+		writeError(w, http.StatusBadRequest, "chipAccess.documentType must be passport, identity_card, residence_permit or drivers_license")
 		return
 	}
-	if flow.DrivingLicence(req.Document.Type) || (req.ChipAccess != nil && flow.DrivingLicence(req.ChipAccess.DocumentType)) {
+	if !drivingLicenceSupported(req.Document.Type, req.Document.IssuingState) ||
+		(req.ChipAccess != nil && !drivingLicenceSupported(req.ChipAccess.DocumentType, req.ChipAccess.CountryCode)) {
 		writeDocumentUnsupported(w)
 		return
 	}
@@ -145,25 +147,29 @@ func validImageRegion(r imageRegion) bool {
 	return r.X >= 0 && r.Y >= 0 && r.W > 0 && r.H > 0 && r.X+r.W <= 1 && r.Y+r.H <= 1
 }
 
-// errCodeDocumentUnsupported refuses an EU driving licence at
-// document_capture and nfc_read: there is no CSCA source for licences
-// (mrtdverify.DrivingLicenceCertPool is empty), so a genuine one could only
-// end DOC_TAMPERED.
+// errCodeDocumentUnsupported refuses a non-Dutch EU driving licence at
+// document_capture and nfc_read: Config.DrivingLicenceCertPool holds only
+// the Dutch licence CSCAs, so a genuine one could only end DOC_TAMPERED.
 const errCodeDocumentUnsupported = "document_unsupported"
 
 func writeDocumentUnsupported(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusUnprocessableEntity, errCodeDocumentUnsupported,
-		"EU driving licences are not supported yet: scan a passport or identity card")
+		"only Dutch driving licences are supported: scan a passport, identity card, residence permit or Dutch driving licence")
 }
 
-// The document types a chip access key may name.
-const (
-	chipAccessPassport     = "passport"
-	chipAccessIdentityCard = "identity_card"
-)
+// drivingLicenceSupported is false for a driving licence from a state other
+// than mrtdverify.DrivingLicenceIssuingState; any other document passes. An
+// issuing state not yet known passes too: the chip's own DG1 decides at
+// nfc_read.
+func drivingLicenceSupported(documentType, issuingState string) bool {
+	return !flow.DrivingLicence(documentType) || issuingState == "" || issuingState == mrtdverify.DrivingLicenceIssuingState
+}
 
+// validChipAccessDocumentType is whether t is a document type a chip access
+// key may name.
 func validChipAccessDocumentType(t string) bool {
-	return t == chipAccessPassport || t == chipAccessIdentityCard || t == flow.DocumentTypeDrivingLicence
+	return t == flow.DocumentKindPassport || t == flow.DocumentKindIdentityCard || t == flow.DocumentKindResidencePermit ||
+		t == flow.DocumentTypeDrivingLicence
 }
 
 // documentEvidence is document_capture's evidence from the app's MRZ reading.
@@ -194,7 +200,7 @@ func documentInfoFromParsedMRZ(p session.ParsedMRZ, now time.Time) documentInfo 
 		shownGiven, shownSurname = p.FullGivenNames, p.FullSurname
 	}
 	return documentInfo{
-		Type: p.DocumentType, Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
+		Type: p.DocumentType, Kind: flow.DocumentKindOf(p.DocumentType, p.IssuingState, p.Nationality), Number: p.Number, IssuingState: p.IssuingState, Nationality: p.Nationality,
 		FirstName: p.GivenNames, LastName: p.Surname, DisplayName: displayName(shownGiven, shownSurname),
 		FullFirstName: p.FullGivenNames, FullLastName: p.FullSurname,
 		Sex: p.Sex, DateOfBirth: p.DateOfBirth, DateOfExpiry: p.DateOfExpiry, PersonalNumber: p.PersonalNumber,

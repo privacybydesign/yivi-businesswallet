@@ -51,7 +51,7 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
               {item.to && !isLast ? (
                 <Link
                   to={item.to}
-                  className="text-muted hover:text-ink truncate transition-colors"
+                  className="text-topbar-fg-soft hover:text-topbar-fg truncate transition-colors"
                 >
                   {item.label}
                 </Link>
@@ -59,7 +59,9 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
                 <span
                   className={[
                     "truncate",
-                    isLast ? "text-ink-soft font-medium" : "text-muted",
+                    isLast
+                      ? "text-topbar-fg font-medium"
+                      : "text-topbar-fg-soft",
                   ].join(" ")}
                   aria-current={isLast ? "page" : undefined}
                 >
@@ -70,7 +72,7 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
                 <Icon
                   name="chevron_right"
                   size={SEPARATOR_SIZE}
-                  className="text-muted shrink-0"
+                  className="text-topbar-fg-soft shrink-0"
                 />
               )}
             </li>
@@ -83,6 +85,7 @@ function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
 
 // Builds the trail automatically from the matched route chain. Each match that
 // declares `handle.crumb` contributes one item; its pathname is the link.
+// It sits in the top bar, so it takes the top bar's colours.
 export function Breadcrumbs(): React.JSX.Element | null {
   const matches = useMatches();
   const { t } = useTranslation();

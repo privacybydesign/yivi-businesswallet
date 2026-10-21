@@ -20,6 +20,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -88,6 +89,7 @@ type requestStore interface {
 	ClearExpiredProofedNames(ctx context.Context) (int64, error)
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
+	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -159,6 +161,8 @@ type Service struct {
 	flowDiplomaSettings flowDiplomaStore
 	diplomas            diplomaStore
 	diplomaChecker      diplomaChecker
+	// flowAddressSettings is each flow's AddressMode; nil asks for none.
+	flowAddressSettings flowAddressStore
 	ips                 Provider
 	verifier            verifier
 	mailer              Mailer
@@ -170,6 +174,8 @@ type Service struct {
 	// dataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	dataRequests dataRequestStore
+	// addressLookup is the Dutch address register; nil checks no address.
+	addressLookup addressFinder
 }
 
 // Stores are the service's persistence, one store per concern.
@@ -188,6 +194,8 @@ type Stores struct {
 	// requests hold; nil asks for none.
 	FlowDiplomas flowDiplomaStore
 	Diplomas     diplomaStore
+	// FlowAddresses holds each flow's AddressMode; nil asks for none.
+	FlowAddresses flowAddressStore
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
@@ -199,7 +207,8 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
+		flowAddressSettings: stores.FlowAddresses,
+		ips:                 ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
@@ -265,6 +274,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	addresses, err := s.allFlowAddresses(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	kinds, err := s.allFlowKinds(ctx, org.ID)
 	if err != nil {
 		return nil, err
@@ -273,13 +286,16 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
-			Diplomas: DiplomasOff, Kind: FlowIdentity,
+			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity,
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
 		}
 		if mode, ok := diplomas[f.ID]; ok {
 			of.Diplomas = mode
+		}
+		if mode, ok := addresses[f.ID]; ok {
+			of.Address = mode
 		}
 		if view == FlowsAll || of.Allowed {
 			out = append(out, of)
@@ -528,23 +544,30 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
+	address, err := s.flowAddress(ctx, org.ID, flow.ID)
+	if err != nil {
+		return Sent{}, err
+	}
 	kind, err := s.flowKind(ctx, org.ID, flow.ID)
 	if err != nil {
 		return Sent{}, err
 	}
 	// A data request is a customer's subject asking for their data; it
-	// collects no diplomas.
+	// collects no diplomas and no address.
 	if kind.dataRequest() {
 		if customer == nil {
 			return Sent{}, ErrDataFlowForMember
 		}
-		diplomas = DiplomasOff
+		diplomas, address = DiplomasOff, AddressOff
 	}
 	if diplomas.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
 		return Sent{}, ErrDiplomasNeedPage
 	}
+	if address.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
+		return Sent{}, ErrAddressNeedsPage
+	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, kind, photo)
+		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, address, kind, photo)
 	}
 
 	id := uuid.New()
@@ -564,7 +587,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
-		Diplomas: diplomas, FlowKind: kind,
+		Diplomas: diplomas, Address: address, FlowKind: kind,
 	})
 	if err != nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess, err)
@@ -616,7 +639,7 @@ func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Te
 // the subject starts one from the page (StartHosted) until hostedLinkTTL. Its
 // redirect must be on one of the customer's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, kind FlowKind, photo *proofingprovider.Image,
+	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, address AddressMode, kind FlowKind, photo *proofingprovider.Image,
 ) (Sent, error) {
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
@@ -647,7 +670,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
 		LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
-		Diplomas: diplomas, FlowKind: kind, ReferencePhoto: photo,
+		Diplomas: diplomas, Address: address, FlowKind: kind, ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -1179,6 +1202,7 @@ func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, view
 			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && customerCompletable(f.Flow),
 			Default:  f.ID == customer.Flows.DefaultFlowID,
 			Diplomas: f.Diplomas,
+			Address:  f.Address,
 			Kind:     f.Kind,
 			RetentionDays: subjectRetentionDays(customer,
 				time.Duration(f.RetentionOverrideSeconds)*time.Second),
@@ -1661,7 +1685,7 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	}
 	doc, ok := presentation.Document()
 	if !ok {
-		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport or id-card")
+		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
 	}
 	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)
@@ -1895,11 +1919,25 @@ func (s *Service) RemoveCustomer(ctx context.Context, orgID, id uuid.UUID) error
 	return err
 }
 
-// SaveCustomerBranding replaces a customer's branding. The colour is a
+// SaveCustomerBranding replaces a customer's branding. The colours are
 // #rrggbb hex, the privacy statement an https URL; empty fields fall back.
 func (s *Service) SaveCustomerBranding(ctx context.Context, orgID, id uuid.UUID, b CustomerBranding, logo LogoChange) (Customer, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
+	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
+	b.FontFamily = strings.TrimSpace(b.FontFamily)
+	for name, color := range map[string]*string{
+		"text": &b.TextColor, "surface": &b.SurfaceColor, "border": &b.BorderColor, "link": &b.LinkColor,
+		"success": &b.SuccessColor, "warning": &b.WarningColor, "error": &b.ErrorColor, "top bar": &b.TopbarColor,
+	} {
+		*color = strings.TrimSpace(*color)
+		if *color != "" && !hexColor.MatchString(*color) {
+			return Customer{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
+		}
+	}
+	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
+		return Customer{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
+	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
@@ -1907,6 +1945,8 @@ func (s *Service) SaveCustomerBranding(ctx context.Context, orgID, id uuid.UUID,
 		return Customer{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
 		return Customer{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
+	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
+		return Customer{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
 		return Customer{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:

@@ -31,7 +31,7 @@ const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 const CAPTION =
-  "text-muted font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase";
+  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 // Mirrors the Input base so the flow select reads as the same field.
 const SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-9 disabled:opacity-60";

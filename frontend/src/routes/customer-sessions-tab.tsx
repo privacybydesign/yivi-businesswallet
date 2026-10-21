@@ -22,6 +22,7 @@ import {
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
 import {
+  addressVerificationNote,
   assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
@@ -244,6 +245,7 @@ function SessionRow({
         </Table.Cell>
         <Table.Cell>
           <ResultTag request={request} compact />{" "}
+          <AddressTag request={request} />
           <DiplomaTag request={request} />
           <DataRequestTag request={request} />
         </Table.Cell>
@@ -380,6 +382,9 @@ function SessionRow({
                     {t("customers.sessions.identity.audited")}
                   </p>
                 )}
+                {request.addressMode !== "off" && (
+                  <SessionAddress request={request} />
+                )}
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
                 )}
@@ -396,6 +401,53 @@ function SessionRow({
         </tr>
       )}
     </>
+  );
+}
+
+// For an approved session that requires the address, that none was entered.
+function AddressTag({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    request.addressMode === "required" &&
+    request.status === "approved" &&
+    request.address === undefined &&
+    request.purgedAt === undefined
+  ) {
+    return <Tag tone="amber">{t("customers.sessions.address.missing")}</Tag>;
+  }
+  return null;
+}
+
+// The postal address the subject entered, and how it was checked.
+function SessionAddress({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const a = request.address;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("customers.sessions.address.title")}
+      </h3>
+      {a === undefined ? (
+        <p className={HINT}>{t("customers.sessions.address.none")}</p>
+      ) : (
+        <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
+          {`${a.street} ${a.houseNumber}`}
+          <br />
+          {`${a.postalCode} ${a.city}`}
+          <br />
+          {a.country}
+        </address>
+      )}
+      <p className={HINT}>{addressVerificationNote(a?.verification, t)}</p>
+    </div>
   );
 }
 
@@ -761,7 +813,7 @@ function SessionTimeline({
     <section aria-labelledby={`timeline-${request.id}`}>
       <h3
         id={`timeline-${request.id}`}
-        className="text-muted mb-3 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase"
+        className="text-muted font-label mb-3 text-[10.5px] font-medium tracking-[0.08em] uppercase"
       >
         {t("customers.sessions.timeline")}
       </h3>

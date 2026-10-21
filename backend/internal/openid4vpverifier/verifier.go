@@ -31,7 +31,7 @@ const (
 	ClaimDateOfBirth = "dateOfBirth"
 	ClaimNationality = "nationality"
 	ClaimPhone       = "mobilenumber"
-	// ClaimPhoto is the passport and id-card portrait, base64 (ScopeProofing).
+	// ClaimPhoto is the passport, id-card and residence-permit portrait, base64 (ScopeProofing).
 	ClaimPhoto = "photo"
 
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
@@ -72,13 +72,14 @@ type Session struct {
 type Presentation struct {
 	Claims map[string]string
 	// ByCredential holds each requested credential's own disclosed claims,
-	// keyed by the DCQL credential id (passport, idcard, email, phone, vog).
+	// keyed by the DCQL credential id (passport, idcard, residencepermit, email,
+	// phone, vog).
 	// Needed because two credentials in one presentation may disclose the same
 	// claim name - both the identity credential and pbdf.vog carry a
 	// dateOfBirth - and Claims keeps only one of them, in map-iteration order.
 	ByCredential map[string]map[string]string
-	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport or
-	// id-card) issuer-signed JWT — the moment the wallet obtained that credential
+	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport,
+	// id-card or residence permit) issuer-signed JWT, the moment the wallet obtained that credential
 	// from its issuer, not the physical document's issue date. Used by a
 	// freshness check on re-identification (see .ai/features/auth-openid4vp.md and
 	// the member-reidentification feature); zero when the presentation carried no
@@ -90,10 +91,10 @@ type Presentation struct {
 }
 
 // identityCredentialIDs are the credentials an identity disclosure draws on.
-var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDEmail, credIDPhone}
+var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDResidencePermit, credIDEmail, credIDPhone}
 
 // IdentityClaims returns the claims the identity credentials disclosed
-// (passport or id-card, email, phone) and VogClaims those of the pbdf.vog
+// (passport, id-card or residence permit, email, phone) and VogClaims those of the pbdf.vog
 // credential, kept apart so a combined presentation (ScopeIdentityVog) cannot
 // let one credential's dateOfBirth overwrite the other's. A Presentation
 // carrying no per-credential detail (ByCredential empty - a fake, or a
@@ -102,17 +103,18 @@ func (p Presentation) IdentityClaims() map[string]string {
 	return p.claimsOf(identityCredentialIDs...)
 }
 
-// IdentityDocument is the passport or id-card a presentation disclosed.
+// IdentityDocument is the passport, id-card or residence permit a presentation
+// disclosed.
 type IdentityDocument struct {
 	// Credential is the credential's vct (e.g. pbdf-staging.pbdf.passport).
 	Credential string
 	Claims     map[string]string
 }
 
-// Document returns the passport or id-card the presentation disclosed,
-// passport first; false when it carried neither.
+// Document returns the passport, id-card or residence permit the presentation
+// disclosed, in that order of preference; false when it carried none.
 func (p Presentation) Document() (IdentityDocument, bool) {
-	for _, c := range [...]struct{ id, vct string }{{credIDPassport, vctPassport}, {credIDIDCard, vctIDCard}} {
+	for _, c := range [...]struct{ id, vct string }{{credIDPassport, vctPassport}, {credIDIDCard, vctIDCard}, {credIDResidencePermit, vctResidencePermit}} {
 		if claims, ok := p.ByCredential[c.id]; ok {
 			return IdentityDocument{Credential: c.vct, Claims: claims}, true
 		}
@@ -210,11 +212,11 @@ func disclosuresOf(sdjwt string) map[string]string {
 	return out
 }
 
-// identityIssuedAt returns the `iat` of the identity credential (passport or
-// id-card, whichever is present) in vp, zero when neither is present or its
+// identityIssuedAt returns the `iat` of the identity credential (passport,
+// id-card or residence permit, whichever is present) in vp, zero when none is present or its
 // `iat` could not be read.
 func identityIssuedAt(vp map[string][]string) time.Time {
-	for _, id := range [...]string{credIDPassport, credIDIDCard} {
+	for _, id := range [...]string{credIDPassport, credIDIDCard, credIDResidencePermit} {
 		tokens := vp[id]
 		if len(tokens) == 0 {
 			continue

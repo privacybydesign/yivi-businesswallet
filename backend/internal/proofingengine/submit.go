@@ -97,7 +97,7 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		req.MrtdEvidence = nfcReq.MrtdEvidence
 		req.Photo = nfcReq.Photo
 		req.Device = nfcReq.Device
-		checks, err := verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
+		checks, err := s.verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
 		if err != nil {
 			return sess, err
 		}

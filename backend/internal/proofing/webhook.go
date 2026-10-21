@@ -41,6 +41,9 @@ const (
 	// EventSessionDiplomaAdded is sent for each DUO diploma extract the
 	// subject added after their identity was approved.
 	EventSessionDiplomaAdded = "session.diploma_added"
+	// EventSessionAddressAdded is sent when the subject entered their postal
+	// address after their identity was approved.
+	EventSessionAddressAdded = "session.address_added"
 	EventTest                = "test"
 )
 
@@ -48,7 +51,7 @@ const (
 var WebhookEvents = []string{
 	EventSessionCreated, EventSessionStarted, EventSessionHandover,
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
-	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded,
+	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
 }
 
 // outcomeEvents is the webhook event each recorded outcome sends.

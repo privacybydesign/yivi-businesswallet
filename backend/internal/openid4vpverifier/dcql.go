@@ -4,8 +4,10 @@ package openid4vpverifier
 const (
 	vctPassport = "pbdf-staging.pbdf.passport"
 	vctIDCard   = "pbdf-staging.pbdf.idcard"
-	vctEmail    = "pbdf-staging.sidn-pbdf.email"
-	vctPhone    = "pbdf-staging.sidn-pbdf.mobilenumber"
+	// vctResidencePermit carries the same claims as the passport and id-card.
+	vctResidencePermit = "pbdf-staging.pbdf.residencepermit"
+	vctEmail           = "pbdf-staging.sidn-pbdf.email"
+	vctPhone           = "pbdf-staging.sidn-pbdf.mobilenumber"
 	// vctVog is the opt-in member-screening credential (#242 §4): a statement by
 	// Stichting Privacy by Design about a VOG PDF it validated at issuance, not a
 	// live Justis statement - the org accepts that trade-off knowingly when it
@@ -17,11 +19,12 @@ const (
 	// Credential ids used in the identity query (identityQuery below), reused by
 	// verifier.go to pick out the identity credential's issuer `iat` for the
 	// re-identification freshness check.
-	credIDPassport = "passport"
-	credIDIDCard   = "idcard"
-	credIDEmail    = "email"
-	credIDPhone    = "phone"
-	credIDVog      = "vog"
+	credIDPassport        = "passport"
+	credIDIDCard          = "idcard"
+	credIDResidencePermit = "residencepermit"
+	credIDEmail           = "email"
+	credIDPhone           = "phone"
+	credIDVog             = "vog"
 
 	// QueryCredentialID is the DCQL credential id StartQuery uses for the one
 	// credential a template-built query asks for; Presentation.QueryClaims reads
@@ -76,9 +79,9 @@ type Scope int
 const (
 	// ScopeLogin discloses only the email — enough to identify the account.
 	ScopeLogin Scope = iota
-	// ScopeIdentity additionally discloses a verified identity (passport OR
-	// id-card) and phone, for flows that must match a real person (invitation
-	// accept, and — later — the KVK-facing wallet bootstrap).
+	// ScopeIdentity additionally discloses a verified identity (passport,
+	// id-card OR residence permit) and phone, for flows that must match a real
+	// person (invitation accept, and later the KVK-facing wallet bootstrap).
 	ScopeIdentity
 	// ScopeVog discloses the pbdf.vog credential (#242 §4), for the opt-in
 	// credential-disclosure screening path. Its claim list is dynamic (only the
@@ -89,9 +92,9 @@ const (
 	// and is asked for a VOG, one scan establishes the identity the VOG is then
 	// matched against. Its vog claim list is dynamic like ScopeVog's.
 	ScopeIdentityVog
-	// ScopeProofing discloses a passport OR id-card with its photo, for the
-	// identity proofing Yivi method: the photo is the reference the subject's
-	// live face is checked against (internal/proofing).
+	// ScopeProofing discloses a passport, id-card OR residence permit with its
+	// photo, for the identity proofing Yivi method: the photo is the reference
+	// the subject's live face is checked against (internal/proofing).
 	ScopeProofing
 )
 
@@ -136,18 +139,19 @@ func loginQuery() dcqlQuery {
 	}
 }
 
-// identityQuery discloses a verified identity (passport OR id-card) plus email
-// and phone, for flows that must match a real person.
+// identityQuery discloses a verified identity (passport, id-card OR residence
+// permit) plus email and phone, for flows that must match a real person.
 func identityQuery() dcqlQuery {
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
 			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
 			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
+			{ID: credIDResidencePermit, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctResidencePermit}}, Claims: claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality)},
 			{ID: credIDEmail, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctEmail}}, Claims: claimPaths(ClaimEmail)},
 			{ID: credIDPhone, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPhone}}, Claims: claimPaths(ClaimPhone)},
 		},
 		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{credIDPassport}, {credIDIDCard}}},
+			{Options: [][]string{{credIDPassport}, {credIDIDCard}, {credIDResidencePermit}}},
 			{Options: [][]string{{credIDEmail}}},
 			{Options: [][]string{{credIDPhone}}},
 		},
@@ -183,18 +187,19 @@ func identityVogQuery(aspectClaims []string) dcqlQuery {
 	return q
 }
 
-// proofingQuery discloses a verified identity (passport OR id-card) with the
-// credential's photo, and nothing else: no email or phone, which proofing a
-// person does not need.
+// proofingQuery discloses a verified identity (passport, id-card OR residence
+// permit) with the credential's photo, and nothing else: no email or phone,
+// which proofing a person does not need.
 func proofingQuery() dcqlQuery {
 	claims := claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality, ClaimPhoto)
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
 			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claims},
 			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctIDCard}}, Claims: claims},
+			{ID: credIDResidencePermit, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctResidencePermit}}, Claims: claims},
 		},
 		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{credIDPassport}, {credIDIDCard}}},
+			{Options: [][]string{{credIDPassport}, {credIDIDCard}, {credIDResidencePermit}}},
 		},
 	}
 }

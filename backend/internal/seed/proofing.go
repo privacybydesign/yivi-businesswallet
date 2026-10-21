@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -32,6 +34,7 @@ type demoProofingFlow struct {
 	def      flow.FlowDefinition
 	kind     proofing.FlowKind
 	diplomas proofing.DiplomaMode
+	address  proofing.AddressMode
 }
 
 // demoProofingCustomer is a customer with the flows assigned to it, the
@@ -44,11 +47,111 @@ type demoProofingCustomer struct {
 }
 
 // demoProofingOrg is a demo org (by slug, one of demoOrganizations) with its
-// own flows, besides the data request flows every org has, and its customers.
+// own flows, besides the data request flows every org has, its customers and
+// optionally its theme, which the Idem app also shows its sessions in.
 type demoProofingOrg struct {
 	slug      string
 	flows     []demoProofingFlow
 	customers []demoProofingCustomer
+	theme     *demoTheme
+}
+
+// demoTheme is a demo org's theme and its logo.
+type demoTheme struct {
+	settings themesettings.SettingsInput
+	logo     []byte
+}
+
+// cmLogoPNG is CM.com's mark, as the CM build of the Idem app showed it.
+//
+//go:embed assets/cm-logo.png
+var cmLogoPNG []byte
+
+// cmTheme is CM.com's look from that build: its action blue (CM's brand blue
+// is too light for white text), purple, ink text and header, and its greys.
+var cmTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#036BD2", AccentColor: "#5412C7", TextColor: "#101E1E", SurfaceColor: "#FBFBFC",
+		BorderColor: "#EAEBEE", LinkColor: "#036BD2", SuccessColor: "#2A9066", TopbarColor: "#101E1E",
+	},
+	logo: cmLogoPNG,
+}
+
+// The other demo orgs' marks; assets/README.md has each source and licence.
+var (
+	//go:embed assets/radboud-logo.png
+	radboudLogoPNG []byte
+	//go:embed assets/asr-logo.png
+	asrLogoPNG []byte
+	//go:embed assets/unibet-logo.png
+	unibetLogoPNG []byte
+	//go:embed assets/odixus-logo.png
+	odixusLogoPNG []byte
+)
+
+// The demo themes set only what the Idem app shows a session in (its
+// AppBranding): primary, accent (the app's secondary: step labels and badge
+// text, so it must read on white), text, surface, border, link, success,
+// error, top bar (the app's header, ignored below 3:1 against white text), font
+// and logo. Each font is a stack the theme settings page offers.
+const (
+	fontOpenSans   = `"Open Sans", system-ui, sans-serif`
+	fontMontserrat = `"Montserrat", system-ui, sans-serif`
+	fontSystemUI   = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
+	fontHelvetica  = `"Helvetica Neue", Arial, sans-serif`
+)
+
+// radboudTheme is Radboud's house style: Red Impact, Maroon, Lady Bug and
+// Berry, the secondary palette's green, and ru.nl's text, greys and Open Sans.
+var radboudTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#E3000B", AccentColor: "#730E04", TextColor: "#303030", SurfaceColor: "#F8F7F7",
+		BorderColor: "#D7D7D7", LinkColor: "#BE311E", SuccessColor: "#4AA943", ErrorColor: "#8F2011",
+		TopbarColor: "#E3000B", FontFamily: fontOpenSans,
+	},
+	logo: radboudLogoPNG,
+}
+
+// asrTheme is asr.nl's design tokens: its dark green (the logo's green is too
+// light for white text), its blue as accent (the brand amber does not read on
+// white), ink as header, greys and feedback colours. Its Avenir is not a font
+// the wallet ships, so the closest stack stands in.
+var asrTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#0F865D", AccentColor: "#0064A8", TextColor: "#2A292E", SurfaceColor: "#F6F6F7",
+		BorderColor: "#E5E5E5", LinkColor: "#0064A8", SuccessColor: "#0F865D", ErrorColor: "#CE0A1E",
+		TopbarColor: "#2A292E", FontFamily: fontHelvetica,
+	},
+	logo: asrLogoPNG,
+}
+
+// unibetTheme is unibet.nl's look: its green header, its darker navigation
+// green as accent (the yellow call to action does not read on white), logo
+// green, ink and greys and link blue. unibet.nl shows no error colour, so the
+// default's is kept; its Roboto is in the system stack.
+var unibetTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#147B45", AccentColor: "#00531D", TextColor: "#111111", SurfaceColor: "#EEEEEE",
+		BorderColor: "#CCCCCC", LinkColor: "#007299", SuccessColor: "#3EAB37", TopbarColor: "#147B45",
+		FontFamily: fontSystemUI,
+	},
+	logo: unibetLogoPNG,
+}
+
+// odixusBlue is odixus.nl's logo blue.
+const odixusBlue = "#0056AD"
+
+// odixusTheme is odixus.nl's look: its logo blue, the darker blue its
+// gradients end in as accent (the logo's orange does not read on white), its
+// body text, light background, input border, success and danger colours.
+// Its Poppins is not a font the wallet ships; Montserrat is the closest.
+var odixusTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: odixusBlue, AccentColor: "#0A4286", TextColor: "#2F281E", SurfaceColor: "#F0F4F9",
+		BorderColor: "#E0E0E0", LinkColor: odixusBlue, SuccessColor: "#79B93C", ErrorColor: "#DF6951",
+		TopbarColor: odixusBlue, FontFamily: fontMontserrat,
+	},
+	logo: odixusLogoPNG,
 }
 
 // The engine's names for what a flow reads and checks.
@@ -74,8 +177,8 @@ const (
 )
 
 // chipAndFace is an eIDAS substantial flow: the document's chip read in the
-// Idem app (passport or identity card; the engine refuses an EU driving
-// licence for now) and a live face matched against its portrait by Regula.
+// Idem app (passport, identity card or Dutch driving licence) and a live face
+// matched against its portrait by Regula.
 func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.FlowDefinition {
 	return flow.FlowDefinition{
 		Name: name, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
@@ -92,6 +195,7 @@ const (
 	flowASRAccountChange = "Rekeningnummer wijzigen"
 	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
 	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
+	flowOdixusOnboarding = "Nieuwe klant met woonadres"
 	flowDataAccess       = "Mijn gegevens inzien"
 	flowDataErasure      = "Mijn gegevens verwijderen"
 )
@@ -124,6 +228,7 @@ var demoProofingOrgs = []demoProofingOrg{
 			{name: "Radboud Academy (Demo)", flows: []string{flowRadboudEnrol, flowRadboudPassword}, retentionDays: demoRetentionDays},
 			{name: "Radboud Studentenservice (Demo)", flows: []string{flowRadboudPassword}, retentionDays: demoRetentionDays},
 		},
+		theme: radboudTheme,
 	},
 	{
 		slug: asrSlug,
@@ -145,6 +250,7 @@ var demoProofingOrgs = []demoProofingOrg{
 			{name: "a.s.r. Schadeverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
 			{name: "a.s.r. Levensverzekeringen (Demo)", flows: []string{flowASRKnownPerson, flowASRAccountChange}, retentionDays: demoRetentionDays},
 		},
+		theme: asrTheme,
 	},
 	{
 		slug: unibetSlug,
@@ -158,6 +264,7 @@ var demoProofingOrgs = []demoProofingOrg{
 			{name: "Unibet Casino (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
 			{name: "Unibet Sport (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
 		},
+		theme: unibetTheme,
 	},
 	{
 		slug: cmSlug,
@@ -175,6 +282,19 @@ var demoProofingOrgs = []demoProofingOrg{
 			{name: "CM Tickets Concerten (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
 			{name: "CM Tickets Festivals (Demo)", flows: []string{flowCMAgeCheck}, retentionDays: shortRetentionDays},
 		},
+		theme: cmTheme,
+	},
+	{
+		slug: odixusSlug,
+		flows: []demoProofingFlow{
+			// A new customer identifies themselves, then enters the postal
+			// address they live at.
+			{def: chipAndFace(flowOdixusOnboarding, privacy.LegalBasisContract, "Onboarding nieuwe klant"), address: proofing.AddressRequired},
+		},
+		customers: []demoProofingCustomer{
+			{name: "odixus Onboarding (Demo)", flows: []string{flowOdixusOnboarding}, retentionDays: demoRetentionDays},
+		},
+		theme: odixusTheme,
 	},
 }
 
@@ -203,6 +323,9 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID, createdBy u
 	recorder := audit.NewDBRecorder()
 	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.allFlows())
 	if err != nil {
+		return err
+	}
+	if err := ensureDemoTheme(ctx, themesettings.NewStore(pool, recorder), orgID, o); err != nil {
 		return err
 	}
 	customers := proofing.NewCustomerStore(pool, recorder)
@@ -255,6 +378,31 @@ func createProofingCustomer(ctx context.Context, pool *pgxpool.Pool, recorder au
 	return nil
 }
 
+// ensureDemoTheme gives orgID o's theme unless the org already has one, so a
+// theme changed since is kept.
+func ensureDemoTheme(ctx context.Context, themes *themesettings.Store, orgID uuid.UUID, o demoProofingOrg) error {
+	if o.theme == nil {
+		return nil
+	}
+	current, err := themes.GetSettings(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: theme %s: %w", o.slug, err)
+	}
+	if current.Configured {
+		return nil
+	}
+	contentType, ok := themesettings.DetectLogoType(o.theme.logo)
+	if !ok {
+		return fmt.Errorf("seed: theme %s: logo is not an image", o.slug)
+	}
+	_, err = themes.Save(ctx, orgID, o.theme.settings,
+		themesettings.LogoUpdate{Replace: true, Logo: themesettings.Logo{Bytes: o.theme.logo, ContentType: contentType}})
+	if err != nil {
+		return fmt.Errorf("seed: theme %s: %w", o.slug, err)
+	}
+	return nil
+}
+
 // EnsureProofingDemo provisions the demo proofing orgs with their flows and
 // customers, and the Yivi team as their admins, so identity proofing can be
 // tried on staging. Idempotent; staging only (`seed --proofing-demo`).
@@ -268,7 +416,7 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 	users := user.NewStore(pool)
 	orgs := organization.NewStore(pool, audit.NewDBRecorder())
 	orgsBySlug := map[string]organization.Organization{}
-	for _, o := range slices.Concat(demoOrganizations, proofingOrganizations) {
+	for _, o := range demoOrganizations {
 		if !slices.ContainsFunc(demoProofingOrgs, func(p demoProofingOrg) bool { return p.slug == o.slug }) {
 			continue
 		}
@@ -358,7 +506,7 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 	return ids, nil
 }
 
-// createProofingFlow saves f for orgID with its kind and diploma setting in
+// createProofingFlow saves f for orgID with its kind, diploma and address settings in
 // one transaction, so a re-run never finds the flow without them.
 func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, f demoProofingFlow) (string, error) {
 	tx, err := pool.Begin(ctx)
@@ -383,6 +531,13 @@ func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.
 			return "", fmt.Errorf("seed: flow %s diplomas: %w", f.def.Name, err)
 		}
 	}
+
+	if f.address != "" {
+		if _, err := proofing.NewFlowAddressStore(tx, recorder).Save(ctx, orgID, saved.ID, f.address); err != nil {
+			return "", fmt.Errorf("seed: flow %s address: %w", f.def.Name, err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
 	}

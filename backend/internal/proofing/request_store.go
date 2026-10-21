@@ -44,7 +44,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
-	r.retention_override_seconds, ` + purgeAtColumn
+	r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -140,7 +140,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var sessionID *string
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
-	var nameCT, birthDateCT []byte
+	var nameCT, birthDateCT, addressCT []byte
 	var retentionDays, overrideSeconds *int
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
@@ -148,7 +148,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
 		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds, &r.PurgeAt); err != nil {
+		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds,
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention = proofedNameRetention
@@ -178,6 +179,13 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)}
 		}
 		r.expectedBirthDate = string(birthDate)
+	}
+	if addressCT != nil {
+		addr, err := s.decryptAddress(r.ID, addressCT)
+		if err != nil {
+			return Request{}, err
+		}
+		r.SubjectAddress = addr
 	}
 	if sessionID != nil {
 		if s.cipher == nil {
@@ -228,6 +236,8 @@ type NewStoredRequest struct {
 	Language    email.Locale
 	// Diplomas is the flow's DiplomaMode at send; empty is off.
 	Diplomas DiplomaMode
+	// Address is the flow's AddressMode at send; empty is off.
+	Address AddressMode
 	// ReferencePhoto is a hosted request's reference photo, held sealed until
 	// its subject starts the session (ReferencePhoto); nil for none.
 	ReferencePhoto *proofingprovider.Image
@@ -277,15 +287,15 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
-			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds)
+			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
-				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0))`
+				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
-			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds); err != nil {
+			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 
@@ -299,6 +309,9 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		}, in.Subject.Name, in.Subject.Email)
 		if in.Diplomas.asked() {
 			fields["diplomas"] = string(in.Diplomas)
+		}
+		if in.Address.asked() {
+			fields["address"] = string(in.Address)
 		}
 		if birthDateCT != nil {
 			fields["expectsSubject"] = true
@@ -657,6 +670,21 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
+// CustomerOf returns the customer the org's request was sent for (nil for a
+// member's), or ErrRequestNotFound.
+func (s *RequestStore) CustomerOf(ctx context.Context, orgID, id uuid.UUID) (*uuid.UUID, error) {
+	var customerID *uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT customer_id FROM identity_proofing_requests
+		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&customerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRequestNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("proofing: customer of request %s: %w", id, err)
+	}
+	return customerID, nil
+}
+
 // GetForCustomer returns one of the requests scope reaches, or
 // ErrRequestNotFound.
 func (s *RequestStore) GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
@@ -983,7 +1011,7 @@ func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error 
 
 // Purge erases every personal detail the wallet holds of a request (the
 // subject's name and e-mail address, the proofed name, the redirect and Yivi
-// transaction that pointed at the subject, its diplomas, a data request's own
+// transaction that pointed at the subject, its diplomas and address, a data request's own
 // matches, the stored Idempotency-Key answers that name it, and the subject in
 // its audit events) and marks it purged; its outcome stays. A match naming it
 // from another data request stays: that review shows it purged. Audited
@@ -1006,7 +1034,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 			SET purged_at = now(), subject_name = '', subject_email = '',
 				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, expected_birth_date_ciphertext = NULL,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
-				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL,
+				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL, address_ciphertext = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {
@@ -1045,9 +1073,9 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys WHERE request_id = $1`, req.ID); err != nil {
 			return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
 		}
-		if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text
-			WHERE request_id = $1 AND payload ? $2::text`, req.ID, webhookDiplomaKey); err != nil {
-			return fmt.Errorf("proofing: purge webhook diplomas request %s: %w", req.ID, err)
+		if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
+			WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, []string{webhookDiplomaKey, webhookAddressKey}); err != nil {
+			return fmt.Errorf("proofing: purge webhook diplomas and address request %s: %w", req.ID, err)
 		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},

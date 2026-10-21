@@ -405,6 +405,30 @@ func TestLoadPhoneURLsNeedHTTPS(t *testing.T) {
 	})
 }
 
+// The Idem App Link is https with a host and nothing appended, even on a local
+// stack: the engine adds the claim's own query, and an App Link is https only.
+func TestLoadAppLinkURL(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"":                                 true,
+		"https://idem.yivi.app/verify":     true,
+		"http://idem.yivi.app/verify":      false,
+		"https://idem.yivi.app/verify?x=1": false,
+		"https://idem.yivi.app/verify#x":   false,
+		"vcmrtd://verify":                  false,
+		"https:///verify":                  false,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			cfg, err := loadWith(t, map[string]string{envIdentityProofingAppLinkURL: raw})
+			if (err == nil) != ok {
+				t.Fatalf("%s=%q: %v, want ok %v", envIdentityProofingAppLinkURL, raw, err, ok)
+			}
+			if ok && cfg.IdentityProofingAppLinkURL != raw {
+				t.Errorf("IdentityProofingAppLinkURL = %q, want %q", cfg.IdentityProofingAppLinkURL, raw)
+			}
+		})
+	}
+}
+
 // A stub outcome with the engine provider is a half-switched .env: refused,
 // not silently ignored.
 func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {

@@ -20,6 +20,12 @@ export const nl: Translation<typeof en> = {
     department: "Afdeling",
     edit: "Bewerken",
     jobTitle: "Functie",
+    colorScheme: "Weergave",
+    colorSchemeName: {
+      system: "Auto",
+      light: "Licht",
+      dark: "Donker",
+    },
     language: "Taal",
     languageName: {
       en: "English",
@@ -382,7 +388,7 @@ export const nl: Translation<typeof en> = {
     identityIntro:
       "Bevestig je identiteit met je EU Digital Identity-wallet. Dit is precies wat je deelt:",
     disclosure: {
-      identityLabel: "Paspoort of identiteitskaart",
+      identityLabel: "Paspoort, identiteitskaart of verblijfsvergunning",
       identityDetail:
         "Bevestigt je naam, geboortedatum en nationaliteit, zodat we je kunnen koppelen aan de bij de KVK geregistreerde vertegenwoordigers van het bedrijf.",
       emailLabel: "E-mailadres",
@@ -613,7 +619,7 @@ export const nl: Translation<typeof en> = {
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
       referenceNoFace: "er is geen gezicht gevonden op de gedeelde foto",
-      photoMissing: "het paspoort of de ID-kaart is gedeeld zonder foto",
+      photoMissing: "het identiteitsdocument is gedeeld zonder foto",
       livenessFailed: "levendheidscontrole mislukt",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
@@ -673,6 +679,13 @@ export const nl: Translation<typeof en> = {
       diplomasClosed:
         "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
       diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
+      addressNeedsPage:
+        "Deze flow vraagt om het adres, dat wordt ingevuld op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      addressClosed:
+        "Het adres kan maar één keer worden ingevuld, kort na een geslaagde identiteitscontrole.",
+      addressNotAsked: "Deze controle vraagt niet om een adres.",
+      addressNotFound:
+        "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -682,6 +695,34 @@ export const nl: Translation<typeof en> = {
         "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
       tooLarge: "Het bestand is te groot.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
+    },
+    address: {
+      overview: {
+        label: "Adres",
+        detail: "Na de identiteitscontrole: het postadres dat je invult",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Vul nu je adres in",
+      intro:
+        "Vul het adres in waar je woont. In Nederland vullen je postcode en huisnummer de straat en plaats in uit de Nederlandse adresregistratie. Het wordt bij je geverifieerde identiteit bewaard.",
+      lookup: {
+        choose: "Welk van deze adressen is van jou?",
+        none: "Deze postcode en dit huisnummer staan niet in de Nederlandse adresregistratie. Controleer ze.",
+        unavailable:
+          "Je adres kan nu niet worden opgezocht. Vul straat en plaats zelf in.",
+      },
+      netherlands: "Nederland",
+      fields: {
+        street: "Straat",
+        houseNumber: "Huisnummer",
+        postalCode: "Postcode",
+        city: "Plaats",
+        country: "Land",
+      },
+      required: "Vul dit in.",
+      save: "Adres opslaan",
+      closed: "De tijd om je adres in te vullen is voorbij.",
+      continue: "Verder",
     },
     diplomas: {
       overview: {
@@ -814,7 +855,7 @@ export const nl: Translation<typeof en> = {
     },
     send: {
       title: "Een persoon verifiëren",
-      hint: "De persoon krijgt een mail met een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
+      hint: "De persoon krijgt een mail met een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek. Een account is niet nodig.",
       hintOnScreen:
         "De persoon is bij je. Een pagina laat zien wat er wordt verzameld, laat kiezen tussen de Yivi-app en de Idem-app en toont de QR-code. Er wordt niets gemaild.",
       channel: "Hoe krijgt de persoon de QR-code?",
@@ -844,7 +885,7 @@ export const nl: Translation<typeof en> = {
       email: "E-mailadres",
       emailRequired: "Vul een geldig e-mailadres in.",
       diplomasOnScreen:
-        "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+        "Deze flow vraagt om een adres of diploma's, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
       name: "Naam (optioneel)",
       nameHint:
         "Laat leeg als je die niet weet: na verificatie staat de naam van het document hier 30 dagen.",
@@ -870,6 +911,7 @@ export const nl: Translation<typeof en> = {
         overview: "Wat er wordt verzameld",
         method: "Kies een app",
         session: "Scan de QR-code",
+        address: "Adres",
         diplomas: "Diploma",
       },
       overview: {
@@ -904,7 +946,7 @@ export const nl: Translation<typeof en> = {
         yivi: {
           title: "Yivi-app",
           detail:
-            "Deel het paspoort of de identiteitskaart die al in je Yivi-app staat en kijk daarna hier in de camera.",
+            "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat en kijk daarna hier in de camera.",
         },
         idem: {
           title: "Idem-app",
@@ -1112,6 +1154,18 @@ export const nl: Translation<typeof en> = {
       expectedSubject: "Verwachte persoon",
       expectedSubjectValue:
         "Naam en geboortedatum gecontroleerd tegen het document",
+      address: {
+        title: "Adres",
+        none: "Geen adres ingevuld.",
+        missing: "Geen adres",
+        declared:
+          "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
+        verified: "Gevonden in de Nederlandse adresregistratie (BAG).",
+        unchecked:
+          "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
+        unsupported:
+          "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
+      },
       diplomas: {
         title: "Diploma's",
         none: "Geen diploma toegevoegd.",
@@ -1186,8 +1240,8 @@ export const nl: Translation<typeof en> = {
       done: "Ik heb het bewaard",
     },
     branding: {
-      title: "Huisstijl van de mail",
-      hint: "De verificatiemail die de personen van je klant krijgen, is ondertekend en opgemaakt als de klant.",
+      title: "Huisstijl",
+      hint: "De eigen huisstijl van de klant voor de mail, de gehoste pagina en de Idem-app. Met een kleur of lettertype hier gebruiken de flows van de klant deze huisstijl in plaats van die van de organisatie; met alleen een logo gebruiken ze de huisstijl van de organisatie met dit logo.",
       displayName: "Weergavenaam",
       displayNameHint:
         "Ondertekent de verificatiemail en het onderwerp. Leeg gebruikt de naam van de klant.",
@@ -1205,6 +1259,12 @@ export const nl: Translation<typeof en> = {
       colorInvalid: "Vul een hexkleur in zoals #1F5B4A.",
       primaryColorHint:
         "Gebruikt voor de knop en het merkteken van de mail. De tekst erop wordt aangepast voor contrast.",
+      secondaryColor: "Secundaire kleur",
+      secondaryColorHint:
+        "Gebruikt voor staplabels en badges in de Idem-app en op de gehoste pagina.",
+      themeTitle: "Huisstijl",
+      themeHint:
+        "De rest van de uitstraling van de klant in de Idem-app en op de gehoste pagina: dezelfde opties als het thema van de organisatie. Leeg houdt het standaardontwerp.",
       supportContact: "Supportcontact",
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "URL van de privacyverklaring",
@@ -1216,8 +1276,8 @@ export const nl: Translation<typeof en> = {
       preview: {
         caption: "Live voorbeeld · verificatiemail",
         heading: "{{name}} vraagt je je identiteit te verifiëren",
-        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de vcmrtd-app op je telefoon.",
-        button: "Openen in de vcmrtd-app",
+        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de Idem-app op je telefoon.",
+        button: "Openen in de Idem-app",
         support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
         privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
         footer: "Identiteitscontrole door Yivi",
@@ -1347,6 +1407,7 @@ export const nl: Translation<typeof en> = {
       nfc_read: "Chip van het document lezen",
       document_photo: "Document fotograferen",
       face_verification: "Gezichtscontrole",
+      address: "Adres invullen",
       diploma_upload: "Diploma's uploaden (DUO)",
     },
     bsnPolicies: {
@@ -1415,7 +1476,7 @@ export const nl: Translation<typeof en> = {
       saveVersion: "Opslaan als versie {{version}}",
       stepsTitle: "Stappen",
       documentCaptureHint:
-        "De persoon fotografeert met de Idem-app de coderegels onderaan het paspoort of de ID-kaart; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
+        "De persoon fotografeert met de Idem-app de coderegels op het paspoort, de ID-kaart of het Nederlandse rijbewijs; daarmee gaat de chip open. Altijd samen met het lezen van de chip.",
       nfcReadHint:
         "De persoon houdt het document tegen de telefoon en de Idem-app leest de chip. Altijd samen met het scannen van het document.",
       documentPhotoHint:
@@ -1423,6 +1484,8 @@ export const nl: Translation<typeof en> = {
       faceVerificationHint:
         "De persoon maakt een selfie; die wordt gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
       stepsOrder: "Wordt in deze volgorde verstuurd: {{steps}}",
+      addressHint:
+        "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       diplomaUploadHint:
         "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon uploadt de diploma-uittreksels die hij bij DUO downloadt, gecontroleerd op de handtekening van DUO en op naam en geboortedatum. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
       faceLocationNative:
@@ -1445,7 +1508,8 @@ export const nl: Translation<typeof en> = {
         "0–1, leeg is alleen geslaagd/gezakt. Alleen bij de gezichtscontrole.",
       documentsTitle: "Geaccepteerde documenten",
       documentTypes: "Geaccepteerde documenttypen",
-      documentTypesHint: "Gescheiden door komma's, leeg accepteert alles.",
+      documentTypesHint:
+        "Gescheiden door komma's: P (paspoort), I (ID-kaart), residence_permit (verblijfsvergunning), drivers_license (Nederlands rijbewijs). Leeg accepteert alles.",
       issuingCountries: "Geaccepteerde landen van uitgifte",
       issuingCountriesHint:
         "ICAO-landcodes van drie letters zoals NLD of DEU, gescheiden door komma's; leeg accepteert alles. Een code die geen land heeft wordt geweigerd.",
@@ -2067,6 +2131,9 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om diploma's vraagt",
       identityProofingDiplomaAdded: "Diploma toegevoegd",
       identityProofingDiplomaRejected: "Diploma geweigerd",
+      identityProofingFlowAddressConfigured:
+        "Gewijzigd of een flow om het adres vraagt",
+      identityProofingAddressAdded: "Adres ingevuld",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
@@ -2153,7 +2220,7 @@ export const nl: Translation<typeof en> = {
     proofing: {
       flow: "Flow voor identiteitsverificatie",
       send: "Identiteitsverificatie versturen",
-      hint: "Mailt dit lid een QR-code en een link voor de vcmrtd-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
+      hint: "Mailt dit lid een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
       noFlows:
         "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
       lastRequest: "Laatste verificatie:",
@@ -2503,7 +2570,7 @@ export const nl: Translation<typeof en> = {
   identitySettings: {
     heading: "Heridentificatie",
     description:
-      "Leden bewijzen hun identiteit met een paspoort of ID-kaart als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
+      "Leden bewijzen hun identiteit met een paspoort, ID-kaart of verblijfsvergunning als ze lid worden. Stel in hoe vaak ze dat opnieuw moeten doen, en wat er gebeurt als dat niet gebeurt.",
     intervals: "Hoe vaak",
     employeeInterval: "Medewerkers",
     externalInterval: "Externen",
@@ -2531,7 +2598,7 @@ export const nl: Translation<typeof en> = {
     credentialMaxAgeDays: "Accepteer een credential van maximaal",
     credentialMaxAgeOff: "Elke leeftijd",
     credentialMaxAgeHint:
-      "Weigert een heridentificatie waarvan de paspoort- of ID-kaartcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
+      "Weigert een heridentificatie waarvan de paspoort-, ID-kaart- of verblijfsvergunningcredential langer geleden bij de uitgever is opgehaald dan dit. Het lid moet dan eerst een nieuwe in de wallet ophalen. Staat standaard uit.",
     consequence: "Als een lid over de termijn is",
     consequenceFlag: "Alleen markeren",
     consequenceFlagHint:

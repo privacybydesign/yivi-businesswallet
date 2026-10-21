@@ -337,8 +337,9 @@ func declares(variables []Variable, name string) bool {
 	return false
 }
 
-// validateURL checks a URL variable's value: an app deep link of the variable's
-// AppScheme, else an absolute http(s) URL.
+// validateURL checks a URL variable's value: an absolute http(s) URL, or, for a
+// variable with an AppScheme, also an app deep link of that scheme (the https
+// App Link form of the same link passes as the former).
 func (v Variable) validateURL(value string) error {
 	if v.AppScheme == "" {
 		return validateAbsoluteHTTPURL(value)
@@ -347,8 +348,11 @@ func (v Variable) validateURL(value string) error {
 	if err != nil {
 		return fmt.Errorf("not a URL: %w", err)
 	}
+	if parsed.Scheme == "http" || parsed.Scheme == "https" {
+		return validateAbsoluteHTTPURL(value)
+	}
 	if parsed.Scheme != v.AppScheme {
-		return fmt.Errorf("must be a %s: link", v.AppScheme)
+		return fmt.Errorf("must be a %s: link or an absolute http(s) URL", v.AppScheme)
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("must have a host")

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
@@ -43,6 +44,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
 	proofingflow "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regulasweep"
 	proofingsession "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -83,6 +85,9 @@ const (
 	// validatie.nl retries internally up to three times with backoff (#242); the
 	// client timeout has to outlast that whole sequence, not one attempt.
 	vogHTTPTimeout = 2 * time.Minute
+
+	addressLookupProbeTimeout = 10 * time.Second
+	addressLookupHTTPTimeout  = 10 * time.Second
 
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
@@ -185,7 +190,7 @@ func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
 // newProofingProvider builds what the proofing service drives: the wallet's
 // own engine (on the pool, sealing under cipher), or the in-memory stub. The
 // engine is also returned on its own so its app routes and jobs get wired.
-func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store, trail proofingengine.DeviceTrail) (proofing.Provider, *proofingengine.Engine, error) {
+func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, cipher *crypto.Cipher, orgStore *organization.Store, trail proofingengine.DeviceTrail, branding proofingengine.BrandingLookup) (proofing.Provider, *proofingengine.Engine, error) {
 	switch cfg.IdentityProofingProvider {
 	case config.ProviderStub:
 		stub := proofingprovider.NewStub()
@@ -194,7 +199,9 @@ func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.P
 	case config.ProviderEngine:
 		engineCfg := proofingengine.DefaultConfig()
 		engineCfg.PublicBaseURL = cfg.IdentityProofingPublicURL
+		engineCfg.AppLinkURL = cfg.IdentityProofingAppLinkURL
 		engineCfg.DeviceTrail = trail
+		engineCfg.Branding = branding
 		if cfg.RegulaFaceAPIURL != "" {
 			regulaClient := regula.New(cfg.RegulaFaceAPIURL)
 			// A Face API that does not answer fails the deploy, not every
@@ -209,6 +216,20 @@ func newProofingProvider(ctx context.Context, cfg config.Config, pool *pgxpool.P
 		if cfg.RegulaFaceMatchThreshold > 0 {
 			engineCfg.RegulaFaceMatchThreshold = cfg.RegulaFaceMatchThreshold
 		}
+
+		drivingLicenceCertPool, err := mrtdverify.LoadCertPool(cfg.IdentityProofingEDLCSCAPaths)
+		if err != nil {
+			return nil, nil, fmt.Errorf("loading driving licence CSCAs: %w", err)
+		}
+		engineCfg.DrivingLicenceCertPool = drivingLicenceCertPool
+
+		// An environment without the ops repo's mount refuses every licence chip.
+		if len(cfg.IdentityProofingEDLCSCAPaths) == 0 {
+			slog.WarnContext(ctx, "IDENTITY_PROOFING_EDL_CSCA_PATHS not set; driving licence chips cannot verify")
+		} else {
+			slog.InfoContext(ctx, "driving licence CSCAs loaded", "paths", cfg.IdentityProofingEDLCSCAPaths)
+		}
+
 		// Without a cipher the session store refuses every session
 		// (proofingprovider.ErrNoEncryptionKey); flows still work.
 		sessions := proofingsession.NewPostgresStore(pool, cipher)
@@ -225,6 +246,49 @@ type deviceTrail struct{ requests *proofing.RequestStore }
 
 func (d deviceTrail) RecordDeviceEvent(ctx context.Context, tenantID, sessionID string, event proofingengine.DeviceEvent, details map[string]any) error {
 	return d.requests.RecordDeviceEvent(ctx, tenantID, sessionID, string(event), details)
+}
+
+// appBranding gives the engine a session's branding. The engine's tenant is
+// the org, and a session's client reference the wallet request it was sent for.
+type appBranding struct{ resolver *proofing.AppBrandingResolver }
+
+func (a appBranding) Branding(ctx context.Context, tenantID, clientReference string) (*proofingengine.Branding, error) {
+	orgID, requestID, err := brandingRequest(tenantID, clientReference)
+	if err != nil {
+		return nil, err
+	}
+	b, err := a.resolver.Branding(ctx, orgID, requestID)
+	if err != nil || b == nil {
+		return nil, err
+	}
+	// The same fields in the same order, so a field added to one fails to compile until the other has it.
+	branding := proofingengine.Branding(*b)
+	return &branding, nil
+}
+
+func (a appBranding) Logo(ctx context.Context, tenantID, clientReference string) (proofingengine.BrandingLogo, error) {
+	orgID, requestID, err := brandingRequest(tenantID, clientReference)
+	if err != nil {
+		return proofingengine.BrandingLogo{}, err
+	}
+	logo, err := a.resolver.Logo(ctx, orgID, requestID)
+	if errors.Is(err, proofing.ErrNoAppLogo) {
+		return proofingengine.BrandingLogo{}, proofingengine.ErrNoBrandingLogo
+	}
+	if err != nil {
+		return proofingengine.BrandingLogo{}, err
+	}
+	return proofingengine.BrandingLogo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
+}
+
+func brandingRequest(tenantID, clientReference string) (orgID, requestID uuid.UUID, err error) {
+	if orgID, err = uuid.Parse(tenantID); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("proofing tenant %q is not an organization id: %w", tenantID, err)
+	}
+	if requestID, err = uuid.Parse(clientReference); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("proofing session reference %q is not a request id: %w", clientReference, err)
+	}
+	return orgID, requestID, nil
 }
 
 // attestationIssuer is the boot-time issuer surface: the readiness probe plus the
@@ -888,12 +952,14 @@ func run() error {
 		slog.WarnContext(ctx, "identity proofing is off: IDENTITY_PROOFING_ENCRYPTION_KEY is not set, so no proofing request can be sent and no webhook is delivered")
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
+	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewCustomerStore(pool, recorder), themeSettingsStore, orgStore)
+	branding := appBranding{brandingResolver}
 	// The proofing jobs outlive the HTTP drain, so the notices and webhook
 	// deliveries the last requests cause still go out; they stop when run
 	// returns, after it.
 	proofingJobs, stopProofingJobs := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopProofingJobs()
-	ips, proofingEngine, err := newProofingProvider(ctx, cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests})
+	ips, proofingEngine, err := newProofingProvider(ctx, cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests}, branding)
 	if err != nil {
 		return err
 	}
@@ -920,6 +986,14 @@ func run() error {
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
+	// The address step checks a Dutch address against the BAG.
+	addressLookup := addresslookup.NewPDOK(cfg.AddressLookupURL, &http.Client{Timeout: addressLookupHTTPTimeout})
+	addressProbeCtx, addressProbeCancel := context.WithTimeout(ctx, addressLookupProbeTimeout)
+	defer addressProbeCancel()
+	if err := addressLookup.Ping(addressProbeCtx); err != nil {
+		return fmt.Errorf("address lookup ping: %w", err)
+	}
+	proofingService.SetAddressLookup(addressLookup)
 	// A customer's session keeps its personal data for its customer's data retention.
 	startPruner(proofingJobs, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session
@@ -948,6 +1022,7 @@ func run() error {
 	proofingIdempotency := proofing.NewIdempotencyStore(pool, proofingCipher)
 	proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	proofingHandler.SetPlatformAdmins(platformAdmins)
+	proofingHandler.SetAppBranding(brandingResolver)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 

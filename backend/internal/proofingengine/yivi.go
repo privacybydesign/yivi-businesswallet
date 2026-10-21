@@ -373,7 +373,7 @@ func disclosureComplianceFailure(fd *flow.FlowDefinition, doc documentInfo, now 
 	if fd == nil {
 		return false, ""
 	}
-	if len(fd.AcceptedDocumentTypes) > 0 && !slices.Contains(fd.AcceptedDocumentTypes, doc.Type) {
+	if !fd.AcceptsDocumentType(doc.Type, doc.Kind) {
 		return true, errCodeDocTypeRefused
 	}
 	if len(fd.AcceptedIssuingCountries) > 0 &&
@@ -550,11 +550,21 @@ func (s *Server) boundLoginFinish(sess session.Session, to session.Status, error
 	return updated, true
 }
 
-// documentFromDisclosure maps the passport/idcard claims onto documentInfo.
+// yiviDocumentKinds are the kinds of the identity credentials, by the last
+// segment of their vct (pbdf-staging.pbdf.residencepermit).
+var yiviDocumentKinds = map[string]string{
+	"passport":        flow.DocumentKindPassport,
+	"idcard":          flow.DocumentKindIdentityCard,
+	"residencepermit": flow.DocumentKindResidencePermit,
+}
+
+// documentFromDisclosure maps the passport, idcard or residencepermit claims
+// onto documentInfo.
 func documentFromDisclosure(info disclosureInfo) documentInfo {
 	a := info.Attributes
 	doc := documentInfo{
-		Type: a["documentType"], Number: a["documentNumber"], IssuingState: a["country"], Nationality: a["nationality"],
+		Type: a["documentType"], Kind: yiviDocumentKinds[info.Credential[strings.LastIndex(info.Credential, ".")+1:]],
+		Number: a["documentNumber"], IssuingState: a["country"], Nationality: a["nationality"],
 		FirstName: a["firstName"], LastName: a["lastName"], Sex: a["gender"],
 		DateOfBirth: a["dateOfBirth"], DateOfExpiry: a["dateOfExpiry"],
 	}

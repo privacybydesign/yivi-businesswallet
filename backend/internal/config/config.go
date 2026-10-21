@@ -109,6 +109,15 @@ const (
 	// defaults to APP_BASE_URL. Set it when the phone reaches the backend by
 	// another address (e.g. the LAN IP in development).
 	envIdentityProofingPublicURL = "IDENTITY_PROOFING_PUBLIC_URL"
+	// envIdentityProofingAppLinkURL is the https App Link / Universal Link a
+	// claim opens the Idem app with (https://idem.yivi.app/verify), carrying the
+	// same handover= and api= as the vcmrtd://verify link it replaces. Empty
+	// keeps vcmrtd://verify, which mail clients and in-app browsers often do not
+	// open; set it once the app version that handles the https link is out.
+	envIdentityProofingAppLinkURL = "IDENTITY_PROOFING_APP_LINK_URL"
+	// envAddressLookupURL is PDOK's Locatieserver, where the address step
+	// checks a Dutch address against the BAG and suggests addresses from it.
+	envAddressLookupURL = "ADDRESS_LOOKUP_URL"
 	// The Regula Face API: the native face step's liveness and match, and the
 	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
 	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
@@ -116,6 +125,10 @@ const (
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
 	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
 	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// envIdentityProofingEDLCSCAPaths is a comma-separated list of the RDW's
+	// eDL CSCA certificate files (PEM or DER), mounted from the ops repo.
+	// Unset trusts no driving licence chip.
+	envIdentityProofingEDLCSCAPaths = "IDENTITY_PROOFING_EDL_CSCA_PATHS"
 	// envIdentityProofingStubOutcome makes every stub session decide (approved,
 	// rejected or needs_review), so dev can see outcomes and their webhooks.
 	envIdentityProofingStubOutcome = "IDENTITY_PROOFING_STUB_OUTCOME"
@@ -326,6 +339,7 @@ const (
 	// can reach.
 	ProviderEngine                  = "engine"
 	defaultIdentityProofingProvider = ProviderEngine
+	defaultAddressLookupURL         = "https://api.pdok.nl/bzk/locatieserver/search/v3_1"
 
 	defaultQerdsDomibusFromParty   = "domibus-blue"
 	defaultQerdsDomibusToParty     = "domibus-red"
@@ -438,6 +452,12 @@ type Config struct {
 	IdentityProofingProvider string
 	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
 	IdentityProofingPublicURL string
+	// IdentityProofingAppLinkURL is the https link a claim opens the Idem app
+	// with (envIdentityProofingAppLinkURL); empty is vcmrtd://verify.
+	IdentityProofingAppLinkURL string
+	// AddressLookupURL is the Dutch address register's search API
+	// (envAddressLookupURL).
+	AddressLookupURL string
 	// IdentityProofingStubOutcome is what every stub session decides; empty
 	// leaves them undecided until they expire.
 	IdentityProofingStubOutcome string
@@ -450,6 +470,9 @@ type Config struct {
 	RegulaFaceAPIURL         string
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
+	// IdentityProofingEDLCSCAPaths are the driving-licence CSCA files the
+	// engine trusts; empty trusts no licence.
+	IdentityProofingEDLCSCAPaths []string
 
 	AttestationIssuer         string
 	AttestationIssuerURL      string
@@ -704,6 +727,14 @@ func Load() (Config, error) {
 	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, identityProofingPublicURL); err != nil {
 		return Config{}, err
 	}
+	identityProofingAppLinkURL := os.Getenv(envIdentityProofingAppLinkURL)
+	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, identityProofingAppLinkURL); err != nil {
+		return Config{}, err
+	}
+	addressLookupURL := envOrDefault(envAddressLookupURL, defaultAddressLookupURL)
+	if err := requireAbsoluteHTTPURL(envAddressLookupURL, addressLookupURL); err != nil {
+		return Config{}, err
+	}
 	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
 	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
 		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
@@ -806,11 +837,14 @@ func Load() (Config, error) {
 		IdentityProofingProvider:      identityProofingProvider,
 		IdentityProofingStubOutcome:   identityProofingStubOutcome,
 		IdentityProofingPublicURL:     identityProofingPublicURL,
+		IdentityProofingAppLinkURL:    identityProofingAppLinkURL,
+		AddressLookupURL:              addressLookupURL,
 		DevMode:                       devMode,
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
 		RegulaFaceAPIURL:              regulaFaceAPIURL,
 		RegulaFaceAPIPublicURL:        regulaFaceAPIPublicURL,
 		RegulaFaceMatchThreshold:      regulaFaceMatchThreshold,
+		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
 
 		AttestationIssuer:         attestationIssuer,
 		AttestationIssuerURL:      attestationIssuerURL,
@@ -926,6 +960,23 @@ func requireAbsoluteHTTPURL(key, raw string) error {
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("config: %s %q must be an absolute http(s) URL", key, raw)
+	}
+	return nil
+}
+
+// requireAppLinkURL accepts an empty value, or an https URL with a host and no
+// query or fragment: an App Link / Universal Link is https only, even on a
+// local stack, and the engine appends the claim's own query to it.
+func requireAppLinkURL(key, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: %s %q: %w", key, raw, err)
+	}
+	if u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return fmt.Errorf("config: %s %q must be an https URL with no query or fragment", key, raw)
 	}
 	return nil
 }
