@@ -399,7 +399,6 @@ func TestUnfinishedSessionsDropEvidence(t *testing.T) {
 				Selfie:        &session.SelfieStepEvidence{Image: "c2VsZmll"},
 				DocumentPhoto: &session.DocumentPhotoStepEvidence{Front: session.DocumentPhotoSide{Image: "ZG9j"}},
 			}
-			s.Yivi = &session.YiviState{Reference: "cmVm", LastFrame: "ZnJhbWU="}
 			s.ExpiresAt = expiresAt
 			return nil
 		}); err != nil {
@@ -414,8 +413,8 @@ func TestUnfinishedSessionsDropEvidence(t *testing.T) {
 			t.Fatalf("read session: %v", err)
 		}
 		if stored.Status != session.Status(want) || stored.Steps.Document != nil || stored.Steps.NFC != nil ||
-			stored.Steps.Selfie != nil || stored.Steps.DocumentPhoto != nil || stored.Yivi != nil {
-			t.Errorf("stored %s session = %+v, Yivi %v; want no evidence", stored.Status, stored.Steps, stored.Yivi != nil)
+			stored.Steps.Selfie != nil || stored.Steps.DocumentPhoto != nil {
+			t.Errorf("stored %s session = %+v; want no evidence", stored.Status, stored.Steps)
 		}
 		if res, err := h.engine.SessionStatus(ctx, h.tenant, sess.ID, sess.Token); err != nil || res.Status != want {
 			t.Errorf("status = %+v, %v; want %s", res, err, want)
@@ -434,69 +433,35 @@ func TestUnfinishedSessionsDropEvidence(t *testing.T) {
 	check(t, withEvidence(t, time.Now().Add(-time.Second)), pp.StatusExpired)
 }
 
-func TestYiviNeedsRegula(t *testing.T) {
+// The Yivi disclosure decides the session on its own, without Regula: no
+// face check runs, and a second disclosure finds it settled.
+func TestYiviDisclosureDecides(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.engine.CreateSession(context.Background(), h.tenant, pp.SessionInput{Method: pp.MethodYivi}); !errors.Is(err, pp.ErrMethodUnavailable) {
-		t.Errorf("Yivi without Regula = %v, want ErrMethodUnavailable", err)
-	}
-}
-
-// The Yivi method's face check lives in the session, not in one replica's
-// memory: a second engine on the same database scores the next frames.
-func TestYiviFaceAcrossReplicas(t *testing.T) {
-	var regulaCalls atomic.Int32
-	withRegula := func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9, calls: &regulaCalls} }
-	h := newHarness(t, withRegula)
 	ctx := context.Background()
 	f, err := h.engine.CreateFlow(ctx, h.tenant, pp.FlowSpec{
-		Name: "Yivi", Steps: []string{"document_capture", "nfc_read", "face_verification"},
-		RequestedAttributes: []string{"dg1"},
-		FaceProvider:        "regula", SelfieLocation: "native", RequiredChecks: []string{"nfc.passive_auth", "face.match"},
+		Name: "Yivi", Steps: []string{"document_capture", "nfc_read"},
+		RequestedAttributes: []string{"dg1"}, RequiredChecks: []string{"nfc.passive_auth"},
 	})
 	if err != nil {
 		t.Fatalf("CreateFlow: %v", err)
 	}
 	sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID, Method: pp.MethodYivi})
 	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+		t.Fatalf("CreateSession without Regula: %v", err)
 	}
-	photo := base64.StdEncoding.EncodeToString([]byte("not really a jpeg"))
-	got, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, pp.Reference{
-		Credential: "pbdf-staging.pbdf.passport", Photo: photo, Attributes: map[string]string{"firstName": "Anna"},
-	})
-	if err != nil || !got.OK || got.StableFrames != 3 {
+	ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: map[string]string{"firstName": "Anna"}}
+	if got, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, ref); err != nil || !got.OK {
 		t.Fatalf("SubmitReference = %+v, %v", got, err)
-	}
-	otherCfg := proofingengine.DefaultConfig()
-	withRegula(&otherCfg)
-	other := proofingengine.New(otherCfg, h.sessions, h.flows, orgNames{}, nil)
-
-	frame := func(e *proofingengine.Engine, s string) pp.FaceVerdict {
-		t.Helper()
-		v, err := e.SubmitFaceFrame(ctx, sess.Token, base64.StdEncoding.EncodeToString([]byte(s)))
-		if err != nil {
-			t.Fatalf("frame %q: %v", s, err)
-		}
-		return v
-	}
-	if v := frame(h.engine, "a"); v.Consecutive != 1 || v.Decision != pp.FaceDecisionPending {
-		t.Fatalf("first frame = %+v", v)
-	}
-	if v := frame(other, "a"); v.Consecutive != 0 {
-		t.Errorf("a replayed frame = %+v, want the run broken", v)
-	}
-	frame(other, "b")
-	frame(h.engine, "c")
-	if v := frame(other, "d"); v.Decision != pp.FaceDecisionApproved {
-		t.Fatalf("after three matches = %+v, want approved", v)
-	}
-	// The replayed "a" never reached Regula: four distinct frames, four calls.
-	if got := regulaCalls.Load(); got != 4 {
-		t.Errorf("Regula matched %d frames, want 4: a replay must not be sent again", got)
 	}
 	res, err := h.engine.SessionResult(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil || res.Status != pp.StatusApproved || res.Method != pp.MethodYivi || res.Name != "Anna" {
 		t.Errorf("result = %+v, %v; want approved from the Yivi app", res, err)
+	}
+	if res.EIDASLevel != "low" {
+		t.Errorf("eIDAS level = %q, want low", res.EIDASLevel)
+	}
+	if _, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, ref); err == nil {
+		t.Error("a second disclosure on a settled session = nil error")
 	}
 }
 

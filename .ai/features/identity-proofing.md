@@ -24,17 +24,20 @@ The send form can instead **show the session on this screen**
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
 vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport,
-ID card or residence permit with its photo at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
+ID card or residence permit at the hosted EUDI verifier, `EUDI_VERIFIER_URL` (`yivi/start`:
 `ScopeProofing`, the `openid4vp://` request shown as an `open.yivi.app` universal
-link and QR; the transaction id stays in `yivi_transaction_id`), polls
-`yivi/disclosure`, which on DONE hands the photo and claims to the engine as the
-face reference (`SubmitReference`), then runs the face check from the browser
-camera (`yivi/face`): each frame is a Regula image match against that photo
-(`MatchImages`), so the Yivi method needs Regula (`ErrMethodUnavailable`
-otherwise). A frame matches at the deployment's threshold or the flow's
-`face.match`, whichever is higher (`boundLoginThreshold`), and the session is
-eIDAS low with no tier (`boundLoginAssurance`): one check out of one is not a
-score. A subject
+link and QR; the transaction id stays in `yivi_transaction_id`), and polls
+`yivi/disclosure`, which on DONE hands the claims to the engine
+(`SubmitReference`).
+- The disclosure decides the session: approved, or rejected
+  `document_not_accepted` when the document breaks the flow's restrictions.
+- No face check runs: the Yivi app vouches for its holder (the passport issuer
+  checks the face when the credential is added), so the method needs no
+  Regula and the session is eIDAS low with no tier (`boundLoginAssurance`).
+- The photo is asked only when the flow keeps the face photos and releases
+  one (`keepsFacePhoto`, `disclosedPhoto`).
+
+A subject
 who cancels in the app is not reported: the verifier only knows pending or done,
 so the page waits out the countdown. Both count down to the
 session's expiry and poll `GET requests/{id}` for the outcome. Nothing is
@@ -111,8 +114,7 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   `Service.SessionChanged` (opened, step started, outcome, expiry). A lazy
   expiry is noticed by whichever read finds the deadline past.
 - **Faces.** Only Regula: the native face step (liveness transaction + match
-  against DG2) and the Yivi method's per-frame match. A frame already scored
-  is counted as a replay without calling Regula again.
+  against DG2). The Yivi method runs no face check.
   - A face step that failed liveness or did not match may be submitted again:
     how often is the app's call; the engine bounds it at 3 attempts a session
     (`maxFaceStepAttempts`), after which the last failed evidence stands and
@@ -124,14 +126,6 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       Regula does not know, or another session's, stays spent.
     - With every attempt reserved and none leaving evidence, a submit is 409
       `face_attempts_spent`.
-  - A Yivi-method session sends at most twice `BoundLoginMaxAttempts` frames
-    to Regula, faceless ones included (`boundLoginFrameBudget`); spending it
-    rejects the session `FACE_NO_MATCH`.
-    - Each frame reserves its call under the row lock before Regula is
-      asked, so concurrent frames cannot overshoot the budget; a frame past
-      it decides the session without a call.
-  - The member route `yivi/face` counts each frame against its org's
-    `memberFaceFrameLimit` (1500 a minute); past it 429 `rate_limited`.
 - **Images.** Every uploaded image is decoded through `images.Decode`: its
   header is checked first (4 megapixels, `images.MaxImagePixels`, above the
   app's largest image, a 1600 px document photo; a JPEG2000 1 megapixel, as a
@@ -177,9 +171,6 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   device only while the chip read is the current step, and dropped once the
   chip evidence lands, so a device taking the session over later never gets
   it.
-- **Yivi state is in the session**, sealed (`session.YiviState`: the disclosed
-  photo and the run of frames), not in memory, so any API replica scores the
-  next frame; it is cleared as the session settles.
 - **Change notices** go through one bounded queue (`Engine.Run`), one per
   session while it waits; a full queue drops the notice and the deadline job
   reconciles instead.
@@ -237,6 +228,56 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     A flow saved without a list releases everything its steps collect
     (`requestedAttributesOf`), and a flow read back always lists what it
     releases.
+  - Age check (`age_over`, "Age check"): releases whether the holder is the
+    flow's `AgeOver` (1..120 years) or older, as `ageOver: {age, over}`.
+    - The editor picks the age in a dropdown under the checkbox: 12, 16,
+      18 (the default), 21 or 65, plus a saved flow's own age when it is
+      another (`ageOverChoices`).
+    - Derived by the engine (`ageOverOf`) at the chip read, from the date of
+      birth in the verified chip evidence, never the MRZ scan alone:
+      `flow.Validate` requires `nfc_read`, and `AgeOver` set exactly with the
+      attribute.
+    - The date of birth is never stored (`asksAge`); it exists only in memory
+      during the scan and chip-read requests.
+      - Document scan: the MRZ is stored without it, and without the chip
+        access key made from it. The app opens the chip with its own scan; after
+        a restart it scans again.
+      - Chip read: stores `NFC.AgeOver` and the chip checks (`NFC.ChipChecks`),
+        and drops the parsed date, DG1 and DG11 (`withholdBirthDate`).
+      - Finish: scores the kept chip checks (`finishChipChecks`), since Passive
+        Authentication cannot run again without DG1.
+      - `TestAgeCheckStoresNoBirthDate` checks the stored session after each
+        step.
+      - Yivi app: the disclosure asks the passport or id-card's age claim
+        (`over12`, `over16`, `over18`, `over21`, `over65`,
+        `openid4vpverifier.AgeClaim`) instead of `dateOfBirth`, and the engine
+        answers from it (`disclosedAgeOver`, released as `result.ageOver`).
+        - A date of birth the app discloses anyway is dropped before storing
+          (`withholdDisclosedBirthDate`). `TestYiviAgeCheckStoresNoBirthDate`
+          checks it.
+        - A disclosure without the age claim, or with a value other than
+          Yes or No, rejects the session `AGE_NOT_DISCLOSED` (code
+          `age_not_disclosed`), so an approved age check always answers.
+        - Offered only for those ages (`yiviAppAvailable`): a saved flow with
+          another age is Idem-only.
+        - The claim is set when the credential is issued: a "yes" holds, a
+          "no" can be out of date until the credential is renewed.
+    - Can be ticked with `dg1`, and then wins: `buildResult` releases the
+      document data without `dateOfBirth` (name, nationality and the rest
+      stay).
+      - Such a flow does not read the identity (`readsIdentity`), so it cannot
+        check for one known person, and a data request or diploma flow, which
+        needs the date of birth, cannot tick it.
+      - The subject's consent screen describes `dg1` without the date of
+        birth (`dg1WithoutBirthDate`).
+    - `over` holds from the birthday the holder turns `age`, on the UTC date
+      of the chip read (born 29 February: 1 March in a common year).
+    - It decides no outcome: an approved minor is approved with `over: false`;
+      the relying party decides.
+    - Off in a new flow, never in a flow without a list (`attributesForSteps`).
+    - Reaches the customer API and admin result as `identity.ageOver`, and the
+      Sessions tab. The Idem app's consent screen names the age from the app
+      session view's `ageOver`.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
@@ -597,8 +638,8 @@ post-review outcome stay the system's.
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
   `hosted: true` session in that app from the customer's own UI (`appLink` or
   `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
-  answers from stored state. The hosted token is the poll token: the Yivi face
-  check and a new Idem code run through `/proof/{token}/…`.
+  answers from stored state. The hosted token is the poll token: the Yivi
+  disclosure poll and a new Idem code run through `/proof/{token}/…`.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
   `public_id.go`) on the customer API and in webhooks; the org routes take
   either form.
@@ -748,12 +789,13 @@ the API is:
   leaves the customer's live pages alone. Every call also counts against its
   source's `hostedSourceLimit`; an IPv6 source is its /64 (`clientip.SourceKey`).
   Past either: 429 `rate_limited` with `Retry-After`.
-- Its own bucket, not the API's, sized for the page (face frames every 400 ms).
+- Its own bucket, not the API's, sized for the page (status and Yivi polls
+  every 2 s).
 - As with an unknown API key, a token that matches no link is a 404 that counts
   against its source's `authFailureLimit`; past it, 429.
 
 Its routes: the page, `status`, `start` (once: a second start is 409
-`link_started`), the customer's `logo`, and the Yivi `start`/`disclosure`/`face`
+`link_started`), the customer's `logo`, and the Yivi `start`/`disclosure`
 routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
 and runs the customer's session TTL. An unstarted link reads as pending until
@@ -802,8 +844,7 @@ dev Vite serves it without the header. The rest of the SPA still sends no CSP.
 The page's outcomes, failures and errors are live regions (`role="alert"`
 for a failure, `status` otherwise); the diploma step keeps one mounted for
 each upload's verdicts, and `StepRegion` moves focus to the new step's
-heading. Embedded, the Yivi face check needs the iframe's `allow="camera"`:
-without it the page says so and offers the link in a tab of its own. The deep-link gap of §11 applies: the page
+heading. The deep-link gap of §11 applies: the page
 shows the QR, and says so.
 
 **Per-flow hosted settings** (the `hosted_*` columns of
@@ -832,7 +873,7 @@ starts: `CreateRequest` (a member's send, the customer API's create) and
 `proofing_paused`; the overview shows why. Every other route stays open, so an
 admin who paused over a leaked key can still revoke it, remove a webhook or
 erase data. Running sessions still settle (engine notices, the deadline job,
-the on-screen Yivi check's frames) and webhooks still go out. Pausing (either
+an on-screen Yivi disclosure) and webhooks still go out. Pausing (either
 level) rejects every open review of the org with `ORG_PAUSED` (reviewer
 "system: organisation paused"), so nothing waits on a decision nobody can
 make; both pause dialogs say so. No review stays open under a pause:
@@ -967,7 +1008,7 @@ Everything this feature does not do yet, in one place.
   has no browser proofing page for it, so only flows whose face capture runs in
   the app (`selfieLocation: native`) can be sent; the wallet forces `native` and
   refuses others (`flow_not_completable`). No face engine of its own: a flow's
-  face step and the Yivi method need Regula.
+  face step needs Regula.
 - **Deep link.** A tapped vcmrtd deep link is not confirmed to open the app
   (on either platform; a fix there is the vcmrtd app's):
   - It is the mail's button and "Open in the Idem app" on the on-screen and

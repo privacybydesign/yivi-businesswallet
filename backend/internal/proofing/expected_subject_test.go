@@ -129,6 +129,9 @@ func TestReadsIdentity(t *testing.T) {
 		"requests the document data": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}}, true,
 		},
+		"withholds the date of birth for the age check": {
+			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"nfc_read"}, RequestedAttributes: []string{"dg1", "age_over"}}}, false,
+		},
 		"leaves the document data out": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg2"}}}, false,
 		},

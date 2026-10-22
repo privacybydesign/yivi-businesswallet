@@ -121,8 +121,10 @@ const (
 	errCodeDocTypeRefused      = "DOCUMENT_TYPE_NOT_ACCEPTED"
 	errCodeCountryRefused      = "DOCUMENT_COUNTRY_NOT_ACCEPTED"
 	errCodeLivenessFailed      = "LIVENESS_FAILED"
+	errCodeFaceNoMatch         = "FACE_NO_MATCH"
 	errCodeAssuranceNotMet     = "ASSURANCE_NOT_MET"
 	errCodeFaceStepNotComplete = "FACE_STEP_NOT_COMPLETED"
+	errCodeAgeNotDisclosed     = "AGE_NOT_DISCLOSED"
 )
 
 // hasFaceStep reports whether fd has any of the face steps the one selfie
@@ -193,6 +195,8 @@ type appResultRequest struct {
 	MrtdEvidence      *mrtdEvidenceRequest `json:"mrtdEvidence,omitempty"`
 	Biometrics        *biometricsInfo      `json:"biometrics,omitempty"`
 	Device            *deviceInfo          `json:"device,omitempty"`
+	// AgeOver is the flow's age answered from the chip's date of birth.
+	AgeOver *ageOverInfo `json:"ageOver,omitempty"`
 }
 
 // documentInfo is the identity read off the document's MRZ/DG1, plus the DG11
@@ -268,20 +272,11 @@ type biometricsInfo struct {
 	FaceVerified   *bool    `json:"faceVerified,omitempty"`
 	LivenessResult string   `json:"livenessResult,omitempty"` // "passed" | "failed" | "not_performed"
 	// LivenessScore is a liveness confidence, 0..1, when the face provider
-	// gives one; nil otherwise (Regula reports liveness as passed or not,
-	// and the Yivi method's face check runs no liveness: "not_performed").
+	// gives one; nil otherwise (Regula reports liveness as passed or not).
 	LivenessScore *float64 `json:"livenessScore,omitempty"`
 	Engine        string   `json:"engine,omitempty"` // "on_device" | "iris" | "ghostfacenet_tflite" (this server) | "regula"
-
-	// Set by this server's own 1:1 verification (the Yivi method's face
-	// check, yivi.go), never by an app's self-report: the threshold the score
-	// was held to, how many live frames were evaluated, where the reference
-	// face came from ("yivi:pbdf.pbdf.passport.photo"), and which frame
-	// integrity checks ran.
-	Threshold       *float64       `json:"threshold,omitempty"`
-	FramesEvaluated *int           `json:"framesEvaluated,omitempty"`
-	ReferenceSource string         `json:"referenceSource,omitempty"`
-	Injection       *injectionInfo `json:"injection,omitempty"`
+	// Threshold is the score the match was held to.
+	Threshold *float64 `json:"threshold,omitempty"`
 }
 
 // deviceInfo is app and device metadata, released whatever was requested.

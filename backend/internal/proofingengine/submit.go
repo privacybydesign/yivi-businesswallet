@@ -97,11 +97,12 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		req.MrtdEvidence = nfcReq.MrtdEvidence
 		req.Photo = nfcReq.Photo
 		req.Device = nfcReq.Device
-		checks, err := s.verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
+		checks, err := s.finishChipChecks(sess.Steps.NFC, req.MrtdEvidence, sess.AAChallenge)
 		if err != nil {
 			return sess, err
 		}
 		verifiedChecks = checks
+		req.AgeOver = sess.Steps.NFC.AgeOver
 		if nfcReq.Document != nil && req.Document != nil {
 			// The DG11 extras, and its name over the MRZ's.
 			req.Document.PersonalNumber = firstNonEmpty(nfcReq.Document.PersonalNumber, req.Document.PersonalNumber)

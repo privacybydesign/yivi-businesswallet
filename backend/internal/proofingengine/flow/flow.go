@@ -288,6 +288,9 @@ type FlowDefinition struct {
 	// releases the outcome only. A stored version's former
 	// RequestedAttributesConfigured key is ignored.
 	RequestedAttributes []string `json:"RequestedAttributes"`
+	// AgeOver is the age, in years, AttributeAgeOver answers for: set exactly
+	// when that attribute is requested.
+	AgeOver int `json:"AgeOver"`
 	// SelfieLocation is who runs the face step (empty is the browser); Validate
 	// refuses it without a face step.
 	SelfieLocation StepLocation `json:"SelfieLocation"`
@@ -402,6 +405,17 @@ const MaxRetentionOverrideDays = 365
 // has no MRZ document code; the app reports it at document_capture. The
 // engine verifies Dutch licences only (mrtdverify.DrivingLicenceIssuingState).
 const DocumentTypeDrivingLicence = "drivers_license"
+
+// AttributeAgeOver is the requested attribute that releases only whether the
+// holder is AgeOver or older, derived from the chip's date of birth.
+const AttributeAgeOver = "age_over"
+
+// minAgeOver and maxAgeOver are the lowest and highest age a flow can ask the
+// holder to be over.
+const (
+	minAgeOver = 1
+	maxAgeOver = 120
+)
 
 // DocumentTypeEUDrivingLicence is the other spelling of an EU driving
 // licence: mrtdEvidence's documentType for a licence chip.
@@ -614,6 +628,24 @@ func validate(fd FlowDefinition) error {
 
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {
 		return err
+	}
+	return validateAgeOver(fd, seenSteps)
+}
+
+// validateAgeOver refuses AttributeAgeOver without the chip read it is derived
+// from or an age to answer for, and an age without the attribute.
+func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
+	if !slices.Contains(fd.RequestedAttributes, AttributeAgeOver) {
+		if fd.AgeOver != 0 {
+			return fmt.Errorf("flow: ageOver set without %q in requestedAttributes", AttributeAgeOver)
+		}
+		return nil
+	}
+	if !seenSteps[StepNFCRead] {
+		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
+	}
+	if fd.AgeOver < minAgeOver || fd.AgeOver > maxAgeOver {
+		return fmt.Errorf("flow: ageOver must be between %d and %d", minAgeOver, maxAgeOver)
 	}
 	return nil
 }

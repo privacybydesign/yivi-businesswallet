@@ -19,16 +19,15 @@ import (
 )
 
 // hostedCallLimit holds the hosted page per customer across all its links, as
-// apiCallLimit holds the API, and per API replica. It fits some twenty people
-// at a hosted face check at once: its frames go every 400 ms, its status polls
-// every 2 s.
+// apiCallLimit holds the API, and per API replica. A page polls its status and
+// its Yivi disclosure every 2 s, so it fits some fifty people at once.
 var hostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 
 // hostedSourceLimit holds the hosted page per client address, valid links
 // included, so one source cannot spend a customer's hostedCallLimit. One
-// person's page at its busiest sends some 210 calls a minute: a face frame
-// every 400 ms and the status and Yivi polls every 2 s. This leaves room for
-// a reload, a second tab and a few people behind one NAT.
+// person's page at its busiest sends some 60 calls a minute: the status and
+// Yivi polls every 2 s. This leaves room for a reload, a second tab and some
+// people behind one NAT.
 var hostedSourceLimit = ratelimit.Limit{Burst: 600, Per: time.Minute}
 
 // staleLinkLimit holds one link that is no longer live (Request.linkLive):
@@ -93,7 +92,6 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/yivi/start", h.limitHosted(h.hostedStartYivi))
 	mux.Handle("POST /proof/{token}/claim-link", h.limitHosted(h.hostedClaimLink))
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
-	mux.Handle("POST /proof/{token}/yivi/face", h.limitHosted(h.hostedFaceFrame))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("GET /proof/{token}/address/lookup", h.limitHosted(h.hostedLookUpAddress))
@@ -434,17 +432,4 @@ func (h *Handler) hostedClaimLink(w http.ResponseWriter, r *http.Request) error 
 func (h *Handler) hostedYiviDisclosure(w http.ResponseWriter, r *http.Request) error {
 	disclosure, err := h.service.HostedYiviDisclosure(r.Context(), r.PathValue("token"))
 	return writeYiviDisclosure(w, r, disclosure, err)
-}
-
-func (h *Handler) hostedFaceFrame(w http.ResponseWriter, r *http.Request) error {
-	image, err := decodeFaceFrame(w, r)
-	if err != nil {
-		return err
-	}
-	verdict, err := h.service.HostedFaceFrame(r.Context(), r.PathValue("token"), image)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, newFaceVerdictResponse(verdict))
-	return nil
 }

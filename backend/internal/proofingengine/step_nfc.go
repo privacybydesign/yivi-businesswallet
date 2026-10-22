@@ -92,6 +92,18 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 			delete(req.MrtdEvidence.DataGroups, dataGroupPersonalDetails)
 		}
 	}
+	// An age-check flow keeps the answer and the chip checks, never the date
+	// of birth: the raw DG1 the finish would check again goes with it.
+	var ageOver *ageOverInfo
+	var chipChecks map[string]any
+	if asksAge(resolvedFlow) {
+		ageOver = ageOverOf(req.Document, resolvedFlow, s.cfg.Now())
+		if chipChecks, err = marshalToMap(checks); err != nil {
+			writeInternalError(w, r, "could not store nfc evidence", err)
+			return
+		}
+		withholdBirthDate(&req)
+	}
 	raw, err := marshalToMap(req)
 	if err != nil {
 		writeInternalError(w, r, "could not store nfc evidence", err)
@@ -100,7 +112,7 @@ func (s *Server) handleSubmitNFCStep(w http.ResponseWriter, r *http.Request) {
 
 	hasDocumentCapture := slices.Contains(resolvedFlow.Steps, flow.StepDocumentCapture)
 	updated, err := s.writeStep(sess, caller, flow.StepNFCRead, func(sess *session.Session, now time.Time) {
-		sess.Steps.NFC = &session.NFCStepEvidence{Raw: raw, Timing: stepTiming(nil, now)}
+		sess.Steps.NFC = &session.NFCStepEvidence{Raw: raw, ChipChecks: chipChecks, AgeOver: ageOver, Timing: stepTiming(nil, now)}
 		if !hasDocumentCapture {
 			return
 		}
@@ -154,6 +166,23 @@ func portraitDataGroup(ev *mrtdEvidenceRequest) string {
 		return dataGroupDLPortrait
 	}
 	return dataGroupPortrait
+}
+
+// finishChipChecks are the chip checks the finish scores: those kept at the
+// chip read (an age-check flow), else run again on the stored evidence ev.
+func (s *Server) finishChipChecks(nfc *session.NFCStepEvidence, ev *mrtdEvidenceRequest, aaChallenge string) (*chipChecksInfo, error) {
+	if nfc.ChipChecks == nil {
+		return s.verifyMrtdEvidence(ev, aaChallenge)
+	}
+	data, err := json.Marshal(nfc.ChipChecks)
+	if err != nil {
+		return nil, err
+	}
+	var checks chipChecksInfo
+	if err := json.Unmarshal(data, &checks); err != nil {
+		return nil, err
+	}
+	return &checks, nil
 }
 
 func decodeNFCStepRequest(raw map[string]any) (submitNFCStepRequest, error) {

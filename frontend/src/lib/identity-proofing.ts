@@ -130,10 +130,11 @@ export const CHECK_LIVENESS = "face.liveness";
 
 // The requested data the service's admin page offers, and the step that
 // produces each: the document scan gives the document and holder (dg1), the
-// chip read its extras, photo and check results, the face step its selfie and
-// biometrics.
+// chip read the age check, its extras, photo and check results, the face step
+// its selfie and biometrics.
 export const REQUESTED_ATTRIBUTES = [
   { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
+  { value: "age_over", step: STEP_NFC_READ },
   { value: "dg11", step: STEP_NFC_READ },
   { value: "dg2", step: STEP_NFC_READ },
   { value: "chip_checks", step: STEP_NFC_READ },
@@ -185,11 +186,14 @@ const YIVI_EIDAS_LEVEL = "low";
 // against a customer's reference photo (proofing.NeedsReferencePhoto: a face
 // step without the chip read, outside the browser), where the Yivi app
 // matches against its credential's photo instead, or requires a level above
-// what a Yivi session reaches.
+// what a Yivi session reaches, or checks an age the Yivi passport and id-card
+// carry no claim for (AGE_OVER_CHOICES).
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   selfieLocation?: string | undefined;
   requiredAssuranceLevel?: string | undefined;
+  requestedAttributes?: readonly string[];
+  ageOver?: number;
 }): boolean {
   const needsReferencePhoto =
     flow.steps.some((step) => FACE_STEPS.includes(step)) &&
@@ -201,6 +205,8 @@ export function yiviAppAvailable(flow: {
   return (
     !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
     !needsReferencePhoto &&
+    (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
+      AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
     levelMet
   );
 }
@@ -222,6 +228,8 @@ export interface ProofingFlowDraft {
   // A decimal 0..1 as typed; "" is pass/fail only.
   faceMatchThreshold: string;
   requestedAttributes: ReadonlySet<string>;
+  // Whole years as typed, the age the age check answers for.
+  ageOver: string;
   // Comma-separated lists as typed; empty accepts any.
   acceptedDocumentTypes: string;
   acceptedIssuingCountries: string;
@@ -320,7 +328,14 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
     faceMatchThreshold: "",
-    requestedAttributes: new Set(REQUESTED_ATTRIBUTES.map((a) => a.value)),
+    // The age check releases less than the document data it would sit next
+    // to, so it starts off.
+    requestedAttributes: new Set(
+      REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+        (value) => value !== ATTRIBUTE_AGE_OVER,
+      ),
+    ),
+    ageOver: String(DEFAULT_AGE_OVER),
     acceptedDocumentTypes: "",
     acceptedIssuingCountries: "",
     assuranceLevel: "",
@@ -363,6 +378,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
     faceMatchThreshold: threshold === undefined ? "" : String(threshold),
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
+    ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
     acceptedDocumentTypes: (flow.acceptedDocumentTypes ?? []).join(", "),
     acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
@@ -397,6 +413,7 @@ export type FlowDraftError =
   | "assuranceLevel"
   | "issuingCountries"
   | "faceMatchThreshold"
+  | "ageOver"
   | "retentionSeconds";
 
 // An issuing country as a flow takes it: three letters (ICAO 9303). Whether
@@ -439,6 +456,9 @@ export function flowDraftError(
       return "faceMatchThreshold";
     }
   }
+  if (ageOverInvalid(draft)) {
+    return "ageOver";
+  }
   if (draft.retentionSeconds.trim() !== "") {
     const seconds = Number(draft.retentionSeconds);
     if (!Number.isInteger(seconds) || seconds < 0) {
@@ -446,6 +466,14 @@ export function flowDraftError(
     }
   }
   return null;
+}
+
+// Whether draft's age check asks an age the service refuses
+// (flow.validateAgeOver).
+function ageOverInvalid(draft: ProofingFlowDraft): boolean {
+  if (!asksAge(draft)) return false;
+  const age = Number(draft.ageOver);
+  return !Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER;
 }
 
 // The request body for a draft, as the service's editor builds it. Call only
@@ -510,7 +538,18 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (draft.retentionSeconds.trim() !== "" && retention > 0) {
     spec.retentionOverrideSeconds = retention;
   }
+  if (asksAge(draft)) {
+    spec.ageOver = Number(draft.ageOver);
+  }
   return spec;
+}
+
+// Whether the draft releases the age check, which needs an age.
+export function asksAge(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.requestedAttributes.has(ATTRIBUTE_AGE_OVER) &&
+    attributeAvailable(draft, ATTRIBUTE_AGE_OVER)
+  );
 }
 
 // The flows a member may send a request on, and the one the form starts on:
@@ -696,8 +735,7 @@ const REJECTION_REASON_KEYS = {
   DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
   FACE_STEP_NOT_COMPLETED: "faceStepNotCompleted",
   FACE_NO_MATCH: "faceNoMatch",
-  REFERENCE_NO_FACE: "referenceNoFace",
-  PHOTO_MISSING: "photoMissing",
+  AGE_NOT_DISCLOSED: "ageNotDisclosed",
   LIVENESS_FAILED: "livenessFailed",
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",
@@ -845,14 +883,40 @@ export function sendableByMail(
 // The document data a flow releases: the holder's name and date of birth.
 export const ATTRIBUTE_DOCUMENT = "dg1";
 
+// The age check: only whether the holder is the flow's age or older, derived
+// from the chip's date of birth (flow.AttributeAgeOver).
+export const ATTRIBUTE_AGE_OVER = "age_over";
+// The age a new age check answers for, and the lowest and highest the service
+// takes (flow.minAgeOver, flow.maxAgeOver).
+const DEFAULT_AGE_OVER = 18;
+const MIN_AGE_OVER = 1;
+const MAX_AGE_OVER = 120;
+// The ages the editor offers: the usual legal limits, as ISO mDL and the EUDI
+// PID name them (age_over_NN), and the ones the Yivi passport and id-card
+// answer (overNN, openid4vpverifier.AgeClaim).
+const AGE_OVER_CHOICES = [12, 16, 18, 21, 65];
+
+// The ages to choose from for a draft: AGE_OVER_CHOICES, plus the draft's own
+// age when a flow was saved with another, so editing it keeps it.
+export function ageOverChoices(draft: ProofingFlowDraft): number[] {
+  const current = Number(draft.ageOver);
+  if (!Number.isInteger(current) || AGE_OVER_CHOICES.includes(current)) {
+    return AGE_OVER_CHOICES;
+  }
+  return [...AGE_OVER_CHOICES, current].sort((a, b) => a - b);
+}
 // Whether flow's result carries the holder's name and date of birth (the
-// document data, dg1), which a request for one known person is matched
-// against (proofing.readsIdentity). The service hands a flow back listing
-// what it releases.
+// document data, dg1, without the age check, which withholds the date), which
+// a request for one known person is matched against (proofing.readsIdentity).
+// The service hands a flow back listing what it releases.
 export function readsIdentity(
   flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {
-  return flow?.requestedAttributes?.includes(ATTRIBUTE_DOCUMENT) ?? false;
+  const attributes = flow?.requestedAttributes ?? [];
+  return (
+    attributes.includes(ATTRIBUTE_DOCUMENT) &&
+    !attributes.includes(ATTRIBUTE_AGE_OVER)
+  );
 }
 
 // Whether a flow of kind with diplomas must read the name and date of birth
@@ -935,8 +999,6 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.sessionOver");
     case "device_active":
       return t("identityProofing.errors.deviceActive");
-    case "method_unavailable":
-      return t("identityProofing.errors.methodUnavailable");
     case "diplomas_need_page":
       return t("identityProofing.errors.diplomasNeedPage");
     case "hosted_disabled":
@@ -996,8 +1058,6 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
       return proofingErrorMessage(error, t);
     case "session_over":
       return t("proofLink.errors.sessionOver");
-    case "method_unavailable":
-      return t("proofLink.errors.methodUnavailable");
     default:
       return t("proofLink.errors.unavailable");
   }

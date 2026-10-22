@@ -2,14 +2,10 @@ package proofingengine
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -18,54 +14,38 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// The Yivi method (a biometric-bound login): the wallet verifies the subject's
-// OpenID4VP disclosure of a passport or ID-card credential and hands the engine
-// its photo and claims as the reference (SubmitReference). The browser camera
-// then sends live frames (SubmitFaceFrame), each a Regula image match against
-// that photo, until BoundLoginStableFrames consecutive matches approve the
-// session or BoundLoginMaxAttempts usable frames reject it; so does spending
-// the session's Regula frame budget (boundLoginFrameBudget). The state is sealed
-// in the session (session.YiviState), so any replica can score the next frame.
-// Without Regula the method is unavailable.
+// The Yivi method: the wallet verifies the subject's OpenID4VP disclosure of a
+// passport or ID-card credential and hands the engine its claims, with the
+// photo only when the flow keeps it (SubmitReference). The disclosure decides
+// the session: the Yivi app vouches for its holder, so no face check runs
+// here, and the session reaches eIDAS low (boundLoginAssurance).
 
 // eventDisclosureReceived marks the engine accepting a disclosure as reference.
 const eventDisclosureReceived = "proofing.disclosure.received"
 
-// Error codes a Yivi-method session can end with.
+// Limits and names of a Yivi-method disclosure.
 const (
-	errCodeFaceNoMatch        = "FACE_NO_MATCH"     // attempt budget spent without a stable match
-	errCodeReferenceNoFace    = "REFERENCE_NO_FACE" // the disclosed photo is not usable
-	errCodePhotoMissing       = "PHOTO_MISSING"     // the credential was disclosed without its photo
-	yiviPhotoAttribute        = "photo"             // the passport/idcard credentials' photo claim
-	boundLoginEngine          = "regula_image_match"
-	boundLoginLiveness        = "not_performed" // no liveness check on the browser frames
-	attrDisclosedAttributes   = "attributes"    // requestedAttributes key releasing the disclosed values
-	boundLoginDuplicateFrames = "duplicate_frames"
-	maxDisclosedPhotoBytes    = 4 << 20 // a passport photo is tens of kB
+	yiviPhotoAttribute        = "photo"      // the passport/idcard credentials' photo claim
+	attrDisclosedAttributes   = "attributes" // requestedAttributes key releasing the disclosed values
+	maxDisclosedPhotoBytes    = 4 << 20      // a passport photo is tens of kB
 	referenceSourceOpenID4VP  = "openid4vp"
 	maxReferenceAttributes    = 20
 	maxReferenceAttrKeyLen    = 40
 	maxReferenceAttrValueLen  = 200
 	maxReferenceCredentialLen = 200
-	// boundLoginFrameBudgetFactor sizes a session's Regula frame budget:
-	// this many times BoundLoginMaxAttempts frames go to Regula, a faceless
-	// one included, before the face check is decided as failed. Only a
-	// replay (an exact frame scored before) costs no call.
-	boundLoginFrameBudgetFactor = 2
 )
 
-// Disclosure codes SubmitReference answers a refused reference with.
+// Codes SubmitReference refuses a disclosure with: the flow restricts the
+// document type, issuing country or expiry and the disclosure does not show
+// it complies, or the flow checks the age and the disclosure does not answer
+// it.
 const (
-	disclosureCodePhotoMissing    = "photo_missing"
-	disclosureCodeReferenceNoFace = "reference_no_face"
-	// The flow restricts the document type, issuing country or expiry, and
-	// the disclosure does not show it complies.
 	disclosureCodeDocumentRefused = "document_not_accepted"
+	disclosureCodeAgeNotDisclosed = "age_not_disclosed"
 )
 
 // disclosureInfo is the result's "disclosure": where the photo and claims came from.
@@ -78,15 +58,6 @@ type disclosureInfo struct {
 	Attributes     map[string]string `json:"attributes,omitempty"`
 	AttributeIDs   []string          `json:"attributeIds,omitempty"`
 }
-
-// injectionInfo is the frame-integrity part of the Yivi method's biometrics.
-type injectionInfo struct {
-	DuplicateFrames int      `json:"duplicateFrames"`
-	Checks          []string `json:"checks"`
-}
-
-// YiviAvailable reports whether the Yivi method can run: it needs Regula.
-func (s *Server) YiviAvailable() bool { return s.cfg.Regula != nil }
 
 // boundLoginSession checks that sess is a Yivi-method session that can still take part.
 func boundLoginSession(sess session.Session) error {
@@ -102,21 +73,11 @@ func boundLoginSession(sess session.Session) error {
 	return nil
 }
 
-func (s *Server) disclosureAccepted() proofingprovider.YiviDisclosure {
-	return proofingprovider.YiviDisclosure{OK: true, StableFrames: s.cfg.BoundLoginStableFrames, MaxAttempts: s.cfg.BoundLoginMaxAttempts}
-}
-
-// acceptReference takes ref as sess's reference and moves it to in_progress.
-// A repeated call once the reference is in gets the same answer.
+// acceptReference decides sess from its disclosure ref: approved with the
+// result, or rejected when the document does not comply with the flow.
 func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
 	if err := boundLoginSession(sess); err != nil {
 		return proofingprovider.YiviDisclosure{}, err
-	}
-	if sess.Yivi != nil {
-		return s.disclosureAccepted(), nil
-	}
-	if sess.Status == session.StatusInProgress {
-		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusConflict, Message: "disclosure already received; continue with the face check"}
 	}
 
 	credential := strings.TrimSpace(ref.Credential)
@@ -143,227 +104,61 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		info.AttributeIDs = append(info.AttributeIDs, credential+"."+k)
 	}
 
-	refuse := func(errorCode, code, reason string) (proofingprovider.YiviDisclosure, error) {
-		details := map[string]any{detailStage: "disclosure", "credential": info.Credential, detailReason: reason}
-		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
-		return proofingprovider.YiviDisclosure{OK: false, Code: code}, nil
-	}
-
 	fd, err := s.resolveSessionFlow(ctx, sess)
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
 	}
+	var ageOver *ageOverInfo
+	if asksAge(fd) {
+		ageOver = disclosedAgeOver(info.Attributes, fd.AgeOver)
+		withholdDisclosedBirthDate(&info)
+	}
+
+	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
 	if failed, errorCode := disclosureComplianceFailure(fd, documentFromDisclosure(info), time.Now()); failed {
-		return refuse(errorCode, disclosureCodeDocumentRefused, disclosureCodeDocumentRefused)
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
+	if asksAge(fd) && ageOver == nil {
+		details[detailReason] = disclosureCodeAgeNotDisclosed
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
 
-	if strings.TrimSpace(ref.Photo) == "" {
-		return refuse(errCodePhotoMissing, disclosureCodePhotoMissing, "photo_missing")
-	}
-	raw, mime, err := decodeImageBase64(ref.Photo, defaultImageMime)
-	if err != nil || len(raw) > maxDisclosedPhotoBytes {
-		return refuse(errCodeReferenceNoFace, disclosureCodeReferenceNoFace, "photo_undecodable")
-	}
-	reference := base64.StdEncoding.EncodeToString(raw)
-	// A chip-derived photo may be JPEG2000, which Regula and browsers need as PNG.
-	if converted, convertedMime, err := images.ToDisplayablePNG(reference, mime); err == nil && converted != "" {
-		reference, mime = converted, convertedMime
-	}
-
-	disclosure, err := json.Marshal(info)
-	if err != nil {
-		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: encode disclosure: %w", err)
-	}
-
-	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
-		if sess.Yivi != nil {
-			return nil
-		}
-		if err := boundLoginSession(*sess); err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		if sess.Status == session.StatusCreated {
-			if err := sess.SetStatus(session.StatusOpened, now); err != nil {
-				return err
-			}
-			if ext := s.capExpiry(sess.CreatedAt, now.Add(s.cfg.SessionOpenTTL)); ext.After(sess.ExpiresAt) {
-				sess.ExpiresAt = ext
-			}
-		}
-		sess.Yivi = &session.YiviState{
-			Reference: reference, ReferenceMime: mime, Disclosure: disclosure,
-			KeepPhoto: attrRequested(*sess, attrDG2, attrFaceImage),
-		}
-		return sess.SetStatus(session.StatusInProgress, now)
-	})
-	if err != nil {
-		var rejected *proofingprovider.RejectedError
-		if errors.As(err, &rejected) {
-			return proofingprovider.YiviDisclosure{}, err
-		}
-		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
-	}
+	_, redaction := effectivePrivacyPolicy(fd)
+	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 
 	if sess.Status == session.StatusCreated {
-		s.auditProofing(updated, eventSessionOpened, nil)
+		opened := sess
+		opened.Status = session.StatusOpened
+		s.auditProofing(opened, eventSessionOpened, nil)
 	}
-	s.auditProofing(updated, eventDisclosureReceived, map[string]any{"credential": info.Credential})
-	return s.disclosureAccepted(), nil
+	s.auditProofing(sess, eventDisclosureReceived, map[string]any{"credential": info.Credential})
+	if _, ok := s.boundLoginFinish(sess, session.StatusApproved, "", result, details); !ok {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not approved", sess.ID)
+	}
+	return proofingprovider.YiviDisclosure{OK: true}, nil
 }
 
-// faceFrame scores one live frame of sess against its reference. A frame
-// first reserves a Regula call from the session's budget under the row lock,
-// so concurrent frames cannot all pass a stale budget check; the Regula call
-// then runs outside the lock, and the counters are applied under it again, so
-// a frame scored by another replica in between is never lost.
-func (s *Server) faceFrame(ctx context.Context, sess session.Session, frame string) (proofingprovider.FaceVerdict, error) {
-	if err := boundLoginSession(sess); err != nil {
-		return proofingprovider.FaceVerdict{}, err
-	}
-	if sess.Yivi == nil || sess.Status != session.StatusInProgress {
-		return proofingprovider.FaceVerdict{}, errDisclosurePending()
-	}
-	if s.cfg.Regula == nil {
-		return proofingprovider.FaceVerdict{}, proofingprovider.ErrMethodUnavailable
-	}
-	raw, _, err := decodeImageBase64(frame, defaultImageMime)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: err.Error()}
-	}
-	fd, err := s.resolveSessionFlow(ctx, sess)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
-	}
-	_, redaction := effectivePrivacyPolicy(fd)
-	threshold := s.boundLoginThreshold(fd)
-	sum := sha256.Sum256(raw)
-	hash := hex.EncodeToString(sum[:])
-	if !sess.Yivi.FaceStarted {
-		s.auditProofing(sess, eventSessionInProgress, map[string]any{detailStage: string(flow.StepFaceVerification)})
-	}
-	newVerdict := func() proofingprovider.FaceVerdict {
-		return proofingprovider.FaceVerdict{
-			StableFrames: s.cfg.BoundLoginStableFrames, MaxAttempts: s.cfg.BoundLoginMaxAttempts,
-			Decision: proofingprovider.FaceDecisionPending,
-		}
-	}
-
-	// Reserve the Regula call. A frame already scored is a replay: counted as
-	// one without asking Regula again, so resending a frame cannot run up
-	// Face API calls. A frame arriving once the budget is spent decides the
-	// face check as failed without a call.
-	replayed := false
-	verdict := newVerdict()
-	var details map[string]any
-	reserved, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
-		replayed, verdict, details = false, newVerdict(), nil
-		st, err := faceFrameState(sess)
-		if err != nil {
-			return err
-		}
-		st.FaceStarted = true
-		if slices.Contains(st.FrameHashes, hash) {
-			replayed = true
-			return nil
-		}
-		if st.RegulaCalls >= s.boundLoginFrameBudget() {
-			verdict.Attempts = st.Attempts
-			details, err = s.decideBoundLogin(sess, st, proofingprovider.FaceDecisionRejected, &verdict, redaction, threshold)
-			return err
-		}
-		st.RegulaCalls++
+// disclosedPhoto is the disclosed photo as the result releases it: only when
+// the flow keeps the face photos and asks for one, as in buildResult. A photo
+// that cannot be read is left out.
+func (s *Server) disclosedPhoto(sess session.Session, photo string, redaction privacy.RedactionPolicy) *photoInfo {
+	if strings.TrimSpace(photo) == "" || !redaction.KeepFacePhotos || !attrRequested(sess, attrDG2, attrFaceImage) {
 		return nil
-	})
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, faceFrameError(err)
 	}
-	if verdict.Decision != proofingprovider.FaceDecisionPending {
-		s.auditFaceDecision(reserved, details)
-		return verdict, nil
+	raw, mime, err := decodeImageBase64(photo, defaultImageMime)
+	if err != nil || len(raw) > maxDisclosedPhotoBytes {
+		slog.Warn("identity proofing: could not read the disclosed photo; leaving it out", slog.String("session_id", sess.ID))
+		return nil
 	}
-
-	var match regula.ImageMatch
-	if !replayed {
-		mctx, cancel := context.WithTimeout(ctx, regula.DefaultTimeout)
-		defer cancel()
-		if match, err = s.cfg.Regula.MatchImages(mctx, sess.Yivi.Reference, base64.StdEncoding.EncodeToString(raw)); err != nil {
-			return proofingprovider.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
-		}
+	image := base64.StdEncoding.EncodeToString(raw)
+	// A chip-derived photo may be JPEG2000, which browsers need as PNG.
+	if converted, convertedMime, err := images.ToDisplayablePNG(image, mime); err == nil && converted != "" {
+		image, mime = converted, convertedMime
 	}
-	score := round3(match.Similarity)
-	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
-		verdict, details = newVerdict(), nil
-		verdict.FaceDetected = match.LiveFaceDetected
-		st, err := faceFrameState(sess)
-		if err != nil {
-			return err
-		}
-		matched := false
-		switch {
-		case replayed || slices.Contains(st.FrameHashes, hash):
-			st.Duplicates++
-			st.Consecutive = 0
-		case !match.LiveFaceDetected:
-			// A frame without a face costs no attempt but breaks the run.
-			st.Consecutive = 0
-		default:
-			st.FrameHashes = append(st.FrameHashes, hash)
-			st.Attempts++
-			st.LastScore, st.BestScore = score, math.Max(st.BestScore, score)
-			matched = score >= threshold
-			if matched {
-				st.Consecutive++
-				st.LastFrame = frame
-			} else {
-				st.Consecutive = 0
-			}
-		}
-		verdict.Matched, verdict.Consecutive, verdict.Attempts = matched, st.Consecutive, st.Attempts
-		approved := st.Consecutive >= s.cfg.BoundLoginStableFrames
-		exhausted := !approved && (st.Attempts >= s.cfg.BoundLoginMaxAttempts || st.RegulaCalls >= s.boundLoginFrameBudget())
-		if !approved && !exhausted {
-			return nil
-		}
-		decision := proofingprovider.FaceDecisionRejected
-		if approved {
-			decision = proofingprovider.FaceDecisionApproved
-		}
-		details, err = s.decideBoundLogin(sess, st, decision, &verdict, redaction, threshold)
-		return err
-	})
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, faceFrameError(err)
-	}
-	if verdict.Decision != proofingprovider.FaceDecisionPending {
-		s.auditFaceDecision(updated, details)
-	}
-	return verdict, nil
-}
-
-// errDisclosurePending refuses a face frame before the disclosure was accepted.
-func errDisclosurePending() error {
-	return &proofingprovider.RejectedError{Status: http.StatusConflict, Message: "disclosure not completed yet"}
-}
-
-// faceFrameState is sess's Yivi state when it can still take a face frame.
-func faceFrameState(sess *session.Session) (*session.YiviState, error) {
-	if err := boundLoginSession(*sess); err != nil {
-		return nil, err
-	}
-	if sess.Yivi == nil || sess.Status != session.StatusInProgress {
-		return nil, errDisclosurePending()
-	}
-	return sess.Yivi, nil
-}
-
-// faceFrameError passes a refusal through as is and wraps any other error.
-func faceFrameError(err error) error {
-	var rejected *proofingprovider.RejectedError
-	if errors.As(err, &rejected) {
-		return err
-	}
-	return fmt.Errorf("proofingengine: face frame: %w", err)
+	return &photoInfo{ImageBase64: image, MimeType: mime}
 }
 
 // disclosureComplianceFailure is flowComplianceFailure for a disclosed
@@ -400,74 +195,18 @@ func disclosedDate(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// decideBoundLogin ends sess's face check as decision: approved with a
-// result, or rejected because its attempts or Regula budget are spent. It
-// returns the outcome's audit details and sets verdict's decision.
-func (s *Server) decideBoundLogin(sess *session.Session, st *session.YiviState, decision proofingprovider.FaceDecision, verdict *proofingprovider.FaceVerdict, redaction privacy.RedactionPolicy, threshold float64) (map[string]any, error) {
-	details := boundLoginOutcomeDetails(st)
-	to, errorCode := session.StatusApproved, ""
-	verdict.Decision = decision
-	if decision != proofingprovider.FaceDecisionApproved {
-		to, errorCode = session.StatusRejected, errCodeFaceNoMatch
-	} else {
-		result, err := s.buildBoundLoginResult(*sess, st, redaction, threshold)
-		if err != nil {
-			return nil, err
-		}
-		sess.Result = result
-	}
-	if err := sess.SetStatus(to, time.Now().UTC()); err != nil {
-		return nil, err
-	}
-	sess.ErrorCode, sess.Yivi = errorCode, nil
-	return details, nil
-}
-
-// auditFaceDecision records the outcome a face frame decided.
-func (s *Server) auditFaceDecision(updated session.Session, details map[string]any) {
-	if updated.ErrorCode != "" {
-		details[detailErrorCode] = updated.ErrorCode
-	}
-	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
-}
-
-// boundLoginFrameBudget is how many frames one Yivi-method session may send
-// to Regula: frames without a face cost no attempt, so without it a camera
-// pointed away (or a client sending blank frames) runs up Face API calls
-// until the session expires.
-func (s *Server) boundLoginFrameBudget() int {
-	return s.cfg.BoundLoginMaxAttempts * boundLoginFrameBudgetFactor
-}
-
-// boundLoginAssurance is an approved Yivi-method session's assurance: the
-// live face matched the credential's photo, with no chip check and no
-// liveness, which is eIDAS low. It is not scored on the tier ladder: one
-// check out of one would name the top tier ("perfect") for a session that ran
-// neither liveness nor a chip check.
+// boundLoginAssurance is an approved Yivi-method session's assurance: the Yivi
+// app vouches for the holder, with no chip check and no face check here,
+// which is eIDAS low. It is not scored on the tier ladder, which needs checks
+// this method does not run.
 func boundLoginAssurance() assuranceInfo {
 	return assuranceInfo{EIDASLevel: flow.AssuranceLevelLow}
 }
 
-// boundLoginThreshold is the score a Yivi frame must reach: the deployment's
-// Regula threshold, and the flow's face.match threshold when that is higher,
-// as the Idem path holds a match to both (checkItems).
-func (s *Server) boundLoginThreshold(fd *flow.FlowDefinition) float64 {
-	threshold := s.cfg.RegulaFaceMatchThreshold
-	if fd != nil {
-		if t, ok := fd.CheckThresholds[flow.CheckFaceMatch]; ok && t > threshold {
-			threshold = t
-		}
-	}
-	return threshold
-}
-
-// buildBoundLoginResult is the released result, gated by requestedAttributes,
-// with the faces only when the flow keeps them.
-func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviState, redaction privacy.RedactionPolicy, threshold float64) (map[string]any, error) {
-	var info disclosureInfo
-	if err := json.Unmarshal(st.Disclosure, &info); err != nil {
-		return nil, fmt.Errorf("proofingengine: decode disclosure: %w", err)
-	}
+// buildBoundLoginResult is the released result, gated by requestedAttributes:
+// the disclosed document and claims, the age answer, and photo when the flow
+// keeps it (disclosedPhoto).
+func buildBoundLoginResult(sess session.Session, info disclosureInfo, photo *photoInfo, ageOver *ageOverInfo) map[string]any {
 	result := map[string]any{}
 	if attrRequested(sess, attrDisclosedAttributes, attrDocument) {
 		result["document"] = documentFromDisclosure(info)
@@ -475,39 +214,18 @@ func (s *Server) buildBoundLoginResult(sess session.Session, st *session.YiviSta
 		info.Attributes = nil
 	}
 	result["disclosure"] = info
+	if ageOver != nil && attrRequested(sess, attrAgeOver) {
+		result["ageOver"] = ageOver
+	}
+	if photo != nil {
+		result["photo"] = photo
+	}
 	result["assurance"] = boundLoginAssurance()
-	// The face photos only when the flow keeps them, as in buildResult.
-	if st.KeepPhoto && redaction.KeepFacePhotos && attrRequested(sess, attrDG2, attrFaceImage) {
-		result["photo"] = &photoInfo{ImageBase64: st.Reference, MimeType: st.ReferenceMime}
-	}
-	if st.LastFrame != "" && redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
-		if raw, mime, err := decodeImageBase64(st.LastFrame, defaultImageMime); err == nil {
-			result["selfie"] = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
-		}
-	}
-	if attrRequested(sess, attrBiometrics) {
-		verified, frames, score := true, st.Attempts, st.LastScore
-		result["biometrics"] = &biometricsInfo{
-			FaceMatchScore: &score, FaceVerified: &verified, LivenessResult: boundLoginLiveness, Engine: boundLoginEngine,
-			Threshold: &threshold, FramesEvaluated: &frames, ReferenceSource: info.Source + ":" + info.PhotoAttribute,
-			Injection: &injectionInfo{DuplicateFrames: st.Duplicates, Checks: []string{boundLoginDuplicateFrames}},
-		}
-	}
-	return result, nil
-}
-
-// boundLoginOutcomeDetails is the terminal event's face-check details.
-func boundLoginOutcomeDetails(st *session.YiviState) map[string]any {
-	return map[string]any{
-		detailStage: "face", "faceMatchScore": st.LastScore, "bestScore": st.BestScore, "frames": st.Attempts,
-		"regulaCalls":     st.RegulaCalls,
-		"duplicateFrames": st.Duplicates, "livenessResult": boundLoginLiveness, "engine": boundLoginEngine,
-	}
+	return result
 }
 
 // boundLoginFinish settles sess as to (stepping through opened and
-// in_progress), stores result and error code, clears the face-check state and
-// reports it.
+// in_progress), stores result and error code, and reports it.
 func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any) (session.Session, bool) {
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status.Terminal() {
@@ -527,7 +245,7 @@ func (s *Server) boundLoginFinish(sess session.Session, to session.Status, error
 		if err := sess.SetStatus(to, now); err != nil {
 			return err
 		}
-		sess.ErrorCode, sess.Yivi = errorCode, nil
+		sess.ErrorCode = errorCode
 		if result != nil {
 			sess.Result = result
 		}

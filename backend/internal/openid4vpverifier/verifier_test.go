@@ -119,16 +119,50 @@ func TestQueryForScope(t *testing.T) {
 	}
 }
 
-// Proofing asks for the passport, id-card or residence permit with its photo,
-// and no email or phone.
-func TestProofingQueryAsksForPhoto(t *testing.T) {
+// Proofing asks for the passport, id-card or residence permit, with no email
+// or phone, and its photo only when the caller asks it.
+func TestProofingQueryAsksPhotoOnlyWhenAsked(t *testing.T) {
 	q := queryFor(ScopeProofing, nil)
 	if len(q.Credentials) != 3 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 3 {
 		t.Fatalf("proofing query = %+v, want passport OR idcard OR residencepermit only", q)
 	}
+	asksPhoto := func(c dcqlCredential) bool {
+		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == ClaimPhoto })
+	}
 	for _, c := range q.Credentials {
-		if !slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == ClaimPhoto }) {
+		if asksPhoto(c) {
+			t.Errorf("%s asks for the photo unasked: %+v", c.ID, c.Claims)
+		}
+	}
+	for _, c := range queryFor(ScopeProofing, []string{ClaimPhoto}).Credentials {
+		if !asksPhoto(c) {
 			t.Errorf("%s does not ask for the photo: %+v", c.ID, c.Claims)
+		}
+	}
+}
+
+// An age check asks for the age claim and never the date of birth.
+func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
+	claim, ok := AgeClaim(18)
+	if !ok || claim != "over18" {
+		t.Fatalf("AgeClaim(18) = %q, %v; want over18", claim, ok)
+	}
+	if _, ok := AgeClaim(17); ok {
+		t.Error("AgeClaim(17) answered: the credentials carry no over17")
+	}
+
+	has := func(c dcqlCredential, name string) bool {
+		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == name })
+	}
+	for _, c := range queryFor(ScopeProofing, []string{claim}).Credentials {
+		if !has(c, claim) || has(c, ClaimDateOfBirth) {
+			t.Errorf("%s claims = %+v, want over18 without dateOfBirth", c.ID, c.Claims)
+		}
+	}
+
+	for _, c := range queryFor(ScopeProofing, nil).Credentials {
+		if !has(c, ClaimDateOfBirth) {
+			t.Errorf("%s without an age check does not ask the date of birth", c.ID)
 		}
 	}
 }

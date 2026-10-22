@@ -9,7 +9,6 @@ import {
   useProofingProgressQuery,
   useYiviDisclosureQuery,
   useStartProofingYiviMutation,
-  useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
   useSubmitAddressMutation,
   useAddressLookupQuery,
@@ -22,13 +21,15 @@ import type {
   DiplomaVerdict,
   ProofingCustomer,
   HostedDiploma,
-  ProofingFaceVerdict,
   ProofingApp,
   ProofingMethod,
   ProofingProgress,
+  ProofingYiviStart,
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  ATTRIBUTE_AGE_OVER,
+  ATTRIBUTE_DOCUMENT,
   addressLookup,
   assuranceLevelLabel,
   diplomaRejectionReason,
@@ -64,11 +65,6 @@ const LINK_BUTTON =
 
 const QR_SIZE = 240;
 const COUNTDOWN_TICK_MS = 1000;
-// A face frame: 640 px wide, JPEG at 0.8, one every 400 ms.
-const FACE_FRAME_WIDTH = 640;
-const FACE_FRAME_QUALITY = 0.8;
-const FACE_FRAME_INTERVAL_MS = 400;
-const FACE_DECISION_PENDING = "pending";
 
 // Who asks: the customer as the steps show it.
 export type VerifyCustomer = Pick<ProofingCustomer, "name" | "branding">;
@@ -95,6 +91,7 @@ const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
+  age_over: "birthdate",
   dg11: "personal",
   dg2: "view",
   chip_checks: "lock",
@@ -131,7 +128,12 @@ export function Overview({
     .map((value) => ({
       icon: ATTRIBUTE_ICONS[value],
       label: t(`identityProofingFlows.attributes.${value}`),
-      detail: t(`customers.onScreen.attributeDetails.${value}`),
+      // The age check withholds the date of birth from the document data.
+      detail:
+        value === ATTRIBUTE_DOCUMENT &&
+        flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
+          ? t("customers.onScreen.attributeDetails.dg1WithoutBirthDate")
+          : t(`customers.onScreen.attributeDetails.${value}`),
     }));
   if (flow.addressMode !== undefined && flow.addressMode !== "off") {
     items.push({
@@ -1099,16 +1101,27 @@ function YiviSession({
   onRestart?: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const start = useStartProofingYiviMutation(target);
-  const { mutate } = start;
+  const { mutateAsync } = useStartProofingYiviMutation(target);
+  // The start's own outcome, not the mutation's state: StrictMode's remount
+  // detaches the mutation from this component, which then never hears back.
+  const [start, setStart] = useState<{
+    data?: ProofingYiviStart;
+    error?: Error;
+  }>({});
   // Once per mount: StrictMode runs an effect twice in development, and each
   // run would start a Yivi session of its own.
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    mutate();
-  }, [mutate]);
+    mutateAsync().then(
+      (data) => setStart({ data }),
+      (error: unknown) =>
+        setStart({
+          error: error instanceof Error ? error : new Error(String(error)),
+        }),
+    );
+  }, [mutateAsync]);
   const yiviSecondsLeft = useSecondsLeft(start.data?.expiresAt);
   const secondsLeft = start.data
     ? Math.min(sessionSecondsLeft, yiviSecondsLeft)
@@ -1116,10 +1129,10 @@ function YiviSession({
   // Polling stops once the session has expired: nothing can finish it then.
   const disclosure = useYiviDisclosureQuery(
     target,
-    start.isSuccess && secondsLeft > 0,
+    start.data !== undefined && secondsLeft > 0,
   );
 
-  if (start.isError) {
+  if (start.error) {
     return (
       <Failed
         message={verifyErrorMessage(target, start.error, t)}
@@ -1146,8 +1159,12 @@ function YiviSession({
         />
       );
     }
+    // The disclosure decided the session: the request's own poll shows the
+    // outcome once it is recorded.
     return (
-      <FaceCheck target={target} stableFrames={disclosure.data.stableFrames} />
+      <output className={`${HINT} block text-center`}>
+        {t("customers.onScreen.yiviShared")}
+      </output>
     );
   }
   if (start.data && secondsLeft === 0) {
@@ -1182,186 +1199,13 @@ function YiviSession({
 }
 
 function yiviEndReason(code: string | undefined, t: TFunction): string {
-  switch (code) {
-    case "photo_missing":
-      return t("customers.onScreen.yiviCodes.photoMissing");
-    case "reference_no_face":
-      return t("customers.onScreen.yiviCodes.referenceNoFace");
-    case "document_not_accepted":
-      return t("customers.onScreen.yiviCodes.documentNotAccepted");
-    default:
-      return code ?? t("identityProofing.errors.generic");
+  if (code === "document_not_accepted") {
+    return t("customers.onScreen.yiviCodes.documentNotAccepted");
   }
-}
-
-// The live face check of a Yivi session: camera frames are sent one at a time
-// until the engine decides. The decision itself lands on the request, which the
-// session polls; this only shows the progress.
-function FaceCheck({
-  target,
-  stableFrames,
-}: {
-  target: VerifyTarget;
-  stableFrames?: number;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // "framed": refused inside an embedding page that did not grant the camera
-  // (its iframe needs allow="camera"), which the subject cannot change there.
-  const [cameraError, setCameraError] = useState<"refused" | "framed">();
-  const [ready, setReady] = useState(false);
-  const [verdict, setVerdict] = useState<ProofingFaceVerdict>();
-  const [frameError, setFrameError] = useState<string>();
-  const submit = useSubmitFaceFrameMutation(target);
-  const { mutateAsync } = submit;
-  const [attempt, setAttempt] = useState(0);
-  const [frameTick, setFrameTick] = useState(0);
-
-  useEffect(() => {
-    let stream: MediaStream | undefined;
-    let cancelled = false;
-    // Started inside a promise so a browser without navigator.mediaDevices
-    // (an insecure context, some in-app browsers) lands in the camera error
-    // below instead of throwing out of the effect.
-    Promise.resolve()
-      .then(() =>
-        navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        }),
-      )
-      .then(async (media) => {
-        if (cancelled) {
-          media.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        stream = media;
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = media;
-        await video.play();
-        setReady(true);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        const framed =
-          error instanceof DOMException &&
-          error.name === "NotAllowedError" &&
-          window.parent !== window;
-        setCameraError(framed ? "framed" : "refused");
-      });
-    return () => {
-      cancelled = true;
-      setReady(false);
-      stream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [attempt]);
-
-  const decided =
-    verdict !== undefined && verdict.decision !== FACE_DECISION_PENDING;
-
-  useEffect(() => {
-    if (!ready || decided || frameError !== undefined) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const frame = captureFrame(videoRef.current);
-      if (frame === undefined) {
-        // No frame yet (the video has no size): try again on the next tick
-        // rather than stopping, which would leave the check waiting forever.
-        setFrameTick((tick) => tick + 1);
-        return;
-      }
-      mutateAsync(frame)
-        .then((next) => {
-          if (!cancelled) setVerdict(next);
-        })
-        .catch((error: unknown) => {
-          if (!cancelled) setFrameError(verifyErrorMessage(target, error, t));
-        });
-    }, FACE_FRAME_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [ready, decided, frameError, verdict, frameTick, mutateAsync, target, t]);
-
-  const total = verdict?.stableFrames ?? stableFrames;
-  const noFace = verdict !== undefined && !verdict.faceDetected;
-  return (
-    <>
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.face.heading")}
-      </h2>
-      <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.face.hint")}
-      </p>
-      {cameraError === "framed" ? (
-        <div className="flex flex-col items-center gap-3 text-center">
-          <p role="alert" className={ERROR}>
-            {t("customers.onScreen.face.cameraFramed")}
-          </p>
-          <a
-            href={window.location.href}
-            target="_blank"
-            rel="noreferrer"
-            className={LINK_BUTTON}
-          >
-            {t("customers.onScreen.face.openInTab")}
-          </a>
-        </div>
-      ) : cameraError === "refused" ? (
-        <Failed
-          message={t("customers.onScreen.face.cameraError")}
-          actionLabel={t("customers.onScreen.face.retry")}
-          onRestart={() => {
-            setCameraError(undefined);
-            setAttempt((a) => a + 1);
-          }}
-        />
-      ) : (
-        <video
-          ref={videoRef}
-          muted
-          playsInline
-          className="rounded-yivi border-line-strong bg-surface-3 aspect-[4/3] w-full max-w-sm -scale-x-100 border object-cover"
-        />
-      )}
-      {frameError !== undefined && (
-        <Failed
-          message={frameError}
-          actionLabel={t("customers.onScreen.face.retry")}
-          onRestart={() => setFrameError(undefined)}
-        />
-      )}
-      <p
-        role="status"
-        className={`text-[13px] ${noFace ? "text-warning-fg" : "text-ink-soft"}`}
-      >
-        {frameError === undefined &&
-          (noFace
-            ? t("customers.onScreen.face.noFace")
-            : total !== undefined &&
-              t("customers.onScreen.face.progress", {
-                count: verdict?.consecutive ?? 0,
-                total,
-              }))}
-      </p>
-    </>
-  );
-}
-
-// One JPEG frame of the video (unmirrored), or undefined before it has one.
-function captureFrame(video: HTMLVideoElement | null): string | undefined {
-  if (!video || video.videoWidth === 0) return undefined;
-  const canvas = document.createElement("canvas");
-  canvas.width = FACE_FRAME_WIDTH;
-  canvas.height = Math.round(
-    (video.videoHeight / video.videoWidth) * FACE_FRAME_WIDTH,
-  );
-  const context = canvas.getContext("2d");
-  if (!context) return undefined;
-  context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", FACE_FRAME_QUALITY);
+  if (code === "age_not_disclosed") {
+    return t("customers.onScreen.yiviCodes.ageNotDisclosed");
+  }
+  return code ?? t("identityProofing.errors.generic");
 }
 
 function SessionOutcome({

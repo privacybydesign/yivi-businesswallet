@@ -474,6 +474,8 @@ type fakeIPS struct {
 	resultReads int
 	result      proofingprovider.Result
 	resultErr   error
+	// flowVersions answers ListFlowVersions when set.
+	flowVersions []proofingprovider.Flow
 	// identityErr fails SessionIdentity alone, after a status read succeeded.
 	identityErr    error
 	identityReads  int
@@ -548,6 +550,9 @@ func (f *fakeIPS) CreateFlowVersion(_ context.Context, _ proofingprovider.Tenant
 }
 
 func (f *fakeIPS) ListFlowVersions(_ context.Context, _ proofingprovider.Tenant, id string) ([]proofingprovider.Flow, error) {
+	if f.flowVersions != nil {
+		return f.flowVersions, nil
+	}
 	return []proofingprovider.Flow{{ID: id, Version: 1}, {ID: id, Version: 2, Active: true}}, nil
 }
 
@@ -580,7 +585,7 @@ func (f *fakeIPS) SessionResult(context.Context, proofingprovider.Tenant, string
 
 func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, _, _ string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
 	f.references = append(f.references, ref)
-	return proofingprovider.YiviDisclosure{OK: true, StableFrames: 3}, nil
+	return proofingprovider.YiviDisclosure{OK: true}, nil
 }
 
 // fakeVerifier is the OpenID4VP verifier: a presentation stays pending until
@@ -589,13 +594,16 @@ type fakeVerifier struct {
 	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
+	// claims are each start's extra claims.
+	claims [][]string
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, _ ...string) (openid4vpverifier.Session, error) {
+func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
 	if scope != openid4vpverifier.ScopeProofing {
 		return openid4vpverifier.Session{}, errors.New("unexpected scope")
 	}
 	f.started++
+	f.claims = append(f.claims, claims)
 	return openid4vpverifier.Session{TransactionID: "tx-" + strconv.Itoa(f.started), WalletLink: "openid4vp://?request_uri=x"}, nil
 }
 
@@ -605,10 +613,6 @@ func (f *fakeVerifier) Result(_ context.Context, transactionID string) (openid4v
 		return openid4vpverifier.Presentation{}, openid4vpverifier.ErrPending
 	}
 	return *f.presentation, nil
-}
-
-func (*fakeIPS) SubmitFaceFrame(context.Context, string, string) (proofingprovider.FaceVerdict, error) {
-	return proofingprovider.FaceVerdict{}, nil
 }
 
 // DecideReview settles the session the way IPS does: the next read has the outcome.
@@ -1630,6 +1634,46 @@ func TestApp(t *testing.T) {
 	yivi := f.sendYivi(t)
 	if _, err := f.svc.App(ctx, testOrg.ID, yivi.Request.ID, nil); !errors.Is(err, ErrWrongMethod) {
 		t.Errorf("App(Yivi) = %v, want %v", err, ErrWrongMethod)
+	}
+}
+
+// An age check's Yivi disclosure asks for the age claim instead of the date
+// of birth.
+func TestYiviAgeCheckAsksAgeClaim(t *testing.T) {
+	f := newFixture()
+	sent := f.sendYivi(t)
+	f.ips.flowVersions = []proofingprovider.Flow{{
+		FlowSpec: proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument, attributeAgeOver}, AgeOver: 18},
+		ID:       sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true,
+	}}
+	if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("StartYivi: %v", err)
+	}
+	if got := f.verifier.claims[len(f.verifier.claims)-1]; !slices.Equal(got, []string{"over18"}) {
+		t.Errorf("claims = %v, want over18", got)
+	}
+}
+
+// The Yivi disclosure asks for the photo only when the flow keeps it.
+func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
+	keep := true
+	for name, tc := range map[string]struct {
+		spec proofingprovider.FlowSpec
+		want []string
+	}{
+		"photo not kept":  {proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument, attributeFacePhoto}}, nil},
+		"photo kept":      {proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument, attributeFacePhoto}, KeepFacePhotos: &keep}, []string{"photo"}},
+		"kept, not asked": {proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument}, KeepFacePhotos: &keep}, nil},
+	} {
+		f := newFixture()
+		sent := f.sendYivi(t)
+		f.ips.flowVersions = []proofingprovider.Flow{{FlowSpec: tc.spec, ID: sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true}}
+		if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
+			t.Fatalf("%s: StartYivi: %v", name, err)
+		}
+		if got := f.verifier.claims[len(f.verifier.claims)-1]; !slices.Equal(got, tc.want) {
+			t.Errorf("%s: claims = %v, want %v", name, got, tc.want)
+		}
 	}
 }
 

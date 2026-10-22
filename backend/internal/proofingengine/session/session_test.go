@@ -103,8 +103,8 @@ func TestForStorageDropsRefPhoto(t *testing.T) {
 	}
 }
 
-// A session that ended without an outcome keeps no step evidence and no Yivi
-// face check; a decided one keeps its (already redacted) evidence.
+// A session that ended without an outcome keeps no step evidence; a decided
+// one keeps its (already redacted) evidence.
 func TestForStorageDropsUnfinished(t *testing.T) {
 	for status, kept := range map[Status]bool{
 		StatusInProgress: true, StatusApproved: true, StatusRejected: true, StatusNeedsReview: true,
@@ -116,13 +116,9 @@ func TestForStorageDropsUnfinished(t *testing.T) {
 				NFC:    &NFCStepEvidence{Raw: map[string]any{"photo": "cGhvdG8="}},
 				Selfie: &SelfieStepEvidence{Image: "c2VsZmll"},
 			},
-			Yivi: &YiviState{LastFrame: "ZnJhbWU="},
 		}.ForStorage()
 		if got := sess.Steps.NFC != nil && sess.Steps.Selfie != nil; got != kept {
 			t.Errorf("%s: evidence kept = %v, want %v", status, got, kept)
-		}
-		if wantYivi := !status.Terminal() && status != StatusNeedsReview; (sess.Yivi != nil) != wantYivi {
-			t.Errorf("%s: Yivi state kept = %v, want %v", status, sess.Yivi != nil, wantYivi)
 		}
 	}
 }

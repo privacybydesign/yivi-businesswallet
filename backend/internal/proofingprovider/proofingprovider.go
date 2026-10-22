@@ -26,11 +26,14 @@ type FlowSpec struct {
 	Name  string   `json:"name"`
 	Steps []string `json:"steps"`
 	// RequestedAttributes limits what a session result may carry (dg1, dg11, dg2,
-	// selfie, chip_checks, biometrics, document_image). Empty releases everything
+	// selfie, chip_checks, biometrics, document_image, age_over). Empty releases everything
 	// the steps collect, ["outcome_only"] the outcome only; a flow read back
 	// always lists what it releases. The wallet never reads the data itself,
 	// only the outcome.
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
+	// AgeOver is the age, in years, age_over answers for; set exactly when
+	// age_over is requested.
+	AgeOver int `json:"ageOver,omitempty"`
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`
@@ -178,6 +181,9 @@ type Identity struct {
 	FullFamilyName string
 	BirthDate      string
 	Nationality    string
+	// AgeOver is whether the holder is the flow's age or older, derived from
+	// the chip's date of birth; nil when the flow did not request age_over.
+	AgeOver *AgeOver
 	// Evidence is what the identity rests on; nil while there is no result.
 	Evidence *Evidence
 	// Photo is the document's portrait (the chip's DG2, or the disclosed
@@ -193,6 +199,13 @@ type Identity struct {
 	// printed BSN blurred under the tenant's policy.
 	DocumentImage     *Image
 	DocumentImageBack *Image
+}
+
+// AgeOver answers age_over: whether the holder is Age or older, without the
+// date of birth it comes from.
+type AgeOver struct {
+	Age  int  `json:"age"`
+	Over bool `json:"over"`
 }
 
 // Image is a face image as the engine releases it: already converted to a format a
@@ -254,57 +267,29 @@ const (
 	// document's chip over NFC.
 	MethodIdem Method = "idem_app"
 	// MethodYivi is a disclosure of existing identity credentials from the Yivi
-	// app, over OpenID4VP at the wallet's verifier, whose photo the engine then checks
-	// the live face against (biometric_bound_login).
+	// app, over OpenID4VP at the wallet's verifier, which decides the session
+	// (biometric_bound_login).
 	MethodYivi Method = "yivi_app"
 	// MethodBrowser is the web device alone, with no app involved.
 	MethodBrowser Method = "browser"
 )
 
-// Reference is what the subject's verified OpenID4VP disclosure gives a
-// MethodYivi session to check the face against. Credential is the credential's
-// vct (e.g. pbdf-staging.pbdf.passport), Photo its photo claim as base64,
-// Attributes the identity claims disclosed with it, by claim name.
+// Reference is the subject's verified OpenID4VP disclosure, which decides a
+// MethodYivi session. Credential is the credential's vct (e.g.
+// pbdf-staging.pbdf.passport), Photo its photo claim as base64 when it was
+// asked, Attributes the identity claims disclosed with it, by claim name.
 type Reference struct {
 	Credential string
 	Photo      string
 	Attributes map[string]string
 }
 
-// YiviDisclosure is the engine taking a Reference. OK false ended the session
-// (Code says why: photo_missing, reference_no_face, document_not_accepted); OK true moves on to the face check, which approves after
-// StableFrames matching frames and rejects after MaxAttempts without them.
+// YiviDisclosure is the engine taking a Reference: OK approved the session,
+// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed).
 type YiviDisclosure struct {
-	OK           bool
-	Code         string
-	StableFrames int
-	MaxAttempts  int
+	OK   bool
+	Code string
 }
-
-// FaceDecision is where a MethodYivi session's face check stands.
-type FaceDecision string
-
-const (
-	FaceDecisionPending  FaceDecision = "pending"
-	FaceDecisionApproved FaceDecision = "approved"
-	FaceDecisionRejected FaceDecision = "rejected"
-)
-
-// FaceVerdict is one live camera frame scored against the disclosed photo. No
-// score, face box or image is kept: only the progress the page shows.
-type FaceVerdict struct {
-	FaceDetected bool
-	Matched      bool
-	Consecutive  int
-	StableFrames int
-	Attempts     int
-	MaxAttempts  int
-	Decision     FaceDecision
-}
-
-// ErrMethodUnavailable is the engine refusing a session for a method it cannot
-// run: MethodYivi without Regula, which scores its face check.
-var ErrMethodUnavailable = errors.New("proofingprovider: method unavailable")
 
 // ErrNoEncryptionKey is a deployment without IDENTITY_PROOFING_ENCRYPTION_KEY:
 // no session (whose evidence is sealed under it) can be stored.

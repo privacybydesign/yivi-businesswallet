@@ -35,9 +35,6 @@ const (
 	// stubAPIBaseURL stands in for IDENTITY_PROOFING_PUBLIC_URL in a stub deep link.
 	// .invalid never resolves (RFC 2606).
 	stubAPIBaseURL = "http://proofing.stub.invalid"
-	// stubStableFrames and stubMaxAttempts mirror the engine's Yivi-method defaults.
-	stubStableFrames = 3
-	stubMaxAttempts  = 40
 )
 
 // Stub is an in-memory stand-in for the proofing engine, for dev/CI and tests. Flows and their versions live
@@ -352,7 +349,7 @@ func (s *Stub) yiviSession(sessionToken string) (string, error) {
 	return "", ErrNotFound
 }
 
-// SubmitReference takes any photo: the stub has no face to find in it.
+// SubmitReference takes any disclosure.
 func (s *Stub) SubmitReference(_ context.Context, t Tenant, sessionID, sessionToken string, _ Reference) (YiviDisclosure, error) {
 	if _, err := s.session(t, sessionID, sessionToken); err != nil {
 		return YiviDisclosure{}, err
@@ -360,25 +357,7 @@ func (s *Stub) SubmitReference(_ context.Context, t Tenant, sessionID, sessionTo
 	if _, err := s.yiviSession(sessionToken); err != nil {
 		return YiviDisclosure{}, err
 	}
-	return YiviDisclosure{OK: true, StableFrames: stubStableFrames, MaxAttempts: stubMaxAttempts}, nil
-}
-
-// SubmitFaceFrame decides as Outcome says: approved or rejected at once,
-// pending otherwise.
-func (s *Stub) SubmitFaceFrame(_ context.Context, sessionToken, _ string) (FaceVerdict, error) {
-	if _, err := s.yiviSession(sessionToken); err != nil {
-		return FaceVerdict{}, err
-	}
-	verdict := FaceVerdict{FaceDetected: true, StableFrames: stubStableFrames, MaxAttempts: stubMaxAttempts, Attempts: 1}
-	switch s.Outcome {
-	case StatusApproved:
-		verdict.Matched, verdict.Consecutive, verdict.Decision = true, stubStableFrames, FaceDecisionApproved
-	case StatusRejected:
-		verdict.Decision = FaceDecisionRejected
-	default:
-		verdict.Decision = FaceDecisionPending
-	}
-	return verdict, nil
+	return YiviDisclosure{OK: true}, nil
 }
 
 // CancelSession ends a stub session that has not decided, as the engine does.

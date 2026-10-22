@@ -178,8 +178,8 @@ type Headless struct {
 
 // StartHeadless starts a customer's hosted request in method, as the subject
 // picking an app on the hosted page would, for a customer building its own UI.
-// A Yivi one's disclosure starts at once; its face check runs through the
-// hosted link's routes. A request not created hosted is ErrNotHosted.
+// A Yivi one's disclosure starts at once and is polled through the hosted
+// link's routes. A request not created hosted is ErrNotHosted.
 func (s *Service) StartHeadless(ctx context.Context, scope CustomerScope, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
 	req, err := s.requests.GetForCustomer(ctx, scope, id)
 	if err != nil {
@@ -321,15 +321,6 @@ func (s *Service) HostedYiviDisclosure(ctx context.Context, token string) (proof
 		return proofingprovider.YiviDisclosure{}, err
 	}
 	return s.yiviDisclosure(ctx, req, sess)
-}
-
-// HostedFaceFrame is FaceFrame for a hosted request.
-func (s *Service) HostedFaceFrame(ctx context.Context, token, image string) (proofingprovider.FaceVerdict, error) {
-	req, sess, err := s.hostedYiviSession(ctx, token)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, err
-	}
-	return s.faceFrame(ctx, req, sess, image)
 }
 
 // HostedEmbedOrigins are the origins that may frame a hosted link's page: its

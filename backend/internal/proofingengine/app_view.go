@@ -29,6 +29,9 @@ type appSessionView struct {
 	// caller's Accept-Language, else "en".
 	Language            string   `json:"language,omitempty"`
 	RequestedAttributes []string `json:"requestedAttributes,omitempty"`
+	// AgeOver is the age age_over answers for, so the app can name it; absent
+	// when the flow asks none.
+	AgeOver int `json:"ageOver,omitempty"`
 	// Steps is the flow's step order, which tells the app what to do; empty without
 	// a flow.
 	Steps []flow.Step `json:"steps,omitempty"`
@@ -175,8 +178,10 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 		return appSessionView{}, err
 	}
 	var steps []flow.Step
+	var ageOver int
 	if resolvedFlow != nil {
 		steps = resolvedFlow.Steps
+		ageOver = resolvedFlow.AgeOver
 	}
 	selfieLocation := flow.LocationBrowser
 	if resolvedFlow != nil {
@@ -204,7 +209,7 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 	return appSessionView{
 		ID: sess.ID, Method: sess.Method, RelyingParty: s.tenantDisplayName(r.Context(), sess.TenantID),
 		Branding: s.sessionBranding(r.Context(), sess.TenantID, sess.ClientReference), Status: sess.Status, Language: requestLanguage(r, sess.Language),
-		RequestedAttributes: sess.RequestedAttributes, Steps: steps, ExpiresAt: sess.ExpiresAt,
+		RequestedAttributes: sess.RequestedAttributes, AgeOver: ageOver, Steps: steps, ExpiresAt: sess.ExpiresAt,
 		SelfieLocation: selfieLocation,
 		AAChallenge:    sess.AAChallenge, RequiredChecks: assuranceChecksFor(resolvedFlow),
 		CompletedSteps: sess.CompletedSteps(), NativeHandoff: nativeHandoff,

@@ -52,7 +52,6 @@ import {
   getProofingYiviDisclosure,
   newProofingClaimLink,
   startProofingYivi,
-  submitProofingFaceFrame,
   uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
@@ -73,7 +72,6 @@ import type {
   ProofingBrandingInput,
   ProofingWebhook,
   WebhookDelivery,
-  ProofingFaceVerdict,
   ProofingClaimLink,
   ProofingApp,
   ProofingYiviDisclosure,
@@ -997,15 +995,6 @@ export function useYiviDisclosureQuery(
       query.state.data?.done || query.state.status === "error"
         ? false
         : ON_SCREEN_POLL_INTERVAL_MS,
-  });
-}
-
-export function useSubmitFaceFrameMutation(
-  target: VerifyTarget,
-): UseMutationResult<ProofingFaceVerdict, Error, string> {
-  return useMutation({
-    mutationFn: (image) => submitProofingFaceFrame(target, image),
-    meta: { suppressErrorToast: true },
   });
 }
 

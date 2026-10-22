@@ -5,7 +5,6 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -17,9 +16,9 @@ type Method string
 const (
 	MethodFace        Method = "face"         // selfie/liveness verification against an enrolled face
 	MethodNFCPassport Method = "nfc_passport" // ICAO 9303 chip read via the vcmrtd app (issue #1)
-	// MethodBiometricBoundLogin is the Yivi method: the live face is matched 1:1
-	// against a disclosed credential's photo before the disclosure is released.
-	// Nothing is enrolled; the reference lives only as long as the session.
+	// MethodBiometricBoundLogin is the Yivi method: a disclosed passport or
+	// ID-card credential decides the session, with no face check here. The
+	// value keeps its stored name.
 	MethodBiometricBoundLogin Method = "biometric_bound_login"
 )
 
@@ -133,11 +132,6 @@ type Session struct {
 	// relay window gmrtd's activeauth.VerifyEvidence warns about.
 	AAChallenge string `json:"aaChallenge,omitempty"`
 
-	// Yivi is a Yivi-method session's face check while it runs: the
-	// reference photo of the disclosure and the frames scored so far. It is
-	// cleared when the session settles, so no biometric outlives it.
-	Yivi *YiviState `json:"yivi,omitempty"`
-
 	// ReferencePhoto is a face photo the relying party supplied at creation,
 	// plain base64 of displayable type ReferencePhotoMime: what the face
 	// step compares the live face against in a flow without nfc_read, in
@@ -171,7 +165,7 @@ type ReviewDecision struct {
 
 // ForStorage is sess as it is persisted: a session whose face step can no
 // longer run (decided, under review, expired or cancelled) keeps no
-// relying-party reference photo and no Yivi face check. One that ended
+// relying-party reference photo. One that ended
 // without an outcome (expired or cancelled) keeps none of its step evidence
 // either: no result is built from it, and the chip's data groups, the
 // selfie, document photos and the chip access key would otherwise wait,
@@ -179,42 +173,11 @@ type ReviewDecision struct {
 func (sess Session) ForStorage() Session {
 	if sess.Status.Terminal() || sess.Status == StatusNeedsReview {
 		sess.ReferencePhoto, sess.ReferencePhotoMime = "", ""
-		sess.Yivi = nil
 	}
 	if sess.Status == StatusExpired || sess.Status == StatusCancelled {
 		sess.Steps = StepEvidence{}
 	}
 	return sess
-}
-
-// YiviState is a Yivi-method session's face check: the disclosed photo the
-// live frames are matched against, and the run of matches so far. Kept in
-// the session (sealed) rather than in memory, so any API replica can score
-// the next frame.
-type YiviState struct {
-	// Reference is the disclosed photo, plain base64, displayable type
-	// ReferenceMime; Disclosure the provenance and claims, as the engine
-	// releases them (JSON, its own shape).
-	Reference     string          `json:"reference"`
-	ReferenceMime string          `json:"referenceMime"`
-	Disclosure    json.RawMessage `json:"disclosure"`
-	KeepPhoto     bool            `json:"keepPhoto,omitempty"`
-
-	Attempts    int     `json:"attempts"`
-	Consecutive int     `json:"consecutive"`
-	BestScore   float64 `json:"bestScore"`
-	LastScore   float64 `json:"lastScore"`
-	// FrameHashes are the SHA-256 (hex) of the frames scored, so a replayed
-	// frame is told apart; Duplicates counts those.
-	FrameHashes []string `json:"frameHashes,omitempty"`
-	Duplicates  int      `json:"duplicates"`
-	// RegulaCalls counts every frame sent to Regula, a faceless one
-	// included, so the session's Face API calls stay bounded.
-	RegulaCalls int `json:"regulaCalls,omitempty"`
-	// LastFrame is the latest matching frame, released as the selfie when
-	// requested.
-	LastFrame   string `json:"lastFrame,omitempty"`
-	FaceStarted bool   `json:"faceStarted,omitempty"`
 }
 
 // StepEvidence is the evidence per step; nil fields are steps not done yet.
@@ -342,8 +305,21 @@ type SelfieStepEvidence struct {
 type NFCStepEvidence struct {
 	// Raw is the engine's mrtdEvidenceRequest as JSON: untyped here, since this
 	// package cannot import the engine.
-	Raw    map[string]any `json:"raw"`
-	Timing StepTiming     `json:"timing"`
+	Raw map[string]any `json:"raw"`
+	// ChipChecks are the engine's chip checks, run on the evidence at the chip
+	// read, as JSON. Set for an age-check flow, whose Raw keeps no DG1 to run
+	// them on again at the finish.
+	ChipChecks map[string]any `json:"chipChecks,omitempty"`
+	// AgeOver is an age-check flow's answer, worked out from the chip's date
+	// of birth at the chip read; that date is never stored.
+	AgeOver *AgeOver   `json:"ageOver,omitempty"`
+	Timing  StepTiming `json:"timing"`
+}
+
+// AgeOver is whether the holder is Age or older.
+type AgeOver struct {
+	Age  int  `json:"age"`
+	Over bool `json:"over"`
 }
 
 // CompletedSteps are the steps with evidence, as plain strings so this package

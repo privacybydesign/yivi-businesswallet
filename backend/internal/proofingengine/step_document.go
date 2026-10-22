@@ -49,7 +49,13 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 	// anything is persisted into Steps.
 	bsnPolicy, _ := effectivePrivacyPolicy(resolvedFlow)
 	applyBSNPolicy(req.Document, bsnPolicy)
-	keepChipAccess := slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
+	// An age-check flow stores no date of birth, nor the chip access key made
+	// from it: the app opens the chip with its own scan, and scans again after
+	// a restart.
+	if asksAge(resolvedFlow) {
+		req.Document.DateOfBirth = ""
+	}
+	keepChipAccess := slices.Contains(resolvedFlow.Steps, flow.StepNFCRead) && !asksAge(resolvedFlow)
 
 	updated, err := s.writeStep(sess, caller, flow.StepDocumentCapture, func(sess *session.Session, now time.Time) {
 		evidence := documentEvidence(req.Document)

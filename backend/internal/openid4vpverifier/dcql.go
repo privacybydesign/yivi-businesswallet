@@ -1,5 +1,7 @@
 package openid4vpverifier
 
+import "slices"
+
 // vct values for the pbdf staging credentials we request (SD-JWT VC / dc+sd-jwt).
 const (
 	vctPassport = "pbdf-staging.pbdf.passport"
@@ -79,9 +81,9 @@ const (
 	// and is asked for a VOG, one scan establishes the identity the VOG is then
 	// matched against. Its vog claim list is dynamic like ScopeVog's.
 	ScopeIdentityVog
-	// ScopeProofing discloses a passport, id-card OR residence permit with its
-	// photo, for the identity proofing Yivi method: the photo is the reference
-	// the subject's live face is checked against (internal/proofing).
+	// ScopeProofing discloses a passport, id-card OR residence permit, for the
+	// identity proofing Yivi method (internal/proofing): its photo only when the
+	// flow keeps it.
 	ScopeProofing
 )
 
@@ -94,7 +96,7 @@ func queryFor(scope Scope, claims []string) dcqlQuery {
 	case ScopeIdentityVog:
 		return identityVogQuery(claims)
 	case ScopeProofing:
-		return proofingQuery()
+		return proofingQuery(claims)
 	default:
 		return loginQuery()
 	}
@@ -161,11 +163,37 @@ func identityVogQuery(aspectClaims []string) dcqlQuery {
 	return q
 }
 
+// ageClaims are the passport, id-card and residence-permit claims ("Yes"/"No") that answer
+// whether the holder is that age or older, by age.
+var ageClaims = map[int]string{12: "over12", 16: "over16", 18: "over18", 21: "over21", 65: "over65"}
+
+// AgeClaim is the passport, id-card and residence-permit claim that answers whether the holder
+// is age or older; false when the credentials carry none for age.
+func AgeClaim(age int) (string, bool) {
+	claim, ok := ageClaims[age]
+	return claim, ok
+}
+
+func isAgeClaim(claim string) bool {
+	for _, c := range ageClaims {
+		if c == claim {
+			return true
+		}
+	}
+	return false
+}
+
 // proofingQuery discloses a verified identity (passport, id-card OR residence
-// permit) with the credential's photo, and nothing else: no email or phone,
-// which proofing a person does not need.
-func proofingQuery() dcqlQuery {
-	claims := claimPaths(ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth, ClaimNationality, ClaimPhoto)
+// permit), and nothing else: no email or phone, which proofing a person does not need.
+// extra are further claims of the flow's: the photo (ClaimPhoto), and an age
+// claim (AgeClaim), which replaces the date of birth an age check never
+// receives.
+func proofingQuery(extra []string) dcqlQuery {
+	names := []string{ClaimGivenNames, ClaimFamilyName, ClaimNationality}
+	if !slices.ContainsFunc(extra, isAgeClaim) {
+		names = append(names, ClaimDateOfBirth)
+	}
+	claims := claimPaths(append(names, extra...)...)
 	return dcqlQuery{
 		Credentials: []dcqlCredential{
 			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{vctPassport}}, Claims: claims},
