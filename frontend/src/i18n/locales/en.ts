@@ -1369,7 +1369,7 @@ export const en = {
         },
       },
       regula:
-        "Documents and faces are checked by Regula, in the Idem or Yivi app.",
+        "Documents and faces are checked by Regula in the Idem app. The Yivi app shares a document already in it, with no face check.",
       advanced: {
         title: "Advanced settings",
         hint: "Steps, documents, what you receive, privacy.",

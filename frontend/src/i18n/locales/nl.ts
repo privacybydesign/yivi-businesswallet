@@ -1398,7 +1398,7 @@ export const nl: Translation<typeof en> = {
         },
       },
       regula:
-        "Documenten en gezichten worden gecontroleerd door Regula, in de Idem- of Yivi-app.",
+        "Documenten en gezichten worden gecontroleerd door Regula in de Idem-app. De Yivi-app deelt een document dat er al in staat, zonder gezichtscontrole.",
       advanced: {
         title: "Geavanceerde instellingen",
         hint: "Stappen, documenten, wat je ontvangt, privacy.",
