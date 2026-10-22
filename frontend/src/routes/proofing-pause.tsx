@@ -6,7 +6,7 @@ import { Card, Icon } from "../ui";
 const HINT = "text-ink-soft text-[13px]";
 const NOTICE_ICON_SIZE = 18;
 
-// Why the org's proofing is stopped, in place of the overview: a platform
+// Why the org's proofing is stopped, above the overview's lists: a platform
 // admin paused it, and only they resume it.
 export function ProofingPausedNotice({
   pause,

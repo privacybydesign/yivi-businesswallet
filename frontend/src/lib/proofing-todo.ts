@@ -1,12 +1,47 @@
-import type { ProofingRequest } from "../api/identity-proofing";
+import type { TFunction } from "i18next";
+import type { ListedStatus, ProofingRequest } from "../api/identity-proofing";
+import { MAX_LISTED_REQUESTS } from "../api/identity-proofing";
 import { isProofingLive } from "./identity-proofing";
+import { waitingOldestFirst } from "./proofing-reviews";
 
 // How many rows a list shows before it leaves the rest to All people.
 export const TODO_ROWS = 5;
 
+// The statuses of a check the person has not finished.
+export const UNFINISHED_STATUSES: readonly ListedStatus[] = [
+  "pending",
+  "in_progress",
+];
+
+// The status of a check held for a decision.
+export const HELD_STATUSES: readonly ListedStatus[] = ["needs_review"];
+
 // The statuses "Recently finished" lists. A withdrawn check is not news, and
 // one in review is not finished.
-const FINISHED_STATUSES = new Set(["approved", "rejected", "expired"]);
+const FINISHED_STATUSES: readonly ListedStatus[] = [
+  "approved",
+  "rejected",
+  "expired",
+];
+const FINISHED = new Set<string>(FINISHED_STATUSES);
+
+// The statuses the to-do lists read, each on its own so the backend's cap
+// counts each apart: the checks the person has not finished; for a reader who
+// cannot decide, their own checks held for an admin (a reviewer finds those
+// under Waiting for your decision); and, with finished, the ones that ended.
+export function todoStatuses({
+  canReview,
+  finished,
+}: {
+  canReview: boolean;
+  finished: boolean;
+}): ListedStatus[] {
+  return [
+    ...UNFINISHED_STATUSES,
+    ...(canReview ? [] : HELD_STATUSES),
+    ...(finished ? FINISHED_STATUSES : []),
+  ];
+}
 
 function sentAt(request: ProofingRequest): number {
   return Date.parse(request.createdAt);
@@ -27,24 +62,83 @@ export function unfinishedChecks(
     .sort((a, b) => sentAt(a) - sentAt(b));
 }
 
+// What Waiting for the person lists: for a reader who cannot decide, their own
+// checks held for an admin first, since the dashboard sends them here to find
+// those and a list shows only its first rows; then the checks the person has
+// not finished.
+export function waitingForOthers(
+  requests: readonly ProofingRequest[],
+  { canReview }: { canReview: boolean },
+): ProofingRequest[] {
+  return [
+    ...(canReview ? [] : waitingOldestFirst(requests)),
+    ...unfinishedChecks(requests),
+  ];
+}
+
 // The checks that ended in a result, the latest first.
 export function finishedChecks(
   requests: readonly ProofingRequest[],
 ): ProofingRequest[] {
   return requests
-    .filter((r) => FINISHED_STATUSES.has(r.status))
+    .filter((r) => FINISHED.has(r.status))
     .sort((a, b) => Date.parse(finishedOn(b)) - Date.parse(finishedOn(a)));
 }
 
-// Which proofing lists the dashboard reads. While a platform admin has paused
-// the org's proofing, every org proofing route answers 403, so only what comes
-// from elsewhere (the member insights) is left to show.
-export function dashboardReads({
-  paused,
+// A count of rows read from lists the backend caps: the number, unless one of
+// those lists hit the cap, when more may exist than were read and the count
+// only says it is at least that many.
+export interface ListedCount {
+  count: number;
+  atLeast: boolean;
+}
+
+export function listedCount(rows: number, capped: boolean): ListedCount {
+  return capped
+    ? { count: Math.max(rows, MAX_LISTED_REQUESTS), atLeast: true }
+    : { count: rows, atLeast: false };
+}
+
+// Whether one of statuses' reads hit the cap.
+export function cappedAmong(
+  capped: readonly ListedStatus[],
+  statuses: readonly ListedStatus[],
+): boolean {
+  return statuses.some((status) => capped.includes(status));
+}
+
+// How a count reads: "200+" once it is only a lower bound, so a busy org is
+// never shown a number it has passed.
+export function countLabel(count: ListedCount, t: TFunction): string {
+  return count.atLeast
+    ? t("common.atLeast", { number: MAX_LISTED_REQUESTS })
+    : String(count.count);
+}
+
+// What stands in for the name of a person without one: their data was purged,
+// or the check was sent without a name.
+export function namelessKey(
+  request: Pick<ProofingRequest, "purgedAt">,
+):
+  | "identityProofing.sessions.purgedSubject"
+  | "identityProofing.requests.noName" {
+  return request.purgedAt
+    ? "identityProofing.sessions.purgedSubject"
+    : "identityProofing.requests.noName";
+}
+
+// What the dashboard and the Overview show the reader. A platform pause stops
+// only what starts proofing, so it hides Verify a person and leaves every list
+// (their routes stay open, and running checks still settle). The line pointing
+// to Settings › Organisation is an admin's: only an admin opens that page.
+export function todoShows({
+  isAdmin,
   canReview,
+  paused,
 }: {
-  paused: boolean;
+  isAdmin: boolean;
   canReview: boolean;
-}): { reviews: boolean; checks: boolean } {
-  return { reviews: canReview && !paused, checks: !paused };
+  paused: boolean;
+}): { verify: boolean; decisions: boolean; orgDetails: boolean } {
+  return { verify: !paused, decisions: canReview, orgDetails: isAdmin };
 }

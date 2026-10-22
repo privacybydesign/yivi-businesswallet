@@ -1,6 +1,9 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import type { ProofingRequest } from "./identity-proofing";
+import { MAX_LISTED_REQUESTS } from "./identity-proofing";
 import {
+  combineStatusReads,
   proofingRequestResultQueryKey,
   proofingRequestsQueryKey,
   refreshAfterReviewDecision,
@@ -68,5 +71,98 @@ describe("refreshAfterReviewDecision", () => {
 
     await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
     unmount();
+  });
+});
+
+function listedRequest(id: string): ProofingRequest {
+  return {
+    id,
+    requestedByName: "Sam",
+    external: true,
+    subjectName: "Noor",
+    subjectEmail: "noor@example.org",
+    flowId: "f1",
+    flowName: "See my data",
+    status: "approved",
+    linkExpiresAt: "2026-10-30T00:00:00Z",
+    createdAt: "2026-10-16T14:00:00Z",
+    diplomaMode: "off",
+    diplomas: [],
+    addressMode: "off",
+    expectedSubject: false,
+    flowKind: "data_access",
+  };
+}
+
+const loaded = (data: ProofingRequest[]) => ({
+  data,
+  isPending: false,
+  isError: false,
+  error: null,
+});
+const loading = {
+  data: undefined,
+  isPending: true,
+  isError: false,
+  error: null,
+};
+
+describe("combineStatusReads", () => {
+  it("joins the reads in the order of their statuses once all landed", () => {
+    const reads = combineStatusReads(
+      ["approved", "rejected"],
+      [loaded([listedRequest("a")]), loaded([listedRequest("b")])],
+    );
+
+    expect(reads.data?.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(reads.isPending).toBe(false);
+  });
+
+  it("holds no list while one status is still loading", () => {
+    const reads = combineStatusReads(
+      ["approved", "rejected"],
+      [loaded([listedRequest("a")]), loading],
+    );
+
+    expect(reads.data).toBeUndefined();
+    expect(reads.isPending).toBe(true);
+  });
+
+  it("reports the failure of either status", () => {
+    const failure = new Error("boom");
+    const reads = combineStatusReads(
+      ["approved", "rejected"],
+      [
+        loaded([listedRequest("a")]),
+        { data: undefined, isPending: false, isError: true, error: failure },
+      ],
+    );
+
+    expect(reads.isError).toBe(true);
+    expect(reads.error).toBe(failure);
+    expect(reads.data).toBeUndefined();
+  });
+
+  it("names the statuses whose read hit the backend's cap", () => {
+    const full = Array.from({ length: MAX_LISTED_REQUESTS }, (_, i) =>
+      listedRequest(`p${i}`),
+    );
+    const reads = combineStatusReads(
+      ["pending", "in_progress"],
+      [loaded(full), loaded([listedRequest("a")])],
+    );
+
+    expect(reads.capped).toEqual(["pending"]);
+    expect(reads.data).toHaveLength(MAX_LISTED_REQUESTS + 1);
+  });
+
+  it("names none while every read holds less than the cap", () => {
+    const reads = combineStatusReads(
+      ["approved", "rejected"],
+      [loaded([listedRequest("a")]), loading],
+    );
+
+    expect(reads.capped).toEqual([]);
+    expect(reads.data).toBeUndefined();
   });
 });

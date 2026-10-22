@@ -2,8 +2,9 @@ import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMemberInsightsQuery } from "../api/organization.queries";
+import { hitsListCap } from "../api/identity-proofing";
 import {
-  useExternalRequestsQuery,
+  useExternalRequestsInQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
@@ -13,7 +14,15 @@ import {
   screeningAttentionCount,
 } from "../lib/member-insights";
 import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
-import { unfinishedChecks } from "../lib/proofing-todo";
+import {
+  HELD_STATUSES,
+  UNFINISHED_STATUSES,
+  cappedAmong,
+  countLabel,
+  listedCount,
+  todoStatuses,
+  unfinishedChecks,
+} from "../lib/proofing-todo";
 import { TaskEmpty, TaskRow, TaskSection } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -72,13 +81,20 @@ export function DashboardTodo({
   const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
   const items: Item[] = [];
 
-  // A disabled query keeps its last result, a 403 from just before a pause
-  // included.
-  const reviews = canReview ? waitingOldestFirst(waiting.data ?? []).length : 0;
-  if (reviews > 0) {
+  // A disabled query keeps its last result, from before the right was
+  // withdrawn too.
+  const held = canReview ? (waiting.data ?? []) : [];
+  const reviews = listedCount(
+    waitingOldestFirst(held).length,
+    hitsListCap(held),
+  );
+  if (reviews.count > 0) {
     items.push({
       key: "reviews",
-      title: t("dashboard.todo.reviews", { count: reviews }),
+      title: t("dashboard.todo.reviews", {
+        count: reviews.count,
+        number: countLabel(reviews, t),
+      }),
       detail: t("dashboard.todo.reviewsDetail"),
       to: reviewPath(slug),
       action: t("dashboard.todo.openReviews"),
@@ -152,27 +168,42 @@ export function DashboardWaiting({
   canReview: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useExternalRequestsQuery(slug);
+  const requests = useExternalRequestsInQuery(
+    slug,
+    todoStatuses({ canReview, finished: false }),
+  );
   const all = requests.data ?? [];
   const items: Item[] = [];
   const overview = `/${slug}/identity-proofing`;
 
-  const unfinished = unfinishedChecks(all).length;
-  if (unfinished > 0) {
+  const unfinished = listedCount(
+    unfinishedChecks(all).length,
+    cappedAmong(requests.capped, UNFINISHED_STATUSES),
+  );
+  if (unfinished.count > 0) {
     items.push({
       key: "unfinished",
-      title: t("dashboard.waiting.unfinished", { count: unfinished }),
+      title: t("dashboard.waiting.unfinished", {
+        count: unfinished.count,
+        number: countLabel(unfinished, t),
+      }),
       detail: t("dashboard.waiting.unfinishedDetail"),
       to: overview,
       action: t("dashboard.waiting.openOverview"),
     });
   }
 
-  const forAdmin = canReview ? 0 : waitingOldestFirst(all).length;
-  if (forAdmin > 0) {
+  const forAdmin = listedCount(
+    canReview ? 0 : waitingOldestFirst(all).length,
+    !canReview && cappedAmong(requests.capped, HELD_STATUSES),
+  );
+  if (forAdmin.count > 0) {
     items.push({
       key: "forAdmin",
-      title: t("dashboard.waiting.forAdmin", { count: forAdmin }),
+      title: t("dashboard.waiting.forAdmin", {
+        count: forAdmin.count,
+        number: countLabel(forAdmin, t),
+      }),
       detail: t("dashboard.waiting.forAdminDetail"),
       to: overview,
       action: t("dashboard.waiting.openOverview"),

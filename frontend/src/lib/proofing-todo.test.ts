@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
+import i18n from "../i18n";
 import type { ProofingRequest } from "../api/identity-proofing";
+import { MAX_LISTED_REQUESTS } from "../api/identity-proofing";
 import {
-  dashboardReads,
+  TODO_ROWS,
+  cappedAmong,
+  countLabel,
   finishedChecks,
+  listedCount,
+  namelessKey,
+  todoShows,
+  todoStatuses,
   unfinishedChecks,
+  waitingForOthers,
 } from "./proofing-todo";
 
 function request(over: Partial<ProofingRequest> = {}): ProofingRequest {
@@ -86,26 +95,110 @@ describe("finishedChecks", () => {
   });
 });
 
-describe("dashboardReads", () => {
-  it("reads the decisions for a reviewer, and the checks for everyone", () => {
-    expect(dashboardReads({ paused: false, canReview: true })).toEqual({
-      reviews: true,
-      checks: true,
-    });
-    expect(dashboardReads({ paused: false, canReview: false })).toEqual({
-      reviews: false,
-      checks: true,
-    });
+describe("todoStatuses", () => {
+  it("reads a member's own checks held for an admin, not a reviewer's", () => {
+    expect(todoStatuses({ canReview: false, finished: false })).toEqual([
+      "pending",
+      "in_progress",
+      "needs_review",
+    ]);
+    expect(todoStatuses({ canReview: true, finished: false })).toEqual([
+      "pending",
+      "in_progress",
+    ]);
   });
 
-  it("reads no proofing list while the org is paused", () => {
-    expect(dashboardReads({ paused: true, canReview: true })).toEqual({
-      reviews: false,
-      checks: false,
-    });
-    expect(dashboardReads({ paused: true, canReview: false })).toEqual({
-      reviews: false,
-      checks: false,
-    });
+  it("reads each status a finished check ends in, expired included", () => {
+    expect(todoStatuses({ canReview: true, finished: true })).toEqual([
+      "pending",
+      "in_progress",
+      "approved",
+      "rejected",
+      "expired",
+    ]);
+  });
+});
+
+describe("waitingForOthers", () => {
+  // A member's check held for an admin among more open links than a list
+  // shows: the dashboard's "waiting for an admin" sends them here to find it.
+  const open = Array.from({ length: TODO_ROWS + 2 }, (_, i) =>
+    request({ id: `open${i}`, createdAt: `2026-10-16T1${i}:00:00Z` }),
+  );
+  const held = request({
+    id: "held",
+    status: "needs_review",
+    createdAt: "2026-10-17T09:00:00Z",
+  });
+
+  it("puts a member's own held checks before the open links", () => {
+    const rows = waitingForOthers([...open, held], { canReview: false });
+    expect(rows.slice(0, TODO_ROWS).map((r) => r.id)).toContain("held");
+    expect(rows[0].id).toBe("held");
+    expect(rows).toHaveLength(open.length + 1);
+  });
+
+  it("leaves a reviewer's held checks to Waiting for your decision", () => {
+    const rows = waitingForOthers([...open, held], { canReview: true });
+    expect(rows.map((r) => r.id)).not.toContain("held");
+  });
+});
+
+describe("listedCount", () => {
+  const en = i18n.getFixedT("en");
+  const nl = i18n.getFixedT("nl");
+
+  it("is the number of rows while no list hit the cap", () => {
+    const count = listedCount(3, false);
+    expect(count).toEqual({ count: 3, atLeast: false });
+    expect(countLabel(count, en)).toBe("3");
+  });
+
+  it("says 200+ once a list hit the cap, in en and nl", () => {
+    const count = listedCount(MAX_LISTED_REQUESTS + 4, true);
+    expect(count.atLeast).toBe(true);
+    for (const t of [en, nl]) {
+      expect(countLabel(count, t)).toBe(`${MAX_LISTED_REQUESTS}+`);
+    }
+    expect(
+      en("dashboard.waiting.unfinished", {
+        count: count.count,
+        number: countLabel(count, en),
+      }),
+    ).toBe(`${MAX_LISTED_REQUESTS}+ identity checks not finished`);
+  });
+
+  it("knows which statuses' reads hit the cap", () => {
+    expect(cappedAmong(["expired"], ["pending", "in_progress"])).toBe(false);
+    expect(cappedAmong(["in_progress"], ["pending", "in_progress"])).toBe(true);
+  });
+});
+
+describe("namelessKey", () => {
+  it("says a purged request was purged, not that it had no name", () => {
+    expect(namelessKey({ purgedAt: "2026-10-20T00:00:00Z" })).toBe(
+      "identityProofing.sessions.purgedSubject",
+    );
+    expect(namelessKey({})).toBe("identityProofing.requests.noName");
+  });
+});
+
+describe("todoShows", () => {
+  it("hides only Verify a person while the org is paused", () => {
+    expect(todoShows({ isAdmin: true, canReview: true, paused: true })).toEqual(
+      { verify: false, decisions: true, orgDetails: true },
+    );
+    expect(
+      todoShows({ isAdmin: true, canReview: true, paused: false }),
+    ).toEqual({ verify: true, decisions: true, orgDetails: true });
+  });
+
+  it("shows decisions to a reviewer and the org details line to an admin", () => {
+    expect(
+      todoShows({ isAdmin: false, canReview: true, paused: false }),
+    ).toEqual({ verify: true, decisions: true, orgDetails: false });
+    expect(
+      todoShows({ isAdmin: false, canReview: false, paused: false }),
+    ).toEqual({ verify: true, decisions: false, orgDetails: false });
   });
 });

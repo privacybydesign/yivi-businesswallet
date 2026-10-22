@@ -747,17 +747,34 @@ export function getProofingStats(
 // been cut off, so a count read from it is only a lower bound.
 export const MAX_LISTED_REQUESTS = 200;
 
+// Whether a list read hit the backend's cap, so more of what it asked for may
+// exist than it holds.
+export function hitsListCap(requests: readonly unknown[]): boolean {
+  return requests.length >= MAX_LISTED_REQUESTS;
+}
+
+// The statuses a request reads in, each one a list can be narrowed to: an
+// unfinished request whose link or session lapsed reads expired.
+export type ListedStatus =
+  | "pending"
+  | "in_progress"
+  | "needs_review"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
 // The org's requests, newest first and capped by the backend after the
 // narrowing: to those sent to one member, to those sent to members or to
-// external people, to those sent on one flow, to those held in one status (in
-// review: the longest in review first), or to the data requests.
+// external people, to those sent on one flow, to those that read in one status
+// (in review: the longest in review first), or to the data requests.
 export function getProofingRequests(
   slug: string,
   filter: {
     subjectUserId?: string;
     subjectKind?: "member" | "external";
     flowId?: string;
-    status?: "needs_review" | "approved" | "rejected";
+    status?: ListedStatus;
     flowKind?: "data_request";
   },
   signal?: AbortSignal,

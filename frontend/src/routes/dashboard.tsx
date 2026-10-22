@@ -12,7 +12,7 @@ import { needsIdentityBanner } from "../lib/identity-status";
 import { needsVogBanner } from "../lib/screening-status";
 import { greetingKey } from "../lib/greeting";
 import { displayName } from "../lib/name";
-import { dashboardReads } from "../lib/proofing-todo";
+import { todoShows } from "../lib/proofing-todo";
 import { Card, TopBar } from "../ui";
 import * as React from "react";
 
@@ -27,7 +27,7 @@ export default function Dashboard(): React.JSX.Element {
   const paused = pause.data?.paused === true;
   const isAdmin = org.data?.role === "admin";
   const canReview = org.data?.canReview === true;
-  const reads = dashboardReads({ paused, canReview });
+  const shows = todoShows({ isAdmin, canReview, paused });
   const greeting = t(greetingKey(), { name: me ? displayName(me) : "" });
 
   if (org.isError) {
@@ -50,7 +50,7 @@ export default function Dashboard(): React.JSX.Element {
       <TopBar
         title={greeting}
         actions={
-          org.data && !paused ? (
+          org.data && shows.verify ? (
             <VerifyPerson slug={slug} isAdmin={isAdmin} />
           ) : undefined
         }
@@ -67,32 +67,32 @@ export default function Dashboard(): React.JSX.Element {
         {org.data && needsVogBanner(org.data.vog) && (
           <VogBanner slug={slug} orgName={org.data.name} vog={org.data.vog!} />
         )}
-        {org.data && !pause.isPending && (
+        {org.data && (
           <>
             <DashboardTodo
               slug={slug}
               orgName={org.data.name}
               isAdmin={isAdmin}
-              canReview={reads.reviews}
+              canReview={shows.decisions}
             />
-            {reads.checks && (
-              <DashboardWaiting slug={slug} canReview={canReview} />
-            )}
+            <DashboardWaiting slug={slug} canReview={canReview} />
           </>
         )}
-        <p className="text-ink-soft text-[13px]">
-          <Trans
-            i18nKey="dashboard.orgDetails"
-            components={{
-              settings: (
-                <Link
-                  to={`/${slug}/settings`}
-                  className="text-link underline"
-                />
-              ),
-            }}
-          />
-        </p>
+        {shows.orgDetails && (
+          <p className="text-ink-soft text-[13px]">
+            <Trans
+              i18nKey="dashboard.orgDetails"
+              components={{
+                settings: (
+                  <Link
+                    to={`/${slug}/settings`}
+                    className="text-link underline"
+                  />
+                ),
+              }}
+            />
+          </p>
+        )}
       </div>
     </>
   );

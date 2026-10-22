@@ -1428,16 +1428,25 @@ finished (`pending`, `in_progress`), the longest waiting first; and the latest
 that ended (`approved`, `rejected`, `expired`; a withdrawn one is no news). A member
 reads the same lists about the checks they sent, as `GET .../requests` already
 scopes them. A member who cannot decide sees their own checks held for review under
-**Waiting for the person** as "Waiting for an admin". The dashboard's **To do** holds
+**Waiting for the person** as "Waiting for an admin", first, so the five rows never
+cut them off. The lists wait for the org's `canReview` before they load. The dashboard's **To do** holds
 a row for what waits for the reader's decision and, for an admin, for the members
 who have not identified and those whose VOG needs attention
 (`lib/member-insights.ts`); **Waiting on others** holds the unfinished checks and,
 for a member who cannot decide, the ones held for an admin. A row appears only
-with a count above zero. While a platform admin has paused the org's proofing,
-every one of these lists answers 403 `proofing_paused`, so the dashboard reads
-none of them: **To do** keeps the member rows and **Waiting on others** is left
-out (`dashboardReads`). The pure parts (`lib/proofing-todo.ts`) are tested;
-the counts come from the same lists as the Overview.
+with a count above zero. The line pointing to Settings › Organisation is an admin's,
+as only an admin opens that page.
+
+Each list is its own read, `GET .../requests?subjectKind=external&status=<s>`, one
+per status (`useExternalRequestsInQuery`, `todoStatuses`): `?status=` matches the
+status a request reads in (`EffectiveStatus`, in SQL `effectiveStatusColumn`), so a
+link that lapsed unstarted is `expired`, not `pending`, and cannot use up the 200 cap
+of the running ones. A count from a read that hit the cap shows "200+"
+(`listedCount`, `countLabel`). While a platform admin has paused the org's
+proofing, only **Verify a person** is hidden on both pages (`todoShows`): every list
+route stays open, and the Overview puts why above the lists. The pure parts
+(`lib/proofing-todo.ts`) are tested; the counts come from the same lists as the
+Overview.
 
 ## 10. Data minimisation
 
