@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -15,6 +16,10 @@ const maxAttributeReasonLength = 300
 
 // attributeOutcomeOnly is the whole list of a flow that collects no data.
 const attributeOutcomeOnly = "outcome_only"
+
+// ErrReasonsMissing is a hosted page that would offer a language the flow's
+// active version gives an item it collects no reason in.
+var ErrReasonsMissing = errors.New("proofing: the flow gives no reason in a language its hosted page offers")
 
 // withReasons checks the reasons a flow version gives for the data it collects
 // and returns the version with them trimmed. The person reads a reason in the
@@ -51,20 +56,48 @@ func withReasons(in proofingprovider.FlowSpec, offered FlowHosted) (proofingprov
 		in.AttributeReasons = reasons
 	}
 
-	// The hosted page offers every supported language when it names none.
-	locales := offered.Locales
-	if len(locales) == 0 {
-		locales = email.Locales()
+	if attribute, locale, missing := missingReason(in, offeredLocales(offered)); missing {
+		return in, fmt.Errorf("%w: give %s a reason in %s", ErrInvalidInput, attribute, locale)
 	}
-	for _, attribute := range in.RequestedAttributes {
+	return in, nil
+}
+
+// offeredLocales are the languages a hosted page offers: every supported one
+// when it names none.
+func offeredLocales(offered FlowHosted) []email.Locale {
+	if len(offered.Locales) == 0 {
+		return email.Locales()
+	}
+	return offered.Locales
+}
+
+// missingReason is the first item spec collects that has no reason in one of
+// locales, with that locale; missing is false when each item has one in each.
+func missingReason(spec proofingprovider.FlowSpec, locales []email.Locale) (attribute string, locale email.Locale, missing bool) {
+	for _, attribute := range spec.RequestedAttributes {
 		if attribute == attributeOutcomeOnly {
 			continue
 		}
 		for _, locale := range locales {
-			if reasons[attribute][string(locale)] == "" {
-				return in, fmt.Errorf("%w: give %s a reason in %s", ErrInvalidInput, attribute, locale)
+			if strings.TrimSpace(spec.AttributeReasons[attribute][string(locale)]) == "" {
+				return attribute, locale, true
 			}
 		}
 	}
-	return in, nil
+	return "", "", false
+}
+
+// hostedOffersReasons is ErrReasonsMissing when the hosted page f would offer
+// a language flow's active version gives an item no reason in. A version saved
+// before reasons existed gives none at all and stays allowed (#329): its page
+// shows no "Why" line in any language until the next edit adds them.
+func hostedOffersReasons(flow proofingprovider.Flow, f FlowHosted) error {
+	if len(flow.AttributeReasons) == 0 {
+		return nil
+	}
+	if attribute, locale, missing := missingReason(flow.FlowSpec, offeredLocales(f)); missing {
+		return fmt.Errorf("%w: the active version gives %s no reason in %s; add one to the flow before its page offers %s",
+			ErrReasonsMissing, attribute, locale, locale)
+	}
+	return nil
 }

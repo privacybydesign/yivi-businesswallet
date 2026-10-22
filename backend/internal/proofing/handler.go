@@ -721,6 +721,8 @@ func mapError(err error) error {
 		return nil
 	case errors.Is(err, ErrInvalidInput):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
+	case errors.Is(err, ErrReasonsMissing):
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}
 	case errors.Is(err, ErrNoEncryptionKey):
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}
 	case errors.Is(err, ErrFlowNotFound):

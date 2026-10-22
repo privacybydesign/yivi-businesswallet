@@ -44,6 +44,8 @@ import {
   MAX_ATTRIBUTE_REASON_CHARS,
   collectedAttributes,
   draftReason,
+  localesWithoutReasons,
+  missingReasonLocales,
   reasonIn,
   mailLifetimeMinutes,
   readsIdentity,
@@ -850,6 +852,60 @@ describe("attribute reasons", () => {
     ).toBeNull();
   });
 
+  it("names the language a reason is missing in", () => {
+    const englishMissing = draft({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { nl: "Om je leeftijd te zien." },
+      },
+    });
+    expect(missingReasonLocales(englishMissing, "dg1", ["en", "nl"])).toEqual([
+      "en",
+    ]);
+    expect(missingReasonLocales(englishMissing, "dg1", ["nl"])).toEqual([]);
+    expect(missingReasonLocales(bare(), "dg1", ["en", "nl"])).toEqual([
+      "en",
+      "nl",
+    ]);
+  });
+
+  it("keeps a hosted page from offering a language without reasons", () => {
+    const flow = {
+      requestedAttributes: ["dg1", "chip_checks"],
+      attributeReasons: {
+        dg1: { en: "To check your age.", nl: "Om je leeftijd te zien." },
+        chip_checks: { en: "To make sure your document is real." },
+      },
+    };
+    expect(localesWithoutReasons(flow, ["en"])).toEqual([]);
+    expect(localesWithoutReasons(flow, ["en", "nl"])).toEqual(["nl"]);
+    // No languages named is every one.
+    expect(localesWithoutReasons(flow, [])).toEqual(["nl"]);
+    expect(
+      localesWithoutReasons(
+        {
+          requestedAttributes: [OUTCOME_ONLY],
+          attributeReasons: flow.attributeReasons,
+        },
+        ["en", "nl"],
+      ),
+    ).toEqual([]);
+  });
+
+  // #329's open point: a version saved before reasons gives none, and its
+  // page may offer any language (without a "Why" line).
+  it("lets a version from before reasons offer any language", () => {
+    expect(
+      localesWithoutReasons({ requestedAttributes: ["dg1"] }, ["en", "nl"]),
+    ).toEqual([]);
+    expect(
+      localesWithoutReasons(
+        { requestedAttributes: ["dg1"], attributeReasons: {} },
+        ["en", "nl"],
+      ),
+    ).toEqual([]);
+  });
+
   it("reads the reason in the page's language and never another", () => {
     const reasons = { en: "To check your age.", nl: "Om je leeftijd te zien." };
     expect(reasonIn(reasons, "nl")).toBe(reasons.nl);
@@ -1245,6 +1301,7 @@ describe("proofingErrorMessage", () => {
     [409, "link_started", "linkStarted"],
     [422, "address_not_found", "addressNotFound"],
     [409, "legal_retention", "legalRetention"],
+    [400, "reasons_missing", "reasonsMissing"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);

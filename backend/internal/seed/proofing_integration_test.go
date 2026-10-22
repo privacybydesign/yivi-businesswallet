@@ -11,9 +11,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	proofingsession "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
@@ -185,5 +190,55 @@ func TestEnsureProofingDemoRenamesItsOwnOrg(t *testing.T) {
 	var name string
 	if err := pool.QueryRow(ctx, "SELECT name FROM organizations WHERE slug = $1", radboudSlug).Scan(&name); err != nil || name != want {
 		t.Errorf("name = %q, %v; want %q", name, err, want)
+	}
+}
+
+// demoTestEncryptionKey encrypts the engine's sessions in a test; none are made.
+const demoTestEncryptionKey = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+
+// demoOrgNames names every tenant the same; the flow list never asks.
+type demoOrgNames struct{}
+
+func (demoOrgNames) DisplayName(context.Context, string) (string, error) { return "Demo", nil }
+
+// Every demo flow gives a reason in each language for each item the engine
+// says it collects, as the flow editor lists them: the demo's first edit of a
+// seeded flow does not ask for any.
+func TestSeededFlowsGiveReasons(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	orgsBySlug := map[string]organization.Organization{}
+	for _, o := range demoProofingOrgs {
+		var org organization.Organization
+		if err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+			VALUES ($1, $1, $1, $1, $1 || '@qerds.localhost') RETURNING id`, o.slug).Scan(&org.ID); err != nil {
+			t.Fatalf("create org %s: %v", o.slug, err)
+		}
+		orgsBySlug[o.slug] = org
+	}
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
+		t.Fatalf("seedProofing: %v", err)
+	}
+
+	cipher, err := crypto.NewCipher(demoTestEncryptionKey)
+	if err != nil {
+		t.Fatalf("build cipher: %v", err)
+	}
+	engine := proofingengine.New(proofingengine.DefaultConfig(), proofingsession.NewPostgresStore(pool, cipher),
+		flow.NewPostgresStore(pool), demoOrgNames{}, nil)
+	for _, o := range demoProofingOrgs {
+		flows, err := engine.ListFlows(ctx, proofingprovider.Tenant{ID: orgsBySlug[o.slug].ID.String()})
+		if err != nil {
+			t.Fatalf("%s flows: %v", o.slug, err)
+		}
+		for _, f := range flows {
+			for _, attribute := range f.RequestedAttributes {
+				for _, locale := range email.Locales() {
+					if f.AttributeReasons[attribute][string(locale)] == "" {
+						t.Errorf("%s %q gives %s no reason in %s", o.slug, f.Name, attribute, locale)
+					}
+				}
+			}
+		}
 	}
 }

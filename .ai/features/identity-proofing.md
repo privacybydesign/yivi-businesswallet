@@ -342,12 +342,19 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     `maxAttributeReasonLength` characters each). `Service.CreateFlow` and
     `EditFlow` check them against the hosted languages (`withReasons`, 400
     `invalid_input`); the engine only stores them, as the languages are the
-    wallet's. A flow saved before reasons existed keeps working: its page shows
-    no "Why" line, and the editor asks for the reasons at the next save. The
-    same holds for a language added on the Hosted page tab later: the reasons
-    are asked for at the next save, and until then the page shows no line in
-    it. A save that lists no items (the engine reads that as everything its
-    steps collect) is not checked; the editor always lists them.
+    wallet's. The editor shows a field per supported language under each
+    ticked item: required in the offered languages, optional in the others,
+    so a reason can be written before the Hosted page tab offers its language.
+    A flow saved before reasons existed keeps working: its page shows no "Why"
+    line, and the editor asks for the reasons at the next save. The Hosted page
+    tab (`SaveFlowHosted` → `hostedOffersReasons`) refuses to offer a language
+    the active version gives an item no reason in, 400 `reasons_missing`, and
+    says so beside the languages with a way to the Check tab; a version saved
+    before reasons gives none and may offer any language. Activating an older
+    version is not checked. A save that lists no items (the engine reads that
+    as everything its steps collect) is not checked; the editor always lists
+    them. The seeded demo flows give reasons in en and nl for everything they
+    collect (`seed.demoReasons`).
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,

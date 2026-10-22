@@ -19,7 +19,7 @@ import {
   asksAge,
   assuranceLevelLabel,
   attributeAvailable,
-  draftReason,
+  missingReasonLocales,
   lockedByLevel,
   retentionChoices,
   ttlMinutes,
@@ -34,6 +34,7 @@ import {
   issuingCountryChoices,
   issuingCountryName,
 } from "../lib/issuing-countries";
+import { SUPPORTED_LANGUAGES } from "../i18n";
 import type { Language } from "../i18n";
 import {
   ChevronSelect,
@@ -46,8 +47,9 @@ import type { OptionLock } from "./flow-editor-parts";
 import { FaceMatchThreshold } from "./flow-editor-threshold";
 
 const LABEL = "text-[14px] font-semibold";
-// Lines a field up under an option's label: past its checkbox and the gap.
-const UNDER_OPTION = "ml-[30px]";
+// Lines a field up under an option's label, past its checkbox and the gap;
+// on a phone the field takes the full width.
+const UNDER_OPTION = "sm:ml-[30px]";
 // A reason field is a plain input: Input's own border would win over the
 // error one.
 const REASON_FIELD =
@@ -70,7 +72,7 @@ interface AdvancedSettingsProps {
   // Whether the flow must read the name and date of birth: required diplomas.
   requiresIdentity: boolean;
   // The languages the flow's hosted page offers: each ticked item is
-  // explained in every one.
+  // explained in every one, and may be in the others.
   locales: readonly Language[];
   // The field the editor refused to save, once it was tried.
   error: FlowDraftError | null;
@@ -450,17 +452,23 @@ function ReceiveSection({
                 <div
                   role="group"
                   aria-label={t(`identityProofingFlows.attributes.${value}`)}
-                  className={`${UNDER_OPTION} grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3`}
+                  className={`grid grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3 ${UNDER_OPTION}`}
                 >
-                  {locales.map((locale) => (
+                  {/* Every language, so a reason can be written before the
+                      Hosted page tab offers it; only the offered ones are
+                      required. */}
+                  {SUPPORTED_LANGUAGES.map((locale) => (
                     <ReasonField
                       key={locale}
                       id={`flow-attr-${value}-reason-${locale}`}
                       locale={locale}
+                      required={locales.includes(locale)}
                       text={draft.attributeReasons[value]?.[locale] ?? ""}
                       missing={
                         error === "reasons" &&
-                        draftReason(draft, value, locale) === ""
+                        missingReasonLocales(draft, value, locales).includes(
+                          locale,
+                        )
                       }
                       onChange={(text) => setReason(value, locale, text)}
                     />
@@ -526,15 +534,19 @@ function MinimumAge({
   );
 }
 
+// An item's reason in one language: required when the hosted page offers
+// it, optional otherwise.
 function ReasonField({
   id,
   locale,
+  required,
   text,
   missing,
   onChange,
 }: {
   id: string;
   locale: Language;
+  required: boolean;
   text: string;
   missing: boolean;
   onChange: (text: string) => void;
@@ -546,14 +558,19 @@ function ReasonField({
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-[13px] font-semibold">
-        {t("identityProofingFlows.editor.receive.reason", { language })}
+        {t(
+          required
+            ? "identityProofingFlows.editor.receive.reason"
+            : "identityProofingFlows.editor.receive.reasonOptional",
+          { language },
+        )}
       </label>
       <input
         id={id}
         type="text"
         value={text}
         maxLength={MAX_ATTRIBUTE_REASON_CHARS}
-        aria-required
+        aria-required={required || undefined}
         aria-invalid={missing || undefined}
         aria-describedby={missing ? errorId : undefined}
         className={`${REASON_FIELD} ${missing ? REASON_FIELD_ERR : REASON_FIELD_OK}`}

@@ -13,10 +13,12 @@ import type {
   ProofingFlowHosted,
 } from "../api/identity-proofing";
 import { SUPPORTED_LANGUAGES } from "../i18n";
+import { errorCode } from "../lib/api-error";
 import {
   effectiveBranding,
   hostedDraft,
   hostedDraftDirty,
+  localesWithoutReasons,
   proofingErrorMessage,
   savedLocales,
 } from "../lib/identity-proofing";
@@ -32,15 +34,20 @@ const COMPLETIONS: readonly ProofingFlowHosted["completion"][] = [
   "redirect",
   "done",
 ];
+// The save's refusal of a language the flow gives no reasons in.
+const REASONS_MISSING = "reasons_missing";
 
 // A flow's hosted page: whether links may be made for it, the languages it
 // offers, how it ends, and a preview of its first step in the flow's branding.
+// onOpenCheck switches to the Check tab, where a missing reason is filled in.
 export function FlowHostedSettings({
   slug,
   flow,
+  onOpenCheck,
 }: {
   slug: string;
   flow: ProofingFlow;
+  onOpenCheck: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingFlowHostedQuery(slug, flow.id);
@@ -53,7 +60,12 @@ export function FlowHostedSettings({
   }
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-      <HostedForm slug={slug} flow={flow} saved={settings.data} />
+      <HostedForm
+        slug={slug}
+        flow={flow}
+        saved={settings.data}
+        onOpenCheck={onOpenCheck}
+      />
       <HostedPreview slug={slug} flow={flow} />
     </div>
   );
@@ -65,18 +77,25 @@ function HostedForm({
   slug,
   flow,
   saved,
+  onOpenCheck,
 }: {
   slug: string;
   flow: ProofingFlow;
   saved: ProofingFlowHosted;
+  onOpenCheck: () => void;
 }): React.JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const save = useSaveFlowHostedMutation(slug, flow.id);
   const [draft, setDraft] = useState(() => hostedDraft(saved));
   // The switch and each ending are labelled by their title and described by
   // their hint.
   const idBase = useId();
   const noLocale = draft.locales.length === 0;
+  // A language the active version gives no reasons in waits for them: the
+  // server refuses it too (reasons_missing).
+  const unexplained = localesWithoutReasons(flow, draft.locales);
+  const reasonsRefused =
+    save.isError && errorCode(save.error) === REASONS_MISSING;
   const dirty = hostedDraftDirty(draft, saved);
 
   function toggleLocale(locale: string, on: boolean): void {
@@ -91,7 +110,7 @@ function HostedForm({
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
-    if (noLocale) {
+    if (noLocale || unexplained.length > 0) {
       return;
     }
     save.mutate({ ...draft, locales: savedLocales(draft.locales) });
@@ -158,6 +177,29 @@ function HostedForm({
               <p role="alert" className={ERROR}>
                 {t("identityProofingFlows.hosted.localesRequired")}
               </p>
+            ) : unexplained.length > 0 || reasonsRefused ? (
+              <div role="alert" className="flex flex-col items-start gap-1.5">
+                <p className={ERROR}>
+                  {unexplained.length > 0
+                    ? t("identityProofingFlows.hosted.reasonsMissing", {
+                        languages: new Intl.ListFormat(i18n.language, {
+                          type: "conjunction",
+                        }).format(
+                          unexplained.map((locale) =>
+                            t(`common.languageName.${locale}`),
+                          ),
+                        ),
+                      })
+                    : proofingErrorMessage(save.error, t)}
+                </p>
+                <button
+                  type="button"
+                  className="text-link text-[12.5px] font-semibold hover:underline"
+                  onClick={onOpenCheck}
+                >
+                  {t("identityProofingFlows.hosted.openCheck")}
+                </button>
+              </div>
             ) : (
               <p className={HINT}>
                 {t("identityProofingFlows.hosted.localesHint")}
@@ -200,7 +242,7 @@ function HostedForm({
               </label>
             ))}
           </fieldset>
-          {save.isError && (
+          {save.isError && !reasonsRefused && (
             <p role="alert" className={ERROR}>
               {proofingErrorMessage(save.error, t)}
             </p>
@@ -221,7 +263,7 @@ function HostedForm({
           <Button
             type="submit"
             loading={save.isPending}
-            disabled={!dirty || noLocale}
+            disabled={!dirty || noLocale || unexplained.length > 0}
           >
             {t("identityProofingFlows.hosted.save")}
           </Button>

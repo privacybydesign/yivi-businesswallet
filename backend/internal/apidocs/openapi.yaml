@@ -6033,7 +6033,10 @@ paths:
         `hosted_disabled`; one with a `redirectUrl` on a `done` flow, or a `language` the flow
         does not offer, is 400. Audited `identity_proofing.flow_hosted_configured` with before
         and after. A missing `enabled` is 400 `invalid_body`; a `completion` other than
-        `redirect` or `done`, or an unsupported locale, is 400 `invalid_input`.
+        `redirect` or `done`, or an unsupported locale, is 400 `invalid_input`. Offering a
+        language (or every language, `locales: []`) that the flow's active version gives an
+        item it collects no `attributeReasons` in is 400 `reasons_missing`; a version saved
+        before reasons existed gives none and may offer any language.
       requestBody:
         required: true
         content:

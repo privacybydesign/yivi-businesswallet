@@ -213,7 +213,11 @@ function FlowView({
                 <FlowBrandingSettings slug={slug} flowId={flow.id} />
               )}
               {tab === "hosted" && (
-                <FlowHostedSettings slug={slug} flow={flow} />
+                <FlowHostedSettings
+                  slug={slug}
+                  flow={flow}
+                  onOpenCheck={() => setEditTab("check")}
+                />
               )}
             </FlowTabPanel>
           ))}

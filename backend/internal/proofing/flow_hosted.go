@@ -155,8 +155,9 @@ func (s *Service) FlowHosted(ctx context.Context, org Org, flowID string) (FlowH
 }
 
 // SaveFlowHosted replaces one of the org's flows' hosted page settings: the
-// languages are supported ones, kept once in the order given. A data request
-// flow's stay the defaults.
+// languages are supported ones, kept once in the order given, and ones the
+// flow's active version gives its reasons in (hostedOffersReasons). A data
+// request flow's stay the defaults.
 func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f FlowHosted) (FlowHosted, error) {
 	if s.flowHostedSettings == nil {
 		return FlowHosted{}, errors.New("proofing: no hosted settings store configured")
@@ -175,10 +176,14 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 		}
 	}
 	f.Locales = locales
-	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
+	flow, err := s.orgFlow(ctx, org, flowID)
+	if err != nil {
 		return FlowHosted{}, err
 	}
 	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
+		return FlowHosted{}, err
+	}
+	if err := hostedOffersReasons(flow, f); err != nil {
 		return FlowHosted{}, err
 	}
 	return s.flowHostedSettings.Save(ctx, org.ID, flowID, f)
@@ -186,13 +191,21 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 
 // orgHasFlow is ErrFlowNotFound for a flow that is not one of the org's.
 func (s *Service) orgHasFlow(ctx context.Context, org Org, flowID string) error {
+	_, err := s.orgFlow(ctx, org, flowID)
+	return err
+}
+
+// orgFlow is the active version of one of the org's flows; ErrFlowNotFound
+// for a flow that is not one of the org's.
+func (s *Service) orgFlow(ctx context.Context, org Org, flowID string) (proofingprovider.Flow, error) {
 	tenant := orgTenant(org.ID)
 	flows, err := s.ips.ListFlows(ctx, tenant)
 	if err != nil {
-		return fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
-	if !slices.ContainsFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID }) {
-		return ErrFlowNotFound
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	if i < 0 {
+		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
-	return nil
+	return flows[i], nil
 }

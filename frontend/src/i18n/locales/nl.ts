@@ -594,6 +594,8 @@ export const nl: Translation<typeof en> = {
       dataFlowForMember:
         "Een flow voor gegevensverzoeken is voor externe personen. Haal hem eerst uit de flows voor leden.",
       exportUnavailable: "Deze gegevens kunnen niet meer worden gedownload.",
+      reasonsMissing:
+        "Elk onderdeel dat deze flow verzamelt heeft een reden nodig in elke taal die de gehoste pagina aanbiedt. Vul ze eerst in op het tabblad Controle.",
       mandateWithdrawn:
         "Je mandaat voor deze organisatie is niet meer actief, daarom zijn de beheerinstellingen voor jou gesloten. Een wettelijk vertegenwoordiger kan je een nieuw mandaat geven.",
       legalRetention:
@@ -1338,6 +1340,9 @@ export const nl: Translation<typeof en> = {
       localesHint:
         "De pagina opent in de taal van het verzoek, anders in de browsertaal van de persoon.",
       localesRequired: "Houd minstens één taal aan.",
+      reasonsMissing:
+        "Vul eerst op het tabblad Controle de redenen in voor {{languages}}: elk onderdeel dat de flow verzamelt heeft er een nodig in elke taal die de pagina aanbiedt.",
+      openCheck: "Naar het tabblad Controle",
       completion: "Als de controle klaar is",
       completions: {
         redirect: {
@@ -1527,6 +1532,7 @@ export const nl: Translation<typeof en> = {
         ageOverLocked:
           "Uit bij verplichte diploma's: die worden met de geboortedatum vergeleken.",
         reason: "Waarom je het nodig hebt · {{language}}",
+        reasonOptional: "Waarom je het nodig hebt · {{language}} (optioneel)",
         reasonMissing: "Vul ook de reden in voor {{language}}.",
       },
       checks: {

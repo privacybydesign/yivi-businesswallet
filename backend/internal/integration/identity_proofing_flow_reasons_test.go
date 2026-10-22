@@ -63,6 +63,13 @@ func TestFlowReasonsHTTPFlow(t *testing.T) {
 		t.Errorf("edited flow = %+v, want version 2 with the English reason", edited)
 	}
 
+	// Nor can the page take on a language the active version has no reasons in.
+	for name, locales := range map[string][]string{"Dutch": {"nl"}, "every language": {}} {
+		wantProofingError(t, "offer "+name+" on an English-only version",
+			env.putJSON(flowsPath+"/"+flow.ID+"/hosted", map[string]any{"enabled": true, "locales": locales, "completion": proofing.CompletionRedirect}),
+			http.StatusBadRequest, "reasons_missing")
+	}
+
 	// The list carries them to the editor, and the hosted page to the person.
 	var listed []flowView
 	listed = decodeJSON[[]flowView](t, env.do(http.MethodGet, flowsPath, nil))

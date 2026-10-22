@@ -27,6 +27,7 @@ import type {
 import type { AuditEvent } from "../api/organization";
 import type { OrgTheme } from "../api/theme";
 import { SUPPORTED_LANGUAGES } from "../i18n/language";
+import type { Language } from "../i18n/language";
 import { errorCode } from "./api-error";
 import { auditActorLabel } from "./audit-event";
 import { fullName } from "./name";
@@ -493,6 +494,44 @@ export function draftReason(
   return (draft.attributeReasons[attribute]?.[locale] ?? "").trim();
 }
 
+// The languages of locales a draft gives an item no reason in: the fields the
+// editor marks, each saying which language is missing.
+export function missingReasonLocales<L extends string>(
+  draft: ProofingFlowDraft,
+  attribute: string,
+  locales: readonly L[],
+): L[] {
+  return locales.filter(
+    (locale) => draftReason(draft, attribute, locale) === "",
+  );
+}
+
+// The languages of locales (every supported one when empty) a hosted page
+// cannot offer yet: a flow's active version gives an item it collects no
+// reason in them (proofing.hostedOffersReasons). None for a version saved
+// before reasons existed: it gives none at all and may offer any language.
+export function localesWithoutReasons(
+  flow: {
+    requestedAttributes?: readonly string[];
+    attributeReasons?: AttributeReasons;
+  },
+  locales: readonly string[],
+): Language[] {
+  const reasons = flow.attributeReasons ?? {};
+  if (Object.keys(reasons).length === 0) {
+    return [];
+  }
+  return SUPPORTED_LANGUAGES.filter(
+    (locale) =>
+      (locales.length === 0 || locales.includes(locale)) &&
+      (flow.requestedAttributes ?? []).some(
+        (attribute) =>
+          attribute !== OUTCOME_ONLY &&
+          (reasons[attribute]?.[locale] ?? "").trim() === "",
+      ),
+  );
+}
+
 // A new flow starts with every step the Idem app runs on and the mandatory
 // checks on, and receives nothing but the outcome until an item is ticked
 // (data minimisation; required diplomas tick Name and document details,
@@ -634,8 +673,8 @@ export function flowDraftError(
     return "ageOver";
   }
 
-  const unexplained = collectedAttributes(draft).some((attribute) =>
-    locales.some((locale) => draftReason(draft, attribute, locale) === ""),
+  const unexplained = collectedAttributes(draft).some(
+    (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
   );
   return unexplained ? "reasons" : null;
 }
@@ -1353,6 +1392,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.dataFlowForMember");
     case "export_unavailable":
       return t("identityProofing.errors.exportUnavailable");
+    case "reasons_missing":
+      return t("identityProofing.errors.reasonsMissing");
     // An admin by role whose mandate was withdrawn: the backend refuses every
     // admin call, though the role still shows the admin's tabs.
     case "mandate_withdrawn":

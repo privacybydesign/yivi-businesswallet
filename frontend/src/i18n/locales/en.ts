@@ -576,6 +576,8 @@ export const en = {
       dataFlowForMember:
         "A data request flow is for external people. Take it off the members' flows first.",
       exportUnavailable: "This data can no longer be downloaded.",
+      reasonsMissing:
+        "Every item this flow collects needs a reason in each language its hosted page offers. Fill them in on the Check tab first.",
       mandateWithdrawn:
         "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
       legalRetention:
@@ -1311,6 +1313,9 @@ export const en = {
       localesHint:
         "The page opens in the language of the request, otherwise in the person's browser language.",
       localesRequired: "Keep at least one language.",
+      reasonsMissing:
+        "Fill in the reasons in {{languages}} on the Check tab first: every item the flow collects needs one in each language the page offers.",
+      openCheck: "Go to the Check tab",
       completion: "When the check ends",
       completions: {
         redirect: {
@@ -1497,6 +1502,7 @@ export const en = {
         ageOverLocked:
           "Off with required diplomas: they are checked against the date of birth.",
         reason: "Why you need it · {{language}}",
+        reasonOptional: "Why you need it · {{language}} (optional)",
         reasonMissing: "Fill in the reason in {{language}} too.",
       },
       checks: {
