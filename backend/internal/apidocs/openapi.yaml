@@ -106,16 +106,14 @@ tags:
 
       The hosted page may be shown in an iframe on one of the customer's
       `allowedRedirectOrigins`; it posts `{type: "proofing.completed", session, status}` to
-      the parent once settled. A flow whose face check runs in the browser (the Yivi app
-      method) needs the camera: give the iframe `allow="camera"`, or the browser refuses it
-      and the page asks the person to open it in a tab of its own.
+      the parent once settled.
 
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
       sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
       `ORG_PAUSED` and `LEGAL_RETENTION`; the session itself is rejected for `FACE_NO_MATCH`,
-      `REFERENCE_NO_FACE`, `PHOTO_MISSING`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
+      `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
       `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
       `FACE_STEP_NOT_COMPLETED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
       `expired` or `cancelled`.
@@ -5498,8 +5496,7 @@ paths:
         mails nothing and needs no `email` for a customer's subject; an on-screen Idem request
         answers the Idem link as `deepLink` (scannable until `deepLinkExpiresAt`), and a Yivi
         one must be on-screen (an e-mailed one is 400), its disclosure started through
-        `yivi/start`. A Yivi request needs Regula on the deployment (else 409
-        `method_unavailable`), and a flow that takes no document photos and is not matched
+        `yivi/start`. A Yivi request needs a flow that takes no document photos and is not matched
         against a reference photo (else 400
         `invalid_input`). A flow that asks for diplomas or the address cannot be e-mailed (422
         `diplomas_need_page`, `address_needs_page`), and a customer flow matched against a reference photo cannot be
@@ -5607,7 +5604,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The deployment has no identity proofing encryption key (`no_encryption_key`), proofing is paused for the customer (`customer_paused`), the request is for a customer without an API key (`customer_no_api_key`), the deployment cannot run Yivi sessions (`method_unavailable`), or a link is asked on a flow whose hosted page is off (`hosted_disabled`).
+          description: The deployment has no identity proofing encryption key (`no_encryption_key`), proofing is paused for the customer (`customer_paused`), the request is for a customer without an API key (`customer_no_api_key`), or a link is asked on a flow whose hosted page is off (`hosted_disabled`).
           content:
             application/json:
               schema:
@@ -5851,10 +5848,10 @@ paths:
       summary: Redeem an on-screen request's Yivi disclosure
       description: >-
         Requires organisation membership. `done` is false while the subject has not finished the
-        OpenID4VP presentation in the Yivi app. Once done, the credential's photo becomes the
-        face check's reference: `ok` true moves the session on to the face check (`stableFrames`
-        matching frames approve it, `maxAttempts` without them reject it); `ok` false ended the
-        session and `code` says why (photo_missing, reference_no_face, document_not_accepted).
+        OpenID4VP presentation in the Yivi app. Once done, the disclosure decides the session:
+        `ok` true approved it, `ok` false rejected it and `code` says why
+        (document_not_accepted). No face check runs: the Yivi app vouches for its holder, and
+        the session reaches eIDAS low.
         The response returns no disclosed value; on approval the engine keeps the disclosed identity attributes (and the
         photo, when the flow requested it) as the session's result, readable through `result`,
         until its retention.
@@ -5871,19 +5868,17 @@ paths:
                   value:
                     done: false
                     ok: false
-                ready:
-                  summary: On to the face check
+                approved:
+                  summary: The disclosure approved the session
                   value:
                     done: true
                     ok: true
-                    stableFrames: 3
-                    maxAttempts: 30
-                noPhoto:
-                  summary: The credential had no photo
+                refused:
+                  summary: The document is not one the flow accepts
                   value:
                     done: true
                     ok: false
-                    code: photo_missing
+                    code: document_not_accepted
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5893,13 +5888,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`, no Regula configured).
+          description: The request does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete or the image cannot be read.
+          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete.
           content:
             application/json:
               schema:
@@ -6683,104 +6678,6 @@ paths:
           description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the request was cancelled or erased (`session_over`).
         '413':
           description: An extract or the upload is too large (`too_large`).
-  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-      - name: requestID
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
-    post:
-      tags: [identity-proofing]
-      summary: Score one face frame of an on-screen Yivi request
-      description: >-
-        Requires organisation membership. `image` is one live camera frame as a JPEG data URL
-        (at most 2 MiB; a larger body is 400 `invalid_body`), scored against the photo the
-        subject disclosed. The frame is matched by Regula and not kept; the answer is only the
-        progress (`faceDetected`, `matched`, `consecutive`, `stableFrames`, `attempts`,
-        `maxAttempts`) and the `decision` (pending, approved, rejected), which is recorded on
-        the request at once. A session sends at most twice `maxAttempts` frames to Regula, a
-        frame without a face included (a resent frame costs none); spending that budget rejects
-        it. Frames count against the organisation's budget of 1500 a minute.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProofingFaceFrame'
-            examples:
-              frame:
-                summary: One camera frame
-                value:
-                  image: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD
-      responses:
-        '200':
-          description: The face check's progress.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofingFaceVerdict'
-              examples:
-                matching:
-                  summary: A matching frame
-                  value:
-                    faceDetected: true
-                    matched: true
-                    consecutive: 2
-                    stableFrames: 3
-                    attempts: 5
-                    maxAttempts: 30
-                    decision: pending
-                approved:
-                  summary: Approved
-                  value:
-                    faceDetected: true
-                    matched: true
-                    consecutive: 3
-                    stableFrames: 3
-                    attempts: 6
-                    maxAttempts: 30
-                    decision: approved
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ProofingForbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          description: >-
-            The organisation spent its face-frame budget (code `rate_limited`): 1500 frames a
-            minute. `Retry-After` says in how many seconds to try again.
-          headers:
-            Retry-After:
-              description: Seconds until the next call is allowed.
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: The request does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`, no Regula configured).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete or the image cannot be read.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-matches:
     parameters:
       - name: slug
@@ -7991,7 +7888,7 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link was started already (`link_started`), its session ended (`session_over`), the customer is paused (`customer_paused`), or the deployment cannot run Yivi sessions (`method_unavailable`).
+          description: The link was started already (`link_started`), its session ended (`session_over`), or the customer is paused (`customer_paused`).
           content:
             application/json:
               schema:
@@ -8166,19 +8063,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProofingYiviDisclosure'
               examples:
-                ready:
-                  summary: On to the face check
+                approved:
+                  summary: The disclosure approved the session
                   value:
                     done: true
                     ok: true
-                    stableFrames: 3
-                    maxAttempts: 30
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete or the image cannot be read.
+          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete.
           content:
             application/json:
               schema:
@@ -8186,70 +8081,7 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /api/v1/proof/{token}/yivi/face:
-    parameters:
-      - name: token
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
-    post:
-      tags: [identity-proofing]
-      summary: Send a face frame of a hosted link
-      security: []
-      description: >-
-        As the org route of the same name, for a hosted link: body `{image}`, one camera frame.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProofingFaceFrame'
-            examples:
-              frame:
-                summary: One camera frame
-                value:
-                  image: data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD
-      responses:
-        '200':
-          description: The face check's progress.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofingFaceVerdict'
-              examples:
-                matching:
-                  summary: A matching frame
-                  value:
-                    faceDetected: true
-                    matched: true
-                    consecutive: 2
-                    stableFrames: 3
-                    attempts: 5
-                    maxAttempts: 30
-                    decision: pending
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/ProofingForbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete or the image cannot be read.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '429':
-          $ref: '#/components/responses/HostedTooManyRequests'
-        '409':
-          description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`), or the deployment cannot run the Yivi face check (`method_unavailable`).
+          description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`).
           content:
             application/json:
               schema:
@@ -8957,7 +8789,7 @@ paths:
         the subject picking it on the hosted page would, and answers the link to show:
         `appLink` (the Idem app's `vcmrtd://` link) or `walletLink` (the Yivi app's
         `openid4vp://` request, its disclosure started already), with `expiresAt`. The
-        Yivi face check then runs through `/api/v1/proof/{token}/yivi/…` with the token
+        Yivi disclosure is then polled through `/api/v1/proof/{token}/yivi/disclosure` with the token
         of the `hostedUrl`, which also serves `claim-link` for a new Idem code. Takes an
         `Idempotency-Key`.
       security:
@@ -9012,8 +8844,7 @@ paths:
           description: >-
             The session was not created hosted (`not_hosted`), was started already
             (`link_started`), or ended (`session_over`); the customer is paused
-            (`customer_paused`); the deployment has no Regula face check for the Yivi app
-            (`method_unavailable`); or a call with this `Idempotency-Key` is still running
+            (`customer_paused`); or a call with this `Idempotency-Key` is still running
             or its outcome is unknown (`idempotency_in_flight`).
           content:
             application/json:
@@ -12070,42 +11901,11 @@ components:
           description: False while the person has not finished in the Yivi app.
         ok:
           type: boolean
-          description: The disclosure gave a photo to check the face against; false ended the session.
+          description: The disclosure approved the session; false rejected it.
         code:
           type: string
-          enum: [photo_missing, reference_no_face, document_not_accepted]
-        stableFrames:
-          type: integer
-        maxAttempts:
-          type: integer
+          enum: [document_not_accepted]
       required: [done, ok]
-    ProofingFaceFrame:
-      type: object
-      additionalProperties: false
-      properties:
-        image:
-          type: string
-          description: One camera frame as a JPEG data URL, at most 2 MiB.
-      required: [image]
-    ProofingFaceVerdict:
-      type: object
-      properties:
-        faceDetected:
-          type: boolean
-        matched:
-          type: boolean
-        consecutive:
-          type: integer
-        stableFrames:
-          type: integer
-        attempts:
-          type: integer
-        maxAttempts:
-          type: integer
-        decision:
-          type: string
-          enum: [pending, approved, rejected]
-      required: [faceDetected, matched, consecutive, stableFrames, attempts, maxAttempts, decision]
     ProofingRequestEvents:
       type: object
       properties:
@@ -12649,8 +12449,9 @@ components:
                   type: boolean
                   description: >-
                     Whether the Yivi app can run the flow: not when it photographs the document,
-                    matches the face against a reference photo, or requires more than `low`, the
-                    level a Yivi session reaches.
+                    matches the face against a reference photo, checks an age the Yivi passport
+                    and ID card carry no claim for (other than 12, 16, 18, 21 and 65), or requires
+                    more than `low`, the level a Yivi session reaches.
                 diplomaMode:
                   type: string
                   enum: ['off', required]

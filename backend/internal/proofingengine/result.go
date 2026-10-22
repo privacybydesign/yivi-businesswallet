@@ -99,6 +99,11 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 			doc.PersonalNumber = ""
 			doc.PlaceOfBirth = ""
 		}
+		// The age check wins over the document data: the date of birth it
+		// answers from is never released next to it.
+		if attrRequested(sess, attrAgeOver) {
+			doc.DateOfBirth = ""
+		}
 		result["document"] = doc
 	}
 

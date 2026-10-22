@@ -274,50 +274,22 @@ const (
 	MethodBrowser Method = "browser"
 )
 
-// Reference is what the subject's verified OpenID4VP disclosure gives a
-// MethodYivi session to check the face against. Credential is the credential's
-// vct (e.g. pbdf-staging.pbdf.passport), Photo its photo claim as base64,
-// Attributes the identity claims disclosed with it, by claim name.
+// Reference is the subject's verified OpenID4VP disclosure, which decides a
+// MethodYivi session. Credential is the credential's vct (e.g.
+// pbdf-staging.pbdf.passport), Photo its photo claim as base64 when it was
+// asked, Attributes the identity claims disclosed with it, by claim name.
 type Reference struct {
 	Credential string
 	Photo      string
 	Attributes map[string]string
 }
 
-// YiviDisclosure is the engine taking a Reference. OK false ended the session
-// (Code says why: photo_missing, reference_no_face, document_not_accepted); OK true moves on to the face check, which approves after
-// StableFrames matching frames and rejects after MaxAttempts without them.
+// YiviDisclosure is the engine taking a Reference: OK approved the session,
+// OK false rejected it (Code says why: document_not_accepted).
 type YiviDisclosure struct {
-	OK           bool
-	Code         string
-	StableFrames int
-	MaxAttempts  int
+	OK   bool
+	Code string
 }
-
-// FaceDecision is where a MethodYivi session's face check stands.
-type FaceDecision string
-
-const (
-	FaceDecisionPending  FaceDecision = "pending"
-	FaceDecisionApproved FaceDecision = "approved"
-	FaceDecisionRejected FaceDecision = "rejected"
-)
-
-// FaceVerdict is one live camera frame scored against the disclosed photo. No
-// score, face box or image is kept: only the progress the page shows.
-type FaceVerdict struct {
-	FaceDetected bool
-	Matched      bool
-	Consecutive  int
-	StableFrames int
-	Attempts     int
-	MaxAttempts  int
-	Decision     FaceDecision
-}
-
-// ErrMethodUnavailable is the engine refusing a session for a method it cannot
-// run: MethodYivi without Regula, which scores its face check.
-var ErrMethodUnavailable = errors.New("proofingprovider: method unavailable")
 
 // ErrNoEncryptionKey is a deployment without IDENTITY_PROOFING_ENCRYPTION_KEY:
 // no session (whose evidence is sealed under it) can be stored.

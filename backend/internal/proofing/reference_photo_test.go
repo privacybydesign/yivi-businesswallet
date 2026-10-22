@@ -29,6 +29,12 @@ func (f fixture) withFaceOnlyFlow() Customer {
 	return c
 }
 
+// withAgeCheck is f checking the holder is age or older.
+func withAgeCheck(f proofingprovider.Flow, age int) proofingprovider.Flow {
+	f.RequestedAttributes, f.AgeOver = []string{attributeDocument, attributeAgeOver}, age
+	return f
+}
+
 // withRequiredLevel is f requiring the eIDAS level.
 func withRequiredLevel(f proofingprovider.Flow, level string) proofingprovider.Flow {
 	f.RequiredAssuranceLevel = level
@@ -54,6 +60,8 @@ func TestNeedsReferencePhoto(t *testing.T) {
 		"requires low":         {withRequiredLevel(appFlow, eidasLow), false, true, true},
 		"requires substantial": {withRequiredLevel(appFlow, eidasSubstantial), false, true, false},
 		"requires high":        {withRequiredLevel(appFlow, eidasHigh), false, true, false},
+		"checks 18 or older":   {withAgeCheck(appFlow, 18), false, true, true},
+		"checks 17 or older":   {withAgeCheck(appFlow, 17), false, true, false},
 	} {
 		if got := flowNeedsReferencePhoto(tc.flow); got != tc.needs {
 			t.Errorf("%s: flowNeedsReferencePhoto = %v, want %v", name, got, tc.needs)

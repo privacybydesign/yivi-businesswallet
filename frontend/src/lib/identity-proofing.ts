@@ -186,11 +186,14 @@ const YIVI_EIDAS_LEVEL = "low";
 // against a customer's reference photo (proofing.NeedsReferencePhoto: a face
 // step without the chip read, outside the browser), where the Yivi app
 // matches against its credential's photo instead, or requires a level above
-// what a Yivi session reaches.
+// what a Yivi session reaches, or checks an age the Yivi passport and id-card
+// carry no claim for (AGE_OVER_CHOICES).
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   selfieLocation?: string | undefined;
   requiredAssuranceLevel?: string | undefined;
+  requestedAttributes?: readonly string[] | undefined;
+  ageOver?: number | undefined;
 }): boolean {
   const needsReferencePhoto =
     flow.steps.some((step) => FACE_STEPS.includes(step)) &&
@@ -202,6 +205,8 @@ export function yiviAppAvailable(flow: {
   return (
     !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
     !needsReferencePhoto &&
+    (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
+      AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
     levelMet
   );
 }
@@ -725,8 +730,6 @@ const REJECTION_REASON_KEYS = {
   DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
   FACE_STEP_NOT_COMPLETED: "faceStepNotCompleted",
   FACE_NO_MATCH: "faceNoMatch",
-  REFERENCE_NO_FACE: "referenceNoFace",
-  PHOTO_MISSING: "photoMissing",
   LIVENESS_FAILED: "livenessFailed",
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",
@@ -880,22 +883,33 @@ export const ATTRIBUTE_AGE_OVER = "age_over";
 // The age a new age check answers for, and the highest the service takes
 // (flow.MaxAgeOver).
 const DEFAULT_AGE_OVER = 18;
-export const MAX_AGE_OVER = 120;
-// The attribute each one cannot be requested with: the age check replaces the
-// document data (flow.validateAgeOver).
-export const EXCLUSIVE_ATTRIBUTES: Readonly<Record<string, string>> = {
-  [ATTRIBUTE_AGE_OVER]: ATTRIBUTE_DOCUMENT,
-  [ATTRIBUTE_DOCUMENT]: ATTRIBUTE_AGE_OVER,
-};
+const MAX_AGE_OVER = 120;
+// The ages the editor offers: the usual legal limits, as ISO mDL and the EUDI
+// PID name them (age_over_NN), and the ones the Yivi passport and id-card
+// answer (overNN, openid4vpverifier.AgeClaim).
+const AGE_OVER_CHOICES = [12, 16, 18, 21, 65];
 
+// The ages to choose from for a draft: AGE_OVER_CHOICES, plus the draft's own
+// age when a flow was saved with another, so editing it keeps it.
+export function ageOverChoices(draft: ProofingFlowDraft): number[] {
+  const current = Number(draft.ageOver);
+  if (!Number.isInteger(current) || AGE_OVER_CHOICES.includes(current)) {
+    return AGE_OVER_CHOICES;
+  }
+  return [...AGE_OVER_CHOICES, current].sort((a, b) => a - b);
+}
 // Whether flow's result carries the holder's name and date of birth (the
-// document data, dg1), which a request for one known person is matched
-// against (proofing.readsIdentity). The service hands a flow back listing
-// what it releases.
+// document data, dg1, without the age check, which withholds the date), which
+// a request for one known person is matched against (proofing.readsIdentity).
+// The service hands a flow back listing what it releases.
 export function readsIdentity(
   flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {
-  return flow?.requestedAttributes?.includes(ATTRIBUTE_DOCUMENT) ?? false;
+  const attributes = flow?.requestedAttributes ?? [];
+  return (
+    attributes.includes(ATTRIBUTE_DOCUMENT) &&
+    !attributes.includes(ATTRIBUTE_AGE_OVER)
+  );
 }
 
 // Whether a flow of kind with diplomas must read the name and date of birth
@@ -978,8 +992,6 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.sessionOver");
     case "device_active":
       return t("identityProofing.errors.deviceActive");
-    case "method_unavailable":
-      return t("identityProofing.errors.methodUnavailable");
     case "diplomas_need_page":
       return t("identityProofing.errors.diplomasNeedPage");
     case "hosted_disabled":
@@ -1039,8 +1051,6 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
       return proofingErrorMessage(error, t);
     case "session_over":
       return t("proofLink.errors.sessionOver");
-    case "method_unavailable":
-      return t("proofLink.errors.methodUnavailable");
     default:
       return t("proofLink.errors.unavailable");
   }

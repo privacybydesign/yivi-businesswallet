@@ -1221,14 +1221,12 @@ export function newProofingClaimLink(
   });
 }
 
-// done is false while the subject has not finished in the Yivi app; ok false
-// ended the session and code says why, ok true moves on to the face check.
+// done is false while the subject has not finished in the Yivi app. Once done,
+// ok true approved the session, ok false rejected it and code says why.
 const proofingYiviDisclosureSchema = z.object({
   done: z.boolean(),
   ok: z.boolean(),
   code: z.string().optional(),
-  stableFrames: z.number().optional(),
-  maxAttempts: z.number().optional(),
 });
 
 export type ProofingYiviDisclosure = z.infer<
@@ -1241,33 +1239,6 @@ export function getProofingYiviDisclosure(
 ): Promise<ProofingYiviDisclosure> {
   return request(`${verifyPath(target)}/yivi/disclosure`, {
     schema: proofingYiviDisclosureSchema,
-    signal,
-  });
-}
-
-// One live camera frame scored against the disclosed photo. decision is
-// "pending", "approved" or "rejected".
-const proofingFaceVerdictSchema = z.object({
-  faceDetected: z.boolean(),
-  matched: z.boolean(),
-  consecutive: z.number(),
-  stableFrames: z.number(),
-  attempts: z.number(),
-  maxAttempts: z.number(),
-  decision: z.string(),
-});
-
-export type ProofingFaceVerdict = z.infer<typeof proofingFaceVerdictSchema>;
-
-export function submitProofingFaceFrame(
-  target: VerifyTarget,
-  image: string,
-  signal?: AbortSignal,
-): Promise<ProofingFaceVerdict> {
-  return request(`${verifyPath(target)}/yivi/face`, {
-    schema: proofingFaceVerdictSchema,
-    method: "POST",
-    body: { image },
     signal,
   });
 }

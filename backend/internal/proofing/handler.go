@@ -44,9 +44,6 @@ type Handler struct {
 	authFailures *ratelimit.Limiter
 	// hostedSources holds the hosted page per source, valid links included.
 	hostedSources *ratelimit.Limiter
-	// memberFaceFrames holds the on-screen Yivi face check's frames per org:
-	// each one is a Regula call.
-	memberFaceFrames *ratelimit.Limiter
 	// webhookTests holds an admin's test events per customer: each one is a
 	// delivery the shared deliverer sends.
 	webhookTests *ratelimit.Limiter
@@ -71,7 +68,7 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 	return &Handler{
 		service: service, requireUser: requireUser, authorize: authorize,
 		apiCalls: ratelimit.New(apiCallLimit), apiSessions: ratelimit.New(APISessionLimit),
-		hostedCalls: ratelimit.New(hostedCallLimit), memberFaceFrames: ratelimit.New(memberFaceFrameLimit),
+		hostedCalls:  ratelimit.New(hostedCallLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
 	}
@@ -110,7 +107,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/claim-link", member(respond.HandlerFunc(h.claimLink)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/app", member(respond.HandlerFunc(h.app)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/face", member(respond.HandlerFunc(h.limitMemberFace(h.faceFrame))))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
@@ -519,12 +515,10 @@ func (h *Handler) startYivi(w http.ResponseWriter, r *http.Request) error {
 type yiviDisclosureResponse struct {
 	// Done is false while the subject has not finished in the Yivi app.
 	Done bool `json:"done"`
-	// OK is the disclosure giving a photo to check the face against; false
-	// ended the session, and Code says why.
-	OK           bool   `json:"ok"`
-	Code         string `json:"code,omitempty"`
-	StableFrames int    `json:"stableFrames,omitempty"`
-	MaxAttempts  int    `json:"maxAttempts,omitempty"`
+	// OK is the disclosure approving the session; false rejected it, and Code
+	// says why.
+	OK   bool   `json:"ok"`
+	Code string `json:"code,omitempty"`
 }
 
 func (h *Handler) yiviDisclosure(w http.ResponseWriter, r *http.Request) error {
@@ -545,82 +539,8 @@ func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proo
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{
-		Done: true, OK: disclosure.OK, Code: disclosure.Code,
-		StableFrames: disclosure.StableFrames, MaxAttempts: disclosure.MaxAttempts,
-	})
+	respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{Done: true, OK: disclosure.OK, Code: disclosure.Code})
 	return nil
-}
-
-// memberFaceFrameLimit holds the on-screen Yivi face check's frames per org,
-// as hostedCallLimit holds a customer's hosted links, and per API replica. It
-// fits some ten members at a face check at once, a frame every 400 ms each.
-var memberFaceFrameLimit = ratelimit.Limit{Burst: 1500, Per: time.Minute}
-
-// limitMemberFace counts a face frame against its org's memberFaceFrameLimit.
-func (h *Handler) limitMemberFace(next respond.HandlerFunc) respond.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) error {
-		if err := rateLimited(w, h.memberFaceFrames, orgFromRequest(r).ID.String()); err != nil {
-			return err
-		}
-		return next(w, r)
-	}
-}
-
-// maxFaceFrameBytes caps one camera frame as the page sends it: a JPEG data
-// URL of a few hundred kilobytes at most.
-const maxFaceFrameBytes = 2 << 20
-
-type faceFrameRequest struct {
-	Image string `json:"image"`
-}
-
-type faceFrameResponse struct {
-	FaceDetected bool   `json:"faceDetected"`
-	Matched      bool   `json:"matched"`
-	Consecutive  int    `json:"consecutive"`
-	StableFrames int    `json:"stableFrames"`
-	Attempts     int    `json:"attempts"`
-	MaxAttempts  int    `json:"maxAttempts"`
-	Decision     string `json:"decision"`
-}
-
-func (h *Handler) faceFrame(w http.ResponseWriter, r *http.Request) error {
-	id, requestedBy, err := sentRequestTarget(r)
-	if err != nil {
-		return err
-	}
-	image, err := decodeFaceFrame(w, r)
-	if err != nil {
-		return err
-	}
-	verdict, err := h.service.FaceFrame(r.Context(), orgFromRequest(r).ID, id, requestedBy, image)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, newFaceVerdictResponse(verdict))
-	return nil
-}
-
-// decodeFaceFrame reads one camera frame, capped at maxFaceFrameBytes.
-func decodeFaceFrame(w http.ResponseWriter, r *http.Request) (string, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFaceFrameBytes)
-	var body faceFrameRequest
-	if err := decode(r, &body); err != nil {
-		return "", err
-	}
-	if body.Image == "" {
-		return "", &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "a frame needs an image"}
-	}
-	return body.Image, nil
-}
-
-func newFaceVerdictResponse(verdict proofingprovider.FaceVerdict) faceFrameResponse {
-	return faceFrameResponse{
-		FaceDetected: verdict.FaceDetected, Matched: verdict.Matched, Consecutive: verdict.Consecutive,
-		StableFrames: verdict.StableFrames, Attempts: verdict.Attempts, MaxAttempts: verdict.MaxAttempts,
-		Decision: string(verdict.Decision),
-	}
 }
 
 // requestEvents is one request's timeline, oldest first: every audit event
@@ -1075,8 +995,6 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
 	case errors.Is(err, ErrRedirectNotAllowed):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the customer's allowed redirect origins"}
-	case errors.Is(err, proofingprovider.ErrMethodUnavailable):
-		return &respond.APIError{Status: http.StatusConflict, Code: "method_unavailable", Message: "Yivi app sessions need the Regula face check, which this deployment has not configured"}
 	case errors.As(err, &rejected):
 		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.

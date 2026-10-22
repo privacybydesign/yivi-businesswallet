@@ -205,29 +205,8 @@ func TestDecideReviewKeepsTheReview(t *testing.T) {
 	}
 }
 
-// A Yivi frame is held to the flow's face.match threshold when that is above
-// the deployment's, as the Idem path is.
-func TestBoundLoginThreshold(t *testing.T) {
-	s := New(DefaultConfig(), newMemSessions(), nil, nil, nil)
-	stricter := &flow.FlowDefinition{CheckThresholds: map[flow.Check]float64{flow.CheckFaceMatch: 0.9}}
-	looser := &flow.FlowDefinition{CheckThresholds: map[flow.Check]float64{flow.CheckFaceMatch: 0.5}}
-	for name, tc := range map[string]struct {
-		fd   *flow.FlowDefinition
-		want float64
-	}{
-		"no flow":    {nil, regula.DefaultMatchThreshold},
-		"stricter":   {stricter, 0.9},
-		"looser":     {looser, regula.DefaultMatchThreshold},
-		"no setting": {&flow.FlowDefinition{}, regula.DefaultMatchThreshold},
-	} {
-		if got := s.boundLoginThreshold(tc.fd); got != tc.want {
-			t.Errorf("%s: threshold = %v, want %v", name, got, tc.want)
-		}
-	}
-}
-
-// A Yivi session is eIDAS low and not scored on the tier ladder: one check
-// out of one would name the top tier.
+// A Yivi session is eIDAS low and not scored on the tier ladder, which needs
+// checks it does not run.
 func TestBoundLoginAssuranceUnscored(t *testing.T) {
 	if a := boundLoginAssurance(); a.Level != "" || a.EIDASLevel != flow.AssuranceLevelLow {
 		t.Errorf("assurance = %+v, want eIDAS low and no tier", a)

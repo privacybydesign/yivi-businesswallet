@@ -163,9 +163,10 @@ var (
 	// matched against its portrait.
 	substantialChecks = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness}
 	faceChecks        = []flow.Check{flow.CheckFaceMatch, flow.CheckFaceLiveness}
-	// cmAttributes leave out every image and the document data: CM checks a
-	// real, adult person and learns only that they are of age.
-	cmAttributes = []string{flow.AttributeAgeOver, "chip_checks", "biometrics"}
+	// cmAttributes leave out every image: CM checks a real, adult person and
+	// learns their name and that they are of age, never their date of birth
+	// (the age check withholds it from dg1).
+	cmAttributes = []string{"dg1", flow.AttributeAgeOver, "chip_checks", "biometrics"}
 )
 
 // demoRetentionDays and shortRetentionDays are how long a demo customer
@@ -272,8 +273,9 @@ var demoProofingOrgs = []demoProofingOrg{
 	{
 		slug: cmSlug,
 		flows: []demoProofingFlow{
-			// Buying a ticket: a real, live person of age. Only whether they
-			// are of age and the checks come back, never their data or an image.
+			// Buying a ticket: a real, live person of age. Their name, whether
+			// they are of age and the checks come back, never their date of
+			// birth or an image.
 			{def: flow.FlowDefinition{
 				Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
 				FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,

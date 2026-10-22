@@ -10,6 +10,7 @@ import {
   addressLookup,
   addressVerificationNote,
   matchingAddress,
+  ageOverChoices,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -216,6 +217,17 @@ describe("yiviAppAvailable", () => {
     );
   });
 
+  it("offers an age check the Yivi credentials answer", () => {
+    const ageCheck = (ageOver: number) =>
+      yiviAppAvailable({
+        steps: ["document_capture", "nfc_read"],
+        requestedAttributes: ["dg1", "age_over"],
+        ageOver,
+      });
+    expect(ageCheck(18)).toBe(true);
+    expect(ageCheck(17)).toBe(false);
+  });
+
   it("leaves a flow requiring more than low to the Idem app", () => {
     const face = ["document_capture", "nfc_read", "face_verification"];
     expect(
@@ -349,6 +361,17 @@ describe("accepted documents", () => {
     );
     expect(spec.acceptedDocumentTypes).toEqual(["P", "ID"]);
     expect(spec.acceptedIssuingCountries).toEqual(["NLD"]);
+  });
+});
+
+describe("ageOverChoices", () => {
+  it("offers the usual ages, plus a saved one that is not among them", () => {
+    expect(ageOverChoices(draft({ ageOver: "18" }))).toEqual([
+      12, 16, 18, 21, 65,
+    ]);
+    expect(ageOverChoices(draft({ ageOver: "17" }))).toEqual([
+      12, 16, 17, 18, 21, 65,
+    ]);
   });
 });
 
@@ -1180,6 +1203,11 @@ describe("diploma step", () => {
     expect(
       readsIdentity({
         requestedAttributes: ["dg2"],
+      }),
+    ).toBe(false);
+    expect(
+      readsIdentity({
+        requestedAttributes: ["dg1", "age_over"],
       }),
     ).toBe(false);
   });

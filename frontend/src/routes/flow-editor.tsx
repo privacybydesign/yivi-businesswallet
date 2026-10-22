@@ -22,8 +22,7 @@ import {
   REQUESTED_ATTRIBUTES,
   ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
-  EXCLUSIVE_ATTRIBUTES,
-  MAX_AGE_OVER,
+  ageOverChoices,
   asksAge,
   attributeAvailable,
   draftFromFlow,
@@ -109,7 +108,8 @@ export function FlowEditor({
   }
 
   // Choosing a data request or required diplomas ticks Document data, which
-  // then stays ticked (identityRequired), and unticks the age check it excludes.
+  // then stays ticked (identityRequired), and unticks the age check, which
+  // withholds the date of birth they need.
   function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
     setFlowKind(kind);
     setDiplomaMode(mode);
@@ -130,9 +130,6 @@ export function FlowEditor({
     const next = new Set(draft.requestedAttributes);
     if (on) {
       next.add(value);
-      // The age check replaces the document data, which carries the date of
-      // birth: ticking one unticks the other.
-      next.delete(EXCLUSIVE_ATTRIBUTES[value] ?? "");
     } else {
       next.delete(value);
     }
@@ -393,36 +390,44 @@ export function FlowEditor({
                   (value === ATTRIBUTE_DOCUMENT &&
                     draft.requestedAttributes.has(value)));
               return (
-                <Checkbox
-                  key={value}
-                  id={`proofing-flow-attr-${value}`}
-                  checked={available && draft.requestedAttributes.has(value)}
-                  disabled={!available || locked}
-                  label={t(`identityProofingFlows.attributes.${value}`)}
-                  hint={t(`identityProofingFlows.attributeHints.${value}`)}
-                  onChange={(checked) => toggleAttribute(value, checked)}
-                />
+                <div key={value} className="flex flex-col gap-2">
+                  <Checkbox
+                    id={`proofing-flow-attr-${value}`}
+                    checked={available && draft.requestedAttributes.has(value)}
+                    disabled={!available || locked}
+                    label={t(`identityProofingFlows.attributes.${value}`)}
+                    hint={t(`identityProofingFlows.attributeHints.${value}`)}
+                    onChange={(checked) => toggleAttribute(value, checked)}
+                  />
+                  {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
+                    <Field
+                      id="proofing-flow-age-over"
+                      label={t("identityProofingFlows.new.ageOver")}
+                      hint={t("identityProofingFlows.new.ageOverHint")}
+                      error={fieldError("ageOver")}
+                    >
+                      <select
+                        id="proofing-flow-age-over"
+                        className={SELECT_CLASS}
+                        value={draft.ageOver}
+                        onChange={(event) =>
+                          update({ ageOver: event.target.value })
+                        }
+                      >
+                        {ageOverChoices(draft).map((age) => (
+                          <option key={age} value={String(age)}>
+                            {t("identityProofingFlows.new.ageOverOption", {
+                              age,
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+                </div>
               );
             })}
           </div>
-          {asksAge(draft) && (
-            <Field
-              id="proofing-flow-age-over"
-              label={t("identityProofingFlows.new.ageOver")}
-              hint={t("identityProofingFlows.new.ageOverHint")}
-              error={fieldError("ageOver")}
-            >
-              <Input
-                id="proofing-flow-age-over"
-                type="number"
-                min={1}
-                max={MAX_AGE_OVER}
-                step={1}
-                value={draft.ageOver}
-                onChange={(event) => update({ ageOver: event.target.value })}
-              />
-            </Field>
-          )}
           <p className={HINT}>{t("identityProofingFlows.new.dataHint")}</p>
           {requiresIdentity && (
             <p className={HINT}>

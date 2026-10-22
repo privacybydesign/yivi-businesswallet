@@ -31,12 +31,16 @@ func TestValidateAgeOver(t *testing.T) {
 	if err := Validate(ok); err != nil {
 		t.Fatalf("Validate(age_over 18) = %v, want nil", err)
 	}
+	withDocument := ok
+	withDocument.RequestedAttributes = []string{AttributeAgeOver, "dg1"}
+	if err := Validate(withDocument); err != nil {
+		t.Fatalf("Validate(age_over with dg1) = %v, want nil", err)
+	}
 
 	noChip := ok
 	noChip.Steps = []Step{StepDocumentPhoto}
 	noChip.RequiredChecks = nil
-	noAge, tooOld, ageOnly, withDocument := ok, ok, validFlow(), ok
-	withDocument.RequestedAttributes = []string{AttributeAgeOver, "dg1"}
+	noAge, tooOld, ageOnly := ok, ok, validFlow()
 	noAge.AgeOver = 0
 	tooOld.AgeOver = MaxAgeOver + 1
 	ageOnly.AgeOver = 18
@@ -49,7 +53,6 @@ func TestValidateAgeOver(t *testing.T) {
 		"no age":                {noAge, "ageOver must be between"},
 		"too old":               {tooOld, "ageOver must be between"},
 		"age without attribute": {ageOnly, "ageOver set without"},
-		"with the document":     {withDocument, "request one of them"},
 	} {
 		if err := Validate(tc.fd); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("Validate(%s) = %v, want %q", name, err, tc.want)

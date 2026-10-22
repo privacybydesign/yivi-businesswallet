@@ -37,7 +37,6 @@ type Provider interface {
 	SessionStatus(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SessionResult(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SubmitReference(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
-	SubmitFaceFrame(ctx context.Context, sessionToken, image string) (proofingprovider.FaceVerdict, error)
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
 	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
@@ -385,7 +384,7 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
-	if required && !slices.Contains(in.RequestedAttributes, attributeDocument) {
+	if required && !releasesIdentity(in.RequestedAttributes) {
 		return proofingprovider.Flow{}, ErrFlowNoIdentity
 	}
 	tenant := orgTenant(org.ID)
@@ -828,7 +827,13 @@ func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID 
 // date of birth (the document data, dg1): what a request for one known person
 // is matched against. The engine hands a flow back listing what it releases.
 func readsIdentity(f proofingprovider.Flow) bool {
-	return slices.Contains(f.RequestedAttributes, attributeDocument)
+	return releasesIdentity(f.RequestedAttributes)
+}
+
+// releasesIdentity reports whether attrs release the name and date of birth:
+// dg1 without the age check, which withholds the date.
+func releasesIdentity(attrs []string) bool {
+	return slices.Contains(attrs, attributeDocument) && !slices.Contains(attrs, attributeAgeOver)
 }
 
 // proofingMail is the mail a request sends. A member's is the org's; a
@@ -1649,7 +1654,11 @@ func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedB
 }
 
 func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) (YiviStart, error) {
-	started, err := s.verifier.StartPresentation(ctx, openid4vpverifier.ScopeProofing)
+	claims, err := s.yiviClaims(ctx, req)
+	if err != nil {
+		return YiviStart{}, err
+	}
+	started, err := s.verifier.StartPresentation(ctx, openid4vpverifier.ScopeProofing, claims...)
 	if err != nil {
 		return YiviStart{}, err
 	}
@@ -1659,11 +1668,41 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 	return YiviStart{WalletLink: started.WalletLink, ExpiresAt: sess.ExpiresAt}, nil
 }
 
-// YiviDisclosure hands the subject's finished disclosure to the engine as the face
-// check's reference, or answers ErrDisclosurePending while the subject has not
-// finished in the Yivi app. A disclosure the engine cannot use (no photo, no face in
-// it) ends the session, which is recorded at once. The photo and claims pass
-// through and are not kept.
+// yiviClaims are the claims req's Yivi disclosure asks for besides the
+// identity: the photo when the flow keeps it, and an age check's age claim in
+// place of the date of birth. The flow is the version req's session pinned,
+// else the active one.
+func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error) {
+	versions, err := s.ips.ListFlowVersions(ctx, requestTenant(req), req.FlowID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: flow of request %s: %w", req.ID, err)
+	}
+	i := slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Version == req.FlowVersion })
+	if i < 0 {
+		i = slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Active })
+	}
+	if i < 0 {
+		return nil, ErrFlowNotFound
+	}
+	f := versions[i]
+	var claims []string
+	if keepsFacePhoto(f) {
+		claims = append(claims, openid4vpverifier.ClaimPhoto)
+	}
+	if !slices.Contains(f.RequestedAttributes, attributeAgeOver) {
+		return claims, nil
+	}
+	claim, ok := openid4vpverifier.AgeClaim(f.AgeOver)
+	if !ok {
+		return nil, fmt.Errorf("%w: the Yivi app cannot answer age %d", ErrInvalidInput, f.AgeOver)
+	}
+	return append(claims, claim), nil
+}
+
+// YiviDisclosure hands the subject's finished disclosure to the engine, which
+// decides the session with it, or answers ErrDisclosurePending while the
+// subject has not finished in the Yivi app. The decision is recorded at once.
+// The photo and claims pass through and are not kept.
 func (s *Service) YiviDisclosure(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviDisclosure, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -1700,28 +1739,6 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	return disclosure, nil
 }
 
-// FaceFrame scores one live camera frame of an on-screen Yivi request against
-// the disclosed photo. The frame passes through to the engine and is not kept; a
-// decision is recorded at once rather than on the next list read.
-func (s *Service) FaceFrame(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, image string) (proofingprovider.FaceVerdict, error) {
-	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, err
-	}
-	return s.faceFrame(ctx, req, sess, image)
-}
-
-func (s *Service) faceFrame(ctx context.Context, req Request, sess *ipsSession, image string) (proofingprovider.FaceVerdict, error) {
-	verdict, err := s.ips.SubmitFaceFrame(ctx, sess.Token, image)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, yiviStepError(err)
-	}
-	if verdict.Decision != proofingprovider.FaceDecisionPending {
-		s.reconcileNow(ctx, req)
-	}
-	return verdict, nil
-}
-
 // yiviStepError reads the engine no longer knowing the session (purged, or the stub
 // restarted) or answering it gone as the session being over; the request's
 // row catches up on the next reconcile.
@@ -1731,12 +1748,6 @@ func yiviStepError(err error) error {
 		return fmt.Errorf("%w: %w", ErrSessionOver, err)
 	}
 	return err
-}
-
-// reconcileNow records what the engine decided for req. A failure is logged: the
-// background reconciler picks the outcome up later.
-func (s *Service) reconcileNow(ctx context.Context, req Request) {
-	s.reconcile(ctx, requestTenant(req), req)
 }
 
 // RequestEvents is one request's audit trail, oldest first: its timeline. A

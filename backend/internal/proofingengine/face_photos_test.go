@@ -3,13 +3,11 @@ package proofingengine
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"image"
 	"image/png"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
@@ -59,25 +57,28 @@ func TestBuildResultReleasesFacesOnlyWhenKept(t *testing.T) {
 	checkFaces(t, buildResult(sess, req, nil, nil, "", keepFaces), faceKeys, true)
 }
 
-// The Yivi method follows the same rule for the disclosed photo and the last
-// matching frame.
-func TestBoundLoginResultReleasesFacesOnlyWhenKept(t *testing.T) {
+// The Yivi method follows the same rule for the disclosed photo.
+func TestBoundLoginResultReleasesPhotoOnlyWhenKept(t *testing.T) {
 	face := testFace(t)
-	st := &session.YiviState{
-		Reference: face.ImageBase64, ReferenceMime: face.MimeType, Disclosure: json.RawMessage(`{}`),
-		KeepPhoto: true, LastFrame: face.ImageBase64,
-	}
 	s := &Server{}
-	byDefault, err := s.buildBoundLoginResult(session.Session{}, st, privacy.RedactionPolicy{}, regula.DefaultMatchThreshold)
-	if err != nil {
-		t.Fatal(err)
+	for name, tc := range map[string]struct {
+		redaction privacy.RedactionPolicy
+		requested []string
+		kept      bool
+	}{
+		"by default":      {privacy.RedactionPolicy{}, nil, false},
+		"kept":            {keepFaces, nil, true},
+		"kept, not asked": {keepFaces, []string{attrDocument}, false},
+	} {
+		sess := session.Session{RequestedAttributes: tc.requested}
+		result := buildBoundLoginResult(sess, disclosureInfo{}, s.disclosedPhoto(sess, face.ImageBase64, tc.redaction), nil)
+		if _, got := result["photo"]; got != tc.kept {
+			t.Errorf("%s: photo released = %v, want %v", name, got, tc.kept)
+		}
+		if _, ok := result["selfie"]; ok {
+			t.Errorf("%s: a Yivi result carries a selfie", name)
+		}
 	}
-	checkFaces(t, byDefault, []string{"photo", "selfie"}, false)
-	kept, err := s.buildBoundLoginResult(session.Session{}, st, keepFaces, regula.DefaultMatchThreshold)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkFaces(t, kept, []string{"photo", "selfie"}, true)
 }
 
 // A finished session's stored evidence keeps no face photo by default: the

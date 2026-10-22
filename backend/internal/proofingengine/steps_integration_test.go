@@ -4,9 +4,11 @@ package proofingengine_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gmrtd/gmrtd/cms"
@@ -15,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/mrtdverify/mrtdtestfixtures"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -268,5 +271,143 @@ func TestDrivingLicenceChip(t *testing.T) {
 	_, token, device = start()
 	if code, step := nfc(token, device, german); code != http.StatusUnprocessableEntity || step["code"] != "document_unsupported" {
 		t.Errorf("nfc with a German licence chip = %d %v, want 422 document_unsupported", code, step)
+	}
+}
+
+// An age-check flow never stores the date of birth: not from the MRZ scan,
+// not from the chip read, not in the result. The name still comes back, and
+// the chip checks kept at the chip read score the finish.
+func TestAgeCheckStoresNoBirthDate(t *testing.T) {
+	const birthDate = "1978-04-05"
+	h := newHarness(t)
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, pp.FlowSpec{
+		Name: "Age check", Steps: []string{"document_capture", "nfc_read"},
+		RequestedAttributes: []string{"dg1", "age_over", "chip_checks"}, AgeOver: 18,
+		RequiredChecks: []string{"nfc.passive_auth"},
+	})
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	token, device := h.claimApp(t, sess)
+	stored := func(when string) session.Session {
+		t.Helper()
+		got, err := h.sessions.Get(h.tenant.ID, sess.ID)
+		if err != nil {
+			t.Fatalf("Get after %s: %v", when, err)
+		}
+		data, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, leak := range []string{birthDate, mrtdtestfixtures.TestDg1Hex} {
+			if strings.Contains(string(data), leak) {
+				t.Errorf("stored session after %s holds %.20q", when, leak)
+			}
+		}
+		return got
+	}
+
+	code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
+		"document":   map[string]any{"type": "P", "number": "099250692", "issuingState": "GBR", "dateOfBirth": birthDate},
+		"chipAccess": map[string]any{"documentType": "passport", "documentNumber": "099250692", "countryCode": "GBR", "dateOfBirth": birthDate, "dateOfExpiry": "2022-07-17"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("document_capture = %d %v", code, step)
+	}
+	if got := stored("document_capture"); got.Steps.Document == nil || got.Steps.Document.ChipAccess != nil {
+		t.Errorf("document = %+v, want one without the chip access key", got.Steps.Document)
+	}
+
+	code, step = h.do(t, http.MethodPost, "/app/"+token+"/steps/nfc", device, map[string]any{"mrtdEvidence": map[string]any{
+		"efSod":      mrtdtestfixtures.TestSodHex,
+		"dataGroups": map[string]string{"DG1": mrtdtestfixtures.TestDg1Hex, "DG2": mrtdtestfixtures.Dg2Hex},
+	}})
+	if code != http.StatusOK {
+		t.Fatalf("nfc = %d %v", code, step)
+	}
+	if got := stored("nfc_read"); got.Steps.NFC == nil || got.Steps.NFC.AgeOver == nil || *got.Steps.NFC.AgeOver != (session.AgeOver{Age: 18, Over: true}) {
+		t.Errorf("nfc evidence = %+v, want age 18, over", got.Steps.NFC)
+	}
+
+	if code, step = h.do(t, http.MethodPost, "/app/"+token+"/submit", device, nil); code != http.StatusOK {
+		t.Fatalf("submit = %d %v", code, step)
+	}
+	stored("submit")
+	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil {
+		t.Fatalf("SessionIdentity: %v", err)
+	}
+	if id.FamilyName == "" || id.BirthDate != "" {
+		t.Errorf("identity = %q, %q; want the name without the date of birth", id.FamilyName, id.BirthDate)
+	}
+	if id.AgeOver == nil || *id.AgeOver != (pp.AgeOver{Age: 18, Over: true}) {
+		t.Errorf("ageOver = %+v, want age 18, over", id.AgeOver)
+	}
+	if id.Evidence == nil || id.Evidence.PassiveAuth == pp.CheckNotPerformed {
+		t.Errorf("evidence = %+v, want passive authentication scored", id.Evidence)
+	}
+}
+
+// The Yivi app answers an age check from its age claim. A date of birth it
+// discloses anyway is never stored, and the name still comes back. The flow's
+// face step is the Idem app's: the Yivi session never calls Regula.
+func TestYiviAgeCheckStoresNoBirthDate(t *testing.T) {
+	const birthDate = "1990-05-01"
+	var regulaCalls atomic.Int32
+	h := newHarness(t, func(c *proofingengine.Config) { c.Regula = fakeRegula{similarity: 0.9, calls: &regulaCalls} })
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, pp.FlowSpec{
+		Name: "Yivi age check", Steps: []string{"document_capture", "nfc_read", "face_verification"},
+		RequestedAttributes: []string{"dg1", "age_over"}, AgeOver: 18,
+		FaceProvider: "regula", SelfieLocation: "native", RequiredChecks: []string{"nfc.passive_auth", "face.match"},
+	})
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID, Method: pp.MethodYivi})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	noBirthDate := func(when string) {
+		t.Helper()
+		got, err := h.sessions.Get(h.tenant.ID, sess.ID)
+		if err != nil {
+			t.Fatalf("Get after %s: %v", when, err)
+		}
+		data, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), birthDate) || strings.Contains(string(data), "yearOfBirth") {
+			t.Errorf("stored session after %s holds the date of birth", when)
+		}
+	}
+
+	got, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, pp.Reference{
+		Credential: "pbdf-staging.pbdf.passport",
+		Attributes: map[string]string{"firstName": "Anna", "lastName": "Jansen", "over18": "Yes", "dateOfBirth": birthDate, "yearOfBirth": "1990"},
+	})
+	if err != nil || !got.OK {
+		t.Fatalf("SubmitReference = %+v, %v", got, err)
+	}
+	noBirthDate("the disclosure")
+
+	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
+	if err != nil {
+		t.Fatalf("SessionIdentity: %v", err)
+	}
+	if id.GivenName != "Anna" || id.BirthDate != "" {
+		t.Errorf("identity = %q, %q; want the name without the date of birth", id.GivenName, id.BirthDate)
+	}
+	if id.AgeOver == nil || *id.AgeOver != (pp.AgeOver{Age: 18, Over: true}) {
+		t.Errorf("ageOver = %+v, want age 18, over", id.AgeOver)
+	}
+	if got := regulaCalls.Load(); got != 0 {
+		t.Errorf("Regula called %d times, want none", got)
 	}
 }

@@ -323,15 +323,6 @@ func (s *Service) HostedYiviDisclosure(ctx context.Context, token string) (proof
 	return s.yiviDisclosure(ctx, req, sess)
 }
 
-// HostedFaceFrame is FaceFrame for a hosted request.
-func (s *Service) HostedFaceFrame(ctx context.Context, token, image string) (proofingprovider.FaceVerdict, error) {
-	req, sess, err := s.hostedYiviSession(ctx, token)
-	if err != nil {
-		return proofingprovider.FaceVerdict{}, err
-	}
-	return s.faceFrame(ctx, req, sess, image)
-}
-
 // HostedEmbedOrigins are the origins that may frame a hosted link's page: its
 // customer's allowed redirect origins. It reads no the engine state.
 func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]string, error) {

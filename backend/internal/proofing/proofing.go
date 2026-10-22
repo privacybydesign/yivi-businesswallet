@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
 )
@@ -683,11 +684,30 @@ var faceProviders = []string{faceProviderRegula}
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
 // photographs the document, which only the Idem app does, matches the face
 // against a customer's reference photo (the Yivi app matches against its
-// credential's photo), or requires a level above what a Yivi session reaches
-// (yiviEIDASLevel), which enforceAssurance would only reject at the end.
+// credential's photo), checks an age the Yivi credentials carry no claim for
+// (openid4vpverifier.AgeClaim), or requires a level above what a Yivi session
+// reaches (yiviEIDASLevel), which enforceAssurance would only reject at the
+// end.
 func yiviAppAvailable(f proofingprovider.Flow) bool {
 	return !slices.Contains(f.Steps, stepDocumentPhoto) && !flowNeedsReferencePhoto(f) &&
-		meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+		yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+}
+
+// keepsFacePhoto reports whether f releases the holder's photo: it keeps the
+// face photos and asks for one (the engine's buildResult rule).
+func keepsFacePhoto(f proofingprovider.Flow) bool {
+	return f.KeepFacePhotos != nil && *f.KeepFacePhotos &&
+		(slices.Contains(f.RequestedAttributes, attributeFacePhoto) || slices.Contains(f.RequestedAttributes, attributeFaceImage))
+}
+
+// yiviAnswersAge reports whether a Yivi disclosure can answer f's age check:
+// always when f has none.
+func yiviAnswersAge(f proofingprovider.Flow) bool {
+	if !slices.Contains(f.RequestedAttributes, attributeAgeOver) {
+		return true
+	}
+	_, ok := openid4vpverifier.AgeClaim(f.AgeOver)
+	return ok
 }
 
 // Public API rate limits, per customer and per API replica: apiCallLimit for
@@ -755,6 +775,17 @@ const stepNFCRead = "nfc_read"
 // attributeDocument is the document data (dg1): the holder's name and date of
 // birth, read by the document scan.
 const attributeDocument = "dg1"
+
+// attributeFacePhoto and attributeFaceImage are the holder's photo, by its two
+// names.
+const (
+	attributeFacePhoto = "dg2"
+	attributeFaceImage = "face_image"
+)
+
+// attributeAgeOver is the age check, which withholds the date of birth from
+// the document data next to it.
+const attributeAgeOver = "age_over"
 
 // stepDocumentPhoto is the photos of the document's front and back, taken in
 // the Idem app.

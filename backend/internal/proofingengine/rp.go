@@ -23,8 +23,8 @@ import (
 )
 
 // The relying-party side, called in-process by internal/proofing: flows and
-// sessions. Errors are pp.ErrNotFound, *pp.RejectedError (status and message)
-// and pp.ErrMethodUnavailable.
+// sessions. Errors are pp.ErrNotFound and *pp.RejectedError (status and
+// message).
 
 // rejected is a refused request.
 func rejected(status int, msg string) error {
@@ -231,9 +231,6 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	switch in.Method {
 	case "", pp.MethodIdem:
 	case pp.MethodYivi:
-		if !s.YiviAvailable() {
-			return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", pp.ErrMethodUnavailable)
-		}
 		method, ttl = session.MethodBiometricBoundLogin, s.cfg.BoundLoginTTL
 	default:
 		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s or %s", in.Method, pp.MethodIdem, pp.MethodYivi))
@@ -256,15 +253,15 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	needsReference := flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
 	if method == session.MethodBiometricBoundLogin {
-		// The Yivi method matches a live face against the disclosed photo, with
-		// no liveness and no chip read: it reaches eIDAS low, matches no
-		// reference photo and takes no document photo. The wallet offers it only
-		// where that fits (yiviAppAvailable); the engine refuses the rest too.
+		// The Yivi method is the disclosure alone, with no face check and no chip
+		// read: it reaches eIDAS low, matches no reference photo and takes no
+		// document photo. The wallet offers it only where that fits
+		// (yiviAppAvailable); the engine refuses the rest too.
 		switch {
 		case !flow.MeetsLevel(flow.AssuranceLevelLow, resolvedFlow.RequiredAssuranceLevel):
 			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
 		case needsReference:
-			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method matches the disclosed photo, not a reference photo")
+			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method runs no face check, so it matches no reference photo")
 		case slices.Contains(resolvedFlow.Steps, flow.StepDocumentPhoto):
 			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method takes no document photo")
 		}
@@ -862,28 +859,13 @@ func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token strin
 }
 
 // SubmitReference hands the engine the subject's verified OpenID4VP
-// disclosure as a Yivi-method session's reference.
+// disclosure, which decides a Yivi-method session.
 func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token string, ref pp.Reference) (pp.YiviDisclosure, error) {
-	if !s.YiviAvailable() {
-		return pp.YiviDisclosure{}, fmt.Errorf("proofingengine: submit reference: %w", pp.ErrMethodUnavailable)
-	}
 	sess, err := s.session(t, id, token)
 	if err != nil {
 		return pp.YiviDisclosure{}, err
 	}
 	return s.acceptReference(ctx, sess, ref)
-}
-
-// SubmitFaceFrame scores one live camera frame of a Yivi-method session.
-func (s *Server) SubmitFaceFrame(ctx context.Context, token, image string) (pp.FaceVerdict, error) {
-	sess, err := s.sessions.Authenticate(token)
-	if errors.Is(err, session.ErrNotFound) {
-		return pp.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", pp.ErrNotFound)
-	}
-	if err != nil {
-		return pp.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
-	}
-	return s.faceFrame(ctx, sess, image)
 }
 
 func privacyBSN(p string) privacy.BSNPolicy { return privacy.BSNPolicy(p) }

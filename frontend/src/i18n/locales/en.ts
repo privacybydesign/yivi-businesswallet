@@ -520,8 +520,6 @@ export const en = {
       documentCountryNotAccepted: "issuing country not accepted by the flow",
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
-      referenceNoFace: "no face was found in the shared photo",
-      photoMissing: "the identity document was shared without its photo",
       livenessFailed: "liveness check failed",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
@@ -573,8 +571,6 @@ export const en = {
       sessionOver: "This session has ended. Start a new one.",
       deviceActive:
         "The Idem app still has this session open: carry on there, or close it first.",
-      methodUnavailable:
-        "This deployment cannot run Yivi app sessions: the face check is not configured. Choose the Idem app.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
       diplomasNeedPage:
@@ -834,8 +830,10 @@ export const en = {
       },
       attributeDetails: {
         dg1: "Your name, date of birth and nationality, and the document's number and expiry date.",
+        dg1WithoutBirthDate:
+          "Your name and nationality, and the document's number and expiry date.",
         age_over:
-          "Only whether you are old enough, worked out from your document's chip: not your date of birth or name.",
+          "Only whether you are old enough, worked out from your document's chip: not your date of birth.",
         dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
         dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",
@@ -849,7 +847,7 @@ export const en = {
         yivi: {
           title: "Yivi app",
           detail:
-            "Share the passport, ID card or residence permit already in your Yivi app, then look into the camera here.",
+            "Share the passport, ID card or residence permit already in your Yivi app.",
         },
         idem: {
           title: "Idem app",
@@ -886,22 +884,9 @@ export const en = {
           "App closed, code expired, or another phone? A new code carries on where the session was.",
       },
       yiviEnded: "The Yivi app session ended: {{reason}}",
+      yiviShared: "Shared from the Yivi app. Finishing the verification…",
       yiviCodes: {
-        photoMissing: "the shared card has no photo.",
-        referenceNoFace: "no face was found on the shared photo.",
         documentNotAccepted: "this flow does not accept the shared document.",
-      },
-      face: {
-        heading: "Look into the camera",
-        hint: "Keep your face in the frame. It is compared with the photo from your Yivi app. A matching image is kept only when your selfie was asked for.",
-        progress: "Match {{count}} of {{total}}",
-        noFace: "No face found. Move closer to the camera.",
-        cameraError:
-          "The camera could not be opened. Allow this page to use it and try again.",
-        cameraFramed:
-          "This page is shown inside another website, which does not let it use your camera. Open it in a tab of its own to continue.",
-        openInTab: "Open in a new tab",
-        retry: "Try again",
       },
       outcome: {
         approved: {
@@ -1327,7 +1312,7 @@ export const en = {
     },
     attributes: {
       dg1: "Name and document details",
-      age_over: "Age check only",
+      age_over: "Age check",
       dg11: "Place of birth and personal number (BSN)",
       dg2: "Personal photo from the chip",
       chip_checks: "Chip check results",
@@ -1338,7 +1323,7 @@ export const en = {
     attributeHints: {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
       age_over:
-        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Not the date itself, nor the name. Ticking it unticks Name and document details.",
+        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Never the date itself: ticked with Name and document details, those come without the date of birth.",
       dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
@@ -1391,7 +1376,7 @@ export const en = {
         "The face check runs in the app: the person has no browser step.",
       faceProvider: "Face check provider",
       faceProviderHint:
-        "Regula checks liveness in the app and the wallet matches the face against the chip photo; in the Yivi app Regula matches the camera against the credential's photo.",
+        "Regula checks liveness in the app and the wallet matches the face against the chip photo.",
       faceWithoutChip:
         "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
@@ -1434,6 +1419,7 @@ export const en = {
         "Off: the portrait, selfie and customer's photo are dropped once the face match is done; its verdicts stay. Turn it on only for a customer that must keep them.",
       blurBsn: "Blur BSN override",
       ageOver: "Minimum age",
+      ageOverOption: "{{age}} or older",
       ageOverHint:
         "Age check only answers whether the person is this age or older on the day of the check.",
       errors: {
@@ -1465,8 +1451,6 @@ export const en = {
         "This link can't be used right now. Contact the organisation that sent it to you.",
       sessionOver:
         "This session has ended. Ask the organisation that sent you this link for a new one.",
-      methodUnavailable:
-        "The Yivi app can't be used for this check right now. Choose the Idem app.",
     },
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",

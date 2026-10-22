@@ -31,27 +31,40 @@ func TestReachedAge(t *testing.T) {
 	}
 }
 
-// The age is answered only from a date of birth read off the chip, and only
-// for a flow that asks one.
+// The age is answered only for a flow that asks one.
 func TestAgeOverOf(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	chipDoc := func(source string) session.Session {
-		return session.Session{Steps: session.StepEvidence{Document: &session.DocumentStepEvidence{
-			Source: source, Parsed: session.ParsedMRZ{DateOfBirth: "2008-10-22"},
-		}}}
+	doc := &documentInfo{DateOfBirth: "2008-10-22"}
+	if got := ageOverOf(doc, &flow.FlowDefinition{AgeOver: 18}, now); got == nil || got.Age != 18 || got.Over {
+		t.Errorf("a day short of 18 = %+v, want age 18, not over", got)
 	}
-	fd := &flow.FlowDefinition{AgeOver: 18}
-	if got := ageOverOf(chipDoc(session.DocumentSourceChip), fd, now); got == nil || got.Age != 18 || got.Over {
-		t.Errorf("chip, a day short of 18 = %+v, want age 18, not over", got)
+	if got := ageOverOf(doc, &flow.FlowDefinition{AgeOver: 16}, now); got == nil || !got.Over {
+		t.Errorf("over 16 = %+v, want over", got)
 	}
-	if got := ageOverOf(chipDoc(session.DocumentSourceChip), &flow.FlowDefinition{AgeOver: 16}, now); got == nil || !got.Over {
-		t.Errorf("chip, over 16 = %+v, want over", got)
-	}
-	if got := ageOverOf(chipDoc(session.DocumentSourceMRZ), fd, now); got != nil {
-		t.Errorf("MRZ only = %+v, want none", got)
-	}
-	if got := ageOverOf(chipDoc(session.DocumentSourceChip), &flow.FlowDefinition{}, now); got != nil {
+	if got := ageOverOf(doc, &flow.FlowDefinition{}, now); got != nil {
 		t.Errorf("no age asked = %+v, want none", got)
+	}
+}
+
+// What the chip read stores keeps no date of birth: not the parsed date, nor
+// the data groups carrying it. The portrait stays for the face match.
+func TestWithholdBirthDate(t *testing.T) {
+	req := submitNFCStepRequest{
+		Document:     &documentInfo{FirstName: "Anna", DateOfBirth: "2008-10-22"},
+		MrtdEvidence: &mrtdEvidenceRequest{DataGroups: map[string]string{dataGroupMRZ: "01", dataGroupPortrait: "02", dataGroupPersonalDetails: "0b"}},
+	}
+	withholdBirthDate(&req)
+	if req.Document.DateOfBirth != "" || req.Document.FirstName != "Anna" {
+		t.Errorf("document = %+v, want the name without the date of birth", req.Document)
+	}
+	if _, ok := req.MrtdEvidence.DataGroups[dataGroupMRZ]; ok {
+		t.Error("DG1 kept")
+	}
+	if _, ok := req.MrtdEvidence.DataGroups[dataGroupPersonalDetails]; ok {
+		t.Error("DG11 kept")
+	}
+	if _, ok := req.MrtdEvidence.DataGroups[dataGroupPortrait]; !ok {
+		t.Error("DG2 dropped")
 	}
 }
 
@@ -71,6 +84,49 @@ func TestResultReleasesAgeOverOnly(t *testing.T) {
 	document := session.Session{RequestedAttributes: []string{attrDocument}}
 	if _, ok := buildResult(document, req, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})["ageOver"]; ok {
 		t.Error("dg1 alone released ageOver")
+	}
+}
+
+// Next to dg1 the age check wins: the name is released, the date of birth
+// never.
+func TestResultAgeOverWithholdsDateOfBirth(t *testing.T) {
+	req := appResultRequest{
+		Document: &documentInfo{FirstName: "Anna", DateOfBirth: "2008-10-22"},
+		AgeOver:  &ageOverInfo{Age: 18, Over: true},
+	}
+	sess := session.Session{RequestedAttributes: []string{attrDocument, attrAgeOver}}
+	result := buildResult(sess, req, nil, nil, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{})
+
+	doc, ok := result["document"].(documentInfo)
+	if !ok || doc.FirstName != "Anna" || doc.DateOfBirth != "" {
+		t.Errorf("document = %+v, want the name without the date of birth", result["document"])
+	}
+	if _, ok := result["ageOver"]; !ok {
+		t.Error("ageOver missing next to dg1")
+	}
+}
+
+// A Yivi disclosure answers the age from its age claim, and keeps no date of
+// birth even when the app sent one.
+func TestDisclosedAgeOver(t *testing.T) {
+	attributes := map[string]string{"firstName": "Anna", "over18": "Yes", "over21": "No", "dateOfBirth": "2006-10-22", "yearOfBirth": "2006"}
+	if got := disclosedAgeOver(attributes, 18); got == nil || *got != (ageOverInfo{Age: 18, Over: true}) {
+		t.Errorf("over18 = %+v, want age 18, over", got)
+	}
+	if got := disclosedAgeOver(attributes, 21); got == nil || got.Over {
+		t.Errorf("over21 = %+v, want age 21, not over", got)
+	}
+	if got := disclosedAgeOver(attributes, 65); got != nil {
+		t.Errorf("no over65 claim = %+v, want none", got)
+	}
+
+	info := disclosureInfo{Attributes: attributes, AttributeIDs: []string{"pbdf.pbdf.passport.firstName", "pbdf.pbdf.passport.dateOfBirth", "pbdf.pbdf.passport.yearOfBirth"}}
+	withholdDisclosedBirthDate(&info)
+	if _, ok := info.Attributes["dateOfBirth"]; ok || info.Attributes["yearOfBirth"] != "" || info.Attributes["firstName"] != "Anna" {
+		t.Errorf("attributes = %v, want the name without the date of birth", info.Attributes)
+	}
+	if len(info.AttributeIDs) != 1 {
+		t.Errorf("attribute ids = %v, want the name's only", info.AttributeIDs)
 	}
 }
 

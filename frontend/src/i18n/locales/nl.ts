@@ -538,8 +538,6 @@ export const nl: Translation<typeof en> = {
         "land van uitgifte niet toegestaan in de flow",
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
-      referenceNoFace: "er is geen gezicht gevonden op de gedeelde foto",
-      photoMissing: "het identiteitsdocument is gedeeld zonder foto",
       livenessFailed: "levendheidscontrole mislukt",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
@@ -590,8 +588,6 @@ export const nl: Translation<typeof en> = {
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
       deviceActive:
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
-      methodUnavailable:
-        "Deze omgeving kan geen sessies met de Yivi-app uitvoeren: de gezichtscontrole is niet ingesteld. Kies de Idem-app.",
       hostedDisabled:
         "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
       diplomasNeedPage:
@@ -852,8 +848,10 @@ export const nl: Translation<typeof en> = {
       },
       attributeDetails: {
         dg1: "Je naam, geboortedatum en nationaliteit, en het nummer en de vervaldatum van het document.",
+        dg1WithoutBirthDate:
+          "Je naam en nationaliteit, en het nummer en de vervaldatum van het document.",
         age_over:
-          "Alleen of je oud genoeg bent, bepaald uit de chip van je document: niet je geboortedatum of naam.",
+          "Alleen of je oud genoeg bent, bepaald uit de chip van je document: niet je geboortedatum.",
         dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
         dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",
@@ -868,7 +866,7 @@ export const nl: Translation<typeof en> = {
         yivi: {
           title: "Yivi-app",
           detail:
-            "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat en kijk daarna hier in de camera.",
+            "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat.",
         },
         idem: {
           title: "Idem-app",
@@ -905,22 +903,9 @@ export const nl: Translation<typeof en> = {
           "App gesloten, code verlopen of een andere telefoon? Met een nieuwe code ga je verder waar de sessie was.",
       },
       yiviEnded: "De sessie in de Yivi-app is beëindigd: {{reason}}",
+      yiviShared: "Gedeeld vanuit de Yivi-app. De verificatie wordt afgerond…",
       yiviCodes: {
-        photoMissing: "de gedeelde kaart heeft geen foto.",
-        referenceNoFace: "op de gedeelde foto is geen gezicht gevonden.",
         documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
-      },
-      face: {
-        heading: "Kijk in de camera",
-        hint: "Houd je gezicht in beeld. Het wordt vergeleken met de foto uit je Yivi-app. Een passend beeld wordt alleen bewaard als om je selfie is gevraagd.",
-        progress: "Match {{count}} van {{total}}",
-        noFace: "Geen gezicht gevonden. Kom dichter bij de camera.",
-        cameraError:
-          "De camera kon niet worden geopend. Geef deze pagina toegang en probeer het opnieuw.",
-        cameraFramed:
-          "Deze pagina staat in een andere website, die haar je camera niet laat gebruiken. Open haar in een eigen tabblad om verder te gaan.",
-        openInTab: "Openen in een nieuw tabblad",
-        retry: "Opnieuw proberen",
       },
       outcome: {
         approved: {
@@ -1355,7 +1340,7 @@ export const nl: Translation<typeof en> = {
     },
     attributes: {
       dg1: "Naam en documentgegevens",
-      age_over: "Alleen leeftijdscontrole",
+      age_over: "Leeftijdscontrole",
       dg11: "Geboorteplaats en persoonsnummer (BSN)",
       dg2: "Pasfoto van de chip",
       chip_checks: "Uitkomst chipcontroles",
@@ -1366,7 +1351,7 @@ export const nl: Translation<typeof en> = {
     attributeHints: {
       dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
       age_over:
-        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Niet de datum zelf en niet de naam. Aanvinken vinkt Naam en documentgegevens uit.",
+        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
       dg11: "Alleen als het document ze op de chip heeft staan; veel documenten niet. Het BSN volgt het BSN-beleid hieronder.",
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
@@ -1420,7 +1405,7 @@ export const nl: Translation<typeof en> = {
         "De gezichtscontrole gebeurt in de app: de persoon heeft geen browserstap.",
       faceProvider: "Aanbieder gezichtscontrole",
       faceProviderHint:
-        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto; in de Yivi-app vergelijkt Regula de camera met de foto uit het credential.",
+        "Regula doet de levendheidscontrole in de app en de wallet vergelijkt het gezicht met de chipfoto.",
       faceWithoutChip:
         "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met de eigen foto van de klant van deze persoon, die het systeem van de klant bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
       dataTitle: "Gevraagde resultaatgegevens",
@@ -1463,6 +1448,7 @@ export const nl: Translation<typeof en> = {
         "Uit: het portret, de selfie en de foto van de klant verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een klant die ze moet bewaren.",
       blurBsn: "BSN vervagen overschrijven",
       ageOver: "Minimumleeftijd",
+      ageOverOption: "{{age}} jaar of ouder",
       ageOverHint:
         "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
       errors: {
@@ -1494,8 +1480,6 @@ export const nl: Translation<typeof en> = {
         "Deze link werkt nu niet. Neem contact op met de organisatie die hem stuurde.",
       sessionOver:
         "Deze sessie is afgelopen. Vraag de organisatie die je deze link stuurde om een nieuwe.",
-      methodUnavailable:
-        "De Yivi-app kan nu niet voor deze controle worden gebruikt. Kies de Idem-app.",
     },
     redirecting: "Je wordt teruggestuurd…",
     poweredBy: "Mogelijk gemaakt door Yivi",
