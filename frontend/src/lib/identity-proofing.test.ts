@@ -829,6 +829,30 @@ describe("attribute reasons", () => {
     });
   });
 
+  it("asks the age check for its reason too, and shows it to the person", () => {
+    const ageCheck = new Set(["dg1", "age_over"]);
+    const halfExplained = draft({
+      requestedAttributes: ageCheck,
+      attributeReasons: {
+        ...EXPLAINED,
+        age_over: { en: "To check your age." },
+      },
+    });
+    expect(collectedAttributes(halfExplained)).toEqual(["dg1", "age_over"]);
+    expect(flowDraftError(halfExplained, false, ["en", "nl"])).toBe("reasons");
+    expect(
+      missingReasonLocales(halfExplained, "age_over", ["en", "nl"]),
+    ).toEqual(["nl"]);
+
+    const explained = draft({ requestedAttributes: ageCheck });
+    expect(flowDraftError(explained, false, ["en", "nl"])).toBeNull();
+    expect(flowSpecFromDraft(explained).attributeReasons?.age_over).toEqual(
+      EXPLAINED.age_over,
+    );
+    // The overview lists the age check, its "Why" line under it.
+    expect(isRequestedAttribute("age_over")).toBe(true);
+  });
+
   it("sends none for a flow that collects nothing", () => {
     const spec = flowSpecFromDraft(ticked({ requestedAttributes: new Set() }));
     expect(spec.requestedAttributes).toEqual([OUTCOME_ONLY]);

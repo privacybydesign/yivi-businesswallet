@@ -330,6 +330,11 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - It decides no outcome: an approved minor is approved with `over: false`;
       the relying party decides.
     - Off in a new flow, never in a flow without a list (`attributesForSteps`).
+    - A collected item like any other: it needs its reason in each offered
+      language (`withReasons`), the editor asks for it under the item, and
+      the person reads it as "Why: ..." under the age check. The CM seed flow
+      gives "To check you are 18 or older." and keeps `dg1`'s reason to the
+      name on the ticket.
     - Reaches the public API and admin result as `identity.ageOver`, and a
       person's row details in the people table ("18 or older: Yes/No"), on a
       flow's People tab and on All people. The Idem app's consent screen

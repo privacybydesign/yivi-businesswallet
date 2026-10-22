@@ -165,8 +165,12 @@ var (
 	// cmReasons are what the person reads under each of them.
 	cmReasons = map[string]map[string]string{
 		"dg1": {
-			"en": "To check you are 18 or older and to put your name on the ticket.",
-			"nl": "Om te controleren dat je 18 of ouder bent, en voor je naam op het ticket.",
+			"en": "To put your name on the ticket.",
+			"nl": "Voor je naam op het ticket.",
+		},
+		flow.AttributeAgeOver: {
+			"en": "To check you are 18 or older.",
+			"nl": "Om te controleren dat je 18 of ouder bent.",
 		},
 		"chip_checks": {
 			"en": "To make sure your document is real.",

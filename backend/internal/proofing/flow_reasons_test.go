@@ -61,6 +61,19 @@ func TestWithReasons(t *testing.T) {
 			reasonSpec([]string{"dg1"}, map[string]map[string]string{"dg1": {"en": reasonDocumentEN}}),
 			onlyEnglish, "",
 		},
+		{
+			"the age check is an item like any other",
+			reasonSpec([]string{"dg1", attributeAgeOver}, documentReasons()),
+			DefaultFlowHosted(), "give age_over a reason in en",
+		},
+		{
+			"the age check with its reason",
+			reasonSpec([]string{"dg1", attributeAgeOver}, map[string]map[string]string{
+				"dg1":            {"en": "To put your name on the ticket.", "nl": "Voor je naam op het ticket."},
+				attributeAgeOver: {"en": reasonDocumentEN, "nl": reasonDocumentNL},
+			}),
+			DefaultFlowHosted(), "",
+		},
 		{"no data needs no reason", reasonSpec([]string{"outcome_only"}, nil), DefaultFlowHosted(), ""},
 		{"a list that is left to the engine is not checked", reasonSpec(nil, nil), DefaultFlowHosted(), ""},
 		{
