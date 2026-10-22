@@ -60,4 +60,9 @@ func TestAPIResultAgeOver(t *testing.T) {
 	if out := newAPIResultResponse(req, identity, time.Now()); out.Identity != nil {
 		t.Errorf("rejected identity = %+v, want none", out.Identity)
 	}
+
+	// A check waiting for review shows its reviewer the same identity.
+	if got := newAPIIdentity(identity); got.AgeOver == nil || *got.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
+		t.Errorf("identity in review = %+v, want ageOver 18, over", got)
+	}
 }

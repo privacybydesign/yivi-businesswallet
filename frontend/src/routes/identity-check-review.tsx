@@ -11,6 +11,7 @@ import type { ProofingRequest } from "../api/identity-proofing";
 import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
 import {
+  ageOverFact,
   assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
@@ -217,6 +218,7 @@ function ChipData({
   const evidence = result.data?.evidence.at(0);
   const none = "—";
   const document = evidenceDocumentLabel(evidence, i18n.language, t) ?? none;
+  const ageOver = ageOverFact(identity, t);
   const level = request.eidasLevel
     ? t("identityProofing.reviews.check.data.levelOnceApproved", {
         level: assuranceLevelLabel(request.eidasLevel, t),
@@ -250,6 +252,7 @@ function ChipData({
                 ? issuingCountryName(identity.nationality, i18n.language, t)
                 : none,
             },
+            ...(ageOver ? [ageOver] : []),
             {
               label: t("identityProofing.sessions.identity.document"),
               value: document,

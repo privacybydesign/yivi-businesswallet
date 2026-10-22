@@ -52,6 +52,7 @@ import {
   isCheckOutcome,
   showsSessionIdentity,
   timelineActor,
+  ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
 import { Card, Icon, Table, Tag, TopBar } from "../ui";
@@ -720,6 +721,7 @@ function IdentityRows({
     );
   }
   const { identity } = result.data;
+  const ageOver = ageOverFact(identity, t);
   const evidence = result.data.evidence.at(0);
   return (
     <>
@@ -741,18 +743,10 @@ function IdentityRows({
             {t("identityProofing.sessions.identity.nationality")}
           </dt>
           <dd>{identity.nationality || "—"}</dd>
-          {identity.ageOver && (
+          {ageOver && (
             <>
-              <dt className="text-muted">
-                {t("identityProofing.sessions.identity.ageOver", {
-                  age: identity.ageOver.age,
-                })}
-              </dt>
-              <dd>
-                {identity.ageOver.over
-                  ? t("identityProofing.sessions.identity.ageOverYes")
-                  : t("identityProofing.sessions.identity.ageOverNo")}
-              </dd>
+              <dt className="text-muted">{ageOver.label}</dt>
+              <dd>{ageOver.value}</dd>
             </>
           )}
         </>

@@ -26,6 +26,7 @@ import {
   addressVerificationNote,
   matchingAddress,
   ageOverChoices,
+  ageOverFact,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -733,6 +734,20 @@ describe("assurance level", () => {
 
   it("needs nothing without a level", () => {
     expect(reachesAssuranceLevel(draft({ documentAndChip: false }))).toBe(true);
+  });
+});
+
+describe("ageOverFact", () => {
+  it("shows the age check's answer, and nothing without one", () => {
+    expect(ageOverFact({ ageOver: { age: 18, over: true } }, t)).toEqual({
+      label: "18 or older",
+      value: "Yes",
+    });
+    expect(ageOverFact({ ageOver: { age: 21, over: false } }, t)?.value).toBe(
+      "No",
+    );
+    expect(ageOverFact({}, t)).toBeUndefined();
+    expect(ageOverFact(undefined, t)).toBeUndefined();
   });
 });
 

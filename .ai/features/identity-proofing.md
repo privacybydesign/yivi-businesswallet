@@ -340,10 +340,12 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       the person reads it as "Why: ..." under the age check. The CM seed flow
       gives "To check you are 18 or older." and keeps `dg1`'s reason to the
       name on the ticket.
-    - Reaches the public API and admin result as `identity.ageOver`, and a
-      person's row details in the people table ("18 or older: Yes/No"), on a
-      flow's People tab and on All people. The Idem app's consent screen
-      names the age from the app session view's `ageOver`.
+    - Reaches the public API and admin result as `identity.ageOver` (the
+      reviewer's read of a check in review too, `newAPIIdentity`), a person's
+      row details in the people table ("18 or older: Yes/No"), on a flow's
+      People tab and on All people, and an identity check's review page, under
+      the nationality (`ageOverFact`). The Idem app's consent screen names the
+      age from the app session view's `ageOver`.
   - **Reasons.** Every item a flow lists, other than `outcome_only`, has a
     reason, required in each language the flow's hosted page offers (§7, every
     supported one until an admin sets them), and the person reads it under the

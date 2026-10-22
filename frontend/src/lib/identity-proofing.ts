@@ -1219,6 +1219,25 @@ export function ageOverChoices(draft: ProofingFlowDraft): number[] {
   }
   return [...AGE_OVER_CHOICES, current].sort((a, b) => a - b);
 }
+
+// The age check's answer as a result's identity shows it ("18 or older":
+// Yes or No); none for a flow without the age check.
+export function ageOverFact(
+  identity: { ageOver?: { age: number; over: boolean } } | undefined,
+  t: TFunction,
+): { label: string; value: string } | undefined {
+  const answer = identity?.ageOver;
+  if (answer === undefined) {
+    return undefined;
+  }
+  return {
+    label: t("identityProofing.sessions.identity.ageOver", { age: answer.age }),
+    value: answer.over
+      ? t("identityProofing.sessions.identity.ageOverYes")
+      : t("identityProofing.sessions.identity.ageOverNo"),
+  };
+}
+
 // Whether flow's result carries the holder's name and date of birth (the
 // document data, dg1, without the age check, which withholds the date), which
 // a request for one known person is matched against (proofing.readsIdentity).
