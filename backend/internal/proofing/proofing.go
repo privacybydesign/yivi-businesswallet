@@ -553,6 +553,9 @@ type RequestFilter struct {
 	// SubjectKind narrows to the requests sent to members or to external people;
 	// the list's cap then counts only those.
 	SubjectKind *SubjectKind
+	// FlowID narrows to the requests sent on one flow, any version; the list's
+	// cap then counts only those.
+	FlowID *string
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

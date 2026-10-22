@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
-import { isDataRequest } from "../api/identity-proofing";
+import { MAX_LISTED_REQUESTS, isDataRequest } from "../api/identity-proofing";
 import type {
   AddressMode,
   AddressVerification,
@@ -1243,6 +1243,42 @@ export function sessionFilterCounts(
     failed: count("failed"),
     expired: count("expired"),
   };
+}
+
+// Whether a request list is as long as one list read returns: it may then have
+// been cut off, so a count read from it is only a lower bound.
+export function requestListCapped(requests: readonly unknown[]): boolean {
+  return requests.length >= MAX_LISTED_REQUESTS;
+}
+
+// A count read from a request list, for display: the number, or the number
+// with a "+" when the list may have been cut off, as "200+" for all of them.
+export function listedCount(
+  count: number,
+  capped: boolean,
+  t: TFunction,
+): string {
+  return capped
+    ? t("identityProofing.requests.atLeast", { count })
+    : String(count);
+}
+
+// Whose retention a people list states: the org's across every flow, the one
+// flow's it is narrowed to, or none for a flow the caller cannot read (a
+// member's, on a flow no longer offered to members), rather than the org's,
+// which may not be that flow's.
+export type RetentionOf<F> =
+  | { kind: "org" }
+  | { kind: "flow"; flow: F }
+  | { kind: "unknown" };
+
+export function peopleRetentionOf<F extends { id: string }>(
+  flowId: string,
+  flows: readonly F[] | undefined,
+): RetentionOf<F> {
+  if (flowId === "") return { kind: "org" };
+  const flow = flows?.find((f) => f.id === flowId);
+  return flow ? { kind: "flow", flow } : { kind: "unknown" };
 }
 
 // The flows requests were sent on, by name: what a flow filter offers. The

@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
 import i18n from "../i18n";
 import type { ProofingFlow, WebhookDelivery } from "../api/identity-proofing";
-import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
+import {
+  DIPLOMA_MODES,
+  ERASURE_HANDLINGS,
+  MAX_LISTED_REQUESTS,
+} from "../api/identity-proofing";
 import {
   PROOFING_REJECTION_CODES,
   addressLookup,
@@ -48,7 +52,10 @@ import {
   matchesSessionFilter,
   proofingStatsBy,
   proofingStatusLabel,
+  listedCount,
+  peopleRetentionOf,
   requestFlows,
+  requestListCapped,
   requestSubject,
   sendableFlows,
   sessionDurationSeconds,
@@ -779,6 +786,44 @@ describe("requestFlows", () => {
   });
 });
 
+describe("listedCount", () => {
+  const full = Array.from({ length: MAX_LISTED_REQUESTS }, () => ({}));
+
+  it("reads a list as long as one read returns as possibly cut off", () => {
+    expect(requestListCapped(full)).toBe(true);
+    expect(requestListCapped(full.slice(1))).toBe(false);
+    expect(requestListCapped([])).toBe(false);
+  });
+
+  it("shows a count from a cut-off list as at least that many", () => {
+    expect(listedCount(MAX_LISTED_REQUESTS, true, t)).toBe("200+");
+    expect(listedCount(12, true, t)).toBe("12+");
+    expect(listedCount(12, false, t)).toBe("12");
+    expect(listedCount(0, false, t)).toBe("0");
+  });
+});
+
+describe("peopleRetentionOf", () => {
+  const flows = [{ id: "a" }, { id: "b" }];
+
+  it("states the org's retention across every flow", () => {
+    expect(peopleRetentionOf("", flows)).toEqual({ kind: "org" });
+    expect(peopleRetentionOf("", undefined)).toEqual({ kind: "org" });
+  });
+
+  it("states the picked flow's retention", () => {
+    expect(peopleRetentionOf("b", flows)).toEqual({
+      kind: "flow",
+      flow: { id: "b" },
+    });
+  });
+
+  it("states none for a picked flow the caller cannot read", () => {
+    expect(peopleRetentionOf("c", flows)).toEqual({ kind: "unknown" });
+    expect(peopleRetentionOf("a", undefined)).toEqual({ kind: "unknown" });
+  });
+});
+
 describe("flowPurgeDays", () => {
   const org = { dataRetentionDays: 30 };
 
@@ -941,6 +986,12 @@ describe("session settings mirror backend/internal/proofing", () => {
     expect(list).not.toBeNull();
     const backend = list![1].split(",").map((e) => Number(e.trim()));
     expect([...DATA_RETENTION_DAY_OPTIONS]).toEqual(backend);
+  });
+
+  it("caps a request list where the backend does", () => {
+    const cap = /const maxListedRequests = (\d+)/.exec(source);
+    expect(cap).not.toBeNull();
+    expect(MAX_LISTED_REQUESTS).toBe(Number(cap![1]));
   });
 });
 

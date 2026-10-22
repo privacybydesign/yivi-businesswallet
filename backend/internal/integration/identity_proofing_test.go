@@ -417,21 +417,25 @@ func TestMemberExternalRequest(t *testing.T) {
 	}
 
 	// The member's own two requests; the stats count external ones only.
-	assertMemberRequestLists(t, env, base, shared)
+	assertMemberRequestLists(t, env, base, shared, restricted)
 
 	env.loginAs("admin@acme.test")
-	assertAdminRequestLists(t, env, base)
+	assertAdminRequestLists(t, env, base, shared, restricted)
 }
 
 // assertMemberRequestLists checks that a member lists and counts only the two
-// requests they sent on the shared flow, one of them external.
-func assertMemberRequestLists(t *testing.T, env *testEnv, base string, shared proofingFlowResp) {
+// requests they sent on the shared flow, one of them external, and none on the
+// restricted one.
+func assertMemberRequestLists(t *testing.T, env *testEnv, base string, shared, restricted proofingFlowResp) {
 	t.Helper()
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 2 {
 		t.Errorf("member requests = %+v, want the two they sent", list)
 	}
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?subjectKind=external", nil)); len(list) != 1 || !list[0].External {
 		t.Errorf("member external requests = %+v, want the one sent to an external person", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?flowId="+restricted.ID, nil)); len(list) != 0 {
+		t.Errorf("member requests on the restricted flow = %+v, want none: the admin sent the one there", list)
 	}
 	stats := decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
 	if len(stats.Rows) != 1 || stats.Rows[0].FlowID != shared.ID || stats.Rows[0].Sessions != 1 {
@@ -440,8 +444,9 @@ func assertMemberRequestLists(t *testing.T, env *testEnv, base string, shared pr
 }
 
 // assertAdminRequestLists checks that an admin lists and counts all three
-// requests: the member's two and their own.
-func assertAdminRequestLists(t *testing.T, env *testEnv, base string) {
+// requests: the member's two on the shared flow and their own on the
+// restricted one.
+func assertAdminRequestLists(t *testing.T, env *testEnv, base string, shared, restricted proofingFlowResp) {
 	t.Helper()
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 3 {
 		t.Errorf("admin requests = %+v, want all three", list)
@@ -454,6 +459,17 @@ func assertAdminRequestLists(t *testing.T, env *testEnv, base string) {
 	}
 	wantProofingError(t, "unknown subject kind", env.do(http.MethodGet, base+"/requests?subjectKind=robot", nil),
 		http.StatusBadRequest, "invalid_input")
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?flowId="+shared.ID, nil)); len(list) != 2 ||
+		list[0].FlowID != shared.ID || list[1].FlowID != shared.ID {
+		t.Errorf("admin requests on the shared flow = %+v, want the member's two", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?flowId="+shared.ID+"&subjectKind=external", nil)); len(list) != 1 ||
+		!list[0].External || list[0].FlowID != shared.ID {
+		t.Errorf("admin external requests on the shared flow = %+v, want the member's external one", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests?flowId="+restricted.ID, nil)); len(list) != 1 || list[0].FlowID != restricted.ID {
+		t.Errorf("admin requests on the restricted flow = %+v, want the admin's own", list)
+	}
 	stats := decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
 	if len(stats.Rows) != 2 || stats.Rows[0].Sessions != 1 || stats.Rows[1].Sessions != 1 {
 		t.Errorf("admin stats = %+v, want one session on each flow", stats)

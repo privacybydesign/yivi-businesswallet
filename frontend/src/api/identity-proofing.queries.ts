@@ -325,16 +325,20 @@ export function useSetFlowSelectionMutation(
   });
 }
 
-// The sessions sent to external people, newest first. Under the requests key,
-// so everything that refreshes the org's requests refreshes these too.
+// The sessions sent to external people, newest first: on any flow, or on the
+// one flowId names, which the backend narrows to before its cap. Under the
+// requests key, so everything that refreshes the org's requests refreshes
+// these too.
 export function useExternalRequestsQuery(
   slug: string,
+  flowId = "",
+  enabled = true,
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), "external"],
+    queryKey: [...proofingRequestsQueryKey(slug), "external", flowId],
     queryFn: ({ signal }) =>
-      getProofingRequests(slug, { subjectKind: "external" }, signal),
-    enabled: slug !== "",
+      getProofingRequests(slug, { subjectKind: "external", flowId }, signal),
+    enabled: enabled && slug !== "",
     refetchInterval: (query) =>
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS

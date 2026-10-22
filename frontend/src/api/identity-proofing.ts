@@ -695,17 +695,27 @@ export function getProofingStats(
   });
 }
 
+// MAX_LISTED_REQUESTS is the most requests one list read returns, the newest
+// (maxListedRequests in backend/internal/proofing): a list that long may have
+// been cut off, so a count read from it is only a lower bound.
+export const MAX_LISTED_REQUESTS = 200;
+
 // The org's requests, newest first and capped by the backend after the
-// narrowing: to those sent to one member, or to those sent to members or to
-// external people.
+// narrowing: to those sent to one member, to those sent to members or to
+// external people, and to those sent on one flow.
 export function getProofingRequests(
   slug: string,
-  filter: { subjectUserId?: string; subjectKind?: "member" | "external" },
+  filter: {
+    subjectUserId?: string;
+    subjectKind?: "member" | "external";
+    flowId?: string;
+  },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
   const params = new URLSearchParams();
   if (filter.subjectUserId) params.set("subjectUserId", filter.subjectUserId);
   if (filter.subjectKind) params.set("subjectKind", filter.subjectKind);
+  if (filter.flowId) params.set("flowId", filter.flowId);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),

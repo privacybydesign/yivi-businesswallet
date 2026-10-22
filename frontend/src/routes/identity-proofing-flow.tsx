@@ -18,7 +18,9 @@ import {
   CHECK_PASSIVE_AUTH,
   assuranceLevelLabel,
   flowStepLabels,
+  listedCount,
   proofingErrorMessage,
+  requestListCapped,
 } from "../lib/identity-proofing";
 import { Button, Card, Tag, TopBar } from "../ui";
 import { FlowHostedSettings } from "./flow-hosted-settings";
@@ -107,7 +109,8 @@ function FlowView({
   flow: ProofingFlow;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const people = useExternalRequestsQuery(slug);
+  // The same list the People tab shows, narrowed to the flow by the backend.
+  const people = useExternalRequestsQuery(slug, flow.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const [editing, setEditing] = useState(false);
   const activeTab: TabKey =
@@ -122,7 +125,9 @@ function FlowView({
   ]
     .filter((part) => part !== "")
     .join(" · ");
-  const count = people.data?.filter((r) => r.flowId === flow.id).length;
+  const count = people.data
+    ? listedCount(people.data.length, requestListCapped(people.data), t)
+    : undefined;
 
   function setTab(tab: TabKey): void {
     setSearchParams(

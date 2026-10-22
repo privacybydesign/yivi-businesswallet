@@ -18,7 +18,10 @@ table (name, created with who by, last used, revoke; revoked ones are not
 listed), the **Webhook endpoint** and its **Recent deliveries**. The **All people** list
 (`/{org}/identity-proofing/people`, opened from the Overview;
 `?session=<id>` opens a row) is not in the sidebar; a flow's People tab is the
-same table narrowed to that flow. "Verify a person" in the
+same table narrowed to that flow by the backend (`?flowId=`), as is All people
+when its Flow filter picks one, whose retention line then states that flow's
+retention. A count read from a list of 200, the cap, may be short, so it shows
+as "200+" ("12+" for a part of it). "Verify a person" in the
 header of the Overview, of All people and of a flow opens the send form, for any member. Only a
 platform admin pauses an org's proofing, after which no request can be sent
 (`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
@@ -482,9 +485,12 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   keys and webhook, reading a request's result and deciding reviews are
   `RequireOrgAdmin`; an admin lists every flow (with `allowed`/`default`) and
   every request of the org. `GET requests?subjectUserId=` narrows either view to
-  the requests proofing one member, and `?subjectKind=external|member` to those
-  sent to external people or to members; the list's cap of 200 applies after
-  the narrowing, so the All people page and the Overview ask for `external`.
+  the requests proofing one member, `?subjectKind=external|member` to those
+  sent to external people or to members, and `?flowId=` to those sent on one
+  flow (any version; index `identity_proofing_requests_org_flow_idx`); the
+  narrowings combine, and the list's cap of 200 applies after them, so the All
+  people page and the Overview ask for `external`, and a flow's People tab for
+  its `flowId` too.
 - **Customers were removed from the model** (thirteen migrations,
   `20261021100000` to `20261021101200`, after the newest one that touched
   customers, `20261019120000`;

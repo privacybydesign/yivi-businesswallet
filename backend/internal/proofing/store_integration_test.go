@@ -2054,6 +2054,54 @@ func TestRequestListBySubjectKind(t *testing.T) {
 	}
 }
 
+// The cap on a list applies after the flow narrowing too: a quiet flow's one
+// request, older than the newest maxListedRequests on a busy flow, is listed
+// when only its flow is asked for, and the flow combines with the subject kind.
+func TestRequestListByFlow(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	alex := makeUser(t, pool, "alex@example.org")
+	ctx := context.Background()
+	onFlow := func(subject Subject, flowID string) NewStoredRequest {
+		in := newStoredRequest(orgID, sam, subject)
+		in.Flow.ID = flowID
+		return in
+	}
+	const quietFlow, busyFlow = "quiet", "busy"
+	quiet, err := store.Create(ctx, onFlow(externalSubject("a@example.org"), quietFlow))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := store.Create(ctx, onFlow(Subject{Kind: SubjectMember, UserID: &alex, Email: "alex@example.org"}, quietFlow)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, onFlow(externalSubject("b@example.org"), busyFlow)); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	kind := SubjectExternal
+	all, err := store.List(ctx, orgID, RequestFilter{SubjectKind: &kind})
+	if err != nil || len(all) != maxListedRequests || slices.ContainsFunc(all, func(r Request) bool { return r.ID == quiet.ID }) {
+		t.Fatalf("List external = %d rows, %v; want the newest %d, all on the busy flow", len(all), err, maxListedRequests)
+	}
+	flowID := quietFlow
+	got, err := store.List(ctx, orgID, RequestFilter{SubjectKind: &kind, FlowID: &flowID})
+	if err != nil || len(got) != 1 || got[0].ID != quiet.ID {
+		t.Errorf("List external on the quiet flow = %d rows, %v; want only its external request", len(got), err)
+	}
+	if got, err = store.List(ctx, orgID, RequestFilter{FlowID: &flowID}); err != nil || len(got) != 2 {
+		t.Errorf("List on the quiet flow = %d rows, %v; want both its requests", len(got), err)
+	}
+	flowID = busyFlow
+	if got, err = store.List(ctx, orgID, RequestFilter{FlowID: &flowID}); err != nil || len(got) != maxListedRequests {
+		t.Errorf("List on the busy flow = %d rows, %v; want %d", len(got), err, maxListedRequests)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {

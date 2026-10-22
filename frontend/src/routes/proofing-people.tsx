@@ -7,6 +7,7 @@ import {
   useDecideReviewMutation,
   useExternalRequestsQuery,
   useProofingRequestEventsQuery,
+  useProofingFlowsQuery,
   useProofingRequestResultQuery,
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
@@ -40,8 +41,11 @@ import {
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
+  listedCount,
   matchesSessionFilter,
+  peopleRetentionOf,
   requestFlows,
+  requestListCapped,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
@@ -136,41 +140,53 @@ export function PeopleList({
   flow?: ProofingFlow;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useExternalRequestsQuery(slug);
+  const [flowFilter, setFlowFilter] = useState("");
+  const scope: PeopleScope = flow ? "flow" : "all";
+  const flowId = flow?.id ?? flowFilter;
+  // The backend narrows to the flow before its cap, so a quiet flow on a busy
+  // org lists its own people; every flow's list names what the filter offers.
+  const requests = useExternalRequestsQuery(slug, flowId);
+  const everyone = useExternalRequestsQuery(slug, "", scope === "all");
+  // A member reads the flows offered to them; another flow's retention is
+  // then not stated.
+  const flows = useProofingFlowsQuery(
+    slug,
+    scope === "all" && flowFilter !== "",
+  );
   const settings = useProofingSettingsQuery(slug);
   const formatWhen = useWhenFormatter();
   const [searchParams] = useSearchParams();
-  const [flowFilter, setFlowFilter] = useState("");
   const [filter, setFilter] = useState<SessionFilter>("all");
   const [open, setOpen] = useState<string | null>(searchParams.get("session"));
-  const scope: PeopleScope = flow ? "flow" : "all";
   const columns = BASE_COLUMNS + (scope === "all" ? 1 : 0) + (isAdmin ? 1 : 0);
-  const all = requests.data ?? [];
-  const flowId = flow?.id ?? flowFilter;
-  const onFlow = flowId === "" ? all : all.filter((r) => r.flowId === flowId);
+  const onFlow = requests.data ?? [];
+  const capped = requestListCapped(onFlow);
   const counts = sessionFilterCounts(onFlow);
   const shown = onFlow.filter((r) => matchesSessionFilter(r.status, filter));
+  const retentionOf = flow
+    ? ({ kind: "flow", flow } as const)
+    : peopleRetentionOf(flowFilter, flows.data);
 
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-x-4 gap-y-3">
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:gap-x-4">
           {scope === "all" && (
             <div className="flex items-center gap-2.5">
               <label htmlFor="people-flow-filter" className={LABEL}>
                 {t("identityProofing.requests.flow")}
               </label>
-              <div className="relative">
+              <div className="relative min-w-0 flex-1 sm:flex-none">
                 <select
                   id="people-flow-filter"
                   value={flowFilter}
                   onChange={(event) => setFlowFilter(event.target.value)}
-                  className={`${SELECT_CLASS} w-64`}
+                  className={`${SELECT_CLASS} w-full sm:w-64`}
                 >
                   <option value="">
                     {t("identityProofing.people.allFlows")}
                   </option>
-                  {requestFlows(all).map((option) => (
+                  {requestFlows(everyone.data ?? []).map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.name}
                     </option>
@@ -188,7 +204,7 @@ export function PeopleList({
             <label htmlFor="people-result-filter" className={LABEL}>
               {t("identityProofing.sessions.result")}
             </label>
-            <div className="relative">
+            <div className="relative min-w-0 flex-1 sm:flex-none">
               <select
                 id="people-result-filter"
                 value={filter}
@@ -198,12 +214,12 @@ export function PeopleList({
                       "all",
                   )
                 }
-                className={`${SELECT_CLASS} w-56`}
+                className={`${SELECT_CLASS} w-full sm:w-56`}
               >
                 {SESSION_FILTERS.map((key) => (
                   <option key={key} value={key}>
                     {t(`identityProofing.sessions.filters.${key}`, {
-                      count: counts[key],
+                      number: listedCount(counts[key], capped, t),
                     })}
                   </option>
                 ))}
@@ -216,9 +232,14 @@ export function PeopleList({
             </div>
           </div>
         </div>
-        {settings.data && (
+        {settings.data && retentionOf.kind !== "unknown" && (
           <p className="text-muted text-[12px]">
-            {retentionNote(settings.data, isAdmin ? "all" : "own", flow, t)}
+            {retentionNote(
+              settings.data,
+              isAdmin ? "all" : "own",
+              retentionOf.kind === "flow" ? retentionOf.flow : undefined,
+              t,
+            )}
           </p>
         )}
       </div>
