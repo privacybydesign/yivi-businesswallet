@@ -514,17 +514,18 @@ function MinimumAge({
       <label htmlFor="flow-age-over" className={LABEL}>
         {t("identityProofingFlows.editor.receive.ageOver")}
       </label>
-      <ChevronSelect
+      <Select
         id="flow-age-over"
         value={draft.ageOver}
-        onChange={(ageOver) => update({ ageOver })}
+        state={error === "ageOver" ? "error" : "ok"}
+        onChange={(event) => update({ ageOver: event.target.value })}
       >
         {ageOverChoices(draft).map((age) => (
           <option key={age} value={String(age)}>
             {t("identityProofingFlows.editor.receive.ageOverOption", { age })}
           </option>
         ))}
-      </ChevronSelect>
+      </Select>
       <span className={HINT}>
         {t("identityProofingFlows.editor.receive.ageOverHint")}
       </span>
