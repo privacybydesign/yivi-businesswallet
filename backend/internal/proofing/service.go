@@ -632,6 +632,15 @@ func (s Settings) sessionTTL(f proofingprovider.Flow) time.Duration {
 	return flowSessionTTL(f, orgTTL)
 }
 
+// withSessionTTL is sess with the lifetime it was created with: the one the
+// provider gave it, or for a provider that does not say, the one asked for.
+func withSessionTTL(sess proofingprovider.Session, asked time.Duration) proofingprovider.Session {
+	if sess.TTL == 0 {
+		sess.TTL = asked
+	}
+	return sess
+}
+
 // Requester is who sends a request: a member, or the org's software calling
 // the API.
 type Requester struct {
@@ -691,10 +700,6 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	ttl := SessionTTL
-	if settings != nil && settings.Session.SessionTTL != 0 {
-		ttl = settings.Session.SessionTTL
-	}
 	flowID, err := s.requestFlowID(ctx, org, by, in)
 	if err != nil {
 		return Sent{}, err
@@ -704,7 +709,13 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	ttl = flowSessionTTL(flow, ttl)
+	// A member's request reads no org settings: the defaults' lifetime, else
+	// the flow's.
+	var lifetimes Settings
+	if settings != nil {
+		lifetimes = *settings
+	}
+	ttl := lifetimes.sessionTTL(flow)
 	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
 	}
@@ -755,6 +766,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
+	sess = withSessionTTL(sess, ttl)
 	// An Idem session is the vcmrtd link; a Yivi one is started from the screen.
 	if in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess,
@@ -782,7 +794,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
 	}
-	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	out := Sent{Request: req}
 	if sess.Claim == nil {
 		return out, nil

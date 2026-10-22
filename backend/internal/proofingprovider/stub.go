@@ -205,7 +205,7 @@ func (s *Stub) createLocked(t Tenant, flowID string, version int, ttl time.Durat
 	s.sessions[id] = stubSession{
 		tenant: t.ID, token: token, flowID: flowID, flowVersion: version, method: method, expiresAt: now.Add(ttl),
 	}
-	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version}
+	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), TTL: ttl, FlowVersion: version}
 	if s.Outcome != "" && s.onChange != nil {
 		notify := s.onChange
 		time.AfterFunc(stubDecisionDelay, func() { notify(id) })

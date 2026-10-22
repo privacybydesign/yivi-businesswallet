@@ -812,6 +812,10 @@ export const en = {
         ageNotDisclosed:
           "the shared document did not say whether you are old enough.",
       },
+      ended: {
+        title: "This check has ended",
+        message: "It was not finished in time, so nothing was shared.",
+      },
       outcome: {
         approved: {
           title: "Identity verified",
@@ -1574,9 +1578,12 @@ export const en = {
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",
     ended: {
-      title: "This check has ended",
-      started:
-        "It was not finished within {{minutes}} minutes, so nothing was shared with {{name}}.",
+      started_one:
+        "It was not finished within {{count}} minute, so nothing was shared with {{name}}.",
+      started_other:
+        "It was not finished within {{count}} minutes, so nothing was shared with {{name}}.",
+      timedOut:
+        "It was not finished in time, so nothing was shared with {{name}}.",
       notStarted:
         "It was not started in time, so nothing was shared with {{name}}.",
       retryTitle: "Want to try again?",

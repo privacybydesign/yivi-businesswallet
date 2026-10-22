@@ -346,36 +346,52 @@ func TestHostedViewCarriesReasons(t *testing.T) {
 	}
 }
 
-// The hosted page names how long the session ran when it ends: the flow's own
-// lifetime, else the org's, else the default.
+// The hosted page names how long its session ran when it ends: the lifetime
+// the session was started with (the flow's own, else the org's, else the
+// default), not whatever the settings say by the time the page is read.
 func TestHostedViewSessionTTL(t *testing.T) {
 	d := newDiplomaFixture(DiplomasOff)
 	_, token := d.sendHosted(t)
-	view := func() string {
+	view := func() hostedProgressResponse {
+		t.Helper()
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
 		r.SetPathValue("token", token)
 		w := httptest.NewRecorder()
 		if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
 			t.Fatalf("hostedView: %v", err)
 		}
-		return w.Body.String()
+		var out hostedProgressResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode hosted view: %v", err)
+		}
+		return out
+	}
+	setOrgTTL := func(ttl time.Duration) {
+		t.Helper()
+		if _, err := d.svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{SessionTTL: &ttl}); err != nil {
+			t.Fatalf("UpdateSettings: %v", err)
+		}
 	}
 
-	if body, want := view(), `"sessionTtlSeconds":600`; !strings.Contains(body, want) {
-		t.Errorf("hosted view with the default lifetime = %s, want %s", body, want)
+	if got := view().SessionTTLSeconds; got != 0 {
+		t.Errorf("unstarted link's lifetime = %d, want none", got)
 	}
 
-	orgTTL := 5 * time.Minute
-	if _, err := d.svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{SessionTTL: &orgTTL}); err != nil {
-		t.Fatalf("UpdateSettings: %v", err)
+	setOrgTTL(5 * time.Minute)
+	started, err := d.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
+	if err != nil {
+		t.Fatalf("StartHosted: %v", err)
 	}
-	if body, want := view(), `"sessionTtlSeconds":300`; !strings.Contains(body, want) {
-		t.Errorf("hosted view under the org's lifetime = %s, want %s", body, want)
+	if got, want := newHostedProgress(started.Request, time.Now()).SessionTTLSeconds, 300; got != want {
+		t.Errorf("start lifetime = %d, want the org's %d", got, want)
+	}
+	if got := d.ips.sessions[len(d.ips.sessions)-1].TTL; got != 5*time.Minute {
+		t.Errorf("session asked for %s, want the org's 5m", got)
 	}
 
-	i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == appFlow.ID })
-	d.ips.flows[i].SessionTTLSeconds = 120
-	if body, want := view(), `"sessionTtlSeconds":120`; !strings.Contains(body, want) {
-		t.Errorf("hosted view under the flow's lifetime = %s, want %s", body, want)
+	// A change of settings afterwards leaves what the session ran with.
+	setOrgTTL(2 * time.Minute)
+	if got, want := view().SessionTTLSeconds, 300; got != want {
+		t.Errorf("lifetime after the org's changed = %d, want the %d it was started with", got, want)
 	}
 }

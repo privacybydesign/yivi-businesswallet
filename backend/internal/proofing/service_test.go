@@ -111,7 +111,7 @@ func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofi
 		return false, nil
 	}
 	f.attached = append(f.attached, sess)
-	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	f.stored.FlowVersion = sess.FlowVersion
 	if req.Method != "" {
 		f.stored.Method = req.Method
@@ -1116,11 +1116,27 @@ func TestHostedFlowSessionLifetime(t *testing.T) {
 	f.ips.flows[0].SessionTTLSeconds = int((2 * time.Minute) / time.Second)
 	_, token := f.sendHosted(t)
 
-	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err != nil {
+	started, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
+	if err != nil {
 		t.Fatalf("StartHosted: %v", err)
 	}
 	if got := f.ips.sessions[0].TTL; got != 2*time.Minute {
 		t.Errorf("hosted session = %v, want the flow's 2m0s", got)
+	}
+	if got := f.requests.stored.session.TTL; got != 2*time.Minute || started.Request.session.TTL != got {
+		t.Errorf("kept session lifetime = %v (start %v), want the flow's 2m0s", got, started.Request.session.TTL)
+	}
+}
+
+// The lifetime a request keeps for its session is the one the provider gave
+// it, else the one it was asked for.
+func TestWithSessionTTL(t *testing.T) {
+	asked := 10 * time.Minute
+	if got := withSessionTTL(proofingprovider.Session{TTL: 15 * time.Minute}, asked).TTL; got != 15*time.Minute {
+		t.Errorf("provider's lifetime = %v, want 15m0s", got)
+	}
+	if got := withSessionTTL(proofingprovider.Session{}, asked).TTL; got != asked {
+		t.Errorf("unsaid lifetime = %v, want the asked %v", got, asked)
 	}
 }
 

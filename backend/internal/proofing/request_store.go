@@ -38,7 +38,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(r.assurance_level, ''), COALESCE(r.eidas_level, ''), COALESCE(r.error_code, ''),
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
-	r.subject_user_id, COALESCE(r.flow_version, 0),
+	COALESCE(r.ips_session_ttl_seconds, 0), r.subject_user_id, COALESCE(r.flow_version, 0),
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
@@ -208,13 +208,14 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var sessionID *string
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
+	var sessionTTLSeconds int
 	var nameCT, birthDateCT, addressCT []byte
 	var retentionDays, legalMonths, overrideSeconds, heldSessions *int
 	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
-		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
+		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
@@ -253,7 +254,10 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		if err != nil {
 			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt session token request %s: %w", r.ID, err)}
 		}
-		r.session = &ipsSession{ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt}
+		r.session = &ipsSession{
+			ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt,
+			TTL: time.Duration(sessionTTLSeconds) * time.Second,
+		}
 		if sessionExpiresAt != nil {
 			r.session.ExpiresAt = *sessionExpiresAt
 		}
@@ -876,11 +880,13 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
 				ips_session_id = $2, ips_session_token_ciphertext = $3, ips_session_expires_at = $4,
+				ips_session_ttl_seconds = NULLIF($7, 0),
 				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = COALESCE(NULLIF($6, ''), method),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, updated_at = now()
 			WHERE id = $1 AND ips_session_id IS NULL AND status = 'pending'
 				AND purged_at IS NULL AND cancelled_at IS NULL AND ips_session_ended_at IS NULL`
-		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion, string(req.Method))
+		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion, string(req.Method),
+			int(sess.TTL/time.Second))
 		if err != nil {
 			return fmt.Errorf("proofing: attach session request %s: %w", req.ID, err)
 		}

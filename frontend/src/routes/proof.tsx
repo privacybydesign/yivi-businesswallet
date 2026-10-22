@@ -21,11 +21,13 @@ import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
 import {
   canCloseDecline,
+  checkEndReason,
   hostedHandBack,
   hostedLanguage,
   hostedTheme,
   postCompletion,
 } from "../lib/hosted-completion";
+import type { CheckEndReason } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import {
   currentStage,
@@ -34,12 +36,12 @@ import {
   isProofingLive,
   methodChoices,
   supportContactLink,
-  ttlMinutes,
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
+  CheckEnded,
   MethodChoice,
   Overview,
   Session,
@@ -66,8 +68,10 @@ export default function Proof(): React.JSX.Element {
   const page = useHostedProofingQuery(token);
 
   return (
-    <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-xl">
+    // The card sits at the top, 80 px down, on every step, as VF1 to VF5
+    // draw it; "Powered by Yivi" follows it.
+    <div className="bg-surface-2 flex min-h-screen flex-col items-center px-4 pt-20 pb-10">
+      <div className="flex w-full max-w-[560px] flex-col gap-5">
         {/* Data first: a background refetch that fails (the tab regaining
             focus on return from the Idem app) keeps the page it already has
             rather than replacing the session with an error card. */}
@@ -75,7 +79,7 @@ export default function Proof(): React.JSX.Element {
           <>
             <HostedFlow token={token} page={page.data} />
             {!page.data.organization.branding.hidePoweredBy && (
-              <p className="text-muted mt-4 text-center text-[12px]">
+              <p className="text-muted text-center text-[12.5px]">
                 {t("proofLink.poweredBy")}
               </p>
             )}
@@ -300,17 +304,13 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
-              ended={
-                <CheckEnded
+              ended={(progress) => (
+                <HostedCheckEnded
                   name={organization.name}
                   contact={organization.branding.supportContact}
-                  minutes={
-                    page.started || started !== undefined
-                      ? ttlMinutes(flow.sessionTtlSeconds)
-                      : undefined
-                  }
+                  reason={checkEndReason(progress)}
                 />
-              }
+              )}
               onEnded={onEnded}
               onSettled={settle}
               dataRequest={dataRequest}
@@ -338,34 +338,32 @@ function HostedFlow({
 
 type DataKind = Exclude<FlowKind, "identity">;
 
-// What the person sees once the check ran out: nothing was shared, and who to
-// ask for a new link. minutes is how long the session ran; absent when the
-// link was never started.
-function CheckEnded({
+// What the person sees once the check ran out (VF5): nothing was shared, and
+// who to ask for a new link. It stays on screen: a check that ran out is not
+// handed back by redirect (hostedHandBack).
+function HostedCheckEnded({
   name,
   contact,
-  minutes,
+  reason,
 }: {
   name: string;
   contact: string;
-  minutes: number | undefined;
+  reason: CheckEndReason;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const link = supportContactLink(contact);
   // The page can be framed, and a plain link would replace it inside the frame.
   const newTab = link?.kind === "web";
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-ink text-[20px] font-bold">
-          {t("proofLink.ended.title")}
-        </h1>
-        <p className="text-ink-soft text-[14px]">
-          {minutes === undefined
-            ? t("proofLink.ended.notStarted", { name })
-            : t("proofLink.ended.started", { name, minutes })}
-        </p>
-      </div>
+    <CheckEnded
+      message={
+        reason.kind === "notStarted"
+          ? t("proofLink.ended.notStarted", { name })
+          : reason.minutes === undefined
+            ? t("proofLink.ended.timedOut", { name })
+            : t("proofLink.ended.started", { name, count: reason.minutes })
+      }
+    >
       <div className="rounded-yivi bg-surface-2 flex flex-col gap-2 p-4">
         <span className="text-ink font-semibold">
           {t("proofLink.ended.retryTitle")}
@@ -388,7 +386,7 @@ function CheckEnded({
           )
         )}
       </div>
-    </div>
+    </CheckEnded>
   );
 }
 

@@ -32,7 +32,12 @@ import {
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
-import { MethodChoice, Overview, Session } from "./proofing-verify-steps";
+import {
+  CheckEnded,
+  MethodChoice,
+  Overview,
+  Session,
+} from "./proofing-verify-steps";
 import type { VerifyOrg } from "./proofing-verify-steps";
 
 const HINT = "text-ink-soft text-[13px]";
@@ -250,6 +255,20 @@ function VerifyFlow({
           addressMode={sent.addressMode}
           onAddressStep={setInAddress}
           onRestart={restart}
+          ended={() => (
+            <CheckEnded message={t("identityProofing.onScreen.ended.message")}>
+              <div>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  icon="scan_qrcode"
+                  onClick={restart}
+                >
+                  {t("identityProofing.onScreen.scan.restart")}
+                </Button>
+              </div>
+            </CheckEnded>
+          )}
           outcomeActions={
             <div className="flex flex-wrap justify-center gap-2">
               <Link

@@ -12243,6 +12243,12 @@ components:
           description: The link's end until it is started, then the session's.
         started:
           type: boolean
+        sessionTtlSeconds:
+          type: integer
+          description: >-
+            The lifetime the started session was created with (the flow's own, else the
+            organisation's, at the start), which the page names when the check ends unfinished.
+            Absent before a start, and for a session started before the wallet kept it.
         completedAt:
           type: string
           format: date-time
@@ -12362,13 +12368,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-                sessionTtlSeconds:
-                  type: integer
-                  description: >-
-                    How long a session of the flow runs once started: the flow's own lifetime when
-                    it sets one, else the organisation's. What the page tells the subject when it
-                    ends unfinished.
-              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays, sessionTtlSeconds]
+              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.

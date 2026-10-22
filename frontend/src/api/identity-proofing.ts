@@ -1165,6 +1165,10 @@ export interface ProofingProgress {
   addressUntil?: string;
   // What the law kept of an erasure, on a hosted link.
   legalRetention?: HostedLegalRetention;
+  // A hosted link's: whether its session was started, and the lifetime it
+  // was created with.
+  started?: boolean;
+  sessionTtlSeconds?: number;
 }
 
 export function startProofingYivi(
@@ -1256,6 +1260,10 @@ const hostedProgressSchema = z.object({
   method: z.string().optional(),
   linkExpiresAt: z.string(),
   started: z.boolean(),
+  // The lifetime the started session was created with, which the page names
+  // when it ends unfinished; absent before a start, and for a session started
+  // before the wallet kept it.
+  sessionTtlSeconds: z.number().optional(),
   // Until when the subject can add a diploma extract; absent while they cannot.
   diplomasUntil: z.string().optional(),
   // Until when the subject can enter their address; absent while they cannot,
@@ -1320,9 +1328,6 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
-    // How long a started session runs, as the page tells the subject when it
-    // ends unfinished.
-    sessionTtlSeconds: z.number(),
   }),
   // The diploma extracts the subject added.
   diplomas: z.array(hostedDiplomaSchema),

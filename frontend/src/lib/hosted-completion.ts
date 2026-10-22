@@ -2,8 +2,9 @@
 // once the session settles. Pure, so the rules are unit-tested.
 
 import type { MutationStatus } from "@tanstack/react-query";
-import type { HostedTheme } from "../api/identity-proofing";
+import type { HostedTheme, ProofingProgress } from "../api/identity-proofing";
 import type { OrgTheme } from "../api/theme";
+import { ttlMinutes } from "./identity-proofing";
 import {
   DEFAULT_LANGUAGE,
   isSupportedLanguage,
@@ -80,9 +81,15 @@ export interface HostedHandBack {
   redirectTo: string | undefined;
 }
 
+// The status of a check that ran out unfinished: the session's time, or the
+// link's before it was started.
+const STATUS_EXPIRED = "expired";
+
 // The hand-back for a settled status, or undefined when there is none: the
 // page hands back once, and a data request in review is not answered yet. A
-// data request's answer shows on the page, so it never redirects away.
+// data request's answer shows on the page, so it never redirects away; nor
+// does a check that ran out, whose page says what to do next (VF5) instead of
+// sending the person back as if it were done.
 export function hostedHandBack({
   sessionId,
   status,
@@ -106,7 +113,7 @@ export function hostedHandBack({
     message,
     post: framed,
     redirectTo:
-      redirectUrl && !dataRequest
+      redirectUrl && !dataRequest && status !== STATUS_EXPIRED
         ? completionRedirect(redirectUrl, message)
         : undefined,
   };
@@ -175,4 +182,27 @@ export function hostedTheme(
 // Whether the decline dialog may close: not while the decline is in flight.
 export function canCloseDecline(status: MutationStatus): boolean {
   return status !== "pending";
+}
+
+// Why a hosted check ended unfinished, as "This check has ended" says it: a
+// link that was never started ran out before a start; a started one ran out
+// within the lifetime its session was created with, named when the page has
+// it (a session started before the wallet kept it says "in time").
+export type CheckEndReason =
+  | { kind: "notStarted" }
+  | { kind: "timedOut"; minutes: number | undefined };
+
+export function checkEndReason(
+  progress: Pick<ProofingProgress, "started" | "sessionTtlSeconds">,
+): CheckEndReason {
+  if (progress.started !== true) {
+    return { kind: "notStarted" };
+  }
+  return {
+    kind: "timedOut",
+    minutes:
+      progress.sessionTtlSeconds === undefined
+        ? undefined
+        : ttlMinutes(progress.sessionTtlSeconds),
+  };
 }

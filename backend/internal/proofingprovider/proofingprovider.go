@@ -109,6 +109,9 @@ type Session struct {
 	ID        string
 	Token     string
 	ExpiresAt time.Time
+	// TTL is the lifetime the provider gave the session when it created it:
+	// the SessionInput's within the provider's bounds. 0 when it does not say.
+	TTL time.Duration
 	// FlowVersion is the flow version the engine pinned the session to; 0 when unknown.
 	FlowVersion int
 	// Claim is the vcmrtd link for the subject's phone, nil when the engine offered none

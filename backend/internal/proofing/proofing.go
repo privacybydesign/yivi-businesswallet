@@ -419,6 +419,9 @@ type ipsSession struct {
 	Token string
 	// ExpiresAt is the engine's hard cap for the session: past it, it is certainly over.
 	ExpiresAt time.Time
+	// TTL is the lifetime the session was created with; 0 for one created
+	// before the wallet kept it.
+	TTL time.Duration
 	// EndedAt is when the wallet saw the session end without an outcome (expired
 	// or cancelled in the engine); nil while it may still run or decide.
 	EndedAt *time.Time

@@ -306,7 +306,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", err)
 	}
 	s.auditProofing(sess, eventSessionCreated, nil)
-	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, FlowVersion: sess.FlowVersion}
+	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: ttl, FlowVersion: sess.FlowVersion}
 	if sess.Method == session.MethodNFCPassport && sessionOpenForDevices(sess) == nil {
 		updated, claims, err := s.mintClaimTokens(sess, "create", session.DeviceRoleNative)
 		if err != nil {

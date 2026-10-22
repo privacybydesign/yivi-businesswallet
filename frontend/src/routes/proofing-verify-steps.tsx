@@ -378,11 +378,32 @@ export function StepRegion({
   );
 }
 
+// What a page shows once its check ran out unfinished: that it ended, that
+// nothing was shared (message), and what the person can do next (children).
+export function CheckEnded({
+  message,
+  children,
+}: {
+  message: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div role="status" className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2.5">
+        <StepHeading>{t("identityProofing.onScreen.ended.title")}</StepHeading>
+        <p className="text-ink-soft text-[15px] leading-[23px]">{message}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // The running session: the app's QR code and link with a countdown, until
 // the request settles or the session runs out. onRestart, when set, offers a
-// new session after one ended; outcomeActions go under the outcome. A page
-// that gives ended shows it instead of the outcome once the session ran out,
-// and is told through onEnded.
+// new session after one ended; outcomeActions go under the outcome. Once the
+// session or an unstarted link ran out, the page shows ended(progress)
+// instead, and is told through onEnded.
 export function Session({
   target,
   initial,
@@ -408,7 +429,7 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
-  ended?: React.ReactNode;
+  ended: (progress: ProofingProgress) => React.ReactNode;
   onEnded?: () => void;
   // Called with the progress once the session has an outcome, and the subject
   // is done adding diploma extracts when it asks for them; again whenever
@@ -458,8 +479,7 @@ export function Session({
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
-  const over =
-    ended !== undefined && (current.status === "expired" || view === "expired");
+  const over = current.status === "expired" || view === "expired";
   // Before paint, so the page drops its stepper in the same frame.
   useLayoutEffect(() => {
     if (over) {
@@ -514,7 +534,7 @@ export function Session({
     );
   }
   if (over) {
-    return <>{ended}</>;
+    return <>{ended(current)}</>;
   }
   if (showsOutcome) {
     return (
@@ -524,9 +544,6 @@ export function Session({
         dataRequest={dataRequest}
       />
     );
-  }
-  if (view === "expired") {
-    return <Expired onRestart={onRestart} />;
   }
 
   // The page's own link, which lasts the session: the hosted page's view,

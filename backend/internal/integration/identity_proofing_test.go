@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -1122,10 +1123,11 @@ type hostedBranding struct {
 
 // hostedView is the public hosted page of a session, as its subject reads it.
 type hostedView struct {
-	Status       string `json:"status"`
-	Started      bool   `json:"started"`
-	DeepLink     string `json:"deepLink"`
-	Organization struct {
+	Status            string `json:"status"`
+	Started           bool   `json:"started"`
+	SessionTTLSeconds int    `json:"sessionTtlSeconds"`
+	DeepLink          string `json:"deepLink"`
+	Organization      struct {
 		Name     string         `json:"name"`
 		Branding hostedBranding `json:"branding"`
 	} `json:"organization"`
@@ -1195,8 +1197,11 @@ func assertHostedStartsOnce(t *testing.T, env *testEnv, token string) {
 		t.Errorf("second start = %d, want 409", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started {
-		t.Errorf("status = %+v, want started", status)
+	// The session keeps the lifetime it was started with, the default here.
+	wantTTL := int(proofing.SessionTTL / time.Second)
+	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started ||
+		status.SessionTTLSeconds != wantTTL {
+		t.Errorf("status = %+v, want started with a %d s lifetime", status, wantTTL)
 	}
 }
 

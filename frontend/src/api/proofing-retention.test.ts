@@ -64,7 +64,6 @@ const hostedPage = {
     addressMode: "off",
     kind: "identity",
     retentionDays: RETENTION_DAYS,
-    sessionTtlSeconds: SESSION_TTL_SECONDS,
   },
   diplomas: [],
 };
@@ -127,22 +126,36 @@ describe("a value the backend adds", () => {
   });
 });
 
-// The hosted page names how long the session ran when it ends unfinished, so
-// the schema must carry the lifetime the server works out.
+// The hosted page names how long the session ran when it ends unfinished: the
+// lifetime it was started with, which a started link's progress carries.
 describe("the session lifetime a subject is told", () => {
   beforeEach(() => {
     vi.mocked(request).mockReset();
   });
 
-  it("comes with the hosted page's flow", async () => {
+  it("comes with a started link's progress, and not before", async () => {
     await getHostedProofing("token");
-    const schema = lastSchema();
-    expect(schema.parse(hostedPage)).toMatchObject({
-      flow: { sessionTtlSeconds: SESSION_TTL_SECONDS },
+    const page = lastSchema();
+    expect(
+      page.parse({
+        ...hostedPage,
+        started: true,
+        sessionTtlSeconds: SESSION_TTL_SECONDS,
+      }),
+    ).toMatchObject({ sessionTtlSeconds: SESSION_TTL_SECONDS });
+    expect(page.parse(hostedPage)).not.toHaveProperty("sessionTtlSeconds");
+
+    await getHostedProofingStatus("token");
+    const status = {
+      status: "expired",
+      linkExpiresAt: hostedPage.linkExpiresAt,
+      started: true,
+      addressGiven: false,
+      sessionTtlSeconds: SESSION_TTL_SECONDS,
+    };
+    expect(lastSchema().parse(status)).toMatchObject({
+      sessionTtlSeconds: SESSION_TTL_SECONDS,
     });
-    const flow: Record<string, unknown> = { ...hostedPage.flow };
-    delete flow.sessionTtlSeconds;
-    expect(() => schema.parse({ ...hostedPage, flow })).toThrow();
   });
 });
 

@@ -831,6 +831,11 @@ export const nl: Translation<typeof en> = {
         ageNotDisclosed:
           "het gedeelde document gaf niet aan of je oud genoeg bent.",
       },
+      ended: {
+        title: "Deze controle is beëindigd",
+        message:
+          "De controle is niet op tijd afgerond, dus er is niets gedeeld.",
+      },
       outcome: {
         approved: {
           title: "Identiteit geverifieerd",
@@ -1605,9 +1610,12 @@ export const nl: Translation<typeof en> = {
     redirecting: "Je wordt teruggestuurd…",
     poweredBy: "Mogelijk gemaakt door Yivi",
     ended: {
-      title: "Deze controle is beëindigd",
-      started:
-        "De controle is niet binnen {{minutes}} minuten afgerond, dus er is niets gedeeld met {{name}}.",
+      started_one:
+        "De controle is niet binnen {{count}} minuut afgerond, dus er is niets gedeeld met {{name}}.",
+      started_other:
+        "De controle is niet binnen {{count}} minuten afgerond, dus er is niets gedeeld met {{name}}.",
+      timedOut:
+        "De controle is niet op tijd afgerond, dus er is niets gedeeld met {{name}}.",
       notStarted:
         "De controle is niet op tijd gestart, dus er is niets gedeeld met {{name}}.",
       retryTitle: "Opnieuw proberen?",

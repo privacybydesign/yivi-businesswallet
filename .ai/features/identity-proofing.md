@@ -1250,14 +1250,21 @@ to its parent for each allowed origin (never `*`), then redirects
 (`location.replace`, so back does not land on the link and redirect again) with
 `?session=&status=` when there is a redirect; otherwise it shows its own
 outcome (`cancelled` included). A session that ran out, or a link that lapsed
-unstarted, shows "This check has ended" instead (`CheckEnded` in `proof.tsx`):
-nothing was shared, for a started session how long it ran (`flow.sessionTtlSeconds`
-of the hosted view, the flow's lifetime else the org's, read when the page
-loads, so a lifetime changed mid-session shows the new one), and who to ask for
-a new link, with the support contact from the branding (the flow's, else the
-org's; a mail or web address is a link, a web one in a new tab because the page
-can be framed). A data request in review is not handed back: the page says it
-is in review. The page's language is the request's
+unstarted, shows "This check has ended" instead (`HostedCheckEnded` in
+`proof.tsx`, VF5) and stays on it: an `expired` check is posted to an embedder
+but never redirected (`hostedHandBack`). It says nothing was shared, for a
+started session how long it ran, and who to ask for a new link, with the
+support contact from the branding (the flow's, else the org's; a mail or web
+address is a link, a web one in a new tab because the page can be framed). How
+long it ran is the lifetime the session was created with, not today's
+settings: the engine reports it (`proofingprovider.Session.TTL`, the asked TTL
+within its bounds), `AttachSession` keeps it (`ips_session_ttl_seconds`), and
+the hosted progress carries it as `sessionTtlSeconds` once started; a session
+started before it was kept says "not finished in time" without a number. The
+on-screen page's ended state is the same `CheckEnded` with Start again. The
+hosted card sits at the top, 80 px down, on every step. A data request in
+review is not handed back: the page says it is in review. The page's language
+is the request's
 `language` (also passed to the engine at start), then the browser's, then English
 (`lib/hosted-completion.ts`). It switches i18n without persisting the wallet's
 stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the
