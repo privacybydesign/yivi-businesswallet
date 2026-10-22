@@ -425,25 +425,9 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 		if !slices.ContainsFunc(demoProofingOrgs, func(p demoProofingOrg) bool { return p.slug == o.slug }) {
 			continue
 		}
-		if err := requireSeedOwned(ctx, orgs, o); err != nil {
-			return err
-		}
-		org, err := ensureOrg(ctx, pool, o, addressDomain)
+		org, err := ensureDemoProofingOrg(ctx, pool, users, orgs, o, addressDomain)
 		if err != nil {
 			return err
-		}
-		// requireSeedOwned proved it the seed's: an older seed's name (one
-		// without "(Demo)") follows the current one.
-		if org.Name != o.name {
-			if _, err := pool.Exec(ctx, `UPDATE organizations SET name = $2 WHERE id = $1`, org.ID, o.name); err != nil {
-				return fmt.Errorf("seed: rename org %q: %w", o.slug, err)
-			}
-			org.Name = o.name
-		}
-		for _, m := range yiviTeam {
-			if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
-				return err
-			}
 		}
 		orgsBySlug[o.slug] = org
 	}
@@ -457,6 +441,32 @@ func EnsureProofingDemo(ctx context.Context, dsn, addressDomain string) error {
 	}
 	slog.Info("ensured identity proofing demo", slog.Int("orgs", len(orgsBySlug)))
 	return nil
+}
+
+// ensureDemoProofingOrg ensures demo proofing org o, under its current name,
+// with the Yivi team as its admins.
+func ensureDemoProofingOrg(ctx context.Context, pool *pgxpool.Pool, users *user.Store, orgs *organization.Store, o demoOrganization, addressDomain string) (organization.Organization, error) {
+	if err := requireSeedOwned(ctx, orgs, o); err != nil {
+		return organization.Organization{}, err
+	}
+	org, err := ensureOrg(ctx, pool, o, addressDomain)
+	if err != nil {
+		return organization.Organization{}, err
+	}
+	// requireSeedOwned proved it the seed's: an older seed's name (one
+	// without "(Demo)") follows the current one.
+	if org.Name != o.name {
+		if _, err := pool.Exec(ctx, `UPDATE organizations SET name = $2 WHERE id = $1`, org.ID, o.name); err != nil {
+			return organization.Organization{}, fmt.Errorf("seed: rename org %q: %w", o.slug, err)
+		}
+		org.Name = o.name
+	}
+	for _, m := range yiviTeam {
+		if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
+			return organization.Organization{}, err
+		}
+	}
+	return org, nil
 }
 
 // ErrNotSeedOwned is returned when a demo org's slug belongs to an org the
