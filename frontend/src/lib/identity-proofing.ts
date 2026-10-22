@@ -735,6 +735,7 @@ const REJECTION_REASON_KEYS = {
   DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
   FACE_STEP_NOT_COMPLETED: "faceStepNotCompleted",
   FACE_NO_MATCH: "faceNoMatch",
+  AGE_NOT_DISCLOSED: "ageNotDisclosed",
   LIVENESS_FAILED: "livenessFailed",
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",

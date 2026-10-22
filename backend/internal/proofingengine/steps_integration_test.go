@@ -401,3 +401,36 @@ func (h harness) storedWithout(t *testing.T, id, when string, leaks ...string) s
 	}
 	return got
 }
+
+// A Yivi disclosure that does not answer the age check rejects the session:
+// approving it would leave the customer without the answer it asked for.
+func TestYiviAgeCheckWithoutClaimRejected(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f, err := h.engine.CreateFlow(ctx, h.tenant, pp.FlowSpec{
+		Name: "Yivi age check", Steps: []string{"document_capture", "nfc_read"},
+		RequestedAttributes: []string{"dg1", "age_over"}, AgeOver: 18, RequiredChecks: []string{"nfc.passive_auth"},
+	})
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	for name, attributes := range map[string]map[string]string{
+		"no claim":      {"firstName": "Anna"},
+		"unknown value": {"firstName": "Anna", "over18": "maybe"},
+	} {
+		sess, err := h.engine.CreateSession(ctx, h.tenant, pp.SessionInput{FlowID: f.ID, Method: pp.MethodYivi})
+		if err != nil {
+			t.Fatalf("%s: CreateSession: %v", name, err)
+		}
+		got, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, pp.Reference{
+			Credential: "pbdf-staging.pbdf.passport", Attributes: attributes,
+		})
+		if err != nil || got.OK || got.Code != "age_not_disclosed" {
+			t.Errorf("%s: SubmitReference = %+v, %v; want refused age_not_disclosed", name, got, err)
+		}
+		res, err := h.engine.SessionResult(ctx, h.tenant, sess.ID, sess.Token)
+		if err != nil || res.Status != pp.StatusRejected || res.ErrorCode != "AGE_NOT_DISCLOSED" {
+			t.Errorf("%s: result = %s %s, %v; want rejected AGE_NOT_DISCLOSED", name, res.Status, res.ErrorCode, err)
+		}
+	}
+}

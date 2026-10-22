@@ -538,6 +538,8 @@ export const nl: Translation<typeof en> = {
         "land van uitgifte niet toegestaan in de flow",
       faceStepNotCompleted: "gezichtsverificatie niet afgerond",
       faceNoMatch: "gezicht komt niet overeen met het document",
+      ageNotDisclosed:
+        "de Yivi-app heeft niet gedeeld of de persoon oud genoeg is",
       livenessFailed: "levendheidscontrole mislukt",
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
@@ -906,6 +908,8 @@ export const nl: Translation<typeof en> = {
       yiviShared: "Gedeeld vanuit de Yivi-app. De verificatie wordt afgerond…",
       yiviCodes: {
         documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
+        ageNotDisclosed:
+          "het gedeelde document gaf niet aan of je oud genoeg bent.",
       },
       outcome: {
         approved: {

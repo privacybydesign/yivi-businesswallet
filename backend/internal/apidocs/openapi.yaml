@@ -115,7 +115,7 @@ tags:
       `ORG_PAUSED` and `LEGAL_RETENTION`; the session itself is rejected for `FACE_NO_MATCH`,
       `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
       `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
-      `FACE_STEP_NOT_COMPLETED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
+      `FACE_STEP_NOT_COMPLETED`, `AGE_NOT_DISCLOSED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
       `expired` or `cancelled`.
 paths:
   /api/v1/admin/identity-proofing/pauses:
@@ -5850,7 +5850,8 @@ paths:
         Requires organisation membership. `done` is false while the subject has not finished the
         OpenID4VP presentation in the Yivi app. Once done, the disclosure decides the session:
         `ok` true approved it, `ok` false rejected it and `code` says why
-        (document_not_accepted). No face check runs: the Yivi app vouches for its holder, and
+        (document_not_accepted, or age_not_disclosed when an age check's claim did not come
+        back). No face check runs: the Yivi app vouches for its holder, and
         the session reaches eIDAS low.
         The response returns no disclosed value; on approval the engine keeps the disclosed identity attributes (and the
         photo, when the flow requested it) as the session's result, readable through `result`,
@@ -11904,7 +11905,7 @@ components:
           description: The disclosure approved the session; false rejected it.
         code:
           type: string
-          enum: [document_not_accepted]
+          enum: [document_not_accepted, age_not_disclosed]
       required: [done, ok]
     ProofingRequestEvents:
       type: object

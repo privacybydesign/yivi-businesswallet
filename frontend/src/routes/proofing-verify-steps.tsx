@@ -1202,6 +1202,9 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
   if (code === "document_not_accepted") {
     return t("customers.onScreen.yiviCodes.documentNotAccepted");
   }
+  if (code === "age_not_disclosed") {
+    return t("customers.onScreen.yiviCodes.ageNotDisclosed");
+  }
   return code ?? t("identityProofing.errors.generic");
 }
 

@@ -520,6 +520,8 @@ export const en = {
       documentCountryNotAccepted: "issuing country not accepted by the flow",
       faceStepNotCompleted: "face verification not completed",
       faceNoMatch: "face did not match the document",
+      ageNotDisclosed:
+        "the Yivi app did not share whether the person is old enough",
       livenessFailed: "liveness check failed",
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
@@ -887,6 +889,8 @@ export const en = {
       yiviShared: "Shared from the Yivi app. Finishing the verification…",
       yiviCodes: {
         documentNotAccepted: "this flow does not accept the shared document.",
+        ageNotDisclosed:
+          "the shared document did not say whether you are old enough.",
       },
       outcome: {
         approved: {

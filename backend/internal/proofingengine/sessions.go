@@ -124,6 +124,7 @@ const (
 	errCodeFaceNoMatch         = "FACE_NO_MATCH"
 	errCodeAssuranceNotMet     = "ASSURANCE_NOT_MET"
 	errCodeFaceStepNotComplete = "FACE_STEP_NOT_COMPLETED"
+	errCodeAgeNotDisclosed     = "AGE_NOT_DISCLOSED"
 )
 
 // hasFaceStep reports whether fd has any of the face steps the one selfie

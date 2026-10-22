@@ -39,10 +39,14 @@ const (
 	maxReferenceCredentialLen = 200
 )
 
-// disclosureCodeDocumentRefused is SubmitReference refusing a disclosure: the
-// flow restricts the document type, issuing country or expiry, and the
-// disclosure does not show it complies.
-const disclosureCodeDocumentRefused = "document_not_accepted"
+// Codes SubmitReference refuses a disclosure with: the flow restricts the
+// document type, issuing country or expiry and the disclosure does not show
+// it complies, or the flow checks the age and the disclosure does not answer
+// it.
+const (
+	disclosureCodeDocumentRefused = "document_not_accepted"
+	disclosureCodeAgeNotDisclosed = "age_not_disclosed"
+)
 
 // disclosureInfo is the result's "disclosure": where the photo and claims came from.
 type disclosureInfo struct {
@@ -115,6 +119,11 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		details[detailReason] = disclosureCodeDocumentRefused
 		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
+	if asksAge(fd) && ageOver == nil {
+		details[detailReason] = disclosureCodeAgeNotDisclosed
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
 
 	_, redaction := effectivePrivacyPolicy(fd)

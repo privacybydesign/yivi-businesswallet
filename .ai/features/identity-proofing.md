@@ -255,6 +255,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
         - A date of birth the app discloses anyway is dropped before storing
           (`withholdDisclosedBirthDate`). `TestYiviAgeCheckStoresNoBirthDate`
           checks it.
+        - A disclosure without the age claim, or with a value other than
+          Yes or No, rejects the session `AGE_NOT_DISCLOSED` (code
+          `age_not_disclosed`), so an approved age check always answers.
         - Offered only for those ages (`yiviAppAvailable`): a saved flow with
           another age is Idem-only.
         - The claim is set when the credential is issued: a "yes" holds, a

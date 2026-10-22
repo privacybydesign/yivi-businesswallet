@@ -285,7 +285,7 @@ type Reference struct {
 }
 
 // YiviDisclosure is the engine taking a Reference: OK approved the session,
-// OK false rejected it (Code says why: document_not_accepted).
+// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed).
 type YiviDisclosure struct {
 	OK   bool
 	Code string
