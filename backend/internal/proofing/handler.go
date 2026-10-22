@@ -384,8 +384,8 @@ const flowKindDataRequest = "data_request"
 // ?subjectKind= to those sent to members or to external people, ?flowId= to
 // those sent on one flow, ?status= to those held in one status, and
 // ?flowKind=data_request to the data requests. A member with the reviewer
-// right also sees the requests the Reviews page reads: those waiting for
-// review and the external ones that ended.
+// right also sees the org's requests for a list ReviewScopeReviews holds whole:
+// those waiting for review and the data requests (listsEveryRequest).
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	filter, err := requestFilterFrom(r.URL.Query())
