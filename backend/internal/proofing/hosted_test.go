@@ -347,8 +347,8 @@ func TestHostedViewCarriesReasons(t *testing.T) {
 }
 
 // The hosted page names how long its session ran when it ends: the lifetime
-// the session was started with (the flow's own, else the org's, else the
-// default), not whatever the settings say by the time the page is read.
+// the session was started with (the flow's own, else the org's fixed default),
+// not whatever the flow says by the time the page is read.
 func TestHostedViewSessionTTL(t *testing.T) {
 	d := newDiplomaFixture(DiplomasOff)
 	_, token := d.sendHosted(t)
@@ -366,32 +366,35 @@ func TestHostedViewSessionTTL(t *testing.T) {
 		}
 		return out
 	}
-	setOrgTTL := func(ttl time.Duration) {
+	// The org's lifetime is a fixed default (#341): the flow sets its own.
+	setFlowTTL := func(ttl time.Duration) {
 		t.Helper()
-		if _, err := d.svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{SessionTTL: &ttl}); err != nil {
-			t.Fatalf("UpdateSettings: %v", err)
+		i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == d.requests.stored.FlowID })
+		if i < 0 {
+			t.Fatalf("flow %s not in the engine", d.requests.stored.FlowID)
 		}
+		d.ips.flows[i].SessionTTLSeconds = int(ttl.Seconds())
 	}
 
 	if got := view().SessionTTLSeconds; got != 0 {
 		t.Errorf("unstarted link's lifetime = %d, want none", got)
 	}
 
-	setOrgTTL(5 * time.Minute)
+	setFlowTTL(5 * time.Minute)
 	started, err := d.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
 	if err != nil {
 		t.Fatalf("StartHosted: %v", err)
 	}
 	if got, want := newHostedProgress(started.Request, time.Now()).SessionTTLSeconds, 300; got != want {
-		t.Errorf("start lifetime = %d, want the org's %d", got, want)
+		t.Errorf("start lifetime = %d, want the flow's %d", got, want)
 	}
 	if got := d.ips.sessions[len(d.ips.sessions)-1].TTL; got != 5*time.Minute {
-		t.Errorf("session asked for %s, want the org's 5m", got)
+		t.Errorf("session asked for %s, want the flow's 5m", got)
 	}
 
-	// A change of settings afterwards leaves what the session ran with.
-	setOrgTTL(2 * time.Minute)
+	// A change of the flow afterwards leaves what the session ran with.
+	setFlowTTL(2 * time.Minute)
 	if got, want := view().SessionTTLSeconds, 300; got != want {
-		t.Errorf("lifetime after the org's changed = %d, want the %d it was started with", got, want)
+		t.Errorf("lifetime after the flow's changed = %d, want the %d it was started with", got, want)
 	}
 }
