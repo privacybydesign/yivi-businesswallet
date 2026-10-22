@@ -1029,8 +1029,9 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
 }
 
 // The copy of every code a session is rejected with: the engine's failed
-// checks and the wallet's own decisions (a review, a lapse, a pause, a legal
-// duty). The test holds it to the backend's codes, both ways.
+// checks, the wallet's own decisions (a lapse, a pause, a legal duty) and what
+// a reviewer found wrong. The person reads it too. The test holds it to the
+// backend's codes, both ways.
 const REJECTION_REASON_KEYS = {
   DOCUMENT_TYPE_NOT_ACCEPTED: "documentTypeNotAccepted",
   DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
@@ -1044,6 +1045,8 @@ const REJECTION_REASON_KEYS = {
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
+  REVIEW_NOT_HOLDER: "reviewNotHolder",
+  REVIEW_ALTERED: "reviewAltered",
   EVIDENCE_NOT_AS_REQUESTED: "evidenceNotAsRequested",
   REVIEW_LAPSED: "reviewLapsed",
   LEGAL_RETENTION: "legalRetention",
@@ -1066,6 +1069,9 @@ const DATA_REQUEST_REFUSALS: Partial<
   Record<ProofingRejectionCode, DataRequestRefusal>
 > = {
   MANUAL_REVIEW_REJECTED: "reviewer",
+  REVIEW_NOT_HOLDER: "reviewer",
+  REVIEW_ALTERED: "reviewer",
+  EVIDENCE_NOT_AS_REQUESTED: "reviewer",
   REVIEW_LAPSED: "lapsed",
   ORG_PAUSED: "paused",
   LEGAL_RETENTION: "law",
@@ -1375,6 +1381,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.sessionNotFound");
     case "not_under_review":
       return t("identityProofing.errors.notUnderReview");
+    case "own_review":
+      return t("identityProofing.errors.ownReview");
     case "reference_photo_required":
       return t("identityProofing.errors.referencePhotoRequired");
     case "organization_not_found":

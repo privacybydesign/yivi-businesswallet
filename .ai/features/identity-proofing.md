@@ -174,7 +174,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 - **Face photos are not kept by default.** The document portrait (DG2, or a
   disclosed credential's), the selfie and the sender's reference photo
   leave the result and the stored evidence once the face match is done
-  (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A flow
+  (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A
+  session that finishes in review keeps them until it is decided, for the
+  reviewer to compare (`heldForReview`); `DecideReview` drops them then
+  (`dropFacePhotos`). A flow
   sets `KeepFacePhotos` for an org that must keep them, for its
   retention. Covering a face instead was dropped: a mosaic or blur can still
   be matched against candidate photos, and a flat cover holds nothing. The
@@ -882,8 +885,9 @@ post-review outcome stay the system's.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
-  admin as actor; a member's request is 404. For an approval this response adds
-  every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
+  admin as actor; a member's request is 404. For an approval, and for a check
+  waiting for review (with its `identity` too, which the API shows only once
+  approved), this response adds every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
   (anything else, like an unconverted JPEG2000, is dropped): `photo` (the
   document's portrait, DG2 or the disclosed credential's), `selfie`,
   `referencePhoto` (the sender's own photo of the person, §14), and
@@ -1347,16 +1351,27 @@ the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep 
 data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
 that a reviewer decided, and the Outcome column shows the error code in words.
 An identity check has no closed list yet, as none goes to review today. A data
-request shows "Answer by" = `purge_at`, the month after it went to review, when it
-lapses (§15). The list is `GET .../requests?status=needs_review`: the filter is
-applied before the list's cap of 200, so an old check in review is never pushed
-off. A row opens its review page, `reviews/{requestId}`: for an identity check
+request shows "Answer by" = `purge_at`, a calendar month after it went to review
+(`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
+The list is `GET .../requests?status=needs_review`: the filter is applied before
+the list's cap of 200, and that list is the longest in review first, so the cap
+leaves out the newest, never the most overdue. A count from a capped list shows
+"200+" (`lib/listed-requests.ts`), on the tabs and the sidebar. Closed reads
+`?flowKind=data_request&status=approved` and `...&status=rejected`, each narrowed
+before its cap. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
 from the chip (an audited result read) and the decision; for a data request §15.
 The decision is approve or reject with a required reason; a rejection names what
-is wrong, sent as the error code (`REJECT_REASONS` in `lib/proofing-reviews.ts`:
-`IDENTITY_MISMATCH`, `DOC_TAMPERED`, `EVIDENCE_NOT_AS_REQUESTED`, none for
-"Something else", which is `MANUAL_REVIEW_REJECTED`).
+is wrong, sent as the error code (`REJECT_REASONS` in `lib/proofing-reviews.ts`):
+`REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED` (it looks
+altered), `EVIDENCE_NOT_AS_REQUESTED`, none for "Something else", which is
+`MANUAL_REVIEW_REJECTED`. These are the reviewer's own codes
+(`reviewerRejectCodes`, any other is 400 for a reviewer): a wallet code would
+mean something else to the person, and `IDENTITY_MISMATCH` would hide the
+session from a later data request (`Candidates`). A reviewer does not decide an
+identity check they sent or that is about them (403 `own_review`; the page
+shows a note in place of the decision); a data request's link sender may
+decide it, or a one-admin org could never answer it.
 `POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
 decided, why and when with the session, `session.ReviewDecision`), audits
@@ -1878,8 +1893,10 @@ hosted page.
   (`legalRetention` in the hosted progress, `withLegalNotice`, GDPR Art.
   12(4)), on a declined request and on an approved one alike, until that date.
   "See my data" is never held.
-- **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
-  12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`. An identity
+- **Nobody reviews it.** A data request left in review a calendar month (GDPR
+  Art. 12(3); `dataRequestReviewMonths`, counted in UTC: 31 Jan lapses at the end
+  of February) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`, at the
+  "Answer by" the Reviews page shows. An identity
   review counts its retention from going to review, and lapses the same way
   then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the

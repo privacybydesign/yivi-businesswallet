@@ -1961,6 +1961,83 @@ func TestReviewDecisionSettles(t *testing.T) {
 	}
 }
 
+// A reviewer's rejection names one of the reviewer's own codes, never one the
+// wallet sets for another reason: IDENTITY_MISMATCH would hide the session from
+// a later data request. The wallet deciding on its own names its own.
+func TestReviewerRejectCodes(t *testing.T) {
+	reviewer := uuid.New()
+	for code, want := range map[string]bool{
+		errorReviewNotHolder: true, errorReviewAltered: true, errorEvidenceNotAsRequested: true,
+		ErrorReviewRejected: true, "": true,
+		errorIdentityMismatch: false, "DOC_TAMPERED": false, ErrorOrgPaused: false,
+	} {
+		f := newFixture()
+		sent := f.send(t)
+		f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+		f.reconcile(t)
+		_, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "anna@acme.test",
+			ReviewInput{Reason: "Not her payslip", ErrorCode: code, ReviewerID: reviewer})
+		if got := !errors.Is(err, ErrInvalidInput); got != want {
+			t.Errorf("a reviewer rejecting with %q: %v, want allowed %v", code, err, want)
+		}
+	}
+	f := newFixture()
+	sent := f.send(t)
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	if _, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, orgPausedReviewer,
+		ReviewInput{Reason: orgPausedReason, ErrorCode: ErrorOrgPaused}); err != nil {
+		t.Errorf("the wallet rejecting with %s: %v, want it decided", ErrorOrgPaused, err)
+	}
+}
+
+// A reviewer does not decide an identity check they sent or one about
+// themselves: another reviewer does.
+func TestOwnReviewRefused(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	sender := uuid.New()
+	f.requests.stored.RequestedBy = &sender
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	for name, reviewer := range map[string]uuid.UUID{"sender": sender, "subject": alex.UserID} {
+		_, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "x@acme.test",
+			ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: reviewer})
+		if !errors.Is(err, ErrOwnReview) {
+			t.Errorf("the %s deciding: %v, want ErrOwnReview", name, err)
+		}
+	}
+	if len(f.ips.decisions) != 0 {
+		t.Fatalf("decisions = %+v, want none sent to the engine", f.ips.decisions)
+	}
+	if req, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "anna@acme.test",
+		ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: uuid.New()}); err != nil || req.Status != StatusApproved {
+		t.Errorf("another reviewer deciding = %+v, %v; want approved", req, err)
+	}
+}
+
+func TestOwnReview(t *testing.T) {
+	sender, subject, other := uuid.New(), uuid.New(), uuid.New()
+	check := Request{FlowKind: FlowIdentity, RequestedBy: &sender, SubjectUserID: &subject}
+	erasure := Request{FlowKind: FlowDataErasure, RequestedBy: &sender}
+	for name, tc := range map[string]struct {
+		req      Request
+		reviewer uuid.UUID
+		want     bool
+	}{
+		"the check's sender":           {check, sender, true},
+		"the check's subject":          {check, subject, true},
+		"another reviewer":             {check, other, false},
+		"the wallet itself":            {check, uuid.Nil, false},
+		"a data request's link sender": {erasure, sender, false},
+		"an API request":               {Request{FlowKind: FlowIdentity}, other, false},
+	} {
+		if got := ownReview(tc.req, tc.reviewer); got != tc.want {
+			t.Errorf("%s: ownReview = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 // A review reason is held to its length in characters, not bytes: 500
 // accented characters are fine, 501 are not.
 func TestReviewReasonCountsChars(t *testing.T) {

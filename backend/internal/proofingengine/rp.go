@@ -701,8 +701,10 @@ var reviewErrorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,64}$`)
 
 var errNotUnderReview = errors.New("the session is not under review")
 
-// DecideReview settles a session in needs_review as the reviewer decided.
-func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
+// DecideReview settles a session in needs_review as the reviewer decided, and
+// drops the face photos it held for the review unless its flow keeps them
+// (dropFacePhotos).
+func (s *Server) DecideReview(ctx context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
 	reason, reviewer := strings.TrimSpace(d.Reason), strings.TrimSpace(d.Reviewer)
 	switch {
 	case d.Approve && d.ErrorCode != "":
@@ -725,6 +727,11 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 	if err != nil {
 		return err
 	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: decide review: %w", err)
+	}
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status != session.StatusNeedsReview {
 			return errNotUnderReview
@@ -737,6 +744,7 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 		// never in the server log, where a free-text reason does not belong.
 		sess.ErrorCode = errorCode
 		sess.Review = &session.ReviewDecision{Reviewer: reviewer, Reason: reason, DecidedAt: now}
+		dropFacePhotos(sess, bsnPolicy, redaction)
 		return nil
 	})
 	switch {

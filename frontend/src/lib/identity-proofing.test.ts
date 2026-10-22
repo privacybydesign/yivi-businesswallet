@@ -1801,8 +1801,8 @@ describe("secondsUntil", () => {
 
 // Every code a session can be rejected with has copy, and copy is only kept
 // for codes the backend still sends: the engine's, the wallet's own, and the
-// ones a reviewer picks when rejecting a check, which the engine stores as
-// given.
+// ones a reviewer picks when rejecting a check (review.go), which the engine
+// stores as given.
 describe("rejection codes mirror the backend", () => {
   const read = (path: string): string =>
     readFileSync(
@@ -1820,20 +1820,27 @@ describe("rejection codes mirror the backend", () => {
         /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g,
       ),
   );
-  const wallet = ["proofing.go", "service.go", "data_request.go"].flatMap(
-    (file) =>
-      codes(
-        read(`proofing/${file}`),
-        /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
-      ),
-  );
-  const reviewer = REJECT_REASONS.flatMap(({ errorCode }) => errorCode ?? []);
-  const backend = [...new Set([...engine, ...wallet, ...reviewer])];
+  const walletCodes = /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g;
+  const wallet = [
+    "proofing.go",
+    "service.go",
+    "data_request.go",
+    "review.go",
+  ].flatMap((file) => codes(read(`proofing/${file}`), walletCodes));
+  const reviewer = codes(read("proofing/review.go"), walletCodes);
+  const backend = [...new Set([...engine, ...wallet])];
 
   it("has copy for every backend code and no other", () => {
     expect(engine.length).toBeGreaterThan(0);
     expect(wallet.length).toBeGreaterThan(0);
     expect([...PROOFING_REJECTION_CODES].sort()).toEqual(backend.sort());
+  });
+
+  it("offers a reviewer only the reviewer's own codes", () => {
+    expect(reviewer.length).toBeGreaterThan(0);
+    for (const { errorCode } of REJECT_REASONS) {
+      if (errorCode !== undefined) expect(reviewer).toContain(errorCode);
+    }
   });
 });
 
@@ -2372,6 +2379,13 @@ describe("rejection reasons", () => {
 
   it("tells a refused data request from a failed identity check", () => {
     expect(dataRequestRefusal("MANUAL_REVIEW_REJECTED")).toBe("reviewer");
+    for (const code of [
+      "REVIEW_NOT_HOLDER",
+      "REVIEW_ALTERED",
+      "EVIDENCE_NOT_AS_REQUESTED",
+    ]) {
+      expect(dataRequestRefusal(code)).toBe("reviewer");
+    }
     expect(dataRequestRefusal("LEGAL_RETENTION")).toBe("law");
     expect(dataRequestRefusal("FACE_NO_MATCH")).toBeUndefined();
     expect(dataRequestRefusal(undefined)).toBeUndefined();

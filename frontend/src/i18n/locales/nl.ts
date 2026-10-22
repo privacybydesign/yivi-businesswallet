@@ -526,6 +526,7 @@ export const nl: Translation<typeof en> = {
       expired: "Verlopen",
       cancelled: "Geannuleerd",
     },
+    listedCountAtLeast: "{{count}}+",
     rejectionReasons: {
       documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
       documentCountryNotAccepted:
@@ -540,7 +541,11 @@ export const nl: Translation<typeof en> = {
       docExpired: "document verlopen",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
       manualReviewRejected: "geweigerd door een beoordelaar",
-      reviewLapsed: "niet binnen 30 dagen beoordeeld",
+      reviewNotHolder:
+        "een beoordelaar vond dat wat is aangeleverd van iemand anders is",
+      reviewAltered:
+        "een beoordelaar vond dat wat is aangeleverd bewerkt lijkt",
+      reviewLapsed: "niet op tijd beoordeeld",
       legalRetention:
         "de organisatie moet deze gegevens volgens de wet bewaren",
       orgPaused:
@@ -548,7 +553,8 @@ export const nl: Translation<typeof en> = {
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
       unknown: "de controle is niet geslaagd ({{code}})",
-      evidenceNotAsRequested: "wat is aangeleverd is niet wat gevraagd was",
+      evidenceNotAsRequested:
+        "een beoordelaar vond dat wat is aangeleverd niet is wat gevraagd was",
     },
     errors: {
       noEncryptionKey:
@@ -567,6 +573,8 @@ export const nl: Translation<typeof en> = {
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
+      ownReview:
+        "Je hebt deze controle zelf verstuurd, of ze gaat over jou, dus een andere beoordelaar beslist erover.",
       referencePhotoRequired:
         "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de API kan worden meegestuurd. Kies een andere flow.",
       organizationNotFound: "Die organisatie bestaat niet.",
@@ -1236,6 +1244,11 @@ export const nl: Translation<typeof en> = {
           approved: "De controle is goedgekeurd.",
           rejected: "De controle is afgewezen.",
         },
+        own: {
+          sent: "Je hebt deze controle zelf verstuurd, dus een andere beoordelaar beslist erover.",
+          subject:
+            "Deze controle gaat over jou, dus een andere beoordelaar beslist erover.",
+        },
       },
       dataRequest: {
         asked: "Gevraagd door {{name}} op {{date}}.",
@@ -1760,7 +1773,7 @@ export const nl: Translation<typeof en> = {
         reviewer:
           "{{organization}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",
         lapsed:
-          "{{organization}} heeft je verzoek niet binnen 30 dagen beantwoord. Vraag hen om een nieuwe link.",
+          "{{organization}} heeft je verzoek niet binnen een maand beantwoord. Vraag hen om een nieuwe link.",
         paused:
           "{{organization}} kon je verzoek nu niet behandelen. Vraag hen later om een nieuwe link.",
         law: "{{organization}} moet je gegevens volgens de wet bewaren, daarom zijn ze niet verwijderd.",

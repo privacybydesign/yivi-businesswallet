@@ -510,6 +510,8 @@ export const en = {
       expired: "Expired",
       cancelled: "Cancelled",
     },
+    // A count taken from a list the backend caps: it may be more.
+    listedCountAtLeast: "{{count}}+",
     rejectionReasons: {
       documentTypeNotAccepted: "document type not accepted by the flow",
       documentCountryNotAccepted: "issuing country not accepted by the flow",
@@ -523,14 +525,17 @@ export const en = {
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
       manualReviewRejected: "refused by a reviewer",
-      reviewLapsed: "not reviewed within 30 days",
+      reviewNotHolder: "a reviewer found that what was sent is someone else's",
+      reviewAltered: "a reviewer found that what was sent looks altered",
+      reviewLapsed: "not reviewed in time",
       legalRetention: "the organisation is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused while the session waited for review; try again later",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
       unknown: "the check did not pass ({{code}})",
-      evidenceNotAsRequested: "what was sent is not what was asked for",
+      evidenceNotAsRequested:
+        "a reviewer found that what was sent is not what was asked for",
     },
     errors: {
       noEncryptionKey:
@@ -548,6 +553,8 @@ export const en = {
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
+      ownReview:
+        "You sent this check, or it is about you, so another reviewer decides it.",
       referencePhotoRequired:
         "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
@@ -1207,6 +1214,10 @@ export const en = {
           approved: "The check is approved.",
           rejected: "The check is rejected.",
         },
+        own: {
+          sent: "You sent this check, so another reviewer decides it.",
+          subject: "This check is about you, so another reviewer decides it.",
+        },
       },
       dataRequest: {
         asked: "Asked by {{name}} on {{date}}.",
@@ -1723,7 +1734,7 @@ export const en = {
         reviewer:
           "{{organization}} refused your request. Contact them if you want to know why.",
         lapsed:
-          "{{organization}} did not answer your request within 30 days. Ask them for a new link.",
+          "{{organization}} did not answer your request within a month. Ask them for a new link.",
         paused:
           "{{organization}} could not handle your request just now. Ask them for a new link later.",
         law: "{{organization}} is required by law to keep your data, so it was not deleted.",

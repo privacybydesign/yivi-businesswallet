@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import { useMeQuery } from "../api/auth.queries";
 import {
   useDecideReviewMutation,
   useProofingRequestResultQuery,
@@ -25,11 +26,13 @@ import {
   checkDecisionInput,
   checkDecisionProblems,
   evidenceDocumentLabel,
+  ownReview,
   reviewPath,
 } from "../lib/proofing-reviews";
 import type {
   AutomaticCheck,
   CheckDecisionDraft,
+  OwnReview,
   RejectReasonKey,
 } from "../lib/proofing-reviews";
 import { Button, Icon, Tag, TopBar } from "../ui";
@@ -61,7 +64,10 @@ export function IdentityCheckReview({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
+  const me = useMeQuery();
   const waiting = request.status === "needs_review";
+  // A check the reader sent or that is about them is another reviewer's.
+  const own = ownReview(request, me.data?.id);
   const readable =
     request.purgedAt === undefined &&
     (waiting || request.status === "approved" || request.status === "rejected");
@@ -92,9 +98,12 @@ export function IdentityCheckReview({
           <AutomaticChecks result={result} />
           <ChipData request={request} result={result} />
         </div>
-        {waiting && (
-          <CheckDecision slug={slug} request={request} name={subject.name} />
-        )}
+        {waiting &&
+          (own ? (
+            <OwnReviewNote slug={slug} own={own} />
+          ) : (
+            <CheckDecision slug={slug} request={request} name={subject.name} />
+          ))}
       </div>
     </>
   );
@@ -257,6 +266,28 @@ function ChipData({
         />
       )}
     </ReviewSection>
+  );
+}
+
+// In place of the decision on a check the reader may not decide.
+function OwnReviewNote({
+  slug,
+  own,
+}: {
+  slug: string;
+  own: OwnReview;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="border-line bg-surface rounded-yivi shadow-card flex min-w-72 flex-[0_1_21rem] flex-col gap-4 border p-5">
+      <h2 className="font-display text-ink text-[18px] font-semibold">
+        {t("identityProofing.reviews.check.decision.title")}
+      </h2>
+      <p role="status" className="text-[13.5px]">
+        {t(`identityProofing.reviews.check.own.${own}`)}
+      </p>
+      <BackToReviews to={reviewPath(slug)} />
+    </div>
   );
 }
 

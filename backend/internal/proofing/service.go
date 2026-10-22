@@ -1640,7 +1640,7 @@ func (s *Service) purgeDue(ctx context.Context) (int64, error) {
 }
 
 // errorReviewLapsed is the error code of a request nobody reviewed in time: a
-// data request dataRequestReviewDays after it went to review, an identity
+// data request dataRequestReviewMonths after it went to review, an identity
 // request its retention after (purge_at, refreshPurgeAt).
 const errorReviewLapsed = "REVIEW_LAPSED"
 

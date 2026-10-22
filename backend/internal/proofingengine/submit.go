@@ -113,11 +113,14 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		}
 	}
 
-	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
-	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
-
 	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, faceMatchSourceOf(sess))
 	finalStatus, finalErrorCode, reason := sessionOutcome(fd, sess, req, verifiedChecks, achieved, s.cfg.Now())
+
+	// A session that waits for review keeps its face photos until it is
+	// decided (heldForReview); DecideReview applies the flow's policy then.
+	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
+	redactionPolicy = heldForReview(finalStatus, redactionPolicy)
+	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
 
 	snapshotFaceAttempts := faceStepAttempts(sess.Steps.Selfie)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {

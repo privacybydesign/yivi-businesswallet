@@ -2137,6 +2137,68 @@ func TestRequestListByStatus(t *testing.T) {
 	}
 }
 
+// What waits for review is listed the longest in review first, so the cap
+// leaves out the newest and never the most overdue.
+func TestRequestListInReviewOldestFirst(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	ids := make([]uuid.UUID, 0, maxListedRequests+1)
+	for range maxListedRequests + 1 {
+		req, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, req.ID)
+	}
+	// The first created went to review last: the order is by when each went
+	// there, not by when it was sent.
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests r SET status = 'needs_review',
+		completed_at = now() - make_interval(mins => array_position($1::uuid[], r.id))
+		WHERE r.id = ANY($1)`, ids); err != nil {
+		t.Fatalf("put in review: %v", err)
+	}
+
+	status := StatusNeedsReview
+	got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
+	if err != nil || len(got) != maxListedRequests {
+		t.Fatalf("List needs_review = %d rows, %v; want %d", len(got), err, maxListedRequests)
+	}
+	longest, newest := ids[len(ids)-1], ids[0]
+	if got[0].ID != longest || slices.ContainsFunc(got, func(r Request) bool { return r.ID == newest }) {
+		t.Errorf("List needs_review starts at %s and holds the newest %v; want the longest in review first, the newest cut",
+			got[0].ID, slices.ContainsFunc(got, func(r Request) bool { return r.ID == newest }))
+	}
+}
+
+// ?flowKind=data_request narrows to data requests before the cap: one older
+// than the newest maxListedRequests identity checks is still listed.
+func TestRequestListDataRequests(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	access := newDataRequest(t, store, orgID, sam, FlowDataAccess, "s-access")
+	erasure := newDataRequest(t, store, orgID, sam, FlowDataErasure, "s-erasure")
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("b@example.org"))); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	got, err := store.List(ctx, orgID, RequestFilter{DataRequests: true})
+	if err != nil || len(got) != 2 || got[0].ID != erasure.ID || got[1].ID != access.ID {
+		t.Errorf("List data requests = %d rows, %v; want the erasure and the access request, newest first", len(got), err)
+	}
+	status := StatusApproved
+	if got, err = store.List(ctx, orgID, RequestFilter{DataRequests: true, Status: &status}); err != nil || len(got) != 0 {
+		t.Errorf("List approved data requests = %d rows, %v; want none", len(got), err)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {

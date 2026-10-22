@@ -410,10 +410,11 @@ export function useMemberRequestsQuery(
   });
 }
 
-// The requests held in review, newest first: what waits for a decision. Under
-// the requests key, so a decision refreshes it. A request whose engine session
-// ended is still held here but reads expired: the caller keeps the ones that
-// still read needs_review.
+// The requests held in review, the longest in review first: what waits for a
+// decision. The backend caps the list after that order, so what it leaves out
+// is the newest. Under the requests key, so a decision refreshes it. A request
+// whose engine session ended is still held here but reads expired: the caller
+// keeps the ones that still read needs_review.
 export function useWaitingReviewsQuery(
   slug: string,
   options: { enabled: boolean },
@@ -424,6 +425,31 @@ export function useWaitingReviewsQuery(
       getProofingRequests(slug, { status: "needs_review" }, signal),
     enabled: options.enabled && slug !== "",
     refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
+  });
+}
+
+// The data requests that ended, approved or rejected: two reads, each narrowed
+// by the backend before its cap, so a busy org's identity checks never push
+// them off. Under the requests key, so a decision refreshes it.
+export function useClosedDataRequestsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "closed-data"],
+    queryFn: async ({ signal }) => {
+      const [approved, rejected] = await Promise.all(
+        (["approved", "rejected"] as const).map((status) =>
+          getProofingRequests(
+            slug,
+            { status, flowKind: "data_request" },
+            signal,
+          ),
+        ),
+      );
+      return [...approved, ...rejected];
+    },
+    enabled: options.enabled && slug !== "",
   });
 }
 

@@ -6,6 +6,7 @@ import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { useWaitingReviewsQuery } from "../api/identity-proofing.queries";
 import { waitingOldestFirst } from "../lib/proofing-reviews";
+import { listIsCapped, listedCount } from "../lib/listed-requests";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
@@ -40,8 +41,10 @@ interface NavItem {
   end?: boolean;
   // A section's pages, listed under it while one of them is open.
   children?: NavChild[];
-  // How many things wait on the reader here, shown beside the name.
+  // How many things wait on the reader here, shown beside the name;
+  // countCapped when it is counted from a list that may have left some out.
   count?: number;
+  countCapped?: boolean;
 }
 
 type NavChild = Omit<NavItem, "icon" | "children">;
@@ -53,8 +56,10 @@ type NavChild = Omit<NavItem, "icon" | "children">;
 interface OrgNavVisibility {
   signing: boolean;
   admin: boolean;
-  // What waits for the reader's decision under Identity proofing › Reviews.
+  // What waits for the reader's decision under Identity proofing › Reviews,
+  // and whether the list it is counted from may have left some out.
   waitingReviews: number;
+  waitingReviewsCapped: boolean;
 }
 
 function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
@@ -76,6 +81,7 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
         to: `${proofing}/reviews`,
         labelKey: "nav.reviews",
         count: visible.waitingReviews,
+        countCapped: visible.waitingReviewsCapped,
       },
       { to: `${proofing}/developers`, labelKey: "nav.developers" },
     );
@@ -86,6 +92,7 @@ function orgNavItems(slug: string, visible: OrgNavVisibility): NavItem[] {
     icon: "scan_qrcode",
     children: proofingChildren,
     count: visible.waitingReviews,
+    countCapped: visible.waitingReviewsCapped,
   });
   items.push(
     { to: `/${slug}/qerds`, labelKey: "nav.qerds", icon: "email" },
@@ -133,12 +140,19 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 
 const NAV_ICON_SIZE = 16;
 
-// The number of things that wait, read aloud with what it counts.
-function CountBadge({ count }: { count: number }): React.JSX.Element {
+// The number of things that wait, read aloud with what it counts: "200+" when
+// it is counted from a list that may have left some out.
+function CountBadge({
+  count,
+  capped = false,
+}: {
+  count: number;
+  capped?: boolean | undefined;
+}): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <span className="bg-ink text-surface ml-auto min-w-5 rounded-full px-1.5 text-center text-[11.5px] leading-5">
-      {count}
+      {listedCount(count, capped, t)}
       <span className="sr-only"> {t("nav.reviewsWaiting")}</span>
     </span>
   );
@@ -208,6 +222,7 @@ export function Sidebar({
         signing: showSigning,
         admin: isOrgAdmin,
         waitingReviews: waitingOldestFirst(waiting.data ?? []).length,
+        waitingReviewsCapped: listIsCapped(waiting.data ?? []),
       })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS
@@ -264,7 +279,10 @@ export function Sidebar({
                   {item.count !== undefined &&
                     item.count > 0 &&
                     !isWithin(pathname, item.to) && (
-                      <CountBadge count={item.count} />
+                      <CountBadge
+                        count={item.count}
+                        capped={item.countCapped}
+                      />
                     )}
                 </>
               )}
@@ -288,7 +306,10 @@ export function Sidebar({
                   >
                     {t(child.labelKey)}
                     {child.count !== undefined && child.count > 0 && (
-                      <CountBadge count={child.count} />
+                      <CountBadge
+                        count={child.count}
+                        capped={child.countCapped}
+                      />
                     )}
                   </NavLink>
                 ))}

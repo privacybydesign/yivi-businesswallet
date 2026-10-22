@@ -245,14 +245,16 @@ func (s *Stub) SessionResult(_ context.Context, t Tenant, sessionID, sessionToke
 }
 
 // SessionIdentity is SessionResult with the stub subject's identity and a
-// valid chip read, for an approved session.
+// valid chip read, for an approved session and one waiting for review.
 func (s *Stub) SessionIdentity(ctx context.Context, t Tenant, sessionID, sessionToken string) (Identity, error) {
 	res, err := s.SessionResult(ctx, t, sessionID, sessionToken)
 	if err != nil {
 		return Identity{}, err
 	}
 	id := Identity{Result: res}
-	if res.Status == StatusApproved {
+	// The engine holds a session's identity and photos from its submit on,
+	// so a reviewer reads them while it waits.
+	if res.Status == StatusApproved || res.Status == StatusNeedsReview {
 		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", stubSpecimenState
 		id.Evidence = &Evidence{
 			Type: EvidenceEMRTD, DocumentType: "P", DocumentKind: "passport", IssuingState: stubSpecimenState, ExpiryDate: "2031-02-01",

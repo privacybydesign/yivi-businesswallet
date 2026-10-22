@@ -4,7 +4,7 @@ import * as React from "react";
 import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useExternalRequestsQuery,
+  useClosedDataRequestsQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -31,6 +31,7 @@ import {
   waitingSince,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
+import { listIsCapped, listedCount } from "../lib/listed-requests";
 import { Card, Table, Tag, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -52,6 +53,9 @@ export default function ProofingReviews(): React.JSX.Element {
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
   const waitingNow = waitingOldestFirst(waiting.data ?? []);
   const counts = reviewCounts(waitingNow);
+  // The backend lists at most the 200 longest in review: past that the counts
+  // are lower bounds.
+  const capped = listIsCapped(waiting.data ?? []);
 
   return (
     <>
@@ -69,7 +73,7 @@ export default function ProofingReviews(): React.JSX.Element {
         </p>
       ) : (
         <>
-          <ReviewTabs active={tab} counts={counts} />
+          <ReviewTabs active={tab} counts={counts} capped={capped} />
           <div className="flex flex-col gap-4 p-4 sm:p-8">
             <Card className="overflow-hidden">
               {tab === "closed" ? (
@@ -97,9 +101,11 @@ export default function ProofingReviews(): React.JSX.Element {
 function ReviewTabs({
   active,
   counts,
+  capped,
 }: {
   active: ReviewTab;
   counts: ReturnType<typeof reviewCounts>;
+  capped: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const countOf: Record<ReviewTab, number | undefined> = {
@@ -131,7 +137,9 @@ function ReviewTabs({
           >
             {t(`identityProofing.reviews.tabs.${tab}`)}
             {countOf[tab] !== undefined && (
-              <span className="text-ink-soft font-normal">{countOf[tab]}</span>
+              <span className="text-ink-soft font-normal">
+                {listedCount(countOf[tab], capped, t)}
+              </span>
             )}
           </Link>
         );
@@ -293,10 +301,11 @@ function WaitingRow({
   );
 }
 
-// The data requests that ended, from the newest external requests.
+// The data requests that ended, read as such: no identity check takes their
+// place under the list's cap.
 function ClosedTable({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useExternalRequestsQuery(slug);
+  const requests = useClosedDataRequestsQuery(slug, { enabled: true });
   const closed = closedRequests(requests.data ?? []);
   return (
     <Table>

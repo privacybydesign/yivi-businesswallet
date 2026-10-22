@@ -8,11 +8,13 @@ import {
 import {
   REJECT_REASONS,
   answerBy,
+  askedAt,
   askedLine,
   automaticChecks,
   checkDecisionInput,
   checkDecisionProblems,
   closedRequests,
+  ownReview,
   personName,
   provenWithParts,
   reviewCounts,
@@ -191,6 +193,37 @@ describe("askedLine", () => {
   });
 });
 
+describe("askedAt", () => {
+  it("is when a waiting request reached review, its month's start", () => {
+    expect(askedAt(request({ flowKind: "data_erasure" }))).toBe(
+      "2026-10-16T14:40:00Z",
+    );
+  });
+
+  it("is when a closed one was made: the decision overwrote the other", () => {
+    expect(
+      askedAt(request({ flowKind: "data_erasure", status: "approved" })),
+    ).toBe("2026-10-16T14:00:00Z");
+  });
+});
+
+describe("ownReview", () => {
+  const check = request({ requestedById: "sam", subjectUserId: "alex" });
+
+  it("is a check the reader sent or that is about them", () => {
+    expect(ownReview(check, "sam")).toBe("sent");
+    expect(ownReview(check, "alex")).toBe("subject");
+    expect(ownReview(check, "anna")).toBeUndefined();
+    expect(ownReview(check, undefined)).toBeUndefined();
+  });
+
+  it("is never a data request, which its link's sender may decide", () => {
+    expect(
+      ownReview({ ...check, flowKind: "data_erasure" }, "sam"),
+    ).toBeUndefined();
+  });
+});
+
 describe("answerBy", () => {
   const purgeAt = "2026-11-15T14:40:00Z";
 
@@ -254,8 +287,20 @@ describe("check decision", () => {
     ).toEqual({
       decision: "reject",
       reason: "Matches",
-      errorCode: "DOC_TAMPERED",
+      errorCode: "REVIEW_ALTERED",
     });
+  });
+
+  it("names what a reviewer found with the reviewer's own codes", () => {
+    // A wallet code would mean something else: IDENTITY_MISMATCH hides the
+    // session from a later data request, DOC_TAMPERED is the chip check's.
+    const codes = REJECT_REASONS.map(({ errorCode }) => errorCode);
+    expect(codes).toEqual([
+      "REVIEW_NOT_HOLDER",
+      "REVIEW_ALTERED",
+      "EVIDENCE_NOT_AS_REQUESTED",
+      undefined,
+    ]);
   });
 
   it("sends no code for something else, so the service uses its own", () => {

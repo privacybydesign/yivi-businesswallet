@@ -31,6 +31,7 @@ import {
 } from "../lib/identity-proofing";
 import {
   answerBy,
+  askedAt,
   askedLine,
   evidenceDocumentLabel,
   provenWithParts,
@@ -94,7 +95,7 @@ export function DataRequestReview({
   const matches = useProofingDataMatchesQuery(slug, request.id);
   const due = answerBy(request);
   const subtitle = [
-    askedLine(request, formatWhen(request.createdAt), t),
+    askedLine(request, formatWhen(askedAt(request)), t),
     due &&
       t("identityProofing.reviews.dataRequest.answerBy", {
         date: formatDay(due),

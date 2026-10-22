@@ -294,7 +294,11 @@ func (h *Handler) activateFlowVersion(w http.ResponseWriter, r *http.Request) er
 }
 
 type requestResponse struct {
-	ID              uuid.UUID  `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// RequestedByID is the member who sent it: absent for one the API created,
+	// and once the member's user is gone. A reviewer does not decide a check
+	// they sent (ErrOwnReview).
+	RequestedByID   *uuid.UUID `json:"requestedById,omitempty"`
 	RequestedByName string     `json:"requestedByName"`
 	APIKeyName      string     `json:"apiKeyName,omitempty"`
 	SubjectUserID   *uuid.UUID `json:"subjectUserId,omitempty"`
@@ -354,7 +358,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req),
-		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
+		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
@@ -365,10 +369,15 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	}
 }
 
+// flowKindDataRequest is ?flowKind='s one value: the data requests, of either
+// kind.
+const flowKindDataRequest = "data_request"
+
 // listRequests shows an admin every request of the org and a member the ones they
 // sent; ?subjectUserId= narrows either to the ones proofing one member,
 // ?subjectKind= to those sent to members or to external people, ?flowId= to
-// those sent on one flow, and ?status= to those held in one status.
+// those sent on one flow, ?status= to those held in one status, and
+// ?flowKind=data_request to the data requests.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	var filter RequestFilter
@@ -399,6 +408,12 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, approved, rejected or needs_review"}
 		}
 		filter.Status = &status
+	}
+	if raw := r.URL.Query().Get("flowKind"); raw != "" {
+		if raw != flowKindDataRequest {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "flowKind must be " + flowKindDataRequest}
+		}
+		filter.DataRequests = true
 	}
 	reqs, err := h.service.Requests(r.Context(), org.ID, filter)
 	if err != nil {
@@ -487,9 +502,12 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	if body.Decision != "approve" && body.Decision != "reject" {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is approve or reject"}
 	}
-	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id,
-		string(auth.UserFromContext(r.Context()).Email),
-		ReviewInput{Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs})
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id, string(caller.Email),
+		ReviewInput{
+			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
+			ReviewerID: caller.ID,
+		})
 	if err != nil {
 		return mapError(err)
 	}
@@ -762,6 +780,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
 	case errors.Is(err, ErrNotUnderReview):
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
+	case errors.Is(err, ErrOwnReview):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}
 	case errors.Is(err, ErrLinkStarted):
 		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
 	case errors.Is(err, ErrDiplomasNotAsked):

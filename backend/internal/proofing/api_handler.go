@@ -541,7 +541,13 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	if out.Diplomas, err = h.diplomaResponses(r, req); err != nil {
 		return err
 	}
-	if identity.Status == proofingprovider.StatusApproved {
+	// A check in review holds its identity and photos until it is decided,
+	// whether or not its flow keeps the photos after (the engine drops them
+	// then): what the reviewer compares. The API shows neither before an approval.
+	if identity.Status == proofingprovider.StatusNeedsReview {
+		out.Identity = newAPIIdentity(identity)
+	}
+	if identity.Status == proofingprovider.StatusApproved || identity.Status == proofingprovider.StatusNeedsReview {
 		out.Photo, out.Selfie = newAdminImage(identity.Photo), newAdminImage(identity.Selfie)
 		out.ReferencePhoto = newAdminImage(identity.ReferencePhoto)
 		out.DocumentImage = newAdminImage(identity.DocumentImage)
@@ -552,9 +558,10 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 }
 
 // adminResultResponse is the API's result as an admin reads it in the
-// wallet: for an approval, also the document's portrait, the live selfie
-// matched against it and the photos of the document's front and back. The
-// API never carries an image.
+// wallet: for an approval, and for a check waiting for review, also the
+// document's portrait, the live selfie matched against it and the photos of
+// the document's front and back, and for the check in review its identity.
+// The API never carries an image.
 type adminResultResponse struct {
 	apiResultResponse
 	Photo  *adminImage `json:"photo,omitempty"`
@@ -579,6 +586,19 @@ func newAdminImage(img *proofingprovider.Image) *adminImage {
 	return &adminImage{MimeType: img.MimeType, Data: img.Base64}
 }
 
+// newAPIIdentity is identity as a result shows it, the age check's answer
+// included.
+func newAPIIdentity(identity proofingprovider.Identity) *apiIdentity {
+	out := &apiIdentity{
+		GivenName: identity.GivenName, FamilyName: identity.FamilyName,
+		BirthDate: identity.BirthDate, Nationality: identity.Nationality,
+	}
+	if a := identity.AgeOver; a != nil {
+		out.AgeOver = &apiAgeOver{Age: a.Age, Over: a.Over}
+	}
+	return out
+}
+
 // newAPIResultResponse is a settled request's result: the identity only for an
 // approval.
 func newAPIResultResponse(req Request, identity proofingprovider.Identity, now time.Time) apiResultResponse {
@@ -589,13 +609,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt
-		out.Identity = &apiIdentity{
-			GivenName: identity.GivenName, FamilyName: identity.FamilyName,
-			BirthDate: identity.BirthDate, Nationality: identity.Nationality,
-		}
-		if a := identity.AgeOver; a != nil {
-			out.Identity.AgeOver = &apiAgeOver{Age: a.Age, Over: a.Over}
-		}
+		out.Identity = newAPIIdentity(identity)
 	}
 	if ev := identity.Evidence; ev != nil {
 		out.Evidence = append(out.Evidence, apiEvidenceEntry{

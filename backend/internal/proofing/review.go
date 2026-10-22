@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -23,15 +24,56 @@ var reviewErrorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,64}$`)
 // whose session the engine already ended.
 var ErrNotUnderReview = errors.New("proofing: the request is not under review")
 
-// ReviewInput is an admin's decision on a request under review: approve, or
-// reject with an optional ErrorCode. Reason is required and audited.
+// ErrOwnReview is a reviewer deciding an identity check they sent or are the
+// subject of: another reviewer decides it.
+var ErrOwnReview = errors.New("proofing: a reviewer does not decide a check they sent or are the subject of")
+
+// The codes a reviewer's rejection names, for what they found wrong; none is
+// ErrorReviewRejected. Each is the reviewer's own and no code the wallet or the
+// engine sets for another reason: a data request still finds the session
+// (DataRequestStore.Candidates leaves out only errorIdentityMismatch), and the
+// person is told what the reviewer found, not a failed check.
+const (
+	// errorReviewNotHolder: what was sent is someone else's.
+	errorReviewNotHolder = "REVIEW_NOT_HOLDER"
+	// errorReviewAltered: what was sent looks altered.
+	errorReviewAltered = "REVIEW_ALTERED"
+	// errorEvidenceNotAsRequested: what was sent is not what was asked for.
+	errorEvidenceNotAsRequested = "EVIDENCE_NOT_AS_REQUESTED"
+)
+
+// reviewerRejectCodes are the codes a reviewer may name; ErrorReviewRejected is
+// "something else", and also what a rejection naming none records.
+var reviewerRejectCodes = []string{errorReviewNotHolder, errorReviewAltered, errorEvidenceNotAsRequested, ErrorReviewRejected}
+
+// ReviewInput is a decision on a request under review: approve, or reject with
+// an optional ErrorCode. Reason is required and audited.
 type ReviewInput struct {
-	Approve   bool
+	Approve bool
+	// ErrorCode names why a rejection is one: for a reviewer one of
+	// reviewerRejectCodes; the wallet deciding on its own names its own
+	// (ErrorOrgPaused).
 	ErrorCode string
 	Reason    string
 	// RequestIDs are the matched sessions approving a data request takes; nil
 	// takes those approvedMatches takes without a tick. Only for a data request.
 	RequestIDs []uuid.UUID
+	// ReviewerID is the member deciding; uuid.Nil when the wallet decides on
+	// its own (a paused org's open reviews).
+	ReviewerID uuid.UUID
+}
+
+// ownReview reports whether reviewer is the one who sent req or its subject:
+// for an identity check they would vouch for their own request or their own
+// identity. A data request is the person's own ask, which whoever sent its
+// link has no stake in, so its sender may decide it: in an org with one admin
+// nobody else could, and it would lapse unanswered.
+func ownReview(req Request, reviewer uuid.UUID) bool {
+	if reviewer == uuid.Nil || req.FlowKind.dataRequest() {
+		return false
+	}
+	return (req.RequestedBy != nil && *req.RequestedBy == reviewer) ||
+		(req.SubjectUserID != nil && *req.SubjectUserID == reviewer)
 }
 
 func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
@@ -43,6 +85,8 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 		return Request{}, fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
 	case in.ErrorCode != "" && !reviewErrorCodePattern.MatchString(in.ErrorCode):
 		return Request{}, fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
+	case in.ReviewerID != uuid.Nil && in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode):
+		return Request{}, fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
 	}
 	// Two reviewers deciding at once: the second waits, then reads it decided.
 	release, err := s.requests.LockReview(ctx, id)
@@ -56,6 +100,9 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	}
 	if req.Status != StatusNeedsReview || req.session == nil || req.session.EndedAt != nil || req.PurgedAt != nil {
 		return Request{}, ErrNotUnderReview
+	}
+	if ownReview(req, in.ReviewerID) {
+		return Request{}, ErrOwnReview
 	}
 	if req.FlowKind.dataRequest() && s.dataRequests != nil {
 		return s.decideDataRequest(ctx, req, reviewer, in)

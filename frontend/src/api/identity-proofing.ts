@@ -188,6 +188,9 @@ export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 
 const proofingRequestSchema = z.object({
   id: z.string(),
+  // The member who sent it; absent for one the API created, and once that
+  // member's account is gone.
+  requestedById: z.string().optional(),
   requestedByName: z.string(),
   // Set for a request the org's software created with one of its keys.
   apiKeyName: z.string().optional(),
@@ -746,14 +749,16 @@ export const MAX_LISTED_REQUESTS = 200;
 
 // The org's requests, newest first and capped by the backend after the
 // narrowing: to those sent to one member, to those sent to members or to
-// external people, to those sent on one flow, or to those held in review.
+// external people, to those sent on one flow, to those held in one status (in
+// review: the longest in review first), or to the data requests.
 export function getProofingRequests(
   slug: string,
   filter: {
     subjectUserId?: string;
     subjectKind?: "member" | "external";
     flowId?: string;
-    status?: "needs_review";
+    status?: "needs_review" | "approved" | "rejected";
+    flowKind?: "data_request";
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -762,6 +767,7 @@ export function getProofingRequests(
   if (filter.subjectKind) params.set("subjectKind", filter.subjectKind);
   if (filter.flowId) params.set("flowId", filter.flowId);
   if (filter.status) params.set("status", filter.status);
+  if (filter.flowKind) params.set("flowKind", filter.flowKind);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -1458,7 +1464,8 @@ export async function submitProofingAddress(
 }
 
 // An administrator's decision on a request under review; reason is required.
-// errorCode names why a rejection is one (MANUAL_REVIEW_REJECTED when absent).
+// errorCode names what a reviewer found wrong (REJECT_REASONS;
+// MANUAL_REVIEW_REJECTED when absent).
 // requestIds are a data request's matched sessions an approval takes (every
 // match when absent).
 export interface ProofingReviewInput {

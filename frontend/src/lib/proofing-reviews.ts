@@ -59,6 +59,13 @@ export function waitingSince(request: ProofingRequest): string {
   return request.completedAt ?? request.createdAt;
 }
 
+// When a data request was asked, as its page says: while it waits, when it
+// reached review, the moment its month to answer runs from (answerBy). A
+// decision overwrites that moment, so a closed one says when it was made.
+export function askedAt(request: ProofingRequest): string {
+  return isWaiting(request) ? waitingSince(request) : request.createdAt;
+}
+
 function sinceMillis(request: ProofingRequest): number {
   return Date.parse(waitingSince(request));
 }
@@ -124,7 +131,8 @@ export function closedRequests(
 }
 
 // Until when a data request in review can be answered: its review lapses then
-// (REVIEW_LAPSED), a month after it went there. Absent for a check, or once decided.
+// (REVIEW_LAPSED, purge_at), a calendar month after it went there (askedAt).
+// Absent for a check, or once decided.
 export function answerBy(request: ProofingRequest): string | undefined {
   return isDataRequest(request.flowKind) && isWaiting(request)
     ? request.purgeAt
@@ -132,16 +140,37 @@ export function answerBy(request: ProofingRequest): string | undefined {
 }
 
 // What a reviewer may find wrong with a check, and the error code the
-// rejection carries. "other" sends none: the service then uses
-// MANUAL_REVIEW_REJECTED.
+// rejection carries: the reviewer's own codes (reviewerRejectCodes in
+// backend/internal/proofing/review.go), never one the wallet sets for another
+// reason, which a later data request would skip or the person misread.
+// "other" sends none: the service then uses MANUAL_REVIEW_REJECTED.
 export const REJECT_REASONS = [
-  { key: "someoneElse", errorCode: "IDENTITY_MISMATCH" },
-  { key: "altered", errorCode: "DOC_TAMPERED" },
+  { key: "someoneElse", errorCode: "REVIEW_NOT_HOLDER" },
+  { key: "altered", errorCode: "REVIEW_ALTERED" },
   { key: "notAsked", errorCode: "EVIDENCE_NOT_AS_REQUESTED" },
   { key: "other", errorCode: undefined },
 ] as const;
 export type RejectReasonKey = (typeof REJECT_REASONS)[number]["key"];
 export const DEFAULT_REJECT_REASON: RejectReasonKey = "someoneElse";
+
+// Why the reader may not decide an identity check: they sent it, or it is
+// about them. Another reviewer decides it (the backend's ownReview, 403
+// own_review). A data request is the person's own ask: whoever sent its link
+// may decide it.
+export type OwnReview = "sent" | "subject";
+
+export function ownReview(
+  request: Pick<
+    ProofingRequest,
+    "flowKind" | "requestedById" | "subjectUserId"
+  >,
+  userId: string | undefined,
+): OwnReview | undefined {
+  if (userId === undefined || isDataRequest(request.flowKind)) return undefined;
+  if (request.requestedById === userId) return "sent";
+  if (request.subjectUserId === userId) return "subject";
+  return undefined;
+}
 
 export interface CheckDecisionDraft {
   choice: ProofingReviewInput["decision"] | undefined;

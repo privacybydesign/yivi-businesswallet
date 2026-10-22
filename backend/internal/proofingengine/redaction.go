@@ -3,6 +3,7 @@ package proofingengine
 import (
 	"errors"
 	"log/slog"
+	"maps"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/redact"
@@ -66,6 +67,41 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	nfc := *sess.Steps.NFC
 	nfc.Raw = raw
 	sess.Steps.NFC = &nfc
+}
+
+// heldForReview is the redaction a session's result and stored evidence take
+// when it finishes in status: one waiting for review keeps its face photos
+// (the chip's portrait, the selfie, a reference photo) whatever its flow says,
+// for the reviewer to compare. The decision drops them then (dropFacePhotos).
+// The BSN is covered either way.
+func heldForReview(status session.Status, redaction privacy.RedactionPolicy) privacy.RedactionPolicy {
+	if status == session.StatusNeedsReview {
+		redaction.KeepFacePhotos = true
+	}
+	return redaction
+}
+
+// resultFacePhotos are the result keys that carry a face photo (buildResult).
+var resultFacePhotos = []string{"photo", "selfie", "referencePhoto"}
+
+// dropFacePhotos drops the face photos a session held for its review
+// (heldForReview) from its result and its stored evidence, unless its flow
+// keeps them. Its stored evidence is redacted again as at submit, which leaves
+// what was covered then as it is.
+func dropFacePhotos(sess *session.Session, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) {
+	if redaction.KeepFacePhotos {
+		return
+	}
+	if sess.Result != nil {
+		// A copy, not a write through a map the session read before this
+		// update may share, as redactStepsForStorage copies the steps.
+		result := maps.Clone(sess.Result)
+		for _, key := range resultFacePhotos {
+			delete(result, key)
+		}
+		sess.Result = result
+	}
+	redactStepsForStorage(sess, bsnPolicy, redaction)
 }
 
 const (

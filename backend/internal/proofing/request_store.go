@@ -55,9 +55,11 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 		AND r.status IN ('pending', 'in_progress') AND COALESCE(r.ips_session_expires_at, r.link_expires_at) > now()
 		THEN NULL ELSE r.purge_at END`
 
-// dataRequestReviewDays is how long a data request may wait in review: GDPR
-// Art. 12(3)'s month to answer. Its purge comes up then (lapseReview).
-const dataRequestReviewDays = 30
+// dataRequestReviewMonths is how long a data request may wait in review: GDPR
+// Art. 12(3)'s month to answer, a calendar month from when the person was proven
+// (completed_at): 16 Oct to 16 Nov, 31 Jan to the end of February. Its purge
+// comes up then (lapseReview), the "Answer by" the Reviews page shows.
+const dataRequestReviewMonths = 1
 
 // settledAt is when an external request ended, for what is counted from it:
 // cancelled, its session ended, decided, or else its running session's or
@@ -80,8 +82,8 @@ const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
 		THEN ` + settledAt + ` + make_interval(months => st.legal_retention_months) END`
 
 // setPurgeAt stores purge_at on the requests r its WHERE (appended, over $1)
-// selects; $2 is dataRequestReviewDays, $3 proofedNameRetention in seconds and
-// $4 defaultDataRetentionDays. It is the one rule for when a request is
+// selects; $2 is dataRequestReviewMonths, $3 proofedNameRetention in seconds
+// and $4 defaultDataRetentionDays. It is the one rule for when a request is
 // purged, so ListPurgeDue reads an index instead of computing it for every
 // unpurged row:
 //   - its retention (its flow's override, else for an external person's the
@@ -95,7 +97,9 @@ const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
 //     retention is never zero. An identity review counts as settled when it
 //     went there: undecided, it is kept no longer than a decided one, the
 //     most its subject was told.
-//   - a data request in review: dataRequestReviewDays after it went there.
+//   - a data request in review: dataRequestReviewMonths after it went there,
+//     counted on the calendar in UTC, so the day does not hang on the
+//     database session's time zone.
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
@@ -113,7 +117,7 @@ const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 				+ (SELECT make_interval(months => st.legal_retention_months) FROM identity_proofing_settings st
 					WHERE st.organization_id = r.organization_id) END),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
-			THEN r.completed_at + make_interval(days => $2) END,
+			THEN (r.completed_at AT TIME ZONE 'UTC' + make_interval(months => $2)) AT TIME ZONE 'UTC' END,
 		CASE WHEN r.status = 'approved' AND r.flow_kind = 'data_erasure' THEN r.completed_at END)
 	WHERE `
 
@@ -126,7 +130,7 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, proofedNameRetention.Seconds(),
+	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewMonths, proofedNameRetention.Seconds(),
 		defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time requests %v: %w", ids, err)
 	}
@@ -147,7 +151,7 @@ func refreshOrgPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) er
 		return fmt.Errorf("proofing: lock requests org %s: %w", id, err)
 	}
 	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL`,
-		id, dataRequestReviewDays, proofedNameRetention.Seconds(), defaultDataRetentionDays); err != nil {
+		id, dataRequestReviewMonths, proofedNameRetention.Seconds(), defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time org %s: %w", id, err)
 	}
 	return nil
@@ -807,17 +811,25 @@ func (s *RequestStore) get(ctx context.Context, id uuid.UUID) (Request, error) {
 	return req, nil
 }
 
-// List returns the org's requests, newest first, narrowed by filter.
+// List returns the org's requests, newest first, narrowed by filter; those in
+// review (filter.Status) the longest in review first, as the Reviews page
+// shows them, so its cap leaves out the newest.
 func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
+	order := `r.created_at DESC`
+	if filter.Status != nil && *filter.Status == StatusNeedsReview {
+		// When it went to review (completed_at), as waitingSince on the page.
+		order = `COALESCE(r.completed_at, r.created_at), r.created_at`
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
 			AND ($5::text IS NULL OR r.subject_kind = $5)
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR r.status = $7)
-		ORDER BY r.created_at DESC LIMIT $3`
+			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
+		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
-		filter.FlowID, filter.Status)
+		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure))
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
