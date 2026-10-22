@@ -60,3 +60,37 @@ describe("dark palette (index.css)", () => {
     },
   );
 });
+
+// The white-label design's light block sets its own status colours. A status
+// text colour it leaves out falls back to Yivi's, a different green than the
+// success colour beside it, so each one it sets has its text colour too, and
+// that text stays readable on its cards.
+const whiteLabelBlock = css.match(
+  /:root:where\(\[data-design="white-label"\]:not\(\[data-color-scheme="dark"\]\)\)\s*\{([^}]*)\}/,
+);
+const whiteLabel: Record<string, string> = {};
+for (const [, name, value] of (whiteLabelBlock?.[1] ?? "").matchAll(
+  /(--yb-[\w-]+):\s*([^;]+);/g,
+)) {
+  whiteLabel[name] = value.trim();
+}
+
+describe("white-label light palette (index.css)", () => {
+  it("sets the success text colour beside the success colour", () => {
+    expect(whiteLabelBlock).not.toBeNull();
+    expect(whiteLabel["--yb-success"]).toBeDefined();
+    expect(whiteLabel["--yb-success-fg"]).toBeDefined();
+  });
+
+  it.each([
+    ["--yb-success-fg", "success status text"],
+    ["--yb-error", "error status text"],
+  ])("keeps %s on its surface at WCAG AA (%s)", (fgToken) => {
+    const ratio = contrastRatio(
+      whiteLabel[fgToken],
+      whiteLabel["--yb-surface"],
+    );
+    expect(ratio).not.toBeNull();
+    expect(ratio!).toBeGreaterThanOrEqual(AA_CONTRAST);
+  });
+});

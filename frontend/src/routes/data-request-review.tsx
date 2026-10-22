@@ -365,8 +365,10 @@ function MatchRow({
     </>
   );
 
+  // A status keeps to one line, so the statuses wrap below the flow name once
+  // it would shrink under basis-44, as on a phone.
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className="flex flex-wrap items-start gap-x-3 gap-y-1.5 py-3">
       {selection && (
         <input
           id={checkboxId}
@@ -380,16 +382,16 @@ function MatchRow({
       {selection ? (
         <label
           htmlFor={checkboxId}
-          className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13.5px]"
+          className="flex min-w-0 grow basis-44 flex-col gap-0.5 text-[13.5px]"
         >
           {body}
         </label>
       ) : (
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13.5px]">
+        <div className="flex min-w-0 grow basis-44 flex-col gap-0.5 text-[13.5px]">
           {body}
         </div>
       )}
-      <span className="flex flex-wrap justify-end gap-1.5">
+      <span className="ml-auto flex flex-wrap justify-end gap-1.5">
         <StatusText tone={LEVEL_TONES[match.level]}>
           {t(
             `identityProofing.reviews.dataRequest.found.levels.${match.level}`,
