@@ -1159,9 +1159,9 @@ function YiviSession({
     // The disclosure decided the session: the request's own poll shows the
     // outcome once it is recorded.
     return (
-      <p role="status" className={`${HINT} text-center`}>
+      <output className={`${HINT} block text-center`}>
         {t("customers.onScreen.yiviShared")}
-      </p>
+      </output>
     );
   }
   if (start.data && secondsLeft === 0) {
@@ -1196,12 +1196,10 @@ function YiviSession({
 }
 
 function yiviEndReason(code: string | undefined, t: TFunction): string {
-  switch (code) {
-    case "document_not_accepted":
-      return t("customers.onScreen.yiviCodes.documentNotAccepted");
-    default:
-      return code ?? t("identityProofing.errors.generic");
+  if (code === "document_not_accepted") {
+    return t("customers.onScreen.yiviCodes.documentNotAccepted");
   }
+  return code ?? t("identityProofing.errors.generic");
 }
 
 function SessionOutcome({

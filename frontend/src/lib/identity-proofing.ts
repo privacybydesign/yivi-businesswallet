@@ -192,8 +192,8 @@ export function yiviAppAvailable(flow: {
   steps: readonly string[];
   selfieLocation?: string | undefined;
   requiredAssuranceLevel?: string | undefined;
-  requestedAttributes?: readonly string[] | undefined;
-  ageOver?: number | undefined;
+  requestedAttributes?: readonly string[];
+  ageOver?: number;
 }): boolean {
   const needsReferencePhoto =
     flow.steps.some((step) => FACE_STEPS.includes(step)) &&
@@ -456,11 +456,8 @@ export function flowDraftError(
       return "faceMatchThreshold";
     }
   }
-  if (asksAge(draft)) {
-    const age = Number(draft.ageOver);
-    if (!Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER) {
-      return "ageOver";
-    }
+  if (ageOverInvalid(draft)) {
+    return "ageOver";
   }
   if (draft.retentionSeconds.trim() !== "") {
     const seconds = Number(draft.retentionSeconds);
@@ -469,6 +466,14 @@ export function flowDraftError(
     }
   }
   return null;
+}
+
+// Whether draft's age check asks an age the service refuses
+// (flow.validateAgeOver).
+function ageOverInvalid(draft: ProofingFlowDraft): boolean {
+  if (!asksAge(draft)) return false;
+  const age = Number(draft.ageOver);
+  return !Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER;
 }
 
 // The request body for a draft, as the service's editor builds it. Call only

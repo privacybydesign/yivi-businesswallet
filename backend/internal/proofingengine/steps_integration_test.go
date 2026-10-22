@@ -294,23 +294,7 @@ func TestAgeCheckStoresNoBirthDate(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	token, device := h.claimApp(t, sess)
-	stored := func(when string) session.Session {
-		t.Helper()
-		got, err := h.sessions.Get(h.tenant.ID, sess.ID)
-		if err != nil {
-			t.Fatalf("Get after %s: %v", when, err)
-		}
-		data, err := json.Marshal(got)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, leak := range []string{birthDate, mrtdtestfixtures.TestDg1Hex} {
-			if strings.Contains(string(data), leak) {
-				t.Errorf("stored session after %s holds %.20q", when, leak)
-			}
-		}
-		return got
-	}
+	leaks := []string{birthDate, mrtdtestfixtures.TestDg1Hex}
 
 	code, step := h.do(t, http.MethodPost, "/app/"+token+"/steps/document_capture", device, map[string]any{
 		"document":   map[string]any{"type": "P", "number": "099250692", "issuingState": "GBR", "dateOfBirth": birthDate},
@@ -319,7 +303,7 @@ func TestAgeCheckStoresNoBirthDate(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("document_capture = %d %v", code, step)
 	}
-	if got := stored("document_capture"); got.Steps.Document == nil || got.Steps.Document.ChipAccess != nil {
+	if got := h.storedWithout(t, sess.ID, "document_capture", leaks...); got.Steps.Document == nil || got.Steps.Document.ChipAccess != nil {
 		t.Errorf("document = %+v, want one without the chip access key", got.Steps.Document)
 	}
 
@@ -330,14 +314,14 @@ func TestAgeCheckStoresNoBirthDate(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("nfc = %d %v", code, step)
 	}
-	if got := stored("nfc_read"); got.Steps.NFC == nil || got.Steps.NFC.AgeOver == nil || *got.Steps.NFC.AgeOver != (session.AgeOver{Age: 18, Over: true}) {
+	if got := h.storedWithout(t, sess.ID, "nfc_read", leaks...); got.Steps.NFC == nil || got.Steps.NFC.AgeOver == nil || *got.Steps.NFC.AgeOver != (session.AgeOver{Age: 18, Over: true}) {
 		t.Errorf("nfc evidence = %+v, want age 18, over", got.Steps.NFC)
 	}
 
 	if code, step = h.do(t, http.MethodPost, "/app/"+token+"/submit", device, nil); code != http.StatusOK {
 		t.Fatalf("submit = %d %v", code, step)
 	}
-	stored("submit")
+	h.storedWithout(t, sess.ID, "submit", leaks...)
 	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil {
 		t.Fatalf("SessionIdentity: %v", err)
@@ -373,21 +357,6 @@ func TestYiviAgeCheckStoresNoBirthDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	noBirthDate := func(when string) {
-		t.Helper()
-		got, err := h.sessions.Get(h.tenant.ID, sess.ID)
-		if err != nil {
-			t.Fatalf("Get after %s: %v", when, err)
-		}
-		data, err := json.Marshal(got)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(data), birthDate) || strings.Contains(string(data), "yearOfBirth") {
-			t.Errorf("stored session after %s holds the date of birth", when)
-		}
-	}
-
 	got, err := h.engine.SubmitReference(ctx, h.tenant, sess.ID, sess.Token, pp.Reference{
 		Credential: "pbdf-staging.pbdf.passport",
 		Attributes: map[string]string{"firstName": "Anna", "lastName": "Jansen", "over18": "Yes", "dateOfBirth": birthDate, "yearOfBirth": "1990"},
@@ -395,7 +364,7 @@ func TestYiviAgeCheckStoresNoBirthDate(t *testing.T) {
 	if err != nil || !got.OK {
 		t.Fatalf("SubmitReference = %+v, %v", got, err)
 	}
-	noBirthDate("the disclosure")
+	h.storedWithout(t, sess.ID, "the disclosure", birthDate, "yearOfBirth")
 
 	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil {
@@ -410,4 +379,24 @@ func TestYiviAgeCheckStoresNoBirthDate(t *testing.T) {
 	if got := regulaCalls.Load(); got != 0 {
 		t.Errorf("Regula called %d times, want none", got)
 	}
+}
+
+// storedWithout is session id as stored, failing t where it holds any of
+// leaks.
+func (h harness) storedWithout(t *testing.T, id, when string, leaks ...string) session.Session {
+	t.Helper()
+	got, err := h.sessions.Get(h.tenant.ID, id)
+	if err != nil {
+		t.Fatalf("Get after %s: %v", when, err)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range leaks {
+		if strings.Contains(string(data), leak) {
+			t.Errorf("stored session after %s holds %.20q", when, leak)
+		}
+	}
+	return got
 }
