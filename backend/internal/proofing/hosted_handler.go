@@ -224,11 +224,12 @@ type hostedViewResponse struct {
 		Branding          brandingResponse `json:"branding"`
 		DataRetentionDays int              `json:"dataRetentionDays"`
 	} `json:"organization"`
+	// Flow is what the person is asked for. The flow's name and assurance
+	// level are the org's internal labels and stay out: the token alone opens
+	// this page, and the person's page shows neither.
 	Flow struct {
-		Name                   string   `json:"name"`
-		RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
-		RequestedAttributes    []string `json:"requestedAttributes"`
-		YiviAvailable          bool     `json:"yiviAvailable"`
+		RequestedAttributes []string `json:"requestedAttributes"`
+		YiviAvailable       bool     `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -341,7 +342,6 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Organization.DataRetentionDays = st.Session.DataRetentionDays
 
 	f := hosted.Flow
-	out.Flow.Name, out.Flow.RequiredAssuranceLevel = f.Name, f.RequiredAssuranceLevel
 	out.Flow.RequestedAttributes = f.RequestedAttributes
 	if out.Flow.RequestedAttributes == nil {
 		out.Flow.RequestedAttributes = []string{}

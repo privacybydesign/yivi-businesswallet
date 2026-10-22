@@ -1296,9 +1296,9 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     branding: proofingBrandingSchema,
     dataRetentionDays: z.number(),
   }),
+  // What the person is asked for: no flow name or assurance level, which are
+  // the org's internal labels.
   flow: z.object({
-    name: z.string(),
-    requiredAssuranceLevel: z.string().optional(),
     requestedAttributes: z.array(z.string()),
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,

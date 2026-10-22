@@ -47,6 +47,7 @@ import {
   sessionView,
   sendRequestFields,
   verifyStages,
+  methodChoices,
   currentStage,
   progressPollContinues,
   reviewPollContinues,
@@ -1752,11 +1753,28 @@ describe("sessionView", () => {
   });
 });
 
+describe("app step", () => {
+  it("offers both apps when the Yivi app can run the flow", () => {
+    expect(methodChoices(true)).toEqual(["yivi_app", "idem_app"]);
+  });
+
+  // Continue never starts a session (#304): a flow with one app still shows
+  // the app step, with that one app to tap.
+  it("offers the Idem app alone otherwise, still as a step of its own", () => {
+    expect(methodChoices(false)).toEqual(["idem_app"]);
+    expect(verifyStages({ diplomas: false })).toContain("method");
+  });
+});
+
 describe("address step", () => {
   it("adds the address stage after the session, before the diplomas", () => {
-    expect(
-      verifyStages({ appChoice: false, address: true, diplomas: true }),
-    ).toEqual(["overview", "session", "address", "diplomas"]);
+    expect(verifyStages({ address: true, diplomas: true })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "address",
+      "diplomas",
+    ]);
   });
 
   it("is at the address or diploma step while it is open", () => {
@@ -1783,14 +1801,15 @@ describe("address step", () => {
 
 describe("diploma step", () => {
   it("adds the diploma stage after the session when the flow has it", () => {
-    expect(verifyStages({ appChoice: true, diplomas: true })).toEqual([
+    expect(verifyStages({ diplomas: true })).toEqual([
       "overview",
       "method",
       "session",
       "diplomas",
     ]);
-    expect(verifyStages({ appChoice: false, diplomas: false })).toEqual([
+    expect(verifyStages({ diplomas: false })).toEqual([
       "overview",
+      "method",
       "session",
     ]);
   });

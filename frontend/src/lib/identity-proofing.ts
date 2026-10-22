@@ -18,6 +18,7 @@ import type {
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
+  ProofingMethod,
   ProofingRequest,
   RegisterAddress,
   WebhookDelivery,
@@ -962,9 +963,9 @@ export function dataRequestRefusal(
     : DATA_REQUEST_REFUSALS[errorCode as ProofingRejectionCode];
 }
 
-// The stages a verify page's stepper shows: what is collected, the app (when
-// the subject has a choice), its session, then the address and the diploma
-// upload (when the flow has those steps).
+// The stages a verify page's stepper shows: what is collected, the app, its
+// session, then the address and the diploma upload (when the flow has those
+// steps).
 export type VerifyStage =
   | "overview"
   | "method"
@@ -973,21 +974,27 @@ export type VerifyStage =
   | "diplomas";
 
 export function verifyStages({
-  appChoice,
   address = false,
   diplomas,
 }: {
-  appChoice: boolean;
   address?: boolean;
   diplomas: boolean;
 }): VerifyStage[] {
   return [
     "overview",
-    ...(appChoice ? (["method"] as const) : []),
+    "method",
     "session",
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
   ];
+}
+
+// The apps a verify page's app step offers: both when the Yivi app can run
+// the flow, else the Idem app alone. Continue always leads to this step, even
+// with one app, because tapping an app is what starts the session: a person
+// (or an admin checking a link) who only reads the first step uses nothing up.
+export function methodChoices(yiviAvailable: boolean): ProofingMethod[] {
+  return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
 }
 
 // The stage a verify page is at: the address or diploma step while it is

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import type { TFunction } from "i18next";
@@ -61,6 +61,7 @@ const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 const LINK_BUTTON =
   "rounded-yivi font-display bg-primary text-primary-fg hover:bg-primary-hover inline-flex h-11 items-center justify-center px-[18px] text-[15px] font-semibold";
+const STEP_HEADING = "text-ink text-[22px] leading-[30px] font-bold";
 
 const QR_SIZE = 240;
 const COUNTDOWN_TICK_MS = 1000;
@@ -105,19 +106,39 @@ const METHOD_ICONS: Record<ProofingMethod, IconName> = {
   idem_app: "phone",
 };
 
+const METHOD_KEYS: Record<ProofingMethod, "yivi" | "idem"> = {
+  yivi_app: "yivi",
+  idem_app: "idem",
+};
+
+// The level of a step's heading: h1 on the hosted page, where the step is
+// what the page is about, h2 under the on-screen page's own title.
+type StepHeadingLevel = "h1" | "h2";
+const StepHeadingLevelContext = createContext<StepHeadingLevel>("h2");
+
+function StepHeading({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return useContext(StepHeadingLevelContext) === "h1" ? (
+    <h1 className={STEP_HEADING}>{children}</h1>
+  ) : (
+    <h2 className={STEP_HEADING}>{children}</h2>
+  );
+}
+
+// What is collected. Continue only moves on to the app step: nothing starts
+// until the person taps an app there.
 export function Overview({
   org,
   flow,
   onContinue,
-  starting,
-  error,
   cancel,
 }: {
   org: VerifyOrg;
   flow: VerifyFlowInfo;
   onContinue: () => void;
-  starting: boolean;
-  error?: string;
   // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
 }): React.JSX.Element {
@@ -154,9 +175,9 @@ export function Overview({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
+        <StepHeading>
           {t("identityProofing.onScreen.overview.heading", { name })}
-        </h2>
+        </StepHeading>
         <p className={HINT}>
           {t("identityProofing.onScreen.overview.intro", { name })}
         </p>
@@ -164,13 +185,17 @@ export function Overview({
       {items.length === 0 ? (
         <p className={HINT}>{t("identityProofing.onScreen.overview.noData")}</p>
       ) : (
-        <DataDisclosure items={items} />
+        <>
+          <DataDisclosure items={items} />
+          {/* "This data" is the list above: with nothing listed there is no
+              data to say anything about. */}
+          <p className={HINT}>
+            {t("identityProofing.onScreen.overview.retention", {
+              count: flow.retentionDays,
+            })}
+          </p>
+        </>
       )}
-      <p className={HINT}>
-        {t("identityProofing.onScreen.overview.retention", {
-          count: flow.retentionDays,
-        })}
-      </p>
       {(supportContact !== "" || privacyUrl !== "") && (
         <div className="flex flex-col gap-1 text-[13px]">
           {supportContact !== "" && (
@@ -192,14 +217,9 @@ export function Overview({
           )}
         </div>
       )}
-      {error && (
-        <p role="alert" className={ERROR}>
-          {error}
-        </p>
-      )}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2.5">
         {cancel}
-        <Button icon="arrow_front" loading={starting} onClick={onContinue}>
+        <Button size="lg" onClick={onContinue}>
           {t("identityProofing.onScreen.overview.continue")}
         </Button>
       </div>
@@ -207,13 +227,17 @@ export function Overview({
   );
 }
 
+// The app step: tapping an app starts the session in it. With one app
+// (methodChoices) the step still shows, with that app alone.
 export function MethodChoice({
+  methods,
   picked,
   onChoose,
   onBack,
   starting,
   error,
 }: {
+  methods: ProofingMethod[];
   // The app last tapped: it shows as starting while the session is created.
   picked: ProofingMethod;
   onChoose: (method: ProofingMethod) => void;
@@ -222,40 +246,38 @@ export function MethodChoice({
   error?: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const options: { value: ProofingMethod; key: "yivi" | "idem" }[] = [
-    { value: "yivi_app", key: "yivi" },
-    { value: "idem_app", key: "idem" },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("identityProofing.onScreen.method.heading")}
-      </h2>
+      <StepHeading>{t("identityProofing.onScreen.method.heading")}</StepHeading>
       <div className="flex flex-col gap-3">
-        {options.map((option) => {
-          const busy = starting && picked === option.value;
+        {methods.map((value) => {
+          const busy = starting && picked === value;
           return (
             <button
-              key={option.value}
+              key={value}
               type="button"
               disabled={starting}
               aria-busy={busy || undefined}
-              onClick={() => onChoose(option.value)}
+              onClick={() => onChoose(value)}
               className={[
                 "rounded-yivi border-line-strong bg-surface enabled:hover:bg-surface-3 flex min-h-[88px] w-full cursor-pointer items-center gap-4 border px-5 py-[18px] text-left transition-colors duration-150 disabled:cursor-not-allowed",
                 busy ? "" : "disabled:opacity-50",
               ].join(" ")}
             >
               <span className="bg-tile text-tile-fg rounded-yivi flex h-10 w-10 shrink-0 items-center justify-center">
-                <Icon name={METHOD_ICONS[option.value]} size={20} />
+                <Icon name={METHOD_ICONS[value]} size={20} />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-1">
                 <span className="text-ink text-[16px] font-semibold">
-                  {t(`identityProofing.onScreen.method.${option.key}.title`)}
+                  {t(
+                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.title`,
+                  )}
                 </span>
                 <span className="text-ink-soft text-[14px] leading-[21px]">
-                  {t(`identityProofing.onScreen.method.${option.key}.detail`)}
+                  {t(
+                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
+                  )}
                 </span>
               </span>
               {busy ? (
@@ -280,7 +302,15 @@ export function MethodChoice({
         </p>
       )}
       <div>
-        <Button variant="secondary" icon="arrow_back" onClick={onBack}>
+        {/* Not while a session is created: its success moves the page on
+            to that session, from whichever step is showing. */}
+        <Button
+          variant="secondary"
+          size="lg"
+          icon="arrow_back"
+          disabled={starting}
+          onClick={onBack}
+        >
           {t("identityProofing.onScreen.method.back")}
         </Button>
       </div>
@@ -290,12 +320,15 @@ export function MethodChoice({
 
 // A verify page's current step. When step changes after the first render,
 // focus moves to the step's heading, so a screen reader reads the new step
-// instead of focus dropping to the page.
+// instead of focus dropping to the page. headingLevel is the level of the
+// steps' headings: h1 on a page with no title of its own.
 export function StepRegion({
   step,
+  headingLevel = "h2",
   children,
 }: {
   step: string;
+  headingLevel?: StepHeadingLevel;
   children: React.ReactNode;
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
@@ -303,19 +336,21 @@ export function StepRegion({
   useEffect(() => {
     if (shown.current === step) return;
     shown.current = step;
-    const heading = ref.current?.querySelector<HTMLElement>("h2, h3");
+    const heading = ref.current?.querySelector<HTMLElement>("h1, h2, h3");
     const target = heading ?? ref.current;
     if (heading) heading.tabIndex = -1;
     target?.focus();
   }, [step]);
   return (
-    <div
-      ref={ref}
-      tabIndex={-1}
-      className="flex flex-col gap-6 outline-none [&_h2]:outline-none [&_h3]:outline-none"
-    >
-      {children}
-    </div>
+    <StepHeadingLevelContext.Provider value={headingLevel}>
+      <div
+        ref={ref}
+        tabIndex={-1}
+        className="flex flex-col gap-6 outline-none [&_h1]:outline-none [&_h2]:outline-none [&_h3]:outline-none"
+      >
+        {children}
+      </div>
+    </StepHeadingLevelContext.Provider>
   );
 }
 
@@ -457,9 +492,9 @@ export function Session({
   // and the on-screen one's when where the phone is cannot be read.
   const manualIdem = link ? (
     <>
-      <h2 className="text-ink text-[18px] font-bold">
+      <StepHeading>
         {t("identityProofing.onScreen.scan.idemHeading")}
-      </h2>
+      </StepHeading>
       <QrCode value={link} />
       <p className={`${HINT} text-center`}>
         {t("identityProofing.onScreen.scan.idemHint")}
@@ -571,9 +606,7 @@ function DiplomaStep({
       </p>
 
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("identityProofing.diplomas.heading")}
-        </h2>
+        <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
         <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
       </div>
 
@@ -795,9 +828,7 @@ function AddressStep({
       </p>
 
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("identityProofing.address.heading")}
-        </h2>
+        <StepHeading>{t("identityProofing.address.heading")}</StepHeading>
         <p className={HINT}>{t("identityProofing.address.intro")}</p>
       </div>
 
@@ -1003,9 +1034,9 @@ function IdemOnScreen({
         <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
           <Icon name="phone" size={24} />
         </span>
-        <h2 className="text-ink text-[18px] font-bold">
+        <StepHeading>
           {t("identityProofing.onScreen.scan.connectedHeading")}
-        </h2>
+        </StepHeading>
         <p className={HINT}>
           {t("identityProofing.onScreen.scan.connectedHint")}
         </p>
@@ -1027,7 +1058,7 @@ function IdemOnScreen({
   if (!shown) {
     return (
       <div className="flex flex-col items-center gap-4">
-        <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
+        <StepHeading>{heading}</StepHeading>
         <QrPlaceholder
           label={t("identityProofing.onScreen.scan.newCodeLoading")}
         />
@@ -1063,7 +1094,7 @@ function IdemQr({
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-4">
-      <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
+      <StepHeading>{heading}</StepHeading>
       <QrCode value={code.deepLink} />
       <p className={`${HINT} text-center`}>{hint}</p>
       <a href={code.deepLink} className={LINK_BUTTON}>
@@ -1162,9 +1193,9 @@ function YiviSession({
       : yiviUniversalLink(start.data.walletLink);
   return (
     <>
-      <h2 className="text-ink text-[18px] font-bold">
+      <StepHeading>
         {t("identityProofing.onScreen.scan.yiviHeading")}
-      </h2>
+      </StepHeading>
       {link === undefined ? (
         <QrPlaceholder label={t("identityProofing.onScreen.scan.starting")} />
       ) : (

@@ -278,7 +278,6 @@ function HostedPreview({
               flow.retentionDays ?? settings.data.dataRetentionDays,
           }}
           onContinue={() => undefined}
-          starting={false}
         />
       </Card>
       <p className={HINT}>{t("identityProofingFlows.hosted.previewNote")}</p>

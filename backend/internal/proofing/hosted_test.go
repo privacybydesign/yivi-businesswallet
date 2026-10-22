@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -283,5 +284,36 @@ func TestHostedViewHidesDocNumber(t *testing.T) {
 	}
 	if got := w.Header().Get(headerCacheControl); got != cacheNoStore {
 		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+}
+
+// The person's page gets what is asked of them, not the flow's internal name
+// or its assurance level.
+func TestHostedViewLeavesOutFlowLabels(t *testing.T) {
+	f := newFixture()
+	f.ips.flows[0].RequiredAssuranceLevel = "low"
+	_, token := f.sendHosted(t)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+	r.SetPathValue("token", token)
+	w := httptest.NewRecorder()
+	if err := NewHandler(f.svc, nil, nil).hostedView(w, r); err != nil {
+		t.Fatalf("hostedView: %v", err)
+	}
+	var view struct {
+		Flow map[string]json.RawMessage `json:"flow"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode hosted view: %v", err)
+	}
+	if view.Flow["requestedAttributes"] == nil {
+		t.Fatalf("hosted view flow = %v, want what it collects", view.Flow)
+	}
+	for _, internal := range []string{"name", "requiredAssuranceLevel"} {
+		if _, ok := view.Flow[internal]; ok {
+			t.Errorf("hosted view flow carries %q; want it left out", internal)
+		}
+	}
+	if strings.Contains(w.Body.String(), appFlow.Name) {
+		t.Errorf("hosted view = %s, want no flow name %q", w.Body.String(), appFlow.Name)
 	}
 }

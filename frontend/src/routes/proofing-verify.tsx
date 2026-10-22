@@ -24,6 +24,7 @@ import type {
 import {
   currentStage,
   dataRequestKindOf,
+  methodChoices,
   proofingErrorMessage,
   sendKindFlows,
   verifyStages,
@@ -154,10 +155,10 @@ function VerifyFlow({
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
   const [method, setMethod] = useState<ProofingMethod>("idem_app");
-  // A flow the Yivi app cannot run leaves the Idem app only: no choice to make.
-  const choice = yiviAppAvailable(flow);
+  // A flow the Yivi app cannot run leaves the Idem app only, still tapped on
+  // the app step as on a hosted link.
+  const methods = methodChoices(yiviAppAvailable(flow));
   const stages = verifyStages({
-    appChoice: choice,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
   });
@@ -189,7 +190,7 @@ function VerifyFlow({
   function restart(): void {
     setSent(undefined);
     create.reset();
-    setStep(choice ? "method" : "overview");
+    setStep("method");
   }
 
   return (
@@ -209,16 +210,12 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onContinue={choice ? () => setStep("method") : () => start(method)}
-          starting={create.isPending}
-          error={
-            create.isError ? proofingErrorMessage(create.error, t) : undefined
-          }
+          onContinue={() => setStep("method")}
           cancel={
             <Link
               to=".."
               relative="path"
-              className="text-ink-soft self-center text-[13px] font-semibold hover:underline"
+              className="rounded-button font-button text-ink hover:bg-surface-3 inline-flex h-11 items-center px-[18px] text-[15px] font-semibold"
             >
               {t("identityProofing.onScreen.overview.cancel")}
             </Link>
@@ -227,6 +224,7 @@ function VerifyFlow({
       )}
       {step === "method" && (
         <MethodChoice
+          methods={methods}
           picked={method}
           onChoose={(picked) => {
             setMethod(picked);

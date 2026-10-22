@@ -1188,13 +1188,20 @@ A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link); it never shows the flow's name or
-its assurance level. The retention it states is the
+what is collected, retention, privacy link). It never shows the flow's name or
+its assurance level, and the hosted view leaves both out of its `flow`: the
+token alone opens it. The retention it states is the
 server's `retentionDays` (hosted view `flow`, flow list):
 `subjectRetentionDays`, the flow's override else the org's days, plus the
-engine's day of grace, rounded up ("deleted at most N days after"). With a
-choice of app, tapping Yivi app or Idem app starts the session (no radio, no
-confirm button). The overview's Decline asks to confirm first (`ConfirmDialog`:
+engine's day of grace, rounded up ("deleted at most N days after"); a flow that
+collects nothing (only the outcome) states none. **Continue only moves on to
+the app step, on every flow** (#304): opening the link or pressing Continue
+starts nothing. The app step lists the apps `methodChoices` gives (Yivi app and
+Idem app when `yiviAvailable`, else the Idem app alone, still as a step of its
+own), and tapping one is the start (no radio, no confirm button; Back is
+disabled while it runs). The on-screen page follows the same steps. The step
+headings are h1 on the hosted page (`StepRegion headingLevel`) and h2 under the
+on-screen page's title. The overview's Decline asks to confirm first (`ConfirmDialog`:
 "Go back" or Decline, saying the link stops working; it stays open while the
 request is in flight), then calls
 `POST /proof/{token}/decline`, which cancels a link not yet started

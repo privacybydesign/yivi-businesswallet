@@ -32,6 +32,7 @@ import {
   dataRequestRefusal,
   hostedErrorMessage,
   isProofingLive,
+  methodChoices,
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
@@ -103,9 +104,7 @@ function HostedFlow({
   const { t } = useTranslation();
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
-  const choice = flow.yiviAvailable;
   const stages = verifyStages({
-    appChoice: choice,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
   });
@@ -214,19 +213,18 @@ function HostedFlow({
           steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
           current={stages.indexOf(stage)}
         />
-        <StepRegion step={stage}>
+        <StepRegion step={stage} headingLevel="h1">
           {step === "overview" && (
             <Overview
               org={organization}
               flow={flow}
-              onContinue={
-                choice ? () => setStep("method") : () => begin(method)
-              }
-              starting={start.isPending}
-              error={actionError}
+              // Opening the link or pressing Continue uses nothing up: the
+              // link starts when the person taps an app (#304).
+              onContinue={() => setStep("method")}
               cancel={
                 <Button
                   variant="secondary"
+                  size="lg"
                   disabled={start.isPending}
                   onClick={() => setConfirmDecline(true)}
                 >
@@ -272,6 +270,7 @@ function HostedFlow({
           )}
           {step === "method" && (
             <MethodChoice
+              methods={methodChoices(flow.yiviAvailable)}
               picked={method}
               onChoose={(picked) => {
                 setMethod(picked);

@@ -12302,11 +12302,10 @@ components:
               required: [name, branding, dataRetentionDays]
             flow:
               type: object
+              description: >-
+                What the person is asked for. The flow's name and its assurance level are left
+                out: the person's page shows neither.
               properties:
-                name:
-                  type: string
-                requiredAssuranceLevel:
-                  type: string
                 requestedAttributes:
                   type: array
                   items:
@@ -12333,7 +12332,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [name, requestedAttributes, yiviAvailable, diplomaMode, addressMode, retentionDays]
+              required: [requestedAttributes, yiviAvailable, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.

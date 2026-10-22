@@ -1129,9 +1129,8 @@ type hostedView struct {
 		Name     string         `json:"name"`
 		Branding hostedBranding `json:"branding"`
 	} `json:"organization"`
-	Flow struct {
-		Name string `json:"name"`
-	} `json:"flow"`
+	// The flow's name and level stay out of the person's page.
+	Flow map[string]json.RawMessage `json:"flow"`
 }
 
 // A hosted session is a link: the subject opens the public page without an
@@ -1161,8 +1160,13 @@ func TestProofingHostedLinkFlow(t *testing.T) {
 	}
 
 	view := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token, "", nil))
-	if view.Status != "pending" || view.Started || view.Organization.Name != "Acme" || view.Flow.Name != "Passport only" {
+	if view.Status != "pending" || view.Started || view.Organization.Name != "Acme" || view.Flow["requestedAttributes"] == nil {
 		t.Errorf("hosted page = %+v; want a pending, unstarted Acme page for the flow", view)
+	}
+	for _, internal := range []string{"name", "requiredAssuranceLevel"} {
+		if _, ok := view.Flow[internal]; ok {
+			t.Errorf("hosted page flow carries %q; want it left out", internal)
+		}
 	}
 	resp = env.apiCall(http.MethodGet, "/api/v1/proof/not-a-token", "", nil)
 	if resp.StatusCode != http.StatusNotFound {
