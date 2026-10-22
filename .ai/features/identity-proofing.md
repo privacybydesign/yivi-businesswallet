@@ -439,7 +439,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       organisation may process a BSN only where a law allows it, so keeping
       one is the flow's choice.
     - "Black out the BSN on document photos" is `blurBsn` (on in a new flow),
-      which fills the printed BSN region solid.
+      which fills the printed BSN region solid on a Dutch document's photos;
+      another country's are released as taken.
     - "Keep face photos after the match" is `keepFacePhotos` (off in a new
       flow): off pixelates the chip portrait and the selfie once the match
       ran.
@@ -1224,10 +1225,13 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `proofedName`, never audited. A member's request, a rejected one, or an
 identity check in review keeps no name.
 
-Under a flow's BlurBSN policy a document photo is released and stored only
-with the BSN region the app located filled solid; a photo that came without
-one is withheld from the result and dropped from storage (`coverBSN`), since
-the server never guesses where the BSN is.
+Under a flow's BlurBSN policy (or a mask or omit BSN policy) a document photo
+is released and stored only with the BSN region the app located filled solid;
+a photo that came without one is withheld from the result and dropped from
+storage (`coverBSN`), since the server never guesses where the BSN is. Only a
+Dutch document prints a BSN, so a photo of a document known not to be Dutch
+is released and stored as taken; one whose issuing state is not known is
+treated as Dutch (`coversDocumentBSN`).
 
 A session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,

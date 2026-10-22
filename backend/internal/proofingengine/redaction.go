@@ -91,14 +91,17 @@ func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
 }
 
 // coversDocumentBSN reports whether a document photo's printed BSN is
-// covered: under BlurBSN, and under a mask or omit BSN policy unless the
-// document is known not to be Dutch.
+// covered: under BlurBSN or a mask or omit BSN policy, unless the document is
+// known not to be Dutch. Only a Dutch document prints a BSN, so another
+// country's photo has none to cover and is released as taken; a Dutch one, or
+// one whose issuing state is not known, is covered, and withheld where the app
+// did not locate the BSN (coverBSN).
 func coversDocumentBSN(redaction privacy.RedactionPolicy, bsnPolicy privacy.BSNPolicy, issuingState string) bool {
-	if redaction.BlurBSN {
-		return true
+	if issuingState != "" && issuingState != dutchIssuingState {
+		return false
 	}
 	p := bsnPolicy.Effective()
-	return (p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit) && (issuingState == "" || issuingState == dutchIssuingState)
+	return redaction.BlurBSN || p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit
 }
 
 // resultIssuingState is the issuing state of the document a result is built
