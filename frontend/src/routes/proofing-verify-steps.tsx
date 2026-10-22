@@ -1105,8 +1105,8 @@ function IdemQr({
   );
 }
 
-// The Yivi app's part: start the disclosure, show its QR until the subject
-// has shared, then the face check against the disclosed photo.
+// The Yivi app's part: start the disclosure and show its QR until the subject
+// has shared. The disclosure decides the session: no face check follows.
 function YiviSession({
   target,
   sessionSecondsLeft,

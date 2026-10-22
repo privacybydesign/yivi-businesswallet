@@ -1764,6 +1764,19 @@ describe("app step", () => {
     expect(methodChoices(false)).toEqual(["idem_app"]);
     expect(verifyStages({ diplomas: false })).toContain("method");
   });
+
+  it("offers the Yivi app for an age check only at an age it answers", () => {
+    const ageCheck = (ageOver: number) =>
+      methodChoices(
+        yiviAppAvailable({
+          steps: ["document_capture", "nfc_read"],
+          requestedAttributes: ["dg1", "age_over"],
+          ageOver,
+        }),
+      );
+    expect(ageCheck(21)).toEqual(["yivi_app", "idem_app"]);
+    expect(ageCheck(20)).toEqual(["idem_app"]);
+  });
 });
 
 describe("address step", () => {

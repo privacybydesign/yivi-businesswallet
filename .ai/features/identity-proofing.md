@@ -1198,7 +1198,8 @@ collects nothing (only the outcome) states none. **Continue only moves on to
 the app step, on every flow** (#304): opening the link or pressing Continue
 starts nothing. The app step lists the apps `methodChoices` gives (Yivi app and
 Idem app when `yiviAvailable`, else the Idem app alone, still as a step of its
-own), and tapping one is the start (no radio, no confirm button; Back is
+own; `yiviAppAvailable`, so an age check at an age the Yivi credentials carry
+no claim for is Idem-only), and tapping one is the start (no radio, no confirm button; Back is
 disabled while it runs). The on-screen page follows the same steps. The step
 headings are h1 on the hosted page (`StepRegion headingLevel`) and h2 under the
 on-screen page's title. The overview's Decline asks to confirm first (`ConfirmDialog`:
