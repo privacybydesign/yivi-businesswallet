@@ -1,7 +1,8 @@
 -- +goose Up
--- An Idempotency-Key is kept per org, not per customer. The kept answers are a
--- 24-hour cache of what the first call answered, so they are dropped rather than
--- carried over: a retry across this migration runs again.
+-- An Idempotency-Key is no longer kept per customer: it is per API key (the
+-- migration that adds api_key_id, once the keys are the org's). The kept
+-- answers are a 24-hour cache of what the first call answered, so they are
+-- dropped rather than carried over: a retry across this migration runs again.
 TRUNCATE identity_proofing_idempotency_keys;
 
 -- Dropping the column drops the primary key and the composite foreign keys.

@@ -474,28 +474,83 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   the requests proofing one member, and `?subjectKind=external|member` to those
   sent to external people or to members; the list's cap of 200 applies after
   the narrowing, so the Sessions page and the Overview ask for `external`.
-- **Customers were removed from the model** (twelve migrations,
-  `20261021100000` to `20261021101100`, after the newest one that touched
+- **Customers were removed from the model** (thirteen migrations,
+  `20261021100000` to `20261021101200`, after the newest one that touched
   customers, `20261019120000`;
-  `internal/migrate/customers_removed_integration_test.go` runs them over two
-  customers' data, down and up again). What the org keeps of them:
-  - the oldest customer's settings (`identity_proofing_settings`: session
-    lifetime and retention, erasure handling, the branding with its
-    white-label colours and font, the redirect origins), and all
-    API keys, now the org's. A key keeps working but reaches every external
-    session of the org (list, read results, cancel, purge), and the org's one
-    webhook gets every flow's events, so keys that were issued to different
-    customers now see each other's sessions. The migration does not revoke or
-    rotate them; before deploying, find the orgs where that matters with
-    `SELECT organization_id FROM identity_proofing_api_keys WHERE revoked_at IS
-    NULL GROUP BY 1 HAVING count(DISTINCT customer_id) > 1`;
-  - one webhook endpoint, the oldest customer's that had one; deliveries still
-    waiting for an endpoint that was dropped are deleted, and the kept
-    Idempotency-Key answers are deleted;
-  - the default flow: the members' default is now the org's, and an org
-    without one takes that of its oldest customer that had one, unless that is
-    a data request flow; the per-customer assignment
-    (`identity_proofing_customer_flows`) is dropped;
+  `internal/migrate/customers_removed_integration_test.go` runs them over
+  several customers' data, down and up again). What the org keeps of them:
+  - their settings, merged (`identity_proofing_settings`, migration
+    `20261021100000`): what the customers agree on stays; where they differ,
+    no customer's subjects get less than that customer promised them, so the
+    shortest session lifetime and data retention, erasure handling `review`,
+    and every redirect origin any of them allowed (so each one's portal still
+    embeds the hosted page). The look (display name, colours, font, logo,
+    support contact, privacy URL, "powered by") cannot be merged and is the
+    oldest customer's;
+  - all API keys, now the org's. A key keeps working, except that a paused
+    customer's keys are revoked (a pause stopped them, and nothing pauses a
+    customer any more). A key reaches every external session of the org (list,
+    read results, cancel, purge), also those sent from the app or for a
+    customer that never had a key, and the org's one webhook gets every flow's
+    events. So in an org with more than one customer, a key now reaches
+    sessions of customers it was not issued to. The migration does not rotate
+    keys; before deploying, find the orgs where that happens (a working key and
+    more than one customer) with
+
+    ```sql
+    SELECT c.organization_id
+    FROM identity_proofing_customers c
+    GROUP BY c.organization_id
+    HAVING count(*) > 1
+       AND EXISTS (SELECT 1
+                   FROM identity_proofing_api_keys k
+                            JOIN identity_proofing_customers kc ON kc.id = k.customer_id
+                   WHERE k.organization_id = c.organization_id
+                     AND k.revoked_at IS NULL
+                     AND kc.paused_at IS NULL);
+    ```
+
+    (`TestUpFoldsCustomersIntoOrg` runs it; it needs `customer_id`, which is
+    gone after the migration);
+  - one webhook endpoint, the oldest customer's that had one. A delivery still
+    waiting for another customer is deleted, whatever URL it last named, since
+    it would go to the kept URL under the kept secret; the kept customer's own
+    stay, also those queued before it moved its URL. Delivered and failed ones
+    stay as history (webhook health only counts what the current URL
+    answered, §4). The kept Idempotency-Key answers are deleted;
+  - one default flow, `is_default`, which an API call that names no `flowId`
+    runs and the send forms preselect. A customer's default wins over the
+    members' default, so an integration that names no flow keeps running the
+    flow it ran: of the customers whose key still works (not revoked, the
+    customer not paused) the oldest one's default, else the oldest customer's
+    with a default. A data request flow cannot be the default, so a customer
+    whose default was one is passed over. What this changes:
+    - an org whose customers' working keys ran different defaults keeps one; a
+      call with the other customers' keys that names no flow now runs the org's
+      default (or answers 422 `no_default_flow`). Find those orgs before
+      deploying with
+
+      ```sql
+      SELECT cf.organization_id
+      FROM identity_proofing_customer_flows cf
+               JOIN identity_proofing_customers c ON c.id = cf.customer_id
+      WHERE cf.is_default
+        AND c.paused_at IS NULL
+        AND EXISTS (SELECT 1
+                    FROM identity_proofing_api_keys k
+                    WHERE k.customer_id = c.id
+                      AND k.revoked_at IS NULL)
+      GROUP BY cf.organization_id
+      HAVING count(DISTINCT cf.flow_id) > 1;
+      ```
+
+    - a members' default replaced by a customer's no longer preselects in the
+      form for a member: it preselects the org's default when members may use
+      it, else the first flow they may use. A member's request always names its
+      flow, so a member is never sent a flow the sender did not pick;
+
+    the per-customer assignment (`identity_proofing_customer_flows`) is
+    dropped;
   - every request: one that had a customer is `external`, one that had none
     `member`; already sent requests keep their stored purge time until their
     next write. Their children (a data request's matches and match checks,
@@ -505,12 +560,16 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     family name and birth date they were made of are not kept, so they cannot be
     made again. A session settled before the migration is therefore not found
     by a data request (§15);
-  - a pause the org set itself is lifted, since only a platform admin can pause
-    now (§8).
+  - what was paused stays paused, as a platform pause (§8): an org its own
+    admin had paused, since they did, and an org whose every customer was
+    paused, since the last of them was. A customer paused while others were not
+    only loses its keys (above): a hosted link sent for it and not started yet
+    can now be started, as the org's.
 
   Audit events recorded for customers stay in the log and still read
   (`customer_created`, `customer_updated`, `customer_flows_configured`,
-  `customer_removed`). The down migrations rebuild one customer per org.
+  `customer_removed`). The down migrations rebuild one customer per org; keys
+  stay revoked and pauses stay platform pauses.
 
 ## 2. The mail is the session
 
@@ -707,8 +766,10 @@ post-review outcome stay the system's.
   `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
   newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
-  `identity_proofing_idempotency_keys`, keyed by org and key, so two orgs may
-  use the same one (`TestIdemKeyIsPerOrg`); pruned after 24 h):
+  `identity_proofing_idempotency_keys`, keyed by API key and Idempotency-Key, so
+  two keys, of one org or of two, may use the same one and are never replayed
+  each other's answer (`TestIdemKeyIsPerAPIKey`, `TestIdemKeyIsPerOrg`); pruned
+  after 24 h, and dropped with the key):
   - the same key and body replay the first successful answer
     (`Idempotent-Replayed: true`); another body is 422 `idempotency_key_reused`;
     a call still running is 409 `idempotency_in_flight`.
@@ -799,7 +860,10 @@ post-review outcome stay the system's.
   `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
   Health is one `WebhookHealth` for the org (`not_configured`, `delivering`, or
   `failing` since, with the last status code and the pending retries), derived
-  from the deliveries to its own endpoint; a failing endpoint shows as an alert on
+  from the deliveries last sent to the endpoint's current URL (a delivery's
+  `endpoint_url`, which `claimDue` sets): what an earlier URL, or a customer's
+  endpoint the migration dropped, answered does not count
+  (`TestWebhookHealthCountsCurrentURL`); a failing endpoint shows as an alert on
   the Overview (for an admin) and on the Webhook tab. The failing streak counts
   from a delivery's `first_attempt_at` (or the last success, if later):
   `last_attempt_at` moves with every retry.
@@ -814,10 +878,11 @@ post-review outcome stay the system's.
   already holds changes and audits nothing. Held in `OrgSettingsStore`; no row
   reads as the defaults. A session change sets only what it names, applied under
   the advisory lock on the org (`lockSettings`), and a `PATCH` checks every part
-  before it saves any (`UpdateSettings`). The white-label columns and
-  `erasure_handling` were columns of the customers: migration
-  `20261021100000` carries them over to the settings of the org's oldest
-  customer.
+  before it saves any, then saves the session settings and the redirect origins
+  in one transaction with one audit event (`UpdateSettings`,
+  `OrgSettingsStore.Save`, `TestSettingsSaveIsOneTransaction`). The white-label
+  columns and `erasure_handling` were columns of the customers: migration
+  `20261021100000` merges them into the org's settings (§1).
   - **Session**: `session_ttl_seconds` (120/300/600, default 600),
     `data_retention_days` (7/30/90/180/365, default 30: the design's maximum of
     a year; the proofed-name retention) and `erasure_handling`
@@ -1012,9 +1077,12 @@ make; the pause's confirmation says so. No review stays open under a pause:
 | A rejection there failed | The hourly `PurgeDue` rejects the reviews still open in every paused org (`rejectPausedReviews`). |
 
 The pause records who set it (`PlatformPausedBy`). The
-columns of an org's own pause (`org_paused_at`, `org_paused_by`) are dropped, and
-a pause an org had set itself was lifted by the migration. Audit events
-recorded with `by: organization` stay in the log. `Stores.Pauses` nil
+columns of an org's own pause (`org_paused_at`, `org_paused_by`) are dropped.
+Migration `20261021101000` turned a pause an org had set itself, and the pause
+of every customer of an org, into a platform pause that names nobody (the
+notice then reads "the platform administrator"); the hourly sweep rejects
+the reviews such an org still had open. Audit events recorded with
+`by: organization` stay in the log. `Stores.Pauses` nil
 (unit tests) never pauses.
 
 ## 9. Manual review

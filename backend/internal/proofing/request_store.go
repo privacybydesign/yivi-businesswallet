@@ -76,7 +76,7 @@ const dataRequestReviewDays = 30
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
-// The org's retention is read in the statement: OrgSettingsStore.SaveSession
+// The org's retention is read in the statement: OrgSettingsStore.Save
 // sets it again for the org's requests (refreshOrgPurgeAt). $3 is
 // defaultDataRetentionDays.
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(

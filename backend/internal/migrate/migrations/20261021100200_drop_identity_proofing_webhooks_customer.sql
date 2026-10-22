@@ -1,6 +1,7 @@
 -- +goose Up
 -- An org has one webhook endpoint, which receives the events of all its flows.
--- An org with several keeps the one of its oldest customer that had one.
+-- An org with several keeps the one of its oldest customer that had one; the
+-- migration before this one dropped what still waited for the others.
 DELETE
 FROM identity_proofing_webhooks w
 WHERE w.customer_id <> (SELECT w2.customer_id

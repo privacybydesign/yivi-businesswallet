@@ -550,6 +550,57 @@ func TestSettingsRedirectOrigins(t *testing.T) {
 	}
 }
 
+// Session settings and redirect origins saved together are one transaction
+// and one audit event: when the origins cannot be stored, the session settings
+// written before them are not kept either.
+func TestSettingsSaveIsOneTransaction(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewOrgSettingsStore(pool, audit.NewDBRecorder())
+	orgID := makeOrg(t, pool, "acme")
+	ctx := context.Background()
+	week := SessionSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7, ErasureHandling: ErasureReview}
+	origins := []string{"https://portal.example.org"}
+
+	// The settings row takes no origins, so their write fails after the
+	// session settings' one made the row.
+	for _, sql := range []string{
+		`CREATE FUNCTION refuse_origins() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF cardinality(NEW.allowed_redirect_origins) > 0 THEN RAISE EXCEPTION 'origins refused'; END IF;
+			RETURN NEW;
+		END $$`,
+		`CREATE TRIGGER refuse_origins BEFORE INSERT OR UPDATE ON identity_proofing_settings
+		FOR EACH ROW EXECUTE FUNCTION refuse_origins()`,
+	} {
+		if _, err := pool.Exec(ctx, sql); err != nil {
+			t.Fatalf("refuse origins: %v", err)
+		}
+	}
+	if _, err := store.Save(ctx, orgID, sessionChange(week), &origins); err == nil {
+		t.Fatal("Save with refused origins succeeded")
+	}
+	got, err := store.Get(ctx, orgID)
+	if err != nil || got.Session.DataRetentionDays != defaultDataRetentionDays || len(got.RedirectOrigins) != 0 {
+		t.Errorf("settings after the failed save = %+v, %v; want the defaults, nothing half saved", got, err)
+	}
+	if n := len(settingsAudits(t, pool, orgID)); n != 0 {
+		t.Errorf("settings_updated audits after the failed save = %d, want 0", n)
+	}
+
+	if _, err := pool.Exec(ctx, `DROP TRIGGER refuse_origins ON identity_proofing_settings`); err != nil {
+		t.Fatalf("allow origins: %v", err)
+	}
+	saved, err := store.Save(ctx, orgID, sessionChange(week), &origins)
+	if err != nil || saved.Session != week || !slices.Equal(saved.RedirectOrigins, origins) {
+		t.Fatalf("Save = %+v, %v; want the week and the origins", saved, err)
+	}
+	audits := settingsAudits(t, pool, orgID)
+	if len(audits) != 1 || audits[0].After["dataRetentionDays"] != float64(week.DataRetentionDays) ||
+		len(audits[0].After["allowedRedirectOrigins"].([]any)) != len(origins) {
+		t.Errorf("settings_updated audits = %+v; want one with the session settings and the origins", audits)
+	}
+}
+
 // The branding round trips with its logo, which a save keeps, replaces or
 // removes as asked; each change is audited once, without the logo's bytes, and
 // the other settings stay as they were.

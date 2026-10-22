@@ -7145,8 +7145,8 @@ paths:
         for the events of all its flows. `configured` is false for an organisation without one.
         The endpoint's `url`, subscribed `events`, the last four characters of its
         signing secret, its `health` (`delivering`, `failing` since `failingSince` with
-        `pendingRetries`, or `not_configured`, and the `lastStatusCode`), the `availableEvents`
-        and `maxAttempts`.
+        `pendingRetries`, or `not_configured`, and the `lastStatusCode`; only what the
+        current `url` answered counts), the `availableEvents` and `maxAttempts`.
       responses:
         '200':
           description: The organisation's endpoint.
@@ -8072,7 +8072,9 @@ paths:
         server lost it mid-call) keeps answering 409 until the key expires after 24
         hours, so that a retry can never create a second session; look the session up
         with `GET /proofing/sessions` or use a new key. Purging a session drops the
-        answers stored for it. `cancel` takes the header too.
+        answers stored for it. An answer is kept per API key: another API key of the
+        organisation that sends the same `Idempotency-Key` runs its own call and is
+        never answered with this one. `cancel` takes the header too.
         Authenticated with the organisation's API key as a Bearer token. `email` and an optional
         `name` of the subject, an external person, `flowId` (any flow of the organisation a
         subject can finish; absent is the organisation's default flow, else 422

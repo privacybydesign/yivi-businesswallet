@@ -1,5 +1,18 @@
 -- +goose Up
 -- An API key belongs to the org, not to a customer: one key reaches every flow.
+-- A paused customer's key started nothing. As the org's it would start
+-- sessions on every flow, and there is no customer pause any more to stop it,
+-- so the migration revokes it: the org's admin creates a new key to resume. A
+-- revoked key stays listed, and stays revoked after a down migration. An org
+-- whose every customer was paused is paused as a whole (the migration for the
+-- pauses).
+UPDATE identity_proofing_api_keys k
+SET revoked_at = now()
+FROM identity_proofing_customers c
+WHERE c.id = k.customer_id
+  AND c.paused_at IS NOT NULL
+  AND k.revoked_at IS NULL;
+
 -- Dropping the column drops its composite unique key, foreign key and index.
 ALTER TABLE identity_proofing_api_keys
     DROP COLUMN customer_id,

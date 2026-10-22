@@ -263,25 +263,30 @@ func (s *WebhookStore) Deliveries(ctx context.Context, orgID uuid.UUID) ([]Deliv
 }
 
 // Health reports how the org's endpoint has been answering; an org without an
-// endpoint is WebhookNotConfigured.
+// endpoint is WebhookNotConfigured. Only deliveries last sent to its current
+// URL count: what another URL answered (one the org moved away from, or a
+// customer's endpoint the migration that removed customers dropped) says
+// nothing about this one.
 func (s *WebhookStore) Health(ctx context.Context, orgID uuid.UUID) (WebhookHealth, error) {
 	// The last attempt decides the state. The failing streak runs back from it
 	// to the first attempt after the last success: a delivery still failing
 	// counts from its first attempt (first_attempt_at; last_attempt_at moves
 	// with every retry), or from the last success when it began before it.
+	// A delivery names the URL it was last sent to (claimDue sets it).
 	var lastStatus *string
 	h := WebhookHealth{State: WebhookNotConfigured}
 	err := s.db.QueryRow(ctx, `SELECT last.status, last.last_status_code,
 			(SELECT min(GREATEST(d.first_attempt_at, ok.at)) FROM identity_proofing_webhook_deliveries d,
 				LATERAL (SELECT COALESCE(max(o.delivered_at), '-infinity') AS at FROM identity_proofing_webhook_deliveries o
-					WHERE o.organization_id = w.organization_id AND o.status = $2) ok
-			 WHERE d.organization_id = w.organization_id AND d.status <> $2 AND d.last_attempt_at > ok.at),
+					WHERE o.organization_id = w.organization_id AND o.endpoint_url = w.url AND o.status = $2) ok
+			 WHERE d.organization_id = w.organization_id AND d.endpoint_url = w.url AND d.status <> $2
+				AND d.last_attempt_at > ok.at),
 			(SELECT count(*) FROM identity_proofing_webhook_deliveries d
-			 WHERE d.organization_id = w.organization_id AND d.status = $3 AND d.attempts > 0)
+			 WHERE d.organization_id = w.organization_id AND d.endpoint_url = w.url AND d.status = $3 AND d.attempts > 0)
 		FROM identity_proofing_webhooks w
 		LEFT JOIN LATERAL (
 			SELECT d.status, d.last_status_code FROM identity_proofing_webhook_deliveries d
-			WHERE d.organization_id = w.organization_id AND d.last_attempt_at IS NOT NULL
+			WHERE d.organization_id = w.organization_id AND d.endpoint_url = w.url AND d.last_attempt_at IS NOT NULL
 			ORDER BY d.last_attempt_at DESC LIMIT 1
 		) last ON true
 		WHERE w.organization_id = $1`, orgID, DeliveryDelivered, DeliveryPending).

@@ -5,6 +5,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -88,6 +89,51 @@ func TestWebhookSealedSecretAndFailingSince(t *testing.T) {
 	}
 	if got := health.FailingSince; got == nil || !got.Equal(first) {
 		t.Errorf("failing since = %v, want the first attempt %v", got, first)
+	}
+}
+
+// Health counts only what the endpoint's current URL answered: an attempt at
+// another URL (one the org moved away from, or a customer's endpoint the
+// migration that removed customers dropped) neither fails it nor waits on it.
+func TestWebhookHealthCountsCurrentURL(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	const oldURL, newURL = "https://hooks.example.org/old", "https://hooks.example.org/new"
+	if _, _, err := webhooks.Save(ctx, orgID, oldURL, WebhookEvents); err != nil {
+		t.Fatal(err)
+	}
+	deliver := func(url, status string, attempts, code int, ago time.Duration) {
+		t.Helper()
+		at := time.Now().Add(-ago)
+		if _, err := pool.Exec(ctx, `INSERT INTO identity_proofing_webhook_deliveries
+			(organization_id, event, payload, endpoint_url, status, attempts, last_status_code,
+			 first_attempt_at, last_attempt_at, delivered_at)
+			VALUES ($1, $2, '{}', $3, $4, $5, $6, $7, $7, CASE WHEN $4 = 'delivered' THEN $7::timestamptz END)`,
+			orgID, EventTest, url, status, attempts, code, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deliver(oldURL, DeliveryFailed, MaxWebhookAttempts, http.StatusInternalServerError, 2*time.Hour)
+	deliver(oldURL, DeliveryPending, 1, http.StatusInternalServerError, time.Hour)
+	if h, err := webhooks.Health(ctx, orgID); err != nil || h.State != WebhookFailing || h.PendingRetries != 1 {
+		t.Fatalf("health at the old URL = %+v, %v; want failing with one retry", h, err)
+	}
+
+	if _, _, err := webhooks.Save(ctx, orgID, newURL, WebhookEvents); err != nil {
+		t.Fatal(err)
+	}
+	h, err := webhooks.Health(ctx, orgID)
+	if err != nil || h.State != WebhookDelivering || h.LastStatusCode != nil || h.FailingSince != nil || h.PendingRetries != 0 {
+		t.Errorf("health after the move = %+v, %v; want delivering, nothing tried at the new URL yet", h, err)
+	}
+
+	deliver(newURL, DeliveryDelivered, 1, http.StatusOK, 30*time.Minute)
+	deliver(oldURL, DeliveryFailed, MaxWebhookAttempts, http.StatusBadGateway, time.Minute)
+	if h, err := webhooks.Health(ctx, orgID); err != nil || h.State != WebhookDelivering ||
+		h.LastStatusCode == nil || *h.LastStatusCode != http.StatusOK {
+		t.Errorf("health = %+v, %v; want delivering on the new URL's 200, not failing on the old one's 502", h, err)
 	}
 }
 

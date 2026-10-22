@@ -576,8 +576,8 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	}
 	// Saving what is already saved changes and audits nothing.
 	_ = env.patchSettings("acme", update).Body.Close()
-	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
-		t.Errorf("settings_updated audits = %d, want 2 (session settings, origins)", n)
+	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 1 {
+		t.Errorf("settings_updated audits = %d, want 1 (session settings and origins, saved together)", n)
 	}
 
 	// Every flow tells the external person how long their data is kept: the
@@ -612,8 +612,8 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get(headerContentType) != contentTypePNG || !bytes.Equal(served, logo) {
 		t.Errorf("logo = %d %q (%d bytes, err %v), want the uploaded PNG", resp.StatusCode, resp.Header.Get(headerContentType), len(served), err)
 	}
-	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 3 {
-		t.Errorf("settings_updated audits = %d, want 3 after the branding", n)
+	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
+		t.Errorf("settings_updated audits = %d, want 2 after the branding", n)
 	}
 
 	bad := map[string]string{"displayName": "Acme", "primaryColor": "green"}

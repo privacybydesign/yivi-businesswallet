@@ -115,9 +115,8 @@ type apiKeyStore interface {
 
 type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
-	SaveSession(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange) (Settings, error)
+	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error)
 	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
-	SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error)
 	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
@@ -1915,36 +1914,26 @@ func (c SettingsChange) session() SessionSettingsChange {
 	}
 }
 
-// UpdateSettings applies change once every field in it is valid, so a
-// rejected update leaves the settings, and the audit log, as they were.
+// UpdateSettings applies change once every field in it is valid, in one
+// transaction, so a rejected or failed update leaves the settings, and the
+// audit log, as they were.
 func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change SettingsChange) (Settings, error) {
-	current, err := s.orgSettings.Get(ctx, orgID)
-	if err != nil {
-		return Settings{}, err
-	}
-
 	session := change.session()
 	if err := checkSettingsChange(session); err != nil {
 		return Settings{}, err
 	}
-	var origins []string
+	var origins *[]string
 	if change.RedirectOrigins != nil {
-		if origins, err = normalizeOrigins(*change.RedirectOrigins); err != nil {
+		normalized, err := normalizeOrigins(*change.RedirectOrigins)
+		if err != nil {
 			return Settings{}, err
 		}
+		origins = &normalized
 	}
-
-	if !session.empty() {
-		if current, err = s.orgSettings.SaveSession(ctx, orgID, session); err != nil {
-			return Settings{}, err
-		}
+	if session.empty() && origins == nil {
+		return s.orgSettings.Get(ctx, orgID)
 	}
-	if change.RedirectOrigins != nil {
-		if current, err = s.orgSettings.SaveRedirectOrigins(ctx, orgID, origins); err != nil {
-			return Settings{}, err
-		}
-	}
-	return current, nil
+	return s.orgSettings.Save(ctx, orgID, session, origins)
 }
 
 // Stats counts the external requests sent within statsWindow, per flow,

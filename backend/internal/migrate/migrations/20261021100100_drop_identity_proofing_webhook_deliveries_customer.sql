@@ -1,12 +1,21 @@
 -- +goose Up
--- Deliveries belong to the org's one endpoint. A delivery still waiting for the
--- endpoint of a customer that lost its endpoint to the org's one would be sent
--- to another customer's URL, so it is dropped.
+-- Deliveries belong to the org's one endpoint: that of its oldest customer that
+-- had one, which the migration for the endpoints keeps. A delivery still
+-- waiting for another customer would go to the kept customer's URL, signed
+-- with its secret, so it is dropped, whatever URL it last named. The kept
+-- customer's own stay, also those queued before it changed its URL: they go to
+-- its current one, as they would have. Delivered and failed ones stay as the
+-- org's history.
 DELETE
 FROM identity_proofing_webhook_deliveries d
 WHERE d.status = 'pending'
-  AND d.endpoint_url IS DISTINCT FROM
-      (SELECT w.url FROM identity_proofing_webhooks w WHERE w.organization_id = d.organization_id);
+  AND d.customer_id IS DISTINCT FROM
+      (SELECT w.customer_id
+       FROM identity_proofing_webhooks w
+                JOIN identity_proofing_customers c ON c.id = w.customer_id
+       WHERE w.organization_id = d.organization_id
+       ORDER BY c.created_at, c.id
+       LIMIT 1);
 
 -- Dropping the column drops the composite foreign keys and the customer index.
 -- A delivery's request stays one of its org.

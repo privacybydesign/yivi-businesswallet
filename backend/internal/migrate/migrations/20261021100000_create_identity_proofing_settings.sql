@@ -54,37 +54,55 @@ CREATE TABLE identity_proofing_settings
     CONSTRAINT identity_proofing_settings_logo_check CHECK ((logo_bytes IS NULL) = (logo_content_type IS NULL))
 );
 
--- An org with customers keeps the settings of its oldest one. Requests already
--- sent keep the purge time they hold until their next write.
+-- An org with customers keeps what they agree on. Where they differ, no
+-- customer's subjects get less than that customer promised them: the shortest
+-- session lifetime and data retention, and "delete my data" decided by review.
+-- The redirect origins are every one any customer allowed, so each customer's
+-- portal can still embed the hosted page and get its subjects back. The look
+-- (name, colours, logo, font, support contact, privacy URL, "powered by")
+-- cannot be merged and is the oldest customer's. Requests already sent keep the
+-- purge time they hold until their next write.
 INSERT INTO identity_proofing_settings (organization_id, session_ttl_seconds, data_retention_days, erasure_handling,
                                         display_name, primary_color, logo_bytes, logo_content_type, support_contact,
                                         privacy_url, secondary_color, text_color, surface_color, border_color,
                                         link_color, success_color, warning_color, error_color, topbar_color,
                                         font_family, hide_powered_by, allowed_redirect_origins)
-SELECT DISTINCT ON (organization_id) organization_id,
-                                     session_ttl_seconds,
-                                     data_retention_days,
-                                     erasure_handling,
-                                     display_name,
-                                     primary_color,
-                                     logo_bytes,
-                                     logo_content_type,
-                                     support_contact,
-                                     privacy_url,
-                                     secondary_color,
-                                     text_color,
-                                     surface_color,
-                                     border_color,
-                                     link_color,
-                                     success_color,
-                                     warning_color,
-                                     error_color,
-                                     topbar_color,
-                                     font_family,
-                                     hide_powered_by,
-                                     allowed_redirect_origins
-FROM identity_proofing_customers
-ORDER BY organization_id, created_at, id;
+SELECT o.organization_id,
+       m.session_ttl_seconds,
+       m.data_retention_days,
+       m.erasure_handling,
+       o.display_name,
+       o.primary_color,
+       o.logo_bytes,
+       o.logo_content_type,
+       o.support_contact,
+       o.privacy_url,
+       o.secondary_color,
+       o.text_color,
+       o.surface_color,
+       o.border_color,
+       o.link_color,
+       o.success_color,
+       o.warning_color,
+       o.error_color,
+       o.topbar_color,
+       o.font_family,
+       o.hide_powered_by,
+       ARRAY(SELECT DISTINCT origin
+             FROM identity_proofing_customers c,
+                  unnest(c.allowed_redirect_origins) AS origin
+             WHERE c.organization_id = o.organization_id
+             ORDER BY origin)
+FROM (SELECT DISTINCT ON (organization_id) *
+      FROM identity_proofing_customers
+      ORDER BY organization_id, created_at, id) o
+         JOIN (SELECT organization_id,
+                      min(session_ttl_seconds) AS session_ttl_seconds,
+                      min(data_retention_days) AS data_retention_days,
+                      CASE WHEN count(DISTINCT erasure_handling) = 1 THEN min(erasure_handling) ELSE 'review' END
+                                               AS erasure_handling
+               FROM identity_proofing_customers
+               GROUP BY organization_id) m ON m.organization_id = o.organization_id;
 
 -- +goose Down
 DROP TABLE identity_proofing_settings;

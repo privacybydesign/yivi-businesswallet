@@ -334,16 +334,22 @@ func (fakeAPIKeys) Authenticate(context.Context, string) (APIKeyCaller, error) {
 
 func (fakeAPIKeys) Touch(context.Context, APIKeyCaller) error { return nil }
 
-// fakeOrgSettings holds the org's settings in memory.
+// fakeOrgSettings holds the org's settings in memory, and counts the saves of
+// the session settings and redirect origins.
 type fakeOrgSettings struct {
 	settings Settings
 	logo     Logo
+	saves    int
 }
 
 func (f *fakeOrgSettings) Get(context.Context, uuid.UUID) (Settings, error) { return f.settings, nil }
 
-func (f *fakeOrgSettings) SaveSession(_ context.Context, _ uuid.UUID, change SessionSettingsChange) (Settings, error) {
+func (f *fakeOrgSettings) Save(_ context.Context, _ uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error) {
+	f.saves++
 	f.settings.Session = change.apply(f.settings.Session)
+	if origins != nil {
+		f.settings.RedirectOrigins = *origins
+	}
 	return f.settings, nil
 }
 
@@ -355,11 +361,6 @@ func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Brandin
 		b.HasLogo = f.settings.Branding.HasLogo
 	}
 	f.settings.Branding = b
-	return f.settings, nil
-}
-
-func (f *fakeOrgSettings) SaveRedirectOrigins(_ context.Context, _ uuid.UUID, origins []string) (Settings, error) {
-	f.settings.RedirectOrigins = origins
 	return f.settings, nil
 }
 
@@ -1223,6 +1224,11 @@ func TestUpdateSettingsAtomic(t *testing.T) {
 		}
 	}
 
+	if f.orgSettings.saves != 0 {
+		t.Errorf("saves after rejected updates = %d, want none", f.orgSettings.saves)
+	}
+
+	// Both parts go to the store in one save, which is one transaction.
 	saved, err := f.svc.UpdateSettings(context.Background(), testOrg.ID,
 		SettingsChange{DataRetentionDays: &retention, RedirectOrigins: &validOrigins})
 	if err != nil {
@@ -1230,6 +1236,9 @@ func TestUpdateSettingsAtomic(t *testing.T) {
 	}
 	if saved.Session.DataRetentionDays != retention || !slices.Equal(saved.RedirectOrigins, validOrigins) {
 		t.Errorf("saved = %+v, want retention %d and origins %v", saved, retention, validOrigins)
+	}
+	if f.orgSettings.saves != 1 {
+		t.Errorf("saves = %d, want the session settings and the origins in one", f.orgSettings.saves)
 	}
 }
 

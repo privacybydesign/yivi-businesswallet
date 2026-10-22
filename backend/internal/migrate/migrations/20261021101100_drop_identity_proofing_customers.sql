@@ -1,7 +1,8 @@
 -- +goose Up
 -- Customers are gone: flows are the org's main object, and what a customer held
--- is the org's (identity_proofing_settings, API keys, the webhook endpoint) or
--- the flow's. Its sessions stay, as external requests of the org.
+-- is the org's (identity_proofing_settings, API keys, the webhook endpoint, a
+-- pause of every customer) or the flow's. Its sessions stay, as external
+-- requests of the org.
 DROP TABLE identity_proofing_customers;
 
 -- +goose Down

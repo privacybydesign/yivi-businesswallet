@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -123,37 +124,61 @@ func scanSettings(row pgx.CollectableRow) (Settings, error) {
 // identity_proofing.settings_updated with before and after. A change to what
 // is already set changes and audits nothing.
 func (s *OrgSettingsStore) SaveSession(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange) (Settings, error) {
+	return s.Save(ctx, orgID, change, nil)
+}
+
+// SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
+// to and be embedded on, and audits identity_proofing.settings_updated with
+// before and after. Saving the origins it already has changes nothing.
+func (s *OrgSettingsStore) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
+	return s.Save(ctx, orgID, SessionSettingsChange{}, &origins)
+}
+
+// Save applies change to the org's session settings and, when origins is set,
+// replaces its redirect origins, in one transaction: both are saved or
+// neither. It audits identity_proofing.settings_updated once, with before and
+// after of what it changed; a change to what is already set changes and
+// audits nothing.
+func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// A request created meanwhile waits on this lock (settingsLockCreate),
 		// so it reads the new retention for its purge time.
-		if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
-			return err
+		if !change.empty() {
+			if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
+				return err
+			}
 		}
 		before, err := getSettings(ctx, q, orgID)
 		if err != nil {
 			return err
 		}
+		auditBefore, auditAfter := map[string]any{}, map[string]any{}
 		// Applied under the lock, so two changes at once each keep the other's.
-		session := change.apply(before.Session)
-		if before.Session == session {
-			return nil
-		}
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
-				(organization_id, session_ttl_seconds, data_retention_days, erasure_handling)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (organization_id) DO UPDATE SET
-				session_ttl_seconds = EXCLUDED.session_ttl_seconds,
-				data_retention_days = EXCLUDED.data_retention_days,
-				erasure_handling = EXCLUDED.erasure_handling, updated_at = now()`,
-			orgID, int(session.SessionTTL.Seconds()), session.DataRetentionDays, string(session.ErasureHandling)); err != nil {
-			return fmt.Errorf("proofing: save session settings org %s: %w", orgID, err)
-		}
-		if before.Session.DataRetentionDays != session.DataRetentionDays {
-			if err := refreshOrgPurgeAt(ctx, q, orgID); err != nil {
+		if session := change.apply(before.Session); session != before.Session {
+			if err := saveSession(ctx, q, orgID, before.Session, session); err != nil {
 				return err
 			}
+			maps.Copy(auditBefore, before.Session.auditFields())
+			maps.Copy(auditAfter, session.auditFields())
 		}
-		return s.recordUpdated(ctx, q, orgID, before.Session.auditFields(), session.auditFields())
+		if origins != nil && !slices.Equal(before.RedirectOrigins, *origins) {
+			after := *origins
+			if after == nil {
+				after = []string{}
+			}
+			if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings (organization_id, allowed_redirect_origins)
+				VALUES ($1, $2)
+				ON CONFLICT (organization_id) DO UPDATE SET allowed_redirect_origins = EXCLUDED.allowed_redirect_origins,
+					updated_at = now()`, orgID, after); err != nil {
+				return fmt.Errorf("proofing: save redirect origins org %s: %w", orgID, err)
+			}
+			auditBefore["allowedRedirectOrigins"] = before.RedirectOrigins
+			auditAfter["allowedRedirectOrigins"] = after
+		}
+		if len(auditAfter) == 0 {
+			return nil
+		}
+		return s.recordUpdated(ctx, q, orgID, auditBefore, auditAfter)
 	})
 	if err != nil {
 		return Settings{}, err
@@ -161,35 +186,24 @@ func (s *OrgSettingsStore) SaveSession(ctx context.Context, orgID uuid.UUID, cha
 	return s.Get(ctx, orgID)
 }
 
-// SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
-// to and be embedded on, and audits identity_proofing.settings_updated with
-// before and after. Saving the origins it already has changes nothing.
-func (s *OrgSettingsStore) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		before, err := getSettings(ctx, q, orgID)
-		if err != nil {
-			return err
-		}
-		if slices.Equal(before.RedirectOrigins, origins) {
-			return nil
-		}
-		if origins == nil {
-			origins = []string{}
-		}
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings (organization_id, allowed_redirect_origins)
-			VALUES ($1, $2)
-			ON CONFLICT (organization_id) DO UPDATE SET allowed_redirect_origins = EXCLUDED.allowed_redirect_origins,
-				updated_at = now()`, orgID, origins); err != nil {
-			return fmt.Errorf("proofing: save redirect origins org %s: %w", orgID, err)
-		}
-		return s.recordUpdated(ctx, q, orgID,
-			map[string]any{"allowedRedirectOrigins": before.RedirectOrigins},
-			map[string]any{"allowedRedirectOrigins": origins})
-	})
-	if err != nil {
-		return Settings{}, err
+// saveSession stores the org's session settings, changed from before to
+// session, and moves its requests' purge time when the retention changed. The
+// caller holds the settings write lock.
+func saveSession(ctx context.Context, q database.Querier, orgID uuid.UUID, before, session SessionSettings) error {
+	if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
+			(organization_id, session_ttl_seconds, data_retention_days, erasure_handling)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			session_ttl_seconds = EXCLUDED.session_ttl_seconds,
+			data_retention_days = EXCLUDED.data_retention_days,
+			erasure_handling = EXCLUDED.erasure_handling, updated_at = now()`,
+		orgID, int(session.SessionTTL.Seconds()), session.DataRetentionDays, string(session.ErasureHandling)); err != nil {
+		return fmt.Errorf("proofing: save session settings org %s: %w", orgID, err)
 	}
-	return s.Get(ctx, orgID)
+	if before.DataRetentionDays != session.DataRetentionDays {
+		return refreshOrgPurgeAt(ctx, q, orgID)
+	}
+	return nil
 }
 
 // SaveBranding replaces the org's branding, and its logo as logo says, and

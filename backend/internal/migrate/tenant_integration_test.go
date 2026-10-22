@@ -63,8 +63,8 @@ func TestRequestChildrenStayWithOrg(t *testing.T) {
 			(organization_id, event, request_id, payload, endpoint_url)
 			VALUES ($1, 'session.approved', $3, jsonb_build_object('from', $2::text), 'https://org.example.test/hook')`,
 		"idempotency key": `INSERT INTO identity_proofing_idempotency_keys
-			(organization_id, key, request_hash, request_id)
-			VALUES ($1, $2::text, '\x00', $3)`,
+			(organization_id, api_key_id, key, request_hash, request_id)
+			VALUES ($1, (SELECT id FROM identity_proofing_api_keys WHERE organization_id = $1), $2::text, '\x00', $3)`,
 	}
 	for name, insert := range children {
 		t.Run(name+" of another org", func(t *testing.T) {
@@ -109,6 +109,12 @@ func TestRequestChildrenStayWithOrg(t *testing.T) {
 		_, err = pool.Exec(ctx, setKey, memberRequest, a.keyID)
 		if !errors.As(err, &pgErr) || pgErr.Code != checkViolation {
 			t.Errorf("a member's request naming an api key = %v, want a check violation", err)
+		}
+
+		_, err = pool.Exec(ctx, `INSERT INTO identity_proofing_idempotency_keys
+			(organization_id, api_key_id, key, request_hash) VALUES ($1, $2, 'k', '\x00')`, a.orgID, otherOrg.keyID)
+		if !errors.As(err, &pgErr) || pgErr.Code != foreignKeyViolation {
+			t.Errorf("an idempotency answer kept under another org's api key = %v, want a foreign key violation", err)
 		}
 
 		if _, err := pool.Exec(ctx, setKey, a.requestID, a.keyID); err != nil {
