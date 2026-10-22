@@ -150,6 +150,28 @@ func TestFlowFaceMatchThreshold(t *testing.T) {
 	}
 }
 
+// A flow requiring Substantial matches at its floor on a deployment whose
+// threshold is lower: a face under it fails the face step, rather than
+// matching there and failing the level (ASSURANCE_NOT_MET) at the end.
+func TestSubstantialMatchesAtItsFloor(t *testing.T) {
+	const lowDeployment = 0.6
+	crop := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nlive-face"))
+	ref := &faceReference{ImageBase64: "cG9ydHJhaXQ=", MimeType: "image/jpeg"}
+	client := &confirmedRegula{taggedRegula: &taggedRegula{tags: map[string]string{"tx": "ips-ref"}}, similarity: 0.7, crop: crop}
+	s := &Server{cfg: Config{Regula: client, RegulaFaceMatchThreshold: lowDeployment}}
+	v, ok := s.faceVerifier(flow.FaceProviderRegula, &flow.FlowDefinition{RequiredAssuranceLevel: flow.AssuranceLevelSubstantial})
+	if !ok {
+		t.Fatal("faceVerifier: Regula is configured, want a verifier")
+	}
+	out, err := v.Verify(context.Background(), session.Session{TenantReference: "ref"}, ref, liveCapture{TransactionID: "tx"})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if out.Matched == nil || *out.Matched || out.Threshold == nil || *out.Threshold != flow.SubstantialMinFaceMatch {
+		t.Errorf("matched = %v at threshold %v for a 0.7 face, want no match at %v", out.Matched, out.Threshold, flow.SubstantialMinFaceMatch)
+	}
+}
+
 // A Substantial flow with no threshold of its own gets the deployment's, and
 // Regula's default must not sit under the floor Substantial refuses.
 func TestRegulaDefaultMeetsFloor(t *testing.T) {

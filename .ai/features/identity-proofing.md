@@ -473,7 +473,14 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     default (`FACE_MATCH_RECOMMENDED`), and saves one only once it is moved.
     The flow's threshold replaces the deployment's
     (`REGULA_FACE_MATCH_THRESHOLD`) for that flow's face match, lower or
-    higher. At Substantial the range starts at 0.75
+    higher, in the Idem and the Yivi app alike (`faceMatchThreshold`); a flow
+    requiring Substantial matches at 0.75 at least, also on a deployment set
+    lower, so a face under it fails the face step rather than reaching the
+    end and failing `ASSURANCE_NOT_MET`. Before, a flow's threshold could only
+    make the deployment's stricter: migration `20261021116000` dropped every
+    stored one under 0.75, from inactive versions too, so an existing flow
+    matches as it did (on a deployment set under 0.75, one stored between the
+    two is lost). At Substantial the range starts at 0.75
     (`SUBSTANTIAL_FACE_MATCH_FLOOR`, `flow.SubstantialMinFaceMatch`): the part
     below is greyed out and out of reach, picking Substantial lifts a lower
     stored threshold to it, and the engine refuses a Substantial flow with one

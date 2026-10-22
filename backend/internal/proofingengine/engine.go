@@ -84,7 +84,8 @@ type Config struct {
 	RegulaSweeps regulasweep.Queue
 	// RegulaFaceAPIPublicURL is the Face API the app runs liveness against;
 	// RegulaFaceMatchThreshold the similarity a match must reach, unless the
-	// flow sets its own.
+	// flow sets its own; a flow's required level may raise it
+	// (faceMatchThreshold).
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
 

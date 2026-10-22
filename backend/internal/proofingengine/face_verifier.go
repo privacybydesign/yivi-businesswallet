@@ -75,21 +75,38 @@ func (s *Server) faceProviderFor(fd *flow.FlowDefinition) flow.FaceProvider {
 	return flow.FaceProviderEngine
 }
 
-// faceVerifier returns the verifier for p, matching at fd's threshold; ok is
-// false when p isn't configured.
+// faceVerifier returns the verifier for p, matching at fd's threshold
+// (faceMatchThreshold); ok is false when p isn't configured.
 func (s *Server) faceVerifier(p flow.FaceProvider, fd *flow.FlowDefinition) (faceVerifier, bool) {
 	if p == flow.FaceProviderRegula {
 		if s.cfg.Regula == nil {
 			return nil, false
 		}
-		threshold, ok := fd.CheckThresholds[flow.CheckFaceMatch]
-		if !ok {
-			threshold = s.cfg.RegulaFaceMatchThreshold
-		}
-		return regulaFaceVerifier{client: s.cfg.Regula, threshold: threshold}, true
+		return regulaFaceVerifier{client: s.cfg.Regula, threshold: s.faceMatchThreshold(fd)}, true
 	}
 	// The wallet runs no face engine of its own: only Regula verifies a face.
 	return nil, false
+}
+
+// faceMatchThreshold is the similarity a face must reach on fd, on the Idem
+// path and the Yivi path alike: the flow's own face.match threshold when it
+// sets one, lower or higher, else the deployment's
+// (REGULA_FACE_MATCH_THRESHOLD); never under the floor of the level fd
+// requires (flow.LevelRequirement.MinFaceMatch), so a face matched under it is
+// refused at the face step rather than approved there and rejected
+// ASSURANCE_NOT_MET at the end, whatever the deployment sets.
+func (s *Server) faceMatchThreshold(fd *flow.FlowDefinition) float64 {
+	threshold := s.cfg.RegulaFaceMatchThreshold
+	if fd == nil {
+		return threshold
+	}
+	if own, ok := fd.CheckThresholds[flow.CheckFaceMatch]; ok {
+		threshold = own
+	}
+	if level, ok := flow.RequirementFor(fd.RequiredAssuranceLevel); ok {
+		threshold = max(threshold, level.MinFaceMatch)
+	}
+	return threshold
 }
 
 // regulaFaceVerifier confirms a liveness transaction the app ran against the
