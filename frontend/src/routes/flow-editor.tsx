@@ -18,7 +18,6 @@ import type {
 } from "../api/identity-proofing";
 import {
   ASSURANCE_LEVELS,
-  ATTRIBUTE_DOCUMENT,
   draftFromFlow,
   emptyFlowDraft,
   flowDraftError,
@@ -26,6 +25,7 @@ import {
   identityRequired,
   proofingErrorMessage,
   withAssuranceLevel,
+  withIdentity,
 } from "../lib/identity-proofing";
 import type {
   AssuranceLevel,
@@ -51,6 +51,7 @@ const ADVANCED_ERRORS: readonly FlowDraftError[] = [
   "identity",
   "documentTypes",
   "issuingCountries",
+  "ageOver",
 ];
 
 // The levels the editor offers, as the draft holds them: "" is none.
@@ -123,18 +124,13 @@ export function FlowEditor({
   }
 
   // Choosing a data request or required diplomas ticks Document data, which
-  // then stays ticked (identityRequired).
+  // then stays ticked (identityRequired), and unticks the age check, which
+  // withholds the date of birth they need.
   function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
     setFlowKind(kind);
     setDiplomaMode(mode);
     if (identityRequired(kind, isDataRequest(kind) ? "off" : mode)) {
-      setDraft((current) => ({
-        ...current,
-        requestedAttributes: new Set([
-          ...current.requestedAttributes,
-          ATTRIBUTE_DOCUMENT,
-        ]),
-      }));
+      setDraft(withIdentity);
     }
   }
 

@@ -269,8 +269,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     releases.
   - Age check (`age_over`, "Age check"): releases whether the holder is the
     flow's `AgeOver` (1..120 years) or older, as `ageOver: {age, over}`.
-    - The editor picks the age in a dropdown under the checkbox: 12, 16,
-      18 (the default), 21 or 65, plus a saved flow's own age when it is
+    - The editor lists it under What you receive, after Name and document
+      details, and picks the age in a "Minimum age" dropdown under it: 12,
+      16, 18 (the default), 21 or 65, plus a saved flow's own age when it is
       another (`ageOverChoices`).
     - Derived by the engine (`ageOverOf`) at the chip read, from the date of
       birth in the verified chip evidence, never the MRZ scan alone:
@@ -306,7 +307,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       stay).
       - Such a flow does not read the identity (`readsIdentity`), so it cannot
         check for one known person, and a data request or diploma flow, which
-        needs the date of birth, cannot tick it.
+        needs the date of birth, cannot tick it: choosing either ticks `dg1`
+        and unticks the age check (`withIdentity`), which then stays off with
+        a lock note, and the editor refuses to save the two together for such
+        a flow (`flowDraftError`), as `EditFlow` does (`releasesIdentity`).
       - The subject's consent screen describes `dg1` without the date of
         birth (`dg1WithoutBirthDate`).
     - `over` holds from the birthday the holder turns `age`, on the UTC date

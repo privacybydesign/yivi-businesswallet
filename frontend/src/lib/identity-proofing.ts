@@ -515,13 +515,7 @@ export function flowDraftError(
   if (draftSteps(draft).length === 0) {
     return "steps";
   }
-  if (
-    requiresIdentity &&
-    !(
-      draft.requestedAttributes.has(ATTRIBUTE_DOCUMENT) &&
-      attributeAvailable(draft, ATTRIBUTE_DOCUMENT)
-    )
-  ) {
+  if (requiresIdentity && !draftReadsIdentity(draft)) {
     return "identity";
   }
   if (!reachesAssuranceLevel(draft)) {
@@ -642,6 +636,26 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     spec.ageOver = Number(draft.ageOver);
   }
   return spec;
+}
+
+// Whether the draft releases the name and date of birth (readsIdentity): the
+// document data, without the age check, which withholds the date.
+function draftReadsIdentity(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.requestedAttributes.has(ATTRIBUTE_DOCUMENT) &&
+    attributeAvailable(draft, ATTRIBUTE_DOCUMENT) &&
+    !asksAge(draft)
+  );
+}
+
+// The draft of a flow that must read the identity (identityRequired): the
+// document data ticked, and the age check, which withholds the date of birth
+// that flow needs, unticked.
+export function withIdentity(draft: ProofingFlowDraft): ProofingFlowDraft {
+  const requestedAttributes = new Set(draft.requestedAttributes);
+  requestedAttributes.add(ATTRIBUTE_DOCUMENT);
+  requestedAttributes.delete(ATTRIBUTE_AGE_OVER);
+  return { ...draft, requestedAttributes };
 }
 
 // Whether the draft releases the age check, which needs an age.

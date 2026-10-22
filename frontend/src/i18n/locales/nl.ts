@@ -1360,10 +1360,6 @@ export const nl: Translation<typeof en> = {
       namePlaceholder: "NL-paspoort + selfie",
       create: "Flow aanmaken",
       saveVersion: "Opslaan als versie {{version}}",
-      ageOver: "Minimumleeftijd",
-      ageOverOption: "{{age}} jaar of ouder",
-      ageOverHint:
-        "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
       errors: {
         name: "Geef de flow een naam.",
         steps: "Kies minstens één stap.",
@@ -1459,6 +1455,12 @@ export const nl: Translation<typeof en> = {
         hint: "Zonder vinkjes krijg je alleen de uitkomst.",
         identityLocked:
           "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
+        ageOver: "Minimumleeftijd",
+        ageOverOption: "{{age}} jaar of ouder",
+        ageOverHint:
+          "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
+        ageOverLocked:
+          "Uit bij een gegevensverzoek of diploma's: die hebben de geboortedatum nodig.",
       },
       checks: {
         title: "Controles",

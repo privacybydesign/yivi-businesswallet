@@ -9,12 +9,15 @@ import type {
   ProofingSettings,
 } from "../api/identity-proofing";
 import {
+  ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
   BSN_POLICIES,
   DOCUMENT_KINDS,
   FOLLOW_ORG,
   REQUESTED_ATTRIBUTES,
   SESSION_TTL_OPTIONS_SECONDS,
+  ageOverChoices,
+  asksAge,
   assuranceLevelLabel,
   attributeAvailable,
   lockedByLevel,
@@ -41,6 +44,8 @@ import {
 import type { OptionLock } from "./flow-editor-parts";
 
 const LABEL = "text-[14px] font-semibold";
+// Lines a field up under an option's label: past its checkbox and the gap.
+const UNDER_OPTION = "pl-[30px]";
 const RADIO = "h-[18px] w-[18px] flex-none accent-ink";
 
 interface AdvancedSettingsProps {
@@ -414,26 +419,39 @@ function ReceiveSection({
     >
       {REQUESTED_ATTRIBUTES.map(({ value }) => {
         const available = attributeAvailable(draft, value);
+        const ticked = draft.requestedAttributes.has(value);
         // Once ticked, Document data stays on: an older version without it can
         // still tick it.
         const locked =
-          requiresIdentity &&
-          value === ATTRIBUTE_DOCUMENT &&
-          draft.requestedAttributes.has(value);
+          requiresIdentity && value === ATTRIBUTE_DOCUMENT && ticked;
+        // Once unticked, the age check stays off: it withholds the date of
+        // birth the flow needs.
+        const ageLock =
+          requiresIdentity && value === ATTRIBUTE_AGE_OVER && !ticked
+            ? { note: t("identityProofingFlows.editor.receive.ageOverLocked") }
+            : undefined;
         return (
-          <OptionRow
-            key={value}
-            id={`flow-attr-${value}`}
-            checked={available && draft.requestedAttributes.has(value)}
-            disabled={!available || locked}
-            label={t(`identityProofingFlows.attributes.${value}`)}
-            hint={t(`identityProofingFlows.attributeHints.${value}`)}
-            onChange={() =>
-              update({
-                requestedAttributes: toggled(draft.requestedAttributes, value),
-              })
-            }
-          />
+          <React.Fragment key={value}>
+            <OptionRow
+              id={`flow-attr-${value}`}
+              checked={available && ticked}
+              disabled={!available || locked}
+              label={t(`identityProofingFlows.attributes.${value}`)}
+              hint={t(`identityProofingFlows.attributeHints.${value}`)}
+              lock={ageLock}
+              onChange={() =>
+                update({
+                  requestedAttributes: toggled(
+                    draft.requestedAttributes,
+                    value,
+                  ),
+                })
+              }
+            />
+            {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
+              <MinimumAge draft={draft} update={update} error={error} />
+            )}
+          </React.Fragment>
         );
       })}
       {requiresIdentity && (
@@ -447,6 +465,47 @@ function ReceiveSection({
         </p>
       )}
     </Section>
+  );
+}
+
+// The age the age check answers for, under its row: the usual legal ages, and
+// a stored flow's own age when it is another (ageOverChoices).
+function MinimumAge({
+  draft,
+  update,
+  error,
+}: {
+  draft: ProofingFlowDraft;
+  update: (patch: Partial<ProofingFlowDraft>) => void;
+  error: FlowDraftError | null;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`flex max-w-xs flex-col gap-1.5 ${UNDER_OPTION}`}>
+      <label htmlFor="flow-age-over" className={LABEL}>
+        {t("identityProofingFlows.editor.receive.ageOver")}
+      </label>
+      <ChevronSelect
+        id="flow-age-over"
+        value={draft.ageOver}
+        onChange={(ageOver) => update({ ageOver })}
+      >
+        {ageOverChoices(draft).map((age) => (
+          <option key={age} value={String(age)}>
+            {t("identityProofingFlows.editor.receive.ageOverOption", { age })}
+          </option>
+        ))}
+      </ChevronSelect>
+      <span className={HINT}>
+        {t("identityProofingFlows.editor.receive.ageOverHint")}
+      </span>
+      {error === "ageOver" && (
+        <p role="alert" className={ERROR}>
+          {t("identityProofingFlows.new.errors.ageOver")}
+        </p>
+      )}
+    </div>
   );
 }
 

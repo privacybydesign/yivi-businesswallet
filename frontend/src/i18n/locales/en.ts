@@ -1331,10 +1331,6 @@ export const en = {
       namePlaceholder: "NL passport + selfie",
       create: "Create flow",
       saveVersion: "Save as version {{version}}",
-      ageOver: "Minimum age",
-      ageOverOption: "{{age}} or older",
-      ageOverHint:
-        "Age check only answers whether the person is this age or older on the day of the check.",
       errors: {
         name: "Give the flow a name.",
         steps: "Pick at least one step.",
@@ -1430,6 +1426,12 @@ export const en = {
         hint: "With nothing ticked you only get the outcome.",
         identityLocked:
           "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
+        ageOver: "Minimum age",
+        ageOverOption: "{{age}} or older",
+        ageOverHint:
+          "Age check only answers whether the person is this age or older on the day of the check.",
+        ageOverLocked:
+          "Off for a data request or diplomas: they need the date of birth.",
       },
       checks: {
         title: "Checks",

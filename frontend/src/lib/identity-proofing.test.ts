@@ -45,6 +45,7 @@ import {
   retentionChoices,
   wholeDays,
   withAssuranceLevel,
+  withIdentity,
   editedFlowSelection,
   emptyFlowDraft,
   flowDraftError,
@@ -757,6 +758,25 @@ describe("identity for data requests and diplomas", () => {
         true,
       ),
     ).toBe("identity");
+  });
+
+  it("does not count the document data next to the age check", () => {
+    const ageCheck = draft({
+      requestedAttributes: new Set(["dg1", "age_over"]),
+    });
+    expect(flowDraftError(ageCheck)).toBeNull();
+    expect(flowDraftError(ageCheck, true)).toBe("identity");
+  });
+
+  it("ticks the document data and unticks the age check when needed", () => {
+    const needed = withIdentity(
+      draft({ requestedAttributes: new Set(["age_over", "chip_checks"]) }),
+    );
+    expect([...needed.requestedAttributes].sort()).toEqual([
+      "chip_checks",
+      "dg1",
+    ]);
+    expect(flowDraftError(needed, true)).toBeNull();
   });
 });
 
