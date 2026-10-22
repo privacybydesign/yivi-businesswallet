@@ -128,8 +128,9 @@ Override the verifier with `EUDI_VERIFIER_URL`, and pin the trusted issuer CA wi
 
 ### Production
 
-Point `EUDI_VERIFIER_URL` at the production EUDI verifier and set `EUDI_ISSUER_CHAIN`.
-The backend runs a one-shot readiness probe at boot (it creates a presentation request of
+Point `EUDI_VERIFIER_URL` at the production EUDI verifier, set `EUDI_ISSUER_CHAIN`, and
+set `EUDI_CREDENTIAL_SCHEME=pbdf` so it requests the production `pbdf.*` credentials
+instead of `pbdf-staging.*`. The backend runs a one-shot readiness probe at boot (it creates a presentation request of
 the shape it will use) and **exits non-zero** if the verifier won't accept it — so a
 misconfigured verifier fails the deploy, not the first user.
 

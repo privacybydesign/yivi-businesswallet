@@ -22,6 +22,7 @@ const (
 	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
 	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
 	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envEudiCredentialScheme        = "EUDI_CREDENTIAL_SCHEME"
 	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
 	envSessionTTL                  = "SESSION_TTL"
 	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
@@ -352,6 +353,7 @@ type Config struct {
 	EudiIssuerChain             string
 	EudiIntendedUseID           string
 	EudiRegistrationCertificate string
+	EudiCredentialScheme        string // pbdf-staging when empty, pbdf in production
 	SessionCookieSecure         bool
 	SessionTTL                  time.Duration
 	SessionPruneEvery           time.Duration
@@ -773,6 +775,7 @@ func Load() (Config, error) {
 		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
 		EudiIntendedUseID:           intendedUseID,
 		EudiRegistrationCertificate: registrationCertificate,
+		EudiCredentialScheme:        os.Getenv(envEudiCredentialScheme),
 		SessionCookieSecure:         cookieSecure,
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,
