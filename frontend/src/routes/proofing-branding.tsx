@@ -316,7 +316,7 @@ function BrandingTab({
                 {t("identityProofing.branding.themeTitle")}
               </span>
               <p className={HINT}>{t("identityProofing.branding.themeHint")}</p>
-              <div className="mt-2 grid grid-cols-[180px_1fr] items-center gap-x-5 gap-y-3.5">
+              <div className="mt-2 grid grid-cols-1 gap-x-5 gap-y-1.5 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center sm:gap-y-3.5">
                 {PROOFING_THEME_COLOR_FIELDS.map((field) => (
                   <ThemeColorField
                     key={field}
