@@ -205,10 +205,9 @@ func TestDecideReviewKeepsTheReview(t *testing.T) {
 	}
 }
 
-// A face is matched, on the Yivi path as on the Idem path, at the flow's own
-// face.match threshold, lower or higher than the deployment's, else at the
-// deployment's; a flow requiring Substantial never under its floor, whatever
-// the deployment sets.
+// A face is matched at the flow's own face.match threshold, lower or higher
+// than the deployment's, else at the deployment's; a flow requiring
+// Substantial never under its floor, whatever the deployment sets.
 func TestFaceMatchThreshold(t *testing.T) {
 	const lowDeployment = 0.6
 	withThreshold := func(level flow.AssuranceLevel, threshold float64) *flow.FlowDefinition {

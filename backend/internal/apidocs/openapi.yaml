@@ -10961,7 +10961,8 @@ components:
             type: number
           description: >-
             Only `face.match` takes one: the similarity from 0 to 1 the face match must reach,
-            in place of the deployment's, in the Idem and the Yivi app alike. Absent, the
+            in place of the deployment's, at the Idem app's face step (the Yivi app runs no face
+            check). Absent, the
             deployment's applies. A flow requiring `substantial` may not set it under 0.75 (422
             `rejected_by_provider` otherwise), and matches at 0.75 at least when it sets none,
             whatever the deployment's.

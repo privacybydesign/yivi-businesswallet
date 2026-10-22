@@ -88,9 +88,9 @@ func (s *Server) faceVerifier(p flow.FaceProvider, fd *flow.FlowDefinition) (fac
 	return nil, false
 }
 
-// faceMatchThreshold is the similarity a face must reach on fd, on the Idem
-// path and the Yivi path alike: the flow's own face.match threshold when it
-// sets one, lower or higher, else the deployment's
+// faceMatchThreshold is the similarity a face must reach at fd's face step
+// (the Yivi path runs no face check): the flow's own face.match threshold when
+// it sets one, lower or higher, else the deployment's
 // (REGULA_FACE_MATCH_THRESHOLD); never under the floor of the level fd
 // requires (flow.LevelRequirement.MinFaceMatch), so a face matched under it is
 // refused at the face step rather than approved there and rejected

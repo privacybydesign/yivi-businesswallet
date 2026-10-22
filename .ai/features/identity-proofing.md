@@ -473,7 +473,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     default (`FACE_MATCH_RECOMMENDED`), and saves one only once it is moved.
     The flow's threshold replaces the deployment's
     (`REGULA_FACE_MATCH_THRESHOLD`) for that flow's face match, lower or
-    higher, in the Idem and the Yivi app alike (`faceMatchThreshold`); a flow
+    higher, at the Idem app's face step (`faceMatchThreshold`; the Yivi app
+    runs no face check); a flow
     requiring Substantial matches at 0.75 at least, also on a deployment set
     lower, so a face under it fails the face step rather than reaching the
     end and failing `ASSURANCE_NOT_MET`. Before, a flow's threshold could only

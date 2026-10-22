@@ -116,8 +116,8 @@ const (
 	// envAddressLookupURL is PDOK's Locatieserver, where the address step
 	// checks a Dutch address against the BAG and suggests addresses from it.
 	envAddressLookupURL = "ADDRESS_LOOKUP_URL"
-	// The Regula Face API: the native face step's liveness and match, and the
-	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
+	// The Regula Face API: the native face step's liveness and match (the Yivi
+	// method runs no face check). REGULA_FACE_API_URL is what the backend calls,
 	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
 	// to the former). Unset leaves face verification unavailable.
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
