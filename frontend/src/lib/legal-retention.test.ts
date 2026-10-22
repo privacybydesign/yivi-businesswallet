@@ -11,6 +11,8 @@ import {
   legalDraftUpdate,
   legalPeriod,
   legalReasonIn,
+  legalRetentionLoss,
+  erasureLeft,
 } from "./legal-retention";
 import type { LegalRetentionDraft } from "./legal-retention";
 
@@ -165,6 +167,63 @@ describe("legalDraftDirty", () => {
       ),
     ).toBe(true);
     expect(legalDraftDirty(draft({ enabled: false }), saved)).toBe(true);
+  });
+});
+
+// Removing the legal retention or shortening it purges the checks past what is
+// left within the hour, so it asks first; nothing else does.
+describe("legalRetentionLoss", () => {
+  it("asks before the legal retention is switched off", () => {
+    expect(legalRetentionLoss(draft({ enabled: false }), saved)).toEqual({
+      kind: "removed",
+    });
+  });
+
+  it("asks before a shorter period, with the period it becomes", () => {
+    expect(
+      legalRetentionLoss(draft({ amount: "18", unit: "months" }), saved),
+    ).toEqual({ kind: "shortened", months: 18 });
+    expect(legalRetentionLoss(draft({ amount: "4" }), saved)).toEqual({
+      kind: "shortened",
+      months: 48,
+    });
+  });
+
+  it("does not ask for a longer or the same period, or other reasons", () => {
+    expect(legalRetentionLoss(draft({ amount: "6" }), saved)).toBeNull();
+    expect(legalRetentionLoss(draft(), saved)).toBeNull();
+    expect(
+      legalRetentionLoss(draft({ amount: "60", unit: "months" }), saved),
+    ).toBeNull();
+    expect(legalRetentionLoss(draft({ reasonEn: "Other." }), saved)).toBeNull();
+  });
+
+  it("does not ask when there was none to lose", () => {
+    expect(legalRetentionLoss(draft({ amount: "1" }), null)).toBeNull();
+    expect(legalRetentionLoss(draft({ enabled: false }), null)).toBeNull();
+  });
+});
+
+// An approved erasure counts the sessions the law holds among those it kept:
+// the person reads those apart from the ones it could not link to them.
+describe("erasureLeft", () => {
+  const held = {
+    sessions: 2,
+    until: "2031-10-19T12:00:00Z",
+    reason: { en: "Kept by law.", nl: "Bewaard volgens de wet." },
+  };
+
+  it("takes the held sessions out of the kept ones", () => {
+    expect(erasureLeft(3, held)).toEqual({ unsure: 1, held });
+    expect(erasureLeft(2, held)).toEqual({ unsure: 0, held });
+  });
+
+  it("keeps every kept session unsure without a hold", () => {
+    expect(erasureLeft(3, undefined)).toEqual({ unsure: 3, held: undefined });
+    expect(erasureLeft(undefined, undefined)).toEqual({
+      unsure: 0,
+      held: undefined,
+    });
   });
 });
 

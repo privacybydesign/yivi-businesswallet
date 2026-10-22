@@ -1,11 +1,16 @@
 import { useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
   useProofingSettingsQuery,
   useUpdateSettingsMutation,
 } from "../api/identity-proofing.queries";
-import type { ProofingSettings } from "../api/identity-proofing";
+import {
+  ERASURE_HANDLINGS,
+  type ProofingSettings,
+} from "../api/identity-proofing";
+import { originLines } from "../lib/hosted-completion";
 import { proofingErrorMessage } from "../lib/identity-proofing";
 import {
   LEGAL_RETENTION_UNITS,
@@ -16,12 +21,14 @@ import {
   legalDraftDirty,
   legalDraftUpdate,
   legalPeriodLabel,
+  legalRetentionLoss,
 } from "../lib/legal-retention";
 import type {
   LegalRetentionDraft,
+  LegalRetentionLoss,
   LegalRetentionUnit,
 } from "../lib/legal-retention";
-import { Button, Card, Icon, Input } from "../ui";
+import { Button, Card, ConfirmDialog, Icon, Input } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
@@ -29,11 +36,15 @@ const ERROR = "text-error text-[12.5px]";
 const SELECT =
   "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 h-9 w-36 appearance-none border pr-10 pl-3 text-[13.5px] outline-none focus:ring-3";
 const CHEVRON_SIZE = 12;
+const TEXTAREA =
+  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-20 w-full max-w-xl border px-3 py-2 font-mono text-[13px] outline-none focus:ring-3";
 const AMOUNT_ID = "legal-amount";
 const AMOUNT_HINT_ID = "legal-amount-hint";
 const REASON_ERROR_ID = "legal-reason-error";
 
-// Settings › Data and privacy.
+// Settings › Data and privacy: the GDPR data requests every org offers and who
+// decides an erasure, the legal retention, and where a hosted page may hand
+// its person back.
 export function PrivacySettingsPanel({
   slug,
 }: {
@@ -54,8 +65,102 @@ export function PrivacySettingsPanel({
   }
   return (
     <div className="flex max-w-3xl flex-col gap-6">
+      <DataRequestsCard slug={slug} settings={settings.data} />
       <LegalRetentionCard slug={slug} settings={settings.data} />
+      <RedirectOriginsCard slug={slug} settings={settings.data} />
     </div>
+  );
+}
+
+// See my data and Delete my data, which every org offers: what each does, when
+// Delete my data is available under the legal retention, and who decides it
+// (the org's erasure handling), saved as it is picked.
+function DataRequestsCard({
+  slug,
+  settings,
+}: {
+  slug: string;
+  settings: ProofingSettings;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const update = useUpdateSettingsMutation(slug);
+  const legal = settings.legalRetention;
+  return (
+    <Card>
+      <div className="border-line border-b px-6 py-4">
+        <h2 className="font-display text-[17px] font-bold">
+          {t("identityProofing.dataRequests.title")}
+        </h2>
+        <p className={`${HINT} mt-1`}>
+          {t("identityProofing.dataRequests.intro")}
+        </p>
+      </div>
+      <div className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className={LABEL}>
+            {t("identityProofing.dataRequests.access.title")}
+          </span>
+          <span className={HINT}>
+            {t("identityProofing.dataRequests.access.hint")}
+          </span>
+        </div>
+        <span className="text-ink-soft text-[13px]">
+          {t("identityProofing.dataRequests.access.state")}
+        </span>
+      </div>
+      <div className="flex flex-col gap-4 px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className={LABEL}>
+              {t("identityProofing.dataRequests.erasure.title")}
+            </span>
+            <span className={HINT}>
+              {t("identityProofing.dataRequests.erasure.hint")}
+            </span>
+          </div>
+          <span className="text-ink-soft text-[13px]">
+            {legal
+              ? t("identityProofing.dataRequests.erasure.after", {
+                  period: legalPeriodLabel(legal.months, t),
+                })
+              : t("identityProofing.dataRequests.erasure.anyTime")}
+          </span>
+        </div>
+        <fieldset className="flex flex-col gap-3" disabled={update.isPending}>
+          <legend className={`${LABEL} mb-1.5`}>
+            {t("identityProofing.dataRequests.whoDecides.legend")}
+          </legend>
+          {ERASURE_HANDLINGS.map((handling) => (
+            <label key={handling} className="flex items-start gap-3">
+              <input
+                type="radio"
+                name="erasure-handling"
+                className="mt-0.5 h-4 w-4 shrink-0"
+                checked={settings.erasureHandling === handling}
+                onChange={() => update.mutate({ erasureHandling: handling })}
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className={LABEL}>
+                  {t(
+                    `identityProofing.dataRequests.whoDecides.${handling}.label`,
+                  )}
+                </span>
+                <span className={HINT}>
+                  {t(
+                    `identityProofing.dataRequests.whoDecides.${handling}.hint`,
+                  )}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {update.isError && (
+          <p role="alert" className={ERROR}>
+            {proofingErrorMessage(update.error, t)}
+          </p>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -84,20 +189,33 @@ function LegalRetentionCard({
     value: LegalRetentionDraft[K],
   ): void => setDraft((d) => ({ ...d, [key]: value }));
   const months = legalDraftMonths(draft);
+  // A removal or a shorter period waiting for its confirmation: it purges the
+  // checks past what is left within the hour.
+  const [loss, setLoss] = useState<LegalRetentionLoss>();
 
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    setTried(true);
-    if (invalid.length > 0) return;
+  function store(): void {
     save.mutate(
       { legalRetention: legalDraftUpdate(draft) },
       {
         onSuccess: (next) => {
           setDraft(legalDraftFrom(next.legalRetention));
           setTried(false);
+          setLoss(undefined);
         },
       },
     );
+  }
+
+  function submit(event: React.FormEvent): void {
+    event.preventDefault();
+    setTried(true);
+    if (invalid.length > 0) return;
+    const lost = legalRetentionLoss(draft, saved);
+    if (lost) {
+      setLoss(lost);
+      return;
+    }
+    store();
   }
 
   function discard(): void {
@@ -222,7 +340,7 @@ function LegalRetentionCard({
               {months !== null && <Changes months={months} className="ml-7" />}
             </>
           )}
-          {save.isError && (
+          {save.isError && loss === undefined && (
             <p role="alert" className={ERROR}>
               {proofingErrorMessage(save.error, t)}
             </p>
@@ -246,6 +364,108 @@ function LegalRetentionCard({
           </Button>
         </div>
       </form>
+      {loss !== undefined && (
+        <ConfirmDialog
+          {...lossCopy(loss, settings.dataRetentionDays, t)}
+          busy={save.isPending}
+          error={save.isError ? proofingErrorMessage(save.error, t) : undefined}
+          onConfirm={store}
+          onClose={() => {
+            setLoss(undefined);
+            save.reset();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+// What the confirmation of a loss says: what is purged, and when.
+function lossCopy(
+  loss: LegalRetentionLoss,
+  retentionDays: number,
+  t: TFunction,
+): { title: string; message: string; confirmLabel: string } {
+  if (loss.kind === "removed") {
+    return {
+      title: t("identityProofing.legalRetention.removeConfirm.title"),
+      message: t("identityProofing.legalRetention.removeConfirm.message", {
+        count: retentionDays,
+      }),
+      confirmLabel: t("identityProofing.legalRetention.removeConfirm.confirm"),
+    };
+  }
+  const period = legalPeriodLabel(loss.months, t);
+  return {
+    title: t("identityProofing.legalRetention.shortenConfirm.title", {
+      period,
+    }),
+    message: t("identityProofing.legalRetention.shortenConfirm.message", {
+      period,
+    }),
+    confirmLabel: t("identityProofing.legalRetention.shortenConfirm.confirm"),
+  };
+}
+
+// The origins a hosted page may redirect its subject to and be embedded on.
+function RedirectOriginsCard({
+  slug,
+  settings,
+}: {
+  slug: string;
+  settings: ProofingSettings;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const update = useUpdateSettingsMutation(slug);
+  const saved = settings.allowedRedirectOrigins.join("\n");
+  const [text, setText] = useState(saved);
+  const fieldId = "redirect-origins";
+
+  function submit(event: React.FormEvent): void {
+    event.preventDefault();
+    update.mutate(
+      { allowedRedirectOrigins: originLines(text) },
+      // Shows the origins as the backend normalised them.
+      { onSuccess: (next) => setText(next.allowedRedirectOrigins.join("\n")) },
+    );
+  }
+
+  return (
+    <Card className="px-6 py-4">
+      <label
+        htmlFor={fieldId}
+        className="font-display block text-[17px] font-bold"
+      >
+        {t("identityProofing.redirectOrigins.title")}
+      </label>
+      <p className={`${HINT} mt-1`}>
+        {t("identityProofing.redirectOrigins.hint")}
+      </p>
+      <form className="mt-3 flex flex-col gap-3" onSubmit={submit} noValidate>
+        <textarea
+          id={fieldId}
+          value={text}
+          rows={3}
+          spellCheck={false}
+          placeholder="https://portal.example.com"
+          className={TEXTAREA}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <div>
+          <Button
+            type="submit"
+            loading={update.isPending}
+            disabled={originLines(text).join("\n") === saved}
+          >
+            {t("identityProofing.redirectOrigins.save")}
+          </Button>
+        </div>
+      </form>
+      {update.isError && (
+        <p className={`${ERROR} mt-2`}>
+          {proofingErrorMessage(update.error, t)}
+        </p>
+      )}
     </Card>
   );
 }

@@ -79,8 +79,8 @@ const (
 	// the reviewer names none, as the engine does.
 	ErrorReviewRejected = "MANUAL_REVIEW_REJECTED"
 	// ErrorLegalRetention is the error code of an erasure refused because its
-	// org is bound by law to keep the data: its erasure handling is ErasureKeep,
-	// or its legal retention holds every session found.
+	// org is bound by law to keep the data: its legal retention holds every
+	// identity check found.
 	ErrorLegalRetention = "LEGAL_RETENTION"
 	// automaticReviewer is who decided a data request the org's ErasureHandling
 	// or legal retention decided without a reviewer.
@@ -108,8 +108,11 @@ var (
 
 // DataMatch is one of the org's external sessions a data request matched.
 type DataMatch struct {
-	RequestID      uuid.UUID
-	FlowName       string
+	RequestID uuid.UUID
+	FlowName  string
+	// FlowKind is the matched session's: one of the person's earlier data
+	// requests is a match too (Candidates).
+	FlowKind       FlowKind
 	Status         Status
 	Method         string
 	AssuranceLevel string
@@ -149,7 +152,7 @@ type dataRequestStore interface {
 	SaveMatches(ctx context.Context, req Request, matches []NewDataMatch) error
 	Matches(ctx context.Context, req Request) ([]DataMatch, error)
 	MatchedRequests(ctx context.Context, req Request) ([]Request, error)
-	RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error
+	RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int, held *DataHold) error
 	RecordExported(ctx context.Context, req Request, sessions int) error
 }
 
@@ -455,9 +458,15 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		exportUntil = &until
 	}
 	var kept *int
+	var hold *DataHold
 	if in.Approve && req.FlowKind == FlowDataErasure {
 		n := keptMatches(matches, approved)
 		kept = &n
+	}
+	// What the law still keeps of the person, for their page: on an approval
+	// it is among the kept, on a refusal it is why.
+	if req.FlowKind == FlowDataErasure {
+		hold = heldMatches(matches, s.now())
 	}
 
 	decided, code := StatusApproved, ""
@@ -468,7 +477,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		}
 	}
 
-	if err := s.dataRequests.RecordDecision(ctx, req, approved, exportUntil, kept); err != nil {
+	if err := s.dataRequests.RecordDecision(ctx, req, approved, exportUntil, kept, hold); err != nil {
 		return Request{}, err
 	}
 
@@ -499,13 +508,13 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 }
 
 // handleErasure decides a proven "delete my data" request as the org's
-// ErasureHandling says, once it has reached review: ErasureKeep refuses it with
-// ErrorLegalRetention; ErasureAutomatic erases its sure matches at once and
-// decides it when no unsure one is left, or leaves those to a reviewer;
-// ErasureReview leaves all of it to a reviewer. It holds the review lock, as a
-// reviewer's decision does, so the two never decide at once. A session the
-// org's legal retention still holds is left alone, as no erasure takes one. A
-// request that fails here waits in review: a reviewer decides it as any other.
+// ErasureHandling says, once it has reached review: ErasureAutomatic erases its
+// sure matches at once and decides it when no unsure one is left, or leaves
+// those to a reviewer; ErasureReview leaves all of it to a reviewer. It holds
+// the review lock, as a reviewer's decision does, so the two never decide at
+// once. A session the org's legal retention still holds is left alone, as no
+// erasure takes one. A request that fails here waits in review: a reviewer
+// decides it as any other.
 func (s *Service) handleErasure(ctx context.Context, req Request) (Request, error) {
 	if req.FlowKind != FlowDataErasure || !req.External() || s.dataRequests == nil {
 		return req, nil
@@ -514,8 +523,7 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 	if err != nil {
 		return req, err
 	}
-	handling := settings.Session.ErasureHandling
-	if handling != ErasureAutomatic && handling != ErasureKeep {
+	if settings.Session.ErasureHandling != ErasureAutomatic {
 		return req, nil
 	}
 	release, err := s.requests.LockReview(ctx, req.ID)
@@ -529,10 +537,6 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 	}
 	if fresh.Status != StatusNeedsReview || fresh.session == nil || fresh.session.EndedAt != nil || fresh.PurgedAt != nil {
 		return fresh, nil
-	}
-	if handling == ErasureKeep {
-		return s.decideDataRequest(ctx, fresh, automaticReviewer,
-			ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
 	}
 	matches, err := s.dataRequests.Matches(ctx, fresh)
 	if err != nil {
@@ -562,11 +566,13 @@ func (s *Service) handleErasure(ctx context.Context, req Request) (Request, erro
 }
 
 // declineHeldErasure declines a proven "delete my data" request at once when
-// the org's legal retention holds every session still found: nothing could be
-// erased, so nobody need decide. It holds the review lock, as a reviewer's
-// decision does, so the two never decide at once. A request that fails here
-// waits in review: a reviewer decides it as any other, and approvedMatches
-// takes no session the legal retention holds.
+// the org's legal retention holds every identity check still found: nothing it
+// asked for could be erased, so nobody need decide. The person's earlier data
+// requests among the matches do not count: each holds only who asked, and goes
+// with its own purge, so it is no reason to send the request to a reviewer. It
+// holds the review lock, as a reviewer's decision does, so the two never decide
+// at once. A request that fails here waits in review: a reviewer decides it as
+// any other, and approvedMatches takes no session the legal retention holds.
 func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request, error) {
 	if req.FlowKind != FlowDataErasure || req.Status != StatusNeedsReview || s.dataRequests == nil {
 		return req, nil
@@ -593,7 +599,7 @@ func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request,
 	}
 	now, found := s.now(), 0
 	for _, m := range matches {
-		if m.PurgedAt != nil {
+		if m.PurgedAt != nil || m.FlowKind.dataRequest() {
 			continue
 		}
 		if !m.held(now) {
@@ -608,32 +614,25 @@ func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request,
 		ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
 }
 
-// withLegalNotice sets the LegalNotice of an erasure the legal retention
-// declined: the reason the org gave, and when the last session found can be
-// erased. Without a legal retention, or a session it still holds, it is left
-// as it is.
+// withLegalNotice sets the LegalNotice of an erasure that left sessions the
+// legal retention holds (DataHold): one it declined, or an approved one, whose
+// person is told what was kept by law, why, and until when (GDPR Art. 12(4)).
+// It is left as it is once the hold passed (the pruner erased what it held),
+// without a legal retention, and for an erasure a reviewer refused otherwise.
 func (s *Service) withLegalNotice(ctx context.Context, req Request) (Request, error) {
-	if req.FlowKind != FlowDataErasure || req.ErrorCode != ErrorLegalRetention || req.PurgedAt != nil || s.dataRequests == nil {
+	hold := req.DataHold
+	if req.FlowKind != FlowDataErasure || hold == nil || !s.now().Before(hold.Until) ||
+		(req.Status != StatusApproved && req.ErrorCode != ErrorLegalRetention) {
 		return req, nil
 	}
 	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil || !settings.LegalRetention.set() {
 		return req, err
 	}
-	matches, err := s.dataRequests.Matches(ctx, req)
-	if err != nil {
-		return req, err
+	req.LegalNotice = &LegalNotice{
+		Sessions: hold.Sessions, Until: hold.Until,
+		ReasonEN: settings.LegalRetention.ReasonEN, ReasonNL: settings.LegalRetention.ReasonNL,
 	}
-	var until time.Time
-	for _, m := range matches {
-		if m.held(s.now()) && m.HeldUntil.After(until) {
-			until = *m.HeldUntil
-		}
-	}
-	if until.IsZero() {
-		return req, nil
-	}
-	req.LegalNotice = &LegalNotice{Until: until, ReasonEN: settings.LegalRetention.ReasonEN, ReasonNL: settings.LegalRetention.ReasonNL}
 	return req, nil
 }
 

@@ -2,26 +2,22 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useUpdateSettingsMutation } from "../api/identity-proofing.queries";
-import {
-  ERASURE_HANDLINGS,
-  type ProofingSettings,
-} from "../api/identity-proofing";
+import type { ProofingSettings } from "../api/identity-proofing";
 import {
   DATA_RETENTION_DAY_OPTIONS,
   SESSION_TTL_OPTIONS_SECONDS,
   proofingErrorMessage,
   ttlMinutes,
 } from "../lib/identity-proofing";
-import { originLines } from "../lib/hosted-completion";
-import { Button, Card, ConfirmDialog } from "../ui";
+import { Card, ConfirmDialog } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 
-// The org's session settings: how long a mailed session runs, how long an
-// approved person's name is kept, how its erasure requests are decided, and
-// where its hosted pages may hand the person back.
+// The org's session settings: how long a mailed session runs and how long an
+// approved person's name is kept. Who decides an erasure and the redirect
+// origins are on Settings › Data and privacy.
 export function SettingsTab({
   slug,
   settings,
@@ -80,32 +76,6 @@ export function SettingsTab({
               }
             />
           </SettingRow>
-          <SettingRow
-            label={t("identityProofing.settings.erasure")}
-            hint={t("identityProofing.settings.erasureHint")}
-          >
-            <div className="flex flex-col gap-2">
-              <Segmented
-                label={t("identityProofing.settings.erasure")}
-                options={ERASURE_HANDLINGS.map((handling) => ({
-                  value: handling,
-                  label: t(
-                    `identityProofing.settings.erasureOptions.${handling}`,
-                  ),
-                }))}
-                value={settings.erasureHandling}
-                disabled={update.isPending}
-                onChange={(handling) =>
-                  update.mutate({ erasureHandling: handling })
-                }
-              />
-              <p className={HINT}>
-                {t(
-                  `identityProofing.settings.erasureOptionHints.${settings.erasureHandling}`,
-                )}
-              </p>
-            </div>
-          </SettingRow>
         </div>
         {update.isError && shorter === undefined && (
           <p className={`${ERROR} px-5 pb-4`}>
@@ -138,7 +108,6 @@ export function SettingsTab({
           }}
         />
       )}
-      <RedirectOriginsCard slug={slug} settings={settings} />
     </div>
   );
 }
@@ -200,71 +169,5 @@ function Segmented<T extends string | number>({
         );
       })}
     </div>
-  );
-}
-
-const TEXTAREA =
-  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-20 w-full max-w-xl border px-3 py-2 font-mono text-[13px] outline-none focus:ring-3";
-
-// The origins a hosted page may redirect its subject to and be embedded on.
-function RedirectOriginsCard({
-  slug,
-  settings,
-}: {
-  slug: string;
-  settings: ProofingSettings;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const update = useUpdateSettingsMutation(slug);
-  const saved = settings.allowedRedirectOrigins.join("\n");
-  const [text, setText] = useState(saved);
-  const fieldId = "redirect-origins";
-
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
-    update.mutate(
-      { allowedRedirectOrigins: originLines(text) },
-      // Shows the origins as the backend normalised them.
-      { onSuccess: (next) => setText(next.allowedRedirectOrigins.join("\n")) },
-    );
-  }
-
-  return (
-    <Card className="px-5 py-4">
-      <label
-        htmlFor={fieldId}
-        className="font-display block text-[15px] font-bold"
-      >
-        {t("identityProofing.settings.redirectOriginsTitle")}
-      </label>
-      <p className={`${HINT} mt-0.5`}>
-        {t("identityProofing.settings.redirectOriginsHint")}
-      </p>
-      <form className="mt-3 flex flex-col gap-3" onSubmit={submit} noValidate>
-        <textarea
-          id={fieldId}
-          value={text}
-          rows={3}
-          spellCheck={false}
-          placeholder="https://portal.example.com"
-          className={TEXTAREA}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <div>
-          <Button
-            type="submit"
-            loading={update.isPending}
-            disabled={originLines(text).join("\n") === saved}
-          >
-            {t("identityProofing.settings.save")}
-          </Button>
-        </div>
-      </form>
-      {update.isError && (
-        <p className={`${ERROR} mt-2`}>
-          {proofingErrorMessage(update.error, t)}
-        </p>
-      )}
-    </Card>
   );
 }

@@ -213,10 +213,10 @@ func TestErasureSettingsAndReviewRetention(t *testing.T) {
 	if current.Session.ErasureHandling != ErasureReview {
 		t.Errorf("a new org's erasure handling = %q, want review", current.Session.ErasureHandling)
 	}
-	keep := ErasureKeep
-	saved, err := settings.SaveSession(ctx, orgID, SessionSettingsChange{ErasureHandling: &keep})
-	if err != nil || saved.Session.ErasureHandling != ErasureKeep || saved.Session.DataRetentionDays != current.Session.DataRetentionDays {
-		t.Errorf("SaveSession(keep) = %+v, %v; want keep, the rest as it was", saved.Session, err)
+	automatic := ErasureAutomatic
+	saved, err := settings.SaveSession(ctx, orgID, SessionSettingsChange{ErasureHandling: &automatic})
+	if err != nil || saved.Session.ErasureHandling != ErasureAutomatic || saved.Session.DataRetentionDays != current.Session.DataRetentionDays {
+		t.Errorf("SaveSession(automatic) = %+v, %v; want automatic, the rest as it was", saved.Session, err)
 	}
 
 	req := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("anna@example.org")), "s1")
@@ -233,7 +233,7 @@ func TestErasureSettingsAndReviewRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	kept := 2
-	if err := data.RecordDecision(ctx, got, []uuid.UUID{}, nil, &kept); err != nil {
+	if err := data.RecordDecision(ctx, got, []uuid.UUID{}, nil, &kept, nil); err != nil {
 		t.Fatalf("RecordDecision: %v", err)
 	}
 	if got := onlyRequest(t, store, orgID); got.DataMatchesKept == nil || *got.DataMatchesKept != kept {

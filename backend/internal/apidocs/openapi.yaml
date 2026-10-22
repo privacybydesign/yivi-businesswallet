@@ -5427,7 +5427,7 @@ paths:
         and a list read does not re-check it. Only the outcome and assurance level are
         returned, and for an external person's approved request the name read off the document
         (`proofedName`), until the organisation's data retention (`dataRetentionDays`, default
-        30 days) clears it. No other document data.
+        7 days) clears it. No other document data.
       parameters:
         - name: subjectUserId
           in: query
@@ -6847,7 +6847,7 @@ paths:
         approved external person's name is kept), `erasureHandling` (how "delete my data"
         requests are decided), `legalRetention` (what the law makes the organisation keep, or
         null), `branding` (with `logoUri` and `hidePoweredBy`) and `allowedRedirectOrigins`.
-        An organisation that set nothing reads the defaults: 600 seconds, 30 days, review, no
+        An organisation that set nothing reads the defaults: 600 seconds, 7 days, review, no
         legal retention, no branding and no origins.
       responses:
         '200':
@@ -6886,18 +6886,21 @@ paths:
       description: >-
         Requires an administrator role in the organisation. `sessionTtlSeconds` (120, 300 or
         600) is how long each session runs; `dataRetentionDays` (7, 30, 90, 180 or 365;
-        default 30) how long an approved external person's name is kept. `erasureHandling` is
+        default 7) how long an approved external person's name is kept. `erasureHandling` is
         how the organisation's "delete my data" requests are decided once the person is proven:
         `review` (default) by a reviewer; `automatic` erases the sessions proven to be the
-        person's at once and leaves a reviewer only those found by e-mail address or name;
-        `keep` refuses each one with `LEGAL_RETENTION`, for an organisation bound by law to
-        keep the data. `legalRetention` (`months` 1 to 600, with a `reasonEn` and a
-        `reasonNl`, both required) is how long the law makes the organisation keep the data of
-        every identity check, counted from the check's end; null removes it. It is the least
-        any flow keeps that data: a check is purged at the later of its flow's retention and
-        this, and a "delete my data" request takes no session before it has passed, so an
-        `automatic` erasure leaves such a session too. A change moves the purge time of the
-        organisation's unpurged external checks. `allowedRedirectOrigins` replaces the origins
+        person's at once and leaves a reviewer only those found by e-mail address or name.
+        `legalRetention` (`months` 1 to 600, with a `reasonEn` and a `reasonNl`, both
+        required) is how long the law makes the organisation keep the data of every approved
+        identity check, counted from the check's end; null removes it. A check that was
+        rejected, expired, cancelled or never started is not held. It is the least any flow
+        keeps that data: an approved check is purged at the later of its flow's retention and
+        this, and neither a "delete my data" request nor the organisation's own purge
+        (`DELETE /api/v1/proofing/sessions/{sessionID}`, 409 `legal_retention`) takes it before
+        it has passed, so an `automatic` erasure leaves such a session too. A request that
+        finds only held checks is declined with `LEGAL_RETENTION`. A change moves the purge
+        time of the organisation's unpurged external checks, and the engine's retention of
+        their sessions follows. `allowedRedirectOrigins` replaces the origins
         (`https://host[:port]`, or `http` on a loopback host; the host a DNS name or an IP
         address; at most 10) a hosted page may send its subject back to and be embedded on.
         An absent field is left as it is; a body with none is 400 `invalid_body`, and a value
@@ -8278,8 +8281,8 @@ paths:
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         in 30 days, an identity check within the data retention), `LEGAL_RETENTION` (an
-        erasure refused because the organisation is bound by law to keep the data: its erasure
-        handling is `keep`, or its legal retention holds every session found) and
+        erasure refused because the organisation is bound by law to keep the data: its legal
+        retention holds every identity check found) and
         `ORG_PAUSED` (a review left open when a platform admin paused the organisation's proofing). The
         session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
@@ -8348,7 +8351,9 @@ paths:
         the engine and what the wallet holds of its outcome (the
         proofed name), whatever its state, and sends `session.purged`. The session stays
         readable with `purgedAt` set, for the audit trail. Audited
-        `identity_proofing.session_purged`; erasing it again changes nothing.
+        `identity_proofing.session_purged`; erasing it again changes nothing. An approved
+        identity check the organisation's legal retention (`legalRetention` in its settings)
+        still holds is not erased: 409 `legal_retention`, until the period has passed.
       security:
         - apiKey: []
       responses:
@@ -8362,6 +8367,15 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The organisation's legal retention still holds the session (`legal_retention`):
+            the law makes it keep the check's data until the period after the check's end has
+            passed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/proofing/sessions/{sessionID}/data-export:
     parameters:
       - name: sessionID
@@ -10528,8 +10542,8 @@ components:
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
             short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time) and
-            `LEGAL_RETENTION` (an erasure refused because the organisation must keep the data by law: its erasure
-            handling is `keep`, or its legal retention holds every session found); others come from
+            `LEGAL_RETENTION` (an erasure refused because the organisation must keep the data by law: its legal
+            retention holds every identity check found); others come from
             the session itself
             (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
             `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
@@ -11138,9 +11152,9 @@ components:
                 type: string
                 format: date-time
                 description: >-
-                  When the organisation's legal retention lets an erasure take the session;
-                  absent when none applies or it passed, and on a request that is not an
-                  erasure. An erasure approval naming a session before then is 409
+                  When the organisation's legal retention lets an erasure take the session, an
+                  approved identity check; absent when none applies or it passed, and on a
+                  request that is not an erasure. An erasure approval naming a session before then is 409
                   `legal_retention`.
             required: [requestId, sessionId, flowName, status, createdAt, level]
       required: [flowKind, matches]
@@ -11710,7 +11724,7 @@ components:
           description: How long an approved external person's proofed name is kept.
         erasureHandling:
           type: string
-          enum: [review, automatic, keep]
+          enum: [review, automatic]
           description: How the organisation's "delete my data" requests are decided once the person is proven.
         legalRetention:
           nullable: true
@@ -11729,8 +11743,8 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        How long the organisation must keep the data of every identity check by law, counted
-        from the check's end, and why.
+        How long the organisation must keep the data of every approved identity check by law,
+        counted from the check's end, and why.
       properties:
         months:
           type: integer
@@ -11739,7 +11753,9 @@ components:
         reasonEn:
           type: string
           maxLength: 500
-          description: Shown to a person whose "delete my data" request it declines, in English.
+          description: >-
+            Shown to a person whose "delete my data" request it declines, or leaves sessions of, in
+            English.
         reasonNl:
           type: string
           maxLength: 500
@@ -11759,7 +11775,7 @@ components:
           enum: [7, 30, 90, 180, 365]
         erasureHandling:
           type: string
-          enum: [review, automatic, keep]
+          enum: [review, automatic]
         legalRetention:
           nullable: true
           allOf:
@@ -11987,10 +12003,16 @@ components:
         legalRetention:
           type: object
           description: >-
-            Why a "delete my data" session was declined (`errorCode` `LEGAL_RETENTION`): the
-            organisation's reason in each language, and the date from which all the person's
-            data can be erased. Absent otherwise.
+            What the organisation's legal retention kept of a "delete my data" session's
+            person: it declined the session (`errorCode` `LEGAL_RETENTION`), or an approved one
+            left sessions it holds (they are among `dataMatchesKept`). How many sessions, the
+            organisation's reason in each language, and the date from which all of them can be
+            erased (and are, by the pruner). Absent otherwise, and once that date passed.
           properties:
+            sessions:
+              type: integer
+              minimum: 1
+              description: How many of the person's sessions the legal retention holds.
             until:
               type: string
               format: date-time
@@ -12002,7 +12024,7 @@ components:
                 nl:
                   type: string
               required: [en, nl]
-          required: [until, reason]
+          required: [sessions, until, reason]
       required: [status, linkExpiresAt, started, addressGiven]
     ProofingHostedView:
       allOf:

@@ -74,7 +74,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
 type updateSettingsRequest struct {
 	SessionTTLSeconds *int `json:"sessionTtlSeconds"`
 	DataRetentionDays *int `json:"dataRetentionDays"`
-	// ErasureHandling is review, automatic or keep (ErasureHandling).
+	// ErasureHandling is review or automatic (ErasureHandling).
 	ErasureHandling *ErasureHandling `json:"erasureHandling"`
 	// LegalRetention replaces the legal retention, and null removes it; absent
 	// leaves it. Kept raw, since absent and null differ.

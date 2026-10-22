@@ -165,6 +165,7 @@ describe("the legal retention", () => {
       addressGiven: false,
     };
     const notice = {
+      sessions: 2,
       until: "2031-10-19T12:00:00Z",
       reason: { en: "The Wwft.", nl: "De Wwft." },
     };
@@ -172,5 +173,26 @@ describe("the legal retention", () => {
     expect(schema.parse({ ...progress, legalRetention: notice })).toMatchObject(
       { legalRetention: notice },
     );
+  });
+
+  it("comes with the progress of an approved erasure that left held sessions", async () => {
+    await getHostedProofingStatus("token");
+    const schema = lastSchema();
+    const progress = {
+      status: "approved",
+      linkExpiresAt: "2026-10-19T12:00:00Z",
+      started: true,
+      addressGiven: false,
+      dataMatchesKept: 3,
+      legalRetention: {
+        sessions: 1,
+        until: "2031-10-19T12:00:00Z",
+        reason: { en: "The Wwft.", nl: "De Wwft." },
+      },
+    };
+    expect(schema.parse(progress)).toMatchObject({
+      dataMatchesKept: 3,
+      legalRetention: { sessions: 1 },
+    });
   });
 });

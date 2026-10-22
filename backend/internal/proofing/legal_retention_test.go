@@ -18,6 +18,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 var legalFiveYears = LegalRetention{
@@ -203,8 +204,9 @@ func TestLegalSyncsEngineRetention(t *testing.T) {
 	}
 }
 
-// A run that failed leaves the legal retention saved and the engine as it was,
-// and saving the same settings again repeats it. Many sessions go in batches.
+// A run that failed leaves the legal retention saved, the update answered and
+// the org marked, and the pruner's next run repeats it without the admin
+// saving again. Many sessions go in batches.
 func TestEngineRetentionRepeats(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
@@ -215,16 +217,19 @@ func TestEngineRetentionRepeats(t *testing.T) {
 	f.requests.identitySessions = map[time.Duration][]string{0: ids}
 
 	f.ips.retentionErr = errors.New("engine down")
-	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, SettingsChange{LegalRetention: &legalFiveYears}); !errors.Is(err, f.ips.retentionErr) {
-		t.Fatalf("UpdateSettings with the engine down = %v; want its error", err)
+	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, SettingsChange{LegalRetention: &legalFiveYears}); err != nil {
+		t.Fatalf("UpdateSettings with the engine down = %v; want the change saved and answered", err)
 	}
 	if got := f.orgSettings.settings.LegalRetention; got != legalFiveYears {
 		t.Errorf("saved %+v; want the legal retention saved all the same", got)
 	}
+	if !f.orgSettings.stale {
+		t.Fatal("the org is not marked for the pruner after a failed sync")
+	}
 
 	f.ips.retentionErr, f.ips.retentions = nil, nil
-	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, SettingsChange{LegalRetention: &legalFiveYears}); err != nil {
-		t.Fatalf("UpdateSettings again: %v", err)
+	if _, err := f.svc.PurgeDue(ctx); err != nil {
+		t.Fatalf("PurgeDue: %v", err)
 	}
 	var sizes []int
 	for _, call := range f.ips.retentions {
@@ -232,6 +237,40 @@ func TestEngineRetentionRepeats(t *testing.T) {
 	}
 	if want := []int{engineSessionBatch, engineSessionBatch, 1}; !slices.Equal(sizes, want) {
 		t.Errorf("sessions per call = %v; want %v", sizes, want)
+	}
+	if f.orgSettings.stale {
+		t.Error("the org is still marked after the pruner synced it")
+	}
+
+	// With nothing marked, the pruner asks the engine for nothing.
+	f.ips.retentions = nil
+	if _, err := f.svc.PurgeDue(ctx); err != nil || len(f.ips.retentions) != 0 {
+		t.Errorf("PurgeDue with nothing marked = %v, set %v in the engine; want nothing", err, f.ips.retentions)
+	}
+}
+
+// A check created against settings that changed before it was attached holds
+// the retention it was created with, and a sync that ran meanwhile did not see
+// it: the org is marked for the pruner. One created against the settings as
+// they stand marks nothing.
+func TestSessionCreatedDuringLegalSaveIsSynced(t *testing.T) {
+	f := newFixture()
+	f.sendExternal(t, "anna@example.org", "")
+	if f.orgSettings.stale {
+		t.Fatal("a check sent against the settings as they stand marked the org")
+	}
+
+	f.ips.onCreate = func() { f.orgSettings.settings.LegalRetention = legalFiveYears }
+	f.sendExternal(t, "bob@example.org", "")
+	if !f.orgSettings.stale {
+		t.Fatal("a check created as the legal retention was saved did not mark the org")
+	}
+	f.requests.identitySessions = map[time.Duration][]string{0: {"ses-bob"}}
+	if _, err := f.svc.PurgeDue(context.Background()); err != nil {
+		t.Fatalf("PurgeDue: %v", err)
+	}
+	if want := legalFiveYears.longest() + retentionGrace; len(f.ips.retentions) != 1 || f.ips.retentions[0].retention != want {
+		t.Errorf("engine retentions = %+v; want the session given the legal period's %v", f.ips.retentions, want)
 	}
 }
 
@@ -244,8 +283,8 @@ func TestEngineFailureKeepsOrigins(t *testing.T) {
 	origins := []string{"https://example.org"}
 
 	change := SettingsChange{LegalRetention: &legalFiveYears, RedirectOrigins: &origins}
-	if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); !errors.Is(err, f.ips.retentionErr) {
-		t.Fatalf("UpdateSettings with the engine down = %v; want its error", err)
+	if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); err != nil {
+		t.Fatalf("UpdateSettings with the engine down = %v; want the change saved", err)
 	}
 	if got := f.orgSettings.settings.RedirectOrigins; !slices.Equal(got, origins) {
 		t.Errorf("saved origins %v; want %v", got, origins)
@@ -331,6 +370,91 @@ func TestErasureDeclinedIfAllHeld(t *testing.T) {
 	if want := f.svc.now().Add(2 * year); !noticed.LegalNotice.Until.Equal(want) ||
 		noticed.LegalNotice.ReasonEN != legalFiveYears.ReasonEN || noticed.LegalNotice.ReasonNL != legalFiveYears.ReasonNL {
 		t.Errorf("notice = %+v; want until %v with the org's reasons", noticed.LegalNotice, want)
+	}
+}
+
+// The person's earlier data request is among the matches, held by no law, but
+// it holds only who asked: the request is declined all the same, not sent to a
+// reviewer who could erase nothing it asked for.
+func TestEarlierDataRequestKeepsTheDecline(t *testing.T) {
+	year := 365 * 24 * time.Hour
+	f, data, _, earlier := legalFixture(t, year, year)
+	delete(data.heldUntil, earlier.ID)
+	data.matchKinds = map[uuid.UUID]FlowKind{earlier.ID: FlowDataErasure}
+
+	req := f.reconcile(t)
+	if req.Status != StatusRejected || req.ErrorCode != ErrorLegalRetention {
+		t.Fatalf("request = %q %q; want rejected %s", req.Status, req.ErrorCode, ErrorLegalRetention)
+	}
+	if want := (DataHold{Sessions: 1, Until: f.svc.now().Add(year)}); data.held == nil || *data.held != want {
+		t.Errorf("recorded hold = %+v; want %+v, the identity check alone", data.held, want)
+	}
+}
+
+// An erasure that leaves an identity check the law holds tells the person what
+// it kept, until when and why, whether a reviewer or the automatic handling
+// approved it; once the hold passed, or for a refusal of the reviewer's own,
+// it says nothing of the law.
+func TestPartialErasureTellsWhatTheLawKeeps(t *testing.T) {
+	year := 365 * 24 * time.Hour
+	f, _, _, free := legalFixture(t, year, -time.Hour)
+	if req := f.reconcile(t); req.Status != StatusNeedsReview {
+		t.Fatalf("request = %q; want needs_review, a session is free", req.Status)
+	}
+	ctx, id := context.Background(), f.requests.stored.ID
+	if _, err := f.svc.DecideReview(ctx, testOrg.ID, id, "r", ReviewInput{Approve: true, Reason: "ok", RequestIDs: []uuid.UUID{free.ID}}); err != nil {
+		t.Fatalf("approving the free session: %v", err)
+	}
+	approved := *f.requests.stored
+	until := f.svc.now().Add(year)
+	if approved.Status != StatusApproved || approved.DataHold == nil || *approved.DataHold != (DataHold{Sessions: 1, Until: until}) {
+		t.Fatalf("approved request = %q with hold %+v; want approved, one session held until %v", approved.Status, approved.DataHold, until)
+	}
+	noticed, err := f.svc.withLegalNotice(ctx, approved)
+	if err != nil || noticed.LegalNotice == nil {
+		t.Fatalf("withLegalNotice = %+v, %v; want a notice", noticed.LegalNotice, err)
+	}
+	if n := noticed.LegalNotice; n.Sessions != 1 || !n.Until.Equal(until) || n.ReasonEN != legalFiveYears.ReasonEN || n.ReasonNL != legalFiveYears.ReasonNL {
+		t.Errorf("notice = %+v; want one session until %v with the org's reasons", n, until)
+	}
+
+	later := until.Add(time.Hour)
+	f.svc.now = func() time.Time { return later }
+	if noticed, err := f.svc.withLegalNotice(ctx, approved); err != nil || noticed.LegalNotice != nil {
+		t.Errorf("withLegalNotice once the hold passed = %+v, %v; want none", noticed.LegalNotice, err)
+	}
+
+	refused := approved
+	refused.Status, refused.ErrorCode = StatusRejected, ErrorReviewRejected
+	f.svc.now = func() time.Time { return until.Add(-time.Hour) }
+	if noticed, err := f.svc.withLegalNotice(ctx, refused); err != nil || noticed.LegalNotice != nil {
+		t.Errorf("withLegalNotice of a reviewer's refusal = %+v, %v; want none", noticed.LegalNotice, err)
+	}
+}
+
+// The org cannot erase through the API what its legal retention still holds,
+// as no "delete my data" request can; once the period passed it can.
+func TestPurgeRequestLegalHold(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	sent := f.sendExternal(t, "anna@example.org", "")
+	until := time.Now().Add(time.Hour)
+	f.requests.heldUntil = &until
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrLegalRetention) {
+		t.Fatalf("PurgeRequest of a held check = %v; want ErrLegalRetention", err)
+	}
+	if f.ips.deletes != 0 || f.requests.stored.PurgedAt != nil {
+		t.Fatalf("a refused purge erased %d sessions, purged at %v", f.ips.deletes, f.requests.stored.PurgedAt)
+	}
+	var apiErr *respond.APIError
+	if !errors.As(mapError(ErrLegalRetention), &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != "legal_retention" {
+		t.Errorf("mapError(ErrLegalRetention) = %+v; want 409 legal_retention", apiErr)
+	}
+
+	passed := time.Now().Add(-time.Hour)
+	f.requests.heldUntil = &passed
+	if err := f.svc.PurgeRequest(ctx, testOrg.ID, sent.Request.ID); err != nil || f.ips.deletes != 1 || f.requests.stored.PurgedAt == nil {
+		t.Errorf("PurgeRequest once the hold passed = %v (%d deletes); want it erased", err, f.ips.deletes)
 	}
 }
 
@@ -435,5 +559,44 @@ func TestAutomaticErasureLeavesHeldSessions(t *testing.T) {
 	}
 	if got := f.ips.deletes - deletes; got != 2 {
 		t.Errorf("sessions erased = %d; want the free session and the request", got)
+	}
+	if want := (DataHold{Sessions: 1, Until: now.Add(365 * 24 * time.Hour)}); f.requests.stored.DataHold == nil || *f.requests.stored.DataHold != want {
+		t.Errorf("hold = %+v; want %+v for the person's page", f.requests.stored.DataHold, want)
+	}
+}
+
+// The person's page gets what the law kept: how many sessions, until when, and
+// the reason in both languages; nothing without a notice.
+func TestHostedProgressLegalRetention(t *testing.T) {
+	now := time.Date(2026, time.October, 19, 12, 0, 0, 0, time.UTC)
+	until := now.AddDate(5, 0, 0)
+	req := Request{FlowKind: FlowDataErasure, Status: StatusApproved, LegalNotice: &LegalNotice{
+		Sessions: 2, Until: until, ReasonEN: legalFiveYears.ReasonEN, ReasonNL: legalFiveYears.ReasonNL,
+	}}
+	body, err := json.Marshal(newHostedProgress(req, now))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		LegalRetention *struct {
+			Sessions int       `json:"sessions"`
+			Until    time.Time `json:"until"`
+			Reason   struct {
+				EN string `json:"en"`
+				NL string `json:"nl"`
+			} `json:"reason"`
+		} `json:"legalRetention"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if l := got.LegalRetention; l == nil || l.Sessions != 2 || !l.Until.Equal(until) ||
+		l.Reason.EN != legalFiveYears.ReasonEN || l.Reason.NL != legalFiveYears.ReasonNL {
+		t.Errorf("legalRetention = %+v; want two sessions until %v with both reasons", l, until)
+	}
+
+	req.LegalNotice = nil
+	if body, err := json.Marshal(newHostedProgress(req, now)); err != nil || strings.Contains(string(body), "legalRetention") {
+		t.Errorf("progress without a notice = %s, %v; want no legalRetention", body, err)
 	}
 }

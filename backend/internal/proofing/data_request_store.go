@@ -230,7 +230,7 @@ func (s *DataRequestStore) SaveMatches(ctx context.Context, req Request, matches
 
 // Matches is req's matches, strong ones first, newest first within.
 func (s *DataRequestStore) Matches(ctx context.Context, req Request) ([]DataMatch, error) {
-	rows, err := s.db.Query(ctx, `SELECT m.matched_request_id, r.flow_name, r.status, COALESCE(r.method, ''),
+	rows, err := s.db.Query(ctx, `SELECT m.matched_request_id, r.flow_name, r.flow_kind, r.status, COALESCE(r.method, ''),
 			COALESCE(r.assurance_level, ''), COALESCE(r.eidas_level, ''), r.created_at, r.completed_at, r.purged_at,
 			m.level, m.approved, `+legalHeldUntil+`
 		FROM identity_proofing_request_matches m
@@ -243,7 +243,7 @@ func (s *DataRequestStore) Matches(ctx context.Context, req Request) ([]DataMatc
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DataMatch, error) {
 		var m DataMatch
-		err := row.Scan(&m.RequestID, &m.FlowName, &m.Status, &m.Method, &m.AssuranceLevel, &m.EIDASLevel,
+		err := row.Scan(&m.RequestID, &m.FlowName, &m.FlowKind, &m.Status, &m.Method, &m.AssuranceLevel, &m.EIDASLevel,
 			&m.CreatedAt, &m.CompletedAt, &m.PurgedAt, &m.Level, &m.Approved, &m.HeldUntil)
 		return m, err
 	})
@@ -282,9 +282,15 @@ func (s *DataRequestStore) scanRequests(ctx context.Context, query string, args 
 }
 
 // RecordDecision marks each of req's matches approved or not, and sets until
-// when an approved "see my data" request's data downloads (nil for none) and
-// how many matches an approved erasure kept (nil for any other decision).
-func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error {
+// when an approved "see my data" request's data downloads (nil for none), how
+// many matches an approved erasure kept (nil for any other decision), and what
+// of an erasure's matches the legal retention holds (nil for none).
+func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int, held *DataHold) error {
+	var heldSessions *int
+	var heldUntil *time.Time
+	if held != nil {
+		heldSessions, heldUntil = &held.Sessions, &held.Until
+	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
 			return cmp.Or(err, ErrNotUnderReview)
@@ -294,8 +300,8 @@ func (s *DataRequestStore) RecordDecision(ctx context.Context, req Request, appr
 			return fmt.Errorf("proofing: decide matches request %s: %w", req.ID, err)
 		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_requests SET data_export_until = $2, data_matches_kept = $3,
-				updated_at = now()
-			WHERE id = $1`, req.ID, exportUntil, kept); err != nil {
+				data_matches_held = $4, data_held_until = $5, updated_at = now()
+			WHERE id = $1`, req.ID, exportUntil, kept, heldSessions, heldUntil); err != nil {
 			return fmt.Errorf("proofing: data export request %s: %w", req.ID, err)
 		}
 		return nil

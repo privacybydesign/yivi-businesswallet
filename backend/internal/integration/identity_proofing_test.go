@@ -543,7 +543,7 @@ func TestBadPatchChangesNothing(t *testing.T) {
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 	base := "/api/v1/orgs/acme/identity-proofing"
 
-	const defaultRetentionDays = 30
+	const defaultRetentionDays = 7
 	wantProofingError(t, "valid retention with a bad origin",
 		env.patchSettings("acme", `{"dataRetentionDays":90,"allowedRedirectOrigins":["https://portal.example.org/a"]}`),
 		http.StatusBadRequest, "invalid_input")
@@ -569,7 +569,7 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 	base := "/api/v1/orgs/acme/identity-proofing"
 
-	const defaultRetentionDays = 30
+	const defaultRetentionDays = 7
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
 	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) || settings.DataRetentionDays != defaultRetentionDays ||
 		settings.Branding.DisplayName != "" || settings.Branding.LogoURI != "" || settings.AllowedRedirectOrigins == nil ||
@@ -678,7 +678,7 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 	base := "/api/v1/orgs/acme/identity-proofing"
 	env.proofingFlow("acme", "Passport only")
 
-	const defaultRetentionDays = 30
+	const defaultRetentionDays = 7
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
 	if settings.LegalRetention != nil {
 		t.Errorf("default legal retention = %+v; want null", settings.LegalRetention)
@@ -789,6 +789,55 @@ func (e *testEnv) apiCall(method, path, key string, body any) *http.Response {
 		e.t.Fatalf("do %s %s: %v", method, path, err)
 	}
 	return resp
+}
+
+// The org's own purge through the API takes no approved check its legal
+// retention still holds, as no "delete my data" request does: 409
+// legal_retention. A check the law does not hold (a rejected one) is purged.
+func TestLegalRetentionBlocksAPIPurge(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	env.proofingDefaultFlow("acme")
+	base := "/api/v1/orgs/acme/identity-proofing"
+
+	resp := env.postJSON(base+"/api-keys", map[string]any{"name": "Backend"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create key = %d, want 201", resp.StatusCode)
+	}
+	key := decodeJSON[proofingAPIKeyResp](t, resp)
+	send := func(email, status string) proofingAPISessionResp {
+		t.Helper()
+		resp := env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+			map[string]any{"email": email, "sendMail": false})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("api create session = %d, want 201", resp.StatusCode)
+		}
+		session := decodeJSON[proofingAPISessionResp](t, resp)
+		// The engine's outcome, as reconcile records it.
+		if _, err := env.pool.Exec(context.Background(), `UPDATE identity_proofing_requests
+			SET status = $2, completed_at = now() WHERE subject_email = $1`, email, status); err != nil {
+			t.Fatalf("decide the check: %v", err)
+		}
+		return session
+	}
+	approved, rejected := send("anna@example.org", "approved"), send("bob@example.org", "rejected")
+	_ = env.patchSettings("acme", `{"legalRetention":{"months":60,"reasonEn":"The Wwft.","reasonNl":"De Wwft."}}`).Body.Close()
+
+	wantProofingError(t, "purge of a held check",
+		env.apiCall(http.MethodDelete, "/api/v1/proofing/sessions/"+approved.ID, key.Secret, nil),
+		http.StatusConflict, "legal_retention")
+	got := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID, key.Secret, nil))
+	if got.PurgedAt != "" {
+		t.Errorf("held check after the refused purge = %+v; want it kept", got)
+	}
+
+	resp = env.apiCall(http.MethodDelete, "/api/v1/proofing/sessions/"+rejected.ID, key.Secret, nil)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("purge of a rejected check = %d, want 204", resp.StatusCode)
+	}
 }
 
 func TestProofingAPIKeyFlow(t *testing.T) {

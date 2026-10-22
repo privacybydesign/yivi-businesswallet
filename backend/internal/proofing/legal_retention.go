@@ -97,9 +97,38 @@ func addMonths(t time.Time, months int) time.Time {
 	return first.AddDate(0, 0, min(t.Day(), lastDay)-1)
 }
 
-// LegalNotice is what a person is told when the legal retention declined their
-// erasure: why, in both languages, and when the last of their data can be erased.
+// DataHold is what an erasure left because the legal retention still holds it:
+// how many of the person's identity checks, and when the last of them can be
+// erased (and is, by the pruner).
+type DataHold struct {
+	Sessions int
+	Until    time.Time
+}
+
+// heldMatches is what the legal retention holds of matches at now; nil when it
+// holds none.
+func heldMatches(matches []DataMatch, now time.Time) *DataHold {
+	var hold *DataHold
+	for _, m := range matches {
+		if !m.held(now) {
+			continue
+		}
+		if hold == nil {
+			hold = &DataHold{}
+		}
+		hold.Sessions++
+		if m.HeldUntil.After(hold.Until) {
+			hold.Until = *m.HeldUntil
+		}
+	}
+	return hold
+}
+
+// LegalNotice is what a person is told when the legal retention kept data their
+// erasure asked for: how many of their sessions, why, in both languages, and
+// when the last of them can be erased.
 type LegalNotice struct {
+	Sessions int
 	Until    time.Time
 	ReasonEN string
 	ReasonNL string

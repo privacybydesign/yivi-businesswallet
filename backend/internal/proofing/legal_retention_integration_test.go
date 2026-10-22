@@ -70,10 +70,11 @@ func TestLegalRetentionFloorsPurge(t *testing.T) {
 		FROM identity_proofing_requests WHERE id = $1`, shortFlow.ID).Scan(&floored); err != nil || !floored {
 		t.Errorf("purge_at of the check on a week's flow = a year after it ended: %v, %v", floored, err)
 	}
-	// The name read off the document is kept as long, at most a month's 31 days over.
+	// The name read off the document is kept as long once approved, at most a
+	// month's 31 days over.
 	got, err := f.requests.Get(ctx, f.orgID, shortFlow.ID)
-	if err != nil || got.NameRetention != legal.longest() {
-		t.Errorf("name retention = %v, %v; want the legal period's %v", got.NameRetention, err, legal.longest())
+	if err != nil || got.legalNameRetention != legal.longest() {
+		t.Errorf("legal name retention = %v, %v; want the legal period's %v", got.legalNameRetention, err, legal.longest())
 	}
 
 	// Past the year they go.
@@ -108,6 +109,102 @@ func TestLegalRetentionFloorsPurge(t *testing.T) {
 	if due := f.purgeDue(t); !sameIDs(due, all) {
 		t.Errorf("due after removing it = %v; want all four", due)
 	}
+}
+
+// The law holds what proved who a person is: an approved identity check. One
+// that was rejected, expired, cancelled or never started is purged at its own
+// retention, holds no name for the legal period, shows no hold to an erasure,
+// and can be purged through the API.
+func TestLegalHoldsApprovedChecksOnly(t *testing.T) {
+	f := newPurgeFixture(t)
+	ctx := context.Background()
+	legal := LegalRetention{Months: 12, ReasonEN: "Kept by law.", ReasonNL: "Bewaard volgens de wet."}
+	if _, err := f.settings.SaveLegalRetention(ctx, f.orgID, legal); err != nil {
+		t.Fatalf("SaveLegalRetention: %v", err)
+	}
+	external := func(email string) NewStoredRequest {
+		return newStoredRequest(f.orgID, f.sam, externalSubject(email))
+	}
+	approved := f.settledAgo(t, external("a@example.org"), "s-approved", "40 days")
+	rejected := f.decidedAgo(t, external("b@example.org"), "s-rejected", StatusRejected, "40 days")
+	expired := createAttached(t, f.requests, external("c@example.org"), "s-expired")
+	cancelled, err := f.requests.Create(ctx, external("d@example.org"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	unstarted := external("e@example.org")
+	unstarted.LinkExpiresAt = time.Now().Add(-40 * 24 * time.Hour)
+	never, err := f.requests.Create(ctx, unstarted)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Expired and cancelled are derived: a session that ended undecided, and
+	// a cancel.
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests
+		SET ips_session_ended_at = now() - interval '40 days' WHERE id = $1`, expired.ID); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests
+		SET cancelled_at = now() - interval '40 days' WHERE id = $1`, cancelled.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := refreshPurgeAt(ctx, f.pool, expired.ID, cancelled.ID); err != nil {
+		t.Fatalf("refresh purge time: %v", err)
+	}
+
+	if due := f.purgeDue(t); !sameIDs(due, []uuid.UUID{rejected.ID, expired.ID, cancelled.ID, never.ID}) {
+		t.Errorf("due under a year's legal retention = %v; want every check but the approved one", due)
+	}
+	for _, tc := range []struct {
+		name string
+		id   uuid.UUID
+		held bool
+	}{{"approved", approved.ID, true}, {"rejected", rejected.ID, false}, {"expired", expired.ID, false}, {"cancelled", cancelled.ID, false}} {
+		until, err := f.requests.HeldUntil(ctx, f.orgID, tc.id)
+		if err != nil || (until != nil) != tc.held {
+			t.Errorf("%s: held until %v, %v; want held %v", tc.name, until, err, tc.held)
+		}
+	}
+	if _, err := f.requests.HeldUntil(ctx, makeOrg(t, f.pool, "globex"), approved.ID); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("HeldUntil from another org = %v; want ErrRequestNotFound", err)
+	}
+
+	// Only an approval keeps the proofed name for the legal period.
+	name := func(status Status, sessionID, email string) time.Duration {
+		t.Helper()
+		req := createAttached(t, f.requests, external(email), sessionID)
+		if err := f.requests.RecordOutcome(ctx, req, sessionID, status,
+			proofingprovider.Result{Status: proofingprovider.Status(status), Name: "Anna Jansen"}); err != nil {
+			t.Fatalf("RecordOutcome %s: %v", status, err)
+		}
+		var kept time.Duration
+		if err := f.pool.QueryRow(ctx, `SELECT EXTRACT(EPOCH FROM proofed_name_purge_after - now())::bigint * 1000000000
+			FROM identity_proofing_requests WHERE id = $1`, req.ID).Scan(&kept); err != nil {
+			t.Fatalf("read the name's clearing time: %v", err)
+		}
+		return kept
+	}
+	if kept := name(StatusRejected, "s-name-rejected", "f@example.org"); kept > defaultSettings(f.orgID).Session.DataRetention() {
+		t.Errorf("a rejected check's name is kept %v; want the org's retention", kept)
+	}
+	if kept := name(StatusApproved, "s-name-approved", "g@example.org"); kept < legal.longest()-time.Hour {
+		t.Errorf("an approved check's name is kept %v; want the legal period's %v", kept, legal.longest())
+	}
+}
+
+// createAttached stores a request and attaches its session, as sending does,
+// in an org that may hold others.
+func createAttached(t *testing.T, store *RequestStore, in NewStoredRequest, sessionID string) Request {
+	t.Helper()
+	ctx := context.Background()
+	req, err := store.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ok, err := store.AttachSession(ctx, req, attachedSession(sessionID)); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	return req
 }
 
 // A flow that keeps its checks longer than the law says keeps them: the
@@ -390,7 +487,7 @@ func TestLegalKeepsEngineSessions(t *testing.T) {
 		t.Fatalf("CreateFlow: %v", err)
 	}
 
-	// Two finished checks of the org, sent under its 30 days of retention.
+	// Two finished checks of the org, sent under its default retention.
 	finished := func(kind FlowKind) string {
 		t.Helper()
 		in := newStoredRequest(f.orgID, f.sam, externalSubject(string(kind)+"@example.org"))
@@ -442,5 +539,98 @@ func TestLegalKeepsEngineSessions(t *testing.T) {
 	}
 	if got := purged(2 * year); !slices.Equal(got, []string{identity}) {
 		t.Errorf("engine purge after two years, no legal retention, removed %v; want the check's session", got)
+	}
+}
+
+// Saving a legal retention marks the org until a sync succeeds: a failed one
+// leaves the mark for the pruner, a sessions' check can set it again, and a
+// sync runs under the settings write lock with the settings saved last, so a
+// save waits for a sync in flight rather than leaving the engine at the
+// retention that sync read.
+func TestSyncEngineRetentionUnderLock(t *testing.T) {
+	f := newPurgeFixture(t)
+	ctx := context.Background()
+	other := makeOrg(t, f.pool, "globex")
+	stale := func() []uuid.UUID {
+		t.Helper()
+		orgs, err := f.settings.StaleEngineRetention(ctx)
+		if err != nil {
+			t.Fatalf("StaleEngineRetention: %v", err)
+		}
+		return orgs
+	}
+	if got := stale(); len(got) != 0 {
+		t.Fatalf("stale before any save = %v; want none", got)
+	}
+	legal := LegalRetention{Months: 60, ReasonEN: "a", ReasonNL: "b"}
+	if _, err := f.settings.SaveLegalRetention(ctx, f.orgID, legal); err != nil {
+		t.Fatalf("SaveLegalRetention: %v", err)
+	}
+	if got := stale(); !slices.Equal(got, []uuid.UUID{f.orgID}) {
+		t.Fatalf("stale after a save = %v; want the org", got)
+	}
+
+	failed := errors.New("engine down")
+	if err := f.settings.SyncEngineRetention(ctx, f.orgID, func(context.Context, Settings) error { return failed }); !errors.Is(err, failed) {
+		t.Fatalf("a failing sync = %v; want its error", err)
+	}
+	if got := stale(); !slices.Equal(got, []uuid.UUID{f.orgID}) {
+		t.Fatalf("stale after a failed sync = %v; want the org still marked", got)
+	}
+
+	// A save waits for the sync in flight, which saw the settings as they stood.
+	inSync, release := make(chan Settings), make(chan struct{})
+	synced := make(chan error, 1)
+	go func() {
+		synced <- f.settings.SyncEngineRetention(ctx, f.orgID, func(_ context.Context, s Settings) error {
+			inSync <- s
+			<-release
+			return nil
+		})
+	}()
+	if seen := <-inSync; seen.LegalRetention != legal {
+		t.Errorf("the sync saw %+v; want the saved legal retention", seen.LegalRetention)
+	}
+	saved := make(chan error, 1)
+	go func() {
+		_, err := f.settings.SaveLegalRetention(ctx, f.orgID, LegalRetention{})
+		saved <- err
+	}()
+	if done, err := awaitLockWait(t, f.pool, saved); done {
+		t.Fatalf("the save finished (%v) while a sync held the settings; want it to wait", err)
+	}
+	close(release)
+	if err := <-synced; err != nil {
+		t.Fatalf("SyncEngineRetention: %v", err)
+	}
+	if err := <-saved; err != nil {
+		t.Fatalf("SaveLegalRetention: %v", err)
+	}
+	// The save after the sync marked the org again, for the sync that follows it.
+	if got := stale(); !slices.Equal(got, []uuid.UUID{f.orgID}) {
+		t.Fatalf("stale after a save behind a sync = %v; want the org", got)
+	}
+	if err := f.settings.SyncEngineRetention(ctx, f.orgID, func(_ context.Context, s Settings) error {
+		if s.LegalRetention != (LegalRetention{}) {
+			t.Errorf("the sync saw %+v; want the legal retention removed", s.LegalRetention)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("SyncEngineRetention: %v", err)
+	}
+	if got := stale(); len(got) != 0 {
+		t.Fatalf("stale after a sync = %v; want none", got)
+	}
+
+	// A session attached after a sync marks its org again; an org without
+	// settings has nothing to mark.
+	if err := f.settings.MarkEngineRetentionStale(ctx, f.orgID); err != nil {
+		t.Fatalf("MarkEngineRetentionStale: %v", err)
+	}
+	if err := f.settings.MarkEngineRetentionStale(ctx, other); err != nil {
+		t.Fatalf("MarkEngineRetentionStale of an org without settings: %v", err)
+	}
+	if got := stale(); !slices.Equal(got, []uuid.UUID{f.orgID}) {
+		t.Errorf("stale after a mark = %v; want the org alone", got)
 	}
 }

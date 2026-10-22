@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,13 @@ type fakeDataRequests struct {
 	// heldUntil is when the legal retention lets a matched session be erased;
 	// SaveMatches stamps it on the matches it stores.
 	heldUntil map[uuid.UUID]time.Time
+	// matchKinds is the flow kind of a matched session, FlowIdentity when
+	// unset; SaveMatches stamps it on the matches it stores.
+	matchKinds map[uuid.UUID]FlowKind
+	// held is what the last decision recorded the legal retention holds;
+	// requests, when set, gets it and kept on its stored request too.
+	held     *DataHold
+	requests *fakeRequests
 }
 
 func (f *fakeDataRequests) FlowKind(_ context.Context, _ uuid.UUID, flowID string) (FlowKind, error) {
@@ -99,7 +107,7 @@ func (f *fakeDataRequests) SaveMatches(_ context.Context, _ Request, matches []N
 	f.saved = matches
 	f.matches = nil
 	for _, m := range matches {
-		match := DataMatch{RequestID: m.RequestID, Level: m.Level}
+		match := DataMatch{RequestID: m.RequestID, Level: m.Level, FlowKind: cmp.Or(f.matchKinds[m.RequestID], FlowIdentity)}
 		if until, ok := f.heldUntil[m.RequestID]; ok {
 			match.HeldUntil = &until
 		}
@@ -116,8 +124,11 @@ func (f *fakeDataRequests) MatchedRequests(context.Context, Request) ([]Request,
 	return f.matched, nil
 }
 
-func (f *fakeDataRequests) RecordDecision(_ context.Context, _ Request, approved []uuid.UUID, exportUntil *time.Time, kept *int) error {
-	f.approved, f.exportTill, f.kept = approved, exportUntil, kept
+func (f *fakeDataRequests) RecordDecision(_ context.Context, req Request, approved []uuid.UUID, exportUntil *time.Time, kept *int, held *DataHold) error {
+	f.approved, f.exportTill, f.kept, f.held = approved, exportUntil, kept, held
+	if f.requests != nil && f.requests.stored != nil && f.requests.stored.ID == req.ID {
+		f.requests.stored.DataMatchesKept, f.requests.stored.DataHold = kept, held
+	}
 	return nil
 }
 
@@ -129,7 +140,7 @@ func (f *fakeDataRequests) RecordExported(context.Context, Request, int) error {
 // newDataFixture is newFixture with chipFlow made a data request flow of kind.
 func newDataFixture(kind FlowKind) (fixture, *fakeDataRequests) {
 	f := newFixture()
-	data := &fakeDataRequests{kinds: map[string]FlowKind{chipFlow.ID: kind}}
+	data := &fakeDataRequests{kinds: map[string]FlowKind{chipFlow.ID: kind}, requests: f.requests}
 	f.svc.dataRequests = data
 	return f, data
 }
@@ -414,8 +425,7 @@ func erasureInReview(t *testing.T, handling ErasureHandling, unsure bool) (fixtu
 }
 
 // An org can have its erasures decided without a reviewer: erased at once
-// when every match is sure, the unsure ones left to a reviewer, or all kept
-// under a legal duty.
+// when every match is sure, the unsure ones left to a reviewer.
 func TestErasureHandling(t *testing.T) {
 	t.Run("automatic, all sure", func(t *testing.T) {
 		f, data, req := erasureInReview(t, ErasureAutomatic, false)
@@ -435,13 +445,15 @@ func TestErasureHandling(t *testing.T) {
 			t.Errorf("sessions erased = %d; want the two sure matches now", got)
 		}
 	})
-	t.Run("keep", func(t *testing.T) {
-		f, _, req := erasureInReview(t, ErasureKeep, true)
-		if req.Status != StatusRejected || req.ErrorCode != ErrorLegalRetention {
-			t.Errorf("status %q (%s); want rejected with %s", req.Status, req.ErrorCode, ErrorLegalRetention)
+	t.Run("keep is gone", func(t *testing.T) {
+		// What the law makes an org keep is its legal retention (D6).
+		f := newFixture()
+		keep := ErasureHandling("keep")
+		if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{ErasureHandling: &keep}); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("UpdateSettings(keep) = %v; want ErrInvalidInput", err)
 		}
-		if got := f.ips.deletes; got != 0 {
-			t.Errorf("sessions erased = %d; want none", got)
+		if got := f.orgSettings.settings.Session.ErasureHandling; got != ErasureReview {
+			t.Errorf("erasure handling = %q; want it left at review", got)
 		}
 	})
 	t.Run("review", func(t *testing.T) {

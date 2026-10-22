@@ -17,7 +17,8 @@ import type {
 } from "../api/identity-proofing";
 import i18n from "../i18n";
 import { errorCode } from "../lib/api-error";
-import { useWhenFormatter } from "../lib/format-when";
+import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
+import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
 import {
   hostedHandBack,
   hostedLanguage,
@@ -308,7 +309,9 @@ type DataKind = Exclude<FlowKind, "identity">;
 // What a data request's person sees once their identity check settled: that
 // the request awaits the org's review, its outcome, and an approved "see
 // my data" request's download while it lasts. An erasure that kept sessions
-// says so, and a refused request says why.
+// says so, what the law keeps until when and why among them (GDPR Art. 12(4)),
+// and a refused request says why; one the law declined says it in its
+// outcome (LegalRetentionOutcome).
 function DataRequestOutcome({
   token,
   organization,
@@ -322,11 +325,13 @@ function DataRequestOutcome({
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
+  const formatDate = useDateFormatter();
   const {
     status,
     errorCode,
     dataExportUntil: exportUntil,
     dataMatchesKept: kept,
+    legalRetention: legal,
   } = progress;
   switch (status) {
     case "needs_review":
@@ -337,15 +342,32 @@ function DataRequestOutcome({
       );
     case "approved":
       if (kind === "data_erasure") {
+        const { unsure, held } = erasureLeft(kept, legal);
         return (
-          <p role="status" className={HINT}>
-            {kept
-              ? t("proofLink.dataRequest.erasedPartly", {
-                  count: kept,
-                  organization,
-                })
-              : t("proofLink.dataRequest.erased")}
-          </p>
+          <div role="status" className="flex flex-col items-center gap-2">
+            <p className={HINT}>
+              {unsure > 0
+                ? t("proofLink.dataRequest.erasedPartly", {
+                    count: unsure,
+                    organization,
+                  })
+                : t("proofLink.dataRequest.erased")}
+            </p>
+            {held && (
+              <>
+                <p className={HINT}>
+                  {t("proofLink.dataRequest.keptByLaw", {
+                    count: held.sessions,
+                    organization,
+                    date: formatDate(held.until),
+                  })}
+                </p>
+                <p className={HINT}>
+                  {legalReasonIn(held.reason, i18n.language)}
+                </p>
+              </>
+            )}
+          </div>
         );
       }
       return exportUntil ? (
@@ -370,6 +392,8 @@ function DataRequestOutcome({
       );
     case "rejected": {
       const why = dataRequestRefusal(errorCode);
+      // The outcome itself gives the law's reason and date.
+      if (legal) return null;
       return why === undefined ? null : (
         <p role="status" className={HINT}>
           {t(`proofLink.dataRequest.refused.${why}`, { organization })}

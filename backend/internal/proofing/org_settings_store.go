@@ -210,8 +210,9 @@ func saveSession(ctx context.Context, q database.Querier, orgID uuid.UUID, befor
 // SaveLegalRetention replaces the org's legal retention (the zero value
 // removes it) and audits identity_proofing.settings_updated with before and
 // after. A change moves the purge time of the org's requests, which are stored
-// again under the same lock as a retention change. Saving the legal retention
-// it has changes and audits nothing.
+// again under the same lock as a retention change, and marks the org's engine
+// sessions for a sync (engine_retention_stale, SyncEngineRetention). Saving the
+// legal retention it has changes, marks and audits nothing.
 func (s *OrgSettingsStore) SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
@@ -224,13 +225,17 @@ func (s *OrgSettingsStore) SaveLegalRetention(ctx context.Context, orgID uuid.UU
 		if before.LegalRetention == legal {
 			return nil
 		}
+		// The engine's sessions hold the old retention until a sync gives them
+		// the new one (SyncEngineRetention).
 		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
-				(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl)
-			VALUES ($1, NULLIF($2, 0), NULLIF($3, ''), NULLIF($4, ''))
+				(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl,
+				 engine_retention_stale)
+			VALUES ($1, NULLIF($2, 0), NULLIF($3, ''), NULLIF($4, ''), true)
 			ON CONFLICT (organization_id) DO UPDATE SET
 				legal_retention_months = EXCLUDED.legal_retention_months,
 				legal_retention_reason_en = EXCLUDED.legal_retention_reason_en,
-				legal_retention_reason_nl = EXCLUDED.legal_retention_reason_nl, updated_at = now()`,
+				legal_retention_reason_nl = EXCLUDED.legal_retention_reason_nl,
+				engine_retention_stale = true, updated_at = now()`,
 			orgID, legal.Months, legal.ReasonEN, legal.ReasonNL); err != nil {
 			return fmt.Errorf("proofing: save legal retention org %s: %w", orgID, err)
 		}
@@ -243,6 +248,58 @@ func (s *OrgSettingsStore) SaveLegalRetention(ctx context.Context, orgID uuid.UU
 		return Settings{}, err
 	}
 	return s.Get(ctx, orgID)
+}
+
+// SyncEngineRetention runs sync with the org's settings as they stand under its
+// settings write lock (settingsLockWrite), which every settings save takes: no
+// save or other sync runs between that read and sync's engine writes, and a
+// request insert waits for it. Once sync succeeded it clears the org's
+// engine_retention_stale; a failed sync leaves it set for the pruner's next run
+// (StaleEngineRetention).
+func (s *OrgSettingsStore) SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error {
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
+			return err
+		}
+		settings, err := getSettings(ctx, q, orgID)
+		if err != nil {
+			return err
+		}
+		if err := sync(ctx, settings); err != nil {
+			return err
+		}
+		if _, err := q.Exec(ctx, `UPDATE identity_proofing_settings SET engine_retention_stale = false
+			WHERE organization_id = $1 AND engine_retention_stale`, orgID); err != nil {
+			return fmt.Errorf("proofing: clear stale engine retention org %s: %w", orgID, err)
+		}
+		return nil
+	})
+}
+
+// MarkEngineRetentionStale marks the org's engine sessions for the next sync
+// (SyncEngineRetention). An org without settings has nothing a sync would
+// change: its sessions hold the defaults they were created with.
+func (s *OrgSettingsStore) MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error {
+	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_settings SET engine_retention_stale = true
+		WHERE organization_id = $1`, orgID); err != nil {
+		return fmt.Errorf("proofing: mark stale engine retention org %s: %w", orgID, err)
+	}
+	return nil
+}
+
+// StaleEngineRetention lists the orgs whose engine sessions may not hold the
+// retention their settings give them yet (engine_retention_stale).
+func (s *OrgSettingsStore) StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := s.db.Query(ctx, `SELECT organization_id FROM identity_proofing_settings
+		WHERE engine_retention_stale ORDER BY organization_id`)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list stale engine retention: %w", err)
+	}
+	orgs, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list stale engine retention: %w", err)
+	}
+	return orgs, nil
 }
 
 // SaveBranding replaces the org's branding, and its logo as logo says, and

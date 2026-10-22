@@ -73,8 +73,10 @@ type fakeRequests struct {
 	// request from ListPurgeDue until cleared.
 	purgeDeferrals int
 	purgeDeferred  bool
-	// identitySessions is what IdentitySessions answers.
+	// identitySessions is what IdentitySessions answers, heldUntil what
+	// HeldUntil does.
 	identitySessions map[time.Duration][]string
+	heldUntil        *time.Time
 }
 
 // actorLabel is the audit actor label ctx carries, "" for none.
@@ -255,6 +257,10 @@ func (f *fakeRequests) IdentitySessions(context.Context, uuid.UUID) (map[time.Du
 	return f.identitySessions, nil
 }
 
+func (f *fakeRequests) HeldUntil(context.Context, uuid.UUID, uuid.UUID) (*time.Time, error) {
+	return f.heldUntil, nil
+}
+
 func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, error) {
 	m, ok := f.members[userID]
 	if !ok {
@@ -346,6 +352,9 @@ type fakeOrgSettings struct {
 	settings Settings
 	logo     Logo
 	saves    int
+	// stale is engine_retention_stale; syncs counts the syncs that ran.
+	stale bool
+	syncs int
 }
 
 func (f *fakeOrgSettings) Get(context.Context, uuid.UUID) (Settings, error) { return f.settings, nil }
@@ -371,8 +380,32 @@ func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Brandin
 }
 
 func (f *fakeOrgSettings) SaveLegalRetention(_ context.Context, _ uuid.UUID, legal LegalRetention) (Settings, error) {
+	if f.settings.LegalRetention != legal {
+		f.stale = true
+	}
 	f.settings.LegalRetention = legal
 	return f.settings, nil
+}
+
+func (f *fakeOrgSettings) SyncEngineRetention(ctx context.Context, _ uuid.UUID, sync func(context.Context, Settings) error) error {
+	f.syncs++
+	if err := sync(ctx, f.settings); err != nil {
+		return err
+	}
+	f.stale = false
+	return nil
+}
+
+func (f *fakeOrgSettings) MarkEngineRetentionStale(context.Context, uuid.UUID) error {
+	f.stale = true
+	return nil
+}
+
+func (f *fakeOrgSettings) StaleEngineRetention(context.Context) ([]uuid.UUID, error) {
+	if !f.stale {
+		return nil, nil
+	}
+	return []uuid.UUID{testOrg.ID}, nil
 }
 
 func (f *fakeOrgSettings) Logo(context.Context, uuid.UUID) (Logo, error) {
@@ -422,6 +455,8 @@ type fakeIPS struct {
 	// retentions records each SetSessionsRetention; retentionErr fails them.
 	retentions   []engineRetentionCall
 	retentionErr error
+	// onCreate runs as a session is created: what happens meanwhile.
+	onCreate func()
 }
 
 // engineRetentionCall is one SetSessionsRetention.
@@ -495,6 +530,9 @@ func (*fakeIPS) ActivateFlowVersion(_ context.Context, _ proofingprovider.Tenant
 }
 
 func (f *fakeIPS) CreateSession(_ context.Context, tenant proofingprovider.Tenant, in proofingprovider.SessionInput) (proofingprovider.Session, error) {
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	f.sessions = append(f.sessions, in)
 	f.sessionKeys = append(f.sessionKeys, tenant)
 	id := "ses-" + in.ClientReference

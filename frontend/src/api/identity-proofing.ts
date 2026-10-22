@@ -274,10 +274,10 @@ export type ProofingRequestInput =
     };
 
 // How the org's "delete my data" requests are decided once the person is
-// proven: by a reviewer, automatically (the sure matches erased at once, the
-// unsure ones left to a reviewer), or kept under a legal duty. ErasureHandling
-// in backend/internal/proofing.
-export const ERASURE_HANDLINGS = ["review", "automatic", "keep"] as const;
+// proven: by a reviewer, or automatically (the sure matches erased at once, the
+// unsure ones left to a reviewer). What the law makes the org keep is its legal
+// retention. ErasureHandling in backend/internal/proofing.
+export const ERASURE_HANDLINGS = ["review", "automatic"] as const;
 export type ErasureHandling = (typeof ERASURE_HANDLINGS)[number];
 
 // How the org's webhook endpoint has been answering. State is a plain string:
@@ -1068,7 +1068,7 @@ export interface ProofingProgress {
   // Until when the subject can enter their address, once approved and while
   // they have not.
   addressUntil?: string;
-  // Why a declined erasure is kept, on a hosted link.
+  // What the law kept of an erasure, on a hosted link.
   legalRetention?: HostedLegalRetention;
 }
 
@@ -1145,6 +1145,8 @@ export function getProofingYiviDisclosure(
 }
 
 const hostedLegalRetentionSchema = z.object({
+  // How many of the person's sessions the law holds.
+  sessions: z.number(),
   until: z.string(),
   reason: z.object({ en: z.string(), nl: z.string() }),
 });
@@ -1169,8 +1171,9 @@ const hostedProgressSchema = z.object({
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
   dataMatchesKept: z.number().optional(),
-  // Why a "delete my data" request was declined by the org's legal retention:
-  // its reason in each language, and when all the person's data can go.
+  // What the org's legal retention kept of a "delete my data" request: it
+  // declined the request, or an approved one left those sessions. Its reason
+  // in each language, and when all of it can go.
   legalRetention: hostedLegalRetentionSchema.optional(),
 });
 

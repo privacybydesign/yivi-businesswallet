@@ -88,6 +88,7 @@ type requestStore interface {
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 	DeferPurge(ctx context.Context, id uuid.UUID) error
 	IdentitySessions(ctx context.Context, orgID uuid.UUID) (map[time.Duration][]string, error)
+	HeldUntil(ctx context.Context, orgID, id uuid.UUID) (*time.Time, error)
 	ClearExpiredProofedNames(ctx context.Context) (int64, error)
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
@@ -122,6 +123,9 @@ type orgSettingsStore interface {
 	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error)
 	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
 	SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error)
+	SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error
+	MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error
+	StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error)
 	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
@@ -254,23 +258,71 @@ const engineSessionBatch = 500
 // identity checks as the settings say now (engineRetention). The engine fixes a
 // session's retention when it creates it and deletes the finished one at that,
 // so a check sent before the legal retention was set would lose its evidence
-// long before the law allows. The engine changes only what differs, so saving
-// the same settings again repeats a run that failed.
-func (s *Service) syncEngineRetention(ctx context.Context, orgID uuid.UUID, settings Settings) error {
-	groups, err := s.requests.IdentitySessions(ctx, orgID)
+// long before the law allows. It runs under the settings write lock, with the
+// settings read under it (OrgSettingsStore.SyncEngineRetention): two saves at
+// once cannot leave the engine at the first one's retention, since the second
+// sync waits for the first and reads what was saved last. The engine changes
+// only what differs, so a run repeats one that failed part-way; the org stays
+// marked (engine_retention_stale) until one succeeds, and the pruner retries
+// it (syncStaleEngineRetention).
+func (s *Service) syncEngineRetention(ctx context.Context, orgID uuid.UUID) error {
+	return s.orgSettings.SyncEngineRetention(ctx, orgID, func(ctx context.Context, settings Settings) error {
+		groups, err := s.requests.IdentitySessions(ctx, orgID)
+		if err != nil {
+			return err
+		}
+		tenant := orgTenant(orgID)
+		for override, ids := range groups {
+			retention := engineRetention(&settings, FlowIdentity, override)
+			for batch := range slices.Chunk(ids, engineSessionBatch) {
+				if err := s.ips.SetSessionsRetention(ctx, tenant, batch, retention); err != nil {
+					return fmt.Errorf("proofing: set engine retention org %s: %w", orgID, err)
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// syncStaleEngineRetention syncs the engine retention of every org still
+// marked for it, for the pruner: a sync that failed, or a session attached
+// after one ran (markIfRetentionMoved). One org's failure leaves it marked for
+// the next run and does not hold up the others.
+func (s *Service) syncStaleEngineRetention(ctx context.Context) error {
+	orgs, err := s.orgSettings.StaleEngineRetention(ctx)
 	if err != nil {
 		return err
 	}
-	tenant := orgTenant(orgID)
-	for override, ids := range groups {
-		retention := engineRetention(&settings, FlowIdentity, override)
-		for batch := range slices.Chunk(ids, engineSessionBatch) {
-			if err := s.ips.SetSessionsRetention(ctx, tenant, batch, retention); err != nil {
-				return fmt.Errorf("proofing: set engine retention org %s: %w", orgID, err)
-			}
+	var errs []error
+	for _, orgID := range orgs {
+		if err := s.syncEngineRetention(ctx, orgID); err != nil {
+			slog.WarnContext(ctx, "identity proofing: engine retention sync failed",
+				slog.String("org_id", orgID.String()), slog.Any("error", err))
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// markIfRetentionMoved marks the org for the next engine retention sync when
+// the retention an external identity check's session was created with is no
+// longer what the settings give it: they changed between the read it was
+// created from and its attach, so a sync that ran in between did not see it.
+// A sync that runs after the attach sees it, so between the two none is
+// missed. Its own failure is logged, not returned: the session is attached
+// and the request stands.
+func (s *Service) markIfRetentionMoved(ctx context.Context, orgID uuid.UUID, kind FlowKind, override, created time.Duration) {
+	if kind != FlowIdentity {
+		return
+	}
+	settings, err := s.orgSettings.Get(ctx, orgID)
+	if err == nil && engineRetention(&settings, kind, override) != created {
+		err = s.orgSettings.MarkEngineRetentionStale(ctx, orgID)
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "identity proofing: engine retention of a new session not checked",
+			slog.String("org_id", orgID.String()), slog.Any("error", err))
+	}
 }
 
 // subjectRetentionDays is what an external person is told about their
@@ -629,9 +681,10 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 
 	id := uuid.New()
+	override := time.Duration(flow.RetentionOverrideSeconds) * time.Second
 	input := proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-		Language: string(in.Language), Retention: engineRetention(settings, kind, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
+		Language: string(in.Language), Retention: engineRetention(settings, kind, override), ReferencePhoto: photo,
 	}
 	sess, err := s.ips.CreateSession(ctx, tenant, input)
 	if err != nil {
@@ -657,6 +710,9 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if !attached {
 		return Sent{}, s.discardSession(ctx, tenant, sess,
 			fmt.Errorf("proofing: attach session request %s: the new request moved on", id))
+	}
+	if settings != nil {
+		s.markIfRetentionMoved(ctx, org.ID, kind, override, input.Retention)
 	}
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
@@ -1422,7 +1478,10 @@ func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprov
 }
 
 // PurgeRequest erases an external request in the engine and every personal detail
-// the wallet holds of it, whatever its state; the row stays, marked purged.
+// the wallet holds of it, whatever its state; the row stays, marked purged. An
+// approved identity check the org's legal retention still holds is
+// ErrLegalRetention: the org may not erase it before the law lets it, as no
+// "delete my data" request may.
 func (s *Service) PurgeRequest(ctx context.Context, orgID, id uuid.UUID) error {
 	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
@@ -1430,6 +1489,13 @@ func (s *Service) PurgeRequest(ctx context.Context, orgID, id uuid.UUID) error {
 	}
 	if req.PurgedAt != nil {
 		return nil
+	}
+	until, err := s.requests.HeldUntil(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if until != nil && s.now().Before(*until) {
+		return ErrLegalRetention
 	}
 	return s.purge(ctx, req)
 }
@@ -1440,11 +1506,14 @@ const purgeBatch = 100
 // PurgeDue purges every request past its retention (setPurgeAt), for the
 // pruner. One that fails to purge is deferred (DeferPurge) and retried by a
 // later run. It first rejects the reviews left open in a paused org
-// (rejectPausedReviews), whose failure is reported once the purge ran.
+// (rejectPausedReviews) and gives the engine the retention an org's settings
+// say where a sync is outstanding (syncStaleEngineRetention), whose failures
+// are reported once the purge ran.
 func (s *Service) PurgeDue(ctx context.Context) (int64, error) {
 	sweepErr := s.rejectPausedReviews(ctx)
+	syncErr := s.syncStaleEngineRetention(ctx)
 	purged, err := s.purgeDue(ctx)
-	return purged, errors.Join(err, sweepErr)
+	return purged, errors.Join(err, sweepErr, syncErr)
 }
 
 // purgeDue is PurgeDue's purge.
@@ -1965,7 +2034,7 @@ func checkSettingsChange(change SessionSettingsChange) error {
 		return fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
 	}
 	if change.ErasureHandling != nil && !change.ErasureHandling.valid() {
-		return fmt.Errorf("%w: erasure requests are decided by review, automatically or kept", ErrInvalidInput)
+		return fmt.Errorf("%w: erasure requests are decided by review or automatically", ErrInvalidInput)
 	}
 	return nil
 }
@@ -2026,9 +2095,11 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 		if current, err = s.orgSettings.SaveLegalRetention(ctx, orgID, legal); err != nil {
 			return Settings{}, err
 		}
-		// Last, so a failed engine run leaves every field of the change saved.
-		if err := s.syncEngineRetention(ctx, orgID, current); err != nil {
-			return Settings{}, err
+		// Last, and not the update's failure: the change is saved, and the
+		// org stays marked until a sync succeeds, which the pruner retries.
+		if err := s.syncEngineRetention(ctx, orgID); err != nil {
+			slog.ErrorContext(ctx, "identity proofing: engine retention sync failed; the pruner retries it",
+				slog.String("org_id", orgID.String()), slog.Any("error", err))
 		}
 	}
 	return current, nil

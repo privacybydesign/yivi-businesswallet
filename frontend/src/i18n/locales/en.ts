@@ -993,25 +993,6 @@ export const en = {
       },
       days_one: "{{count}} day",
       days_other: "{{count}} days",
-      erasure: "Erasure requests",
-      erasureHint:
-        "How a request to delete someone's data is decided once their identity is proven.",
-      erasureOptions: {
-        review: "Reviewer decides",
-        automatic: "Automatic",
-        keep: "Keep: legal duty",
-      },
-      erasureOptionHints: {
-        review:
-          "A reviewer decides each request. Sessions proven to be this person's start ticked; the reviewer ticks any found only by e-mail address or name.",
-        automatic:
-          "Sessions proven to be this person's are deleted at once. Only sessions found by e-mail address or name go to a reviewer.",
-        keep: "Every request is refused and the data kept, because a law requires this organisation to keep it. The person is told why.",
-      },
-      redirectOriginsTitle: "Redirect origins",
-      redirectOriginsHint:
-        "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
-      save: "Save",
     },
     webhookState: {
       delivering: "Delivering",
@@ -1109,7 +1090,53 @@ export const en = {
           "Delete my data is declined during the {{period}} after a check ends. The person sees the reason and the date their data can be deleted.",
         access: "See my data keeps working.",
       },
+      removeConfirm: {
+        title: "Remove the legal retention?",
+        message_one:
+          "Identity checks are then kept only as long as their flow says, or {{count}} day after they end for a flow without its own retention. Every check that ended longer ago than that loses its personal data within the hour, in the wallet and in the proofing service, and Delete my data is no longer declined. This cannot be undone.",
+        message_other:
+          "Identity checks are then kept only as long as their flow says, or {{count}} days after they end for a flow without its own retention. Every check that ended longer ago than that loses its personal data within the hour, in the wallet and in the proofing service, and Delete my data is no longer declined. This cannot be undone.",
+        confirm: "Remove legal retention",
+      },
+      shortenConfirm: {
+        title: "Shorten the legal retention to {{period}}?",
+        message:
+          "Every identity check that ended more than {{period}} ago, and is past its flow's own retention, loses its personal data within the hour, in the wallet and in the proofing service. This cannot be undone.",
+        confirm: "Shorten legal retention",
+      },
       discard: "Discard",
+      save: "Save",
+    },
+    dataRequests: {
+      title: "Data requests from people",
+      intro:
+        "Every organisation offers these two, as the GDPR requires. The person proves who they are first: Scan the document, Read the document's chip, Face check (eIDAS Substantial).",
+      access: {
+        title: "See my data",
+        hint: "The person sees what you hold about them, once a reviewer approves.",
+        state: "Always on",
+      },
+      erasure: {
+        title: "Delete my data",
+        hint: "Available once the legal period below has passed for that person's data.",
+        after: "After {{period}}",
+        anyTime: "Right away",
+      },
+      whoDecides: {
+        legend: "Who decides",
+        review: {
+          label: "A reviewer decides every request",
+          hint: "Nothing is deleted until someone in Reviews approves it.",
+        },
+        automatic: {
+          label: "Delete automatically when it is certain",
+          hint: "Checks proven with the same document are deleted at once. A reviewer decides about checks that match on name or e-mail address only.",
+        },
+      },
+    },
+    redirectOrigins: {
+      title: "Redirect origins",
+      hint: "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
     },
     developers: {
@@ -1422,6 +1449,10 @@ export const en = {
         "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{organization}}'s retention period ends.",
       erasedPartly_other:
         "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{organization}}'s retention period ends.",
+      keptByLaw_one:
+        "{{count}} identity check is kept until {{date}}, because the law requires {{organization}} to keep it. It is deleted then.",
+      keptByLaw_other:
+        "{{count}} identity checks are kept until {{date}}, because the law requires {{organization}} to keep them. They are deleted then.",
       refused: {
         reviewer:
           "{{organization}} refused your request. Contact them if you want to know why.",

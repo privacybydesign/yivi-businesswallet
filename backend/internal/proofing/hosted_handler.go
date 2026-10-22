@@ -151,17 +151,20 @@ type hostedProgressResponse struct {
 	// DataMatchesKept is how many sessions an approved erasure kept, so its
 	// person is not told everything was deleted when it was not.
 	DataMatchesKept *int `json:"dataMatchesKept,omitempty"`
-	// LegalRetention is why a "delete my data" request was declined by the
-	// org's legal retention; absent otherwise.
+	// LegalRetention is what the org's legal retention kept of a "delete my
+	// data" request's person: it declined the request, or an approved one left
+	// those sessions; absent otherwise.
 	LegalRetention *hostedLegalRetention `json:"legalRetention,omitempty"`
 }
 
-// hostedLegalRetention is what the person is told about a declined erasure:
-// the org's reason in each language the page speaks, and the date from which
-// all their data can be erased.
+// hostedLegalRetention is what the person is told about the data an erasure
+// left because the law holds it: how many of their sessions, the org's reason
+// in each language the page speaks, and the date from which all of it can be
+// erased.
 type hostedLegalRetention struct {
-	Until  time.Time `json:"until"`
-	Reason struct {
+	Sessions int       `json:"sessions"`
+	Until    time.Time `json:"until"`
+	Reason   struct {
 		EN string `json:"en"`
 		NL string `json:"nl"`
 	} `json:"reason"`
@@ -171,7 +174,7 @@ func newHostedLegalRetention(n *LegalNotice) *hostedLegalRetention {
 	if n == nil {
 		return nil
 	}
-	out := &hostedLegalRetention{Until: n.Until}
+	out := &hostedLegalRetention{Sessions: n.Sessions, Until: n.Until}
 	out.Reason.EN, out.Reason.NL = n.ReasonEN, n.ReasonNL
 	return out
 }

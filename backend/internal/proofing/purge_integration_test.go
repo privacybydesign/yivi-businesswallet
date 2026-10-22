@@ -20,7 +20,7 @@ import (
 )
 
 // purgeFixture is a request store over a fresh database with one org, which
-// saved no settings (30 days' retention), and one member.
+// saved no settings (defaultDataRetentionDays), and one member.
 type purgeFixture struct {
 	pool     *pgxpool.Pool
 	requests *RequestStore
@@ -49,6 +49,12 @@ func (f purgeFixture) subject(name, email, birthDate string) Subject {
 // back by age (a Postgres interval), as the pruner will see it.
 func (f purgeFixture) settledAgo(t *testing.T, in NewStoredRequest, sessionID, age string) Request {
 	t.Helper()
+	return f.decidedAgo(t, in, sessionID, StatusApproved, age)
+}
+
+// decidedAgo is settledAgo with the outcome status.
+func (f purgeFixture) decidedAgo(t *testing.T, in NewStoredRequest, sessionID string, status Status, age string) Request {
+	t.Helper()
 	ctx := context.Background()
 	req, err := f.requests.Create(ctx, in)
 	if err != nil {
@@ -57,8 +63,8 @@ func (f purgeFixture) settledAgo(t *testing.T, in NewStoredRequest, sessionID, a
 	if ok, err := f.requests.AttachSession(ctx, req, attachedSession(sessionID)); err != nil || !ok {
 		t.Fatalf("AttachSession = %v, %v", ok, err)
 	}
-	if err := f.requests.RecordOutcome(ctx, req, sessionID, StatusApproved,
-		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+	if err := f.requests.RecordOutcome(ctx, req, sessionID, status,
+		proofingprovider.Result{Status: proofingprovider.Status(status)}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - $2::interval
@@ -105,6 +111,12 @@ func TestPurgeDueFollowsRetention(t *testing.T) {
 	ctx := context.Background()
 	otherOrg := makeOrg(t, f.pool, "globex")
 	const tenDays = "10 days"
+	month := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 30, ErasureHandling: ErasureReview}
+	for _, org := range []uuid.UUID{f.orgID, otherOrg} {
+		if _, err := f.settings.SaveSession(ctx, org, sessionChange(month)); err != nil {
+			t.Fatalf("SaveSession: %v", err)
+		}
+	}
 
 	plain := f.settledAgo(t, newStoredRequest(f.orgID, f.sam, f.subject("", "a@example.org", "")), "s1", tenDays)
 	flowOwn := newStoredRequest(f.orgID, f.sam, f.subject("", "b@example.org", ""))
@@ -500,7 +512,7 @@ func TestPurgeAtSetOnEveryWrite(t *testing.T) {
 }
 
 // An unsent request's purge time is its link's lapse plus its org's retention,
-// 30 days for an org that saved none.
+// defaultDataRetentionDays for an org that saved none.
 func TestPurgeAtFollowsTheLink(t *testing.T) {
 	f := newPurgeFixture(t)
 	ctx := context.Background()
@@ -509,7 +521,7 @@ func TestPurgeAtFollowsTheLink(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	settings, err := f.settings.Get(ctx, f.orgID)
-	if err != nil || settings.Session.DataRetention() != proofedNameRetention {
+	if err != nil || settings.Session.DataRetentionDays != defaultDataRetentionDays {
 		t.Fatalf("settings = %+v, %v; want the default retention", settings.Session, err)
 	}
 	days := settings.Session.DataRetentionDays
@@ -568,17 +580,17 @@ func TestRetentionWaitsForInsert(t *testing.T) {
 			t.Errorf("rollback: %v", err)
 		}
 	}()
-	// Create's writes, held open: its purge time read from the 30 days.
+	// Create's writes, held open: its purge time read from the default week.
 	req, err := NewRequestStore(tx, audit.NopRecorder{}, newTestCipher(t)).
 		Create(ctx, newStoredRequest(f.orgID, f.sam, f.subject("", "a@example.org", "")))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	const weekDays = 7
-	week := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: weekDays, ErasureHandling: ErasureReview}
+	const monthDays = 30
+	month := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: monthDays, ErasureHandling: ErasureReview}
 	saved := make(chan error, 1)
 	go func() {
-		_, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(week))
+		_, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(month))
 		saved <- err
 	}()
 	done, saveErr := awaitLockWait(t, f.pool, saved)
@@ -593,8 +605,8 @@ func TestRetentionWaitsForInsert(t *testing.T) {
 	}
 	var ok bool
 	if err := f.pool.QueryRow(ctx, `SELECT purge_at = link_expires_at + make_interval(days => $2)
-		FROM identity_proofing_requests WHERE id = $1`, req.ID, weekDays).Scan(&ok); err != nil || !ok {
-		t.Errorf("purge time on the new retention = %v, %v; want the link's lapse plus %d days", ok, err, weekDays)
+		FROM identity_proofing_requests WHERE id = $1`, req.ID, monthDays).Scan(&ok); err != nil || !ok {
+		t.Errorf("purge time on the new retention = %v, %v; want the link's lapse plus %d days", ok, err, monthDays)
 	}
 }
 
@@ -620,11 +632,11 @@ func TestRetentionBesideWrite(t *testing.T) {
 		WHERE id = $1`, req.ID); err != nil {
 		t.Fatalf("cancel request: %v", err)
 	}
-	const weekDays = 7
-	week := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: weekDays, ErasureHandling: ErasureReview}
+	const monthDays = 30
+	month := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: monthDays, ErasureHandling: ErasureReview}
 	saved := make(chan error, 1)
 	go func() {
-		_, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(week))
+		_, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(month))
 		saved <- err
 	}()
 	done, saveErr := awaitLockWait(t, f.pool, saved)

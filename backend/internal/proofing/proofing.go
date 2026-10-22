@@ -64,16 +64,17 @@ const proofedNameRetention = 30 * 24 * time.Hour
 // hoursPerDay converts the org's data retention in days to a duration.
 const hoursPerDay = 24
 
-// defaultDataRetentionDays is the data retention of an org that set none: the
-// proofed-name retention, in days.
-const defaultDataRetentionDays = int(proofedNameRetention / (hoursPerDay * time.Hour))
+// defaultDataRetentionDays is the data retention of an org that set none: a
+// week after a check ends, as Settings › Data and privacy says. The column's
+// default (identity_proofing_settings.data_retention_days) is the same.
+const defaultDataRetentionDays = 7
 
 // SessionTTLOptions are the session lifetimes an admin may pick; SessionTTL is
 // the default and the longest.
 var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
 
 // DataRetentionDayOptions are the proofed-name retentions, in days, an admin
-// may pick: up to a year; defaultDataRetentionDays (30) is the default.
+// may pick: up to a year; defaultDataRetentionDays (7) is the default.
 var DataRetentionDayOptions = []int{7, 30, 90, 180, 365}
 
 // Branding is how the proofing mail to external people and the hosted pages
@@ -149,13 +150,13 @@ const (
 	// unsure ones is then decided; one with them waits for a reviewer, who
 	// decides only those.
 	ErasureAutomatic ErasureHandling = "automatic"
-	// ErasureKeep refuses every request (ErrorLegalRetention): the org is
-	// bound by law to keep the data.
-	ErasureKeep ErasureHandling = "keep"
 )
 
+// valid reports a handling an org may set. What the law makes an org keep is
+// its legal retention, not a handling: the "keep" that refused every request
+// is gone (migration 20261021110100).
 func (h ErasureHandling) valid() bool {
-	return h == ErasureReview || h == ErasureAutomatic || h == ErasureKeep
+	return h == ErasureReview || h == ErasureAutomatic
 }
 
 // SessionSettingsChange changes some of the org's session settings: a nil field
@@ -321,9 +322,13 @@ type Request struct {
 	// DataMatchesKept is how many of an approved erasure's matched sessions
 	// were kept, not erased; nil for any other request.
 	DataMatchesKept *int
-	// LegalNotice is why a FlowDataErasure request was declined by the org's
-	// legal retention, for its person's page; nil otherwise, and set only on
-	// the hosted reads (withLegalNotice).
+	// DataHold is what a decided FlowDataErasure request left because the
+	// org's legal retention still holds it; nil when it left nothing held.
+	DataHold *DataHold
+	// LegalNotice is what the org's legal retention kept of a FlowDataErasure
+	// request's person, for their page: why, and until when, once it declined
+	// the request or an approved one left sessions it holds; nil otherwise,
+	// and set only on the hosted reads (withLegalNotice).
 	LegalNotice *LegalNotice
 	// CancelledAt is when an API caller cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
@@ -360,6 +365,10 @@ type Request struct {
 	// NameRetention is how long a proofed name is kept: the org's data
 	// retention, or proofedNameRetention for a member's request.
 	NameRetention time.Duration
+	// legalNameRetention is how long the org's legal retention keeps the
+	// proofed name of an external identity check once it is approved
+	// (legalHeld); 0 for any other request or without a legal retention.
+	legalNameRetention time.Duration
 	// RetentionOverride is the flow's own retention at send, when it set one:
 	// it applies in place of the org's.
 	RetentionOverride time.Duration

@@ -1,5 +1,8 @@
 import type { TFunction } from "i18next";
-import type { ProofingLegalRetention } from "../api/identity-proofing";
+import type {
+  HostedLegalRetention,
+  ProofingLegalRetention,
+} from "../api/identity-proofing";
 
 // Mirrors maxLegalRetentionMonths and maxLegalReasonLength in
 // backend/internal/proofing/legal_retention.go.
@@ -118,6 +121,41 @@ export function legalDraftDirty(
     draft.reasonEn.trim() !== saved.reasonEn ||
     draft.reasonNl.trim() !== saved.reasonNl
   );
+}
+
+// What saving a draft takes from the people whose checks the saved legal
+// retention holds, so the admin confirms it first: removing it, or a shorter
+// period, purges every check past what is left within the hour. A longer
+// period, a new one, or new reasons take nothing.
+export type LegalRetentionLoss =
+  | { kind: "removed" }
+  | { kind: "shortened"; months: number };
+
+export function legalRetentionLoss(
+  draft: LegalRetentionDraft,
+  saved: ProofingLegalRetention | null,
+): LegalRetentionLoss | null {
+  if (saved === null) return null;
+  if (!draft.enabled) return { kind: "removed" };
+  const months = legalDraftMonths(draft);
+  if (months !== null && months < saved.months) {
+    return { kind: "shortened", months };
+  }
+  return null;
+}
+
+// What an approved erasure left, for its person's page: the sessions it could
+// not link to them for certain (kept counts the sessions the law holds too),
+// and those the law holds, when it holds any.
+export function erasureLeft(
+  kept: number | undefined,
+  legal: HostedLegalRetention | undefined,
+): { unsure: number; held: HostedLegalRetention | undefined } {
+  const held = legal !== undefined && legal.sessions > 0 ? legal : undefined;
+  return {
+    unsure: Math.max(0, (kept ?? 0) - (held?.sessions ?? 0)),
+    held,
+  };
 }
 
 // The reason in the language a person reads: Dutch for a Dutch page, else

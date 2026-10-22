@@ -1260,6 +1260,16 @@ function SessionOutcome({
   dataRequest: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  // An erasure the legal retention declined says why and until when, before
+  // the refusal any other data request gets.
+  if (progress.status === "rejected" && progress.legalRetention) {
+    return (
+      <LegalRetentionOutcome
+        legal={progress.legalRetention}
+        actions={actions}
+      />
+    );
+  }
   if (
     progress.status === "rejected" &&
     dataRequest &&
@@ -1289,14 +1299,6 @@ function SessionOutcome({
         />
       );
     case "rejected":
-      if (progress.legalRetention) {
-        return (
-          <LegalRetentionOutcome
-            legal={progress.legalRetention}
-            actions={actions}
-          />
-        );
-      }
       return (
         <Outcome
           tone="error"

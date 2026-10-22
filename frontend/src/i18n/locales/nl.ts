@@ -1018,25 +1018,6 @@ export const nl: Translation<typeof en> = {
       },
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
-      erasure: "Verwijderverzoeken",
-      erasureHint:
-        "Hoe een verzoek om iemands gegevens te verwijderen wordt beslist zodra diens identiteit is bewezen.",
-      erasureOptions: {
-        review: "Beoordelaar beslist",
-        automatic: "Automatisch",
-        keep: "Bewaren: wettelijke plicht",
-      },
-      erasureOptionHints: {
-        review:
-          "Een beoordelaar beslist over elk verzoek. Sessies die bewezen van deze persoon zijn, staan aangevinkt; sessies die alleen op e-mailadres of naam zijn gevonden, vinkt de beoordelaar zelf aan.",
-        automatic:
-          "Sessies die bewezen van deze persoon zijn, worden meteen verwijderd. Alleen sessies die op e-mailadres of naam zijn gevonden, gaan naar een beoordelaar.",
-        keep: "Elk verzoek wordt geweigerd en de gegevens blijven bewaard, omdat deze organisatie ze volgens de wet moet bewaren. De persoon krijgt te zien waarom.",
-      },
-      redirectOriginsTitle: "Terugstuur-origins",
-      redirectOriginsHint:
-        "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
-      save: "Opslaan",
     },
     webhookState: {
       delivering: "Levert af",
@@ -1136,7 +1117,53 @@ export const nl: Translation<typeof en> = {
           "Mijn gegevens verwijderen wordt geweigerd gedurende de {{period}} na afloop van een controle. De persoon ziet de reden en de datum waarop de gegevens verwijderd kunnen worden.",
         access: "Mijn gegevens inzien blijft werken.",
       },
+      removeConfirm: {
+        title: "Wettelijke bewaartermijn verwijderen?",
+        message_one:
+          "Identiteitscontroles worden dan alleen nog bewaard zo lang hun flow zegt, of {{count}} dag na afloop voor een flow zonder eigen bewaartermijn. Elke controle die langer geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst, en Mijn gegevens verwijderen wordt niet meer geweigerd. Dit kan niet ongedaan worden gemaakt.",
+        message_other:
+          "Identiteitscontroles worden dan alleen nog bewaard zo lang hun flow zegt, of {{count}} dagen na afloop voor een flow zonder eigen bewaartermijn. Elke controle die langer geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst, en Mijn gegevens verwijderen wordt niet meer geweigerd. Dit kan niet ongedaan worden gemaakt.",
+        confirm: "Bewaartermijn verwijderen",
+      },
+      shortenConfirm: {
+        title: "Wettelijke bewaartermijn verkorten tot {{period}}?",
+        message:
+          "Elke identiteitscontrole die meer dan {{period}} geleden is afgelopen en voorbij de eigen bewaartermijn van haar flow is, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst. Dit kan niet ongedaan worden gemaakt.",
+        confirm: "Bewaartermijn verkorten",
+      },
       discard: "Verwerpen",
+      save: "Opslaan",
+    },
+    dataRequests: {
+      title: "Gegevensverzoeken van personen",
+      intro:
+        "Elke organisatie biedt deze twee aan, zoals de AVG vereist. De persoon bewijst eerst wie hij of zij is: Document scannen, Chip van het document lezen, Gezichtscontrole (eIDAS Substantieel).",
+      access: {
+        title: "Mijn gegevens inzien",
+        hint: "De persoon ziet wat je van hem of haar bewaart, zodra een beoordelaar het goedkeurt.",
+        state: "Altijd aan",
+      },
+      erasure: {
+        title: "Mijn gegevens verwijderen",
+        hint: "Beschikbaar zodra de wettelijke termijn hieronder voor de gegevens van die persoon voorbij is.",
+        after: "Na {{period}}",
+        anyTime: "Meteen",
+      },
+      whoDecides: {
+        legend: "Wie beslist",
+        review: {
+          label: "Een beoordelaar beslist over elk verzoek",
+          hint: "Er wordt niets verwijderd totdat iemand het in Beoordelingen goedkeurt.",
+        },
+        automatic: {
+          label: "Automatisch verwijderen als het zeker is",
+          hint: "Controles die met hetzelfde document zijn bewezen, worden meteen verwijderd. Een beoordelaar beslist over controles die alleen op naam of e-mailadres overeenkomen.",
+        },
+      },
+    },
+    redirectOrigins: {
+      title: "Terugstuur-origins",
+      hint: "Eén per regel, zoals https://portal.example.com. Een gehoste pagina mag de persoon naar deze origins terugsturen en daarop worden ingesloten.",
       save: "Opslaan",
     },
     developers: {
@@ -1452,6 +1479,10 @@ export const nl: Translation<typeof en> = {
         "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       erasedPartly_other:
         "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+      keptByLaw_one:
+        "{{count}} identiteitscontrole wordt bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna wordt ze verwijderd.",
+      keptByLaw_other:
+        "{{count}} identiteitscontroles worden bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna worden ze verwijderd.",
       refused: {
         reviewer:
           "{{organization}} heeft je verzoek geweigerd. Neem contact met hen op als je wilt weten waarom.",

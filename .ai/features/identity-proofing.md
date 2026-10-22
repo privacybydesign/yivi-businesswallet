@@ -171,7 +171,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   so `PurgeDue` erases it first: its flow's retention override when set, else
   the org's data retention for an external person's request, else for a member's
   request `proofedNameRetention` (30 days); for an external person's identity
-  check never less than the org's legal retention (§4). The engine's own
+  check never less than the org's legal retention (§4). A legal retention
+  saved later is given to the sessions already created (`syncEngineRetention`,
+  §4). The engine's own
   default, 90 days after a session ended, applies only to a session created
   without one. `PurgeDue`, `Engine.Purge` (removal in batches of 100, each with
   its own timeout) and `Engine.SweepRegula` run at start and then every
@@ -212,11 +214,12 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - **Settings**, one row per org (`identity_proofing_settings`,
     `OrgSettingsStore` in `org_settings_store.go`, `Settings` in `proofing.go`):
     session (QR) lifetime 2, 5 or 10 minutes; data retention 7, 30, 90, 180 or
-    365 days (default 30); how "delete my data" requests are decided (`review`,
-    `automatic` or `keep`, default `review`); branding (display name, colours,
-    font, logo, support contact, privacy URL, hide "powered by"); allowed
-    redirect origins. No row reads as the defaults (10 minutes, 30 days, review,
-    the org's own look, no redirect origins).
+    365 days (default 7); how "delete my data" requests are decided (`review`
+    or `automatic`, default `review`); a legal retention; branding (display
+    name, colours, font, logo, support contact, privacy URL, hide "powered
+    by"); allowed redirect origins. No row reads as the defaults (10 minutes,
+    7 days, review, no legal retention, the org's own look, no redirect
+    origins).
   - **API keys**, one set: a key works on every flow and reaches every
     external request of the org. No key is needed to send from the app.
   - **One webhook endpoint** for the events of all its flows.
@@ -891,33 +894,54 @@ post-review outcome stay the system's.
   columns and `erasure_handling` were columns of the customers: migration
   `20261021100000` merges them into the org's settings (§1).
   - **Session**: `session_ttl_seconds` (120/300/600, default 600),
-    `data_retention_days` (7/30/90/180/365, default 30: the design's maximum of
-    a year; the proofed-name retention) and `erasure_handling`
-    (`review`/`automatic`/`keep`, default `review`, §15). A change of the
-    retention moves the purge time of the org's unpurged external requests
-    (§10). The frontend options are held to the Go lists by
-    `lib/identity-proofing.test.ts`.
+    `data_retention_days` (7/30/90/180/365, default 7: "purged 7 days after a
+    check ends", VC3; the design's maximum is a year) and `erasure_handling`
+    (`review`/`automatic`, default `review`, §15). Migration `20261021110200`
+    set the column's default to 7, as `defaultDataRetentionDays` is, and first
+    gave an org that had sent an external request without saving settings a
+    row with the 30 days it had then. `keep` (refuse every erasure) is gone:
+    the legal retention says what the law keeps; migration `20261021110100`
+    made it `review`. A change of the retention moves the purge time of the
+    org's unpurged external requests (§10). The frontend options are held to
+    the Go lists by `lib/identity-proofing.test.ts`. In the app the QR
+    lifetime and the retention are on Developers › Session settings; "Who
+    decides" and the redirect origins on Settings › Data and privacy.
   - **Legal retention** (`legal_retention_months` 1 to 600, with
     `legal_retention_reason_en` and `_nl`, all or none; Settings › Data and
     privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
-    the data of every identity check, counted from the end of the check, with
-    the reason shown to the person in each language. It is the floor of an
-    external identity check's retention (§10): the check is purged at the later
-    of its flow's or the org's retention and the legal period, and the engine
-    session, the proofed name and the days a person is told follow
+    the data of every approved identity check, counted from the end of the
+    check, with the reason shown to the person in each language. It holds only
+    an approved external identity check (`legalHeld`): one that was rejected,
+    expired, cancelled or never started proved nobody, so it is purged at its
+    own retention and blocks no erasure. It is the floor of such a check's
+    retention (§10): the check is purged at the later of its flow's or the
+    org's retention and the legal period, and the engine session, the proofed
+    name (once approved, `RecordOutcome`) and the days a person is told follow
     (`engineRetention`, `subjectRetentionDays`, `LegalRetention.longest`). A
     data request, a member's request and another org's are not held. The
     period counts calendar months as the database does (`addMonths`); the form
-    states years or months. `Service.UpdateSettings` checks it with the rest
-    before saving any (`LegalRetention.check`), and saving it moves the purge
-    time of the org's unpurged external requests under the settings lock
-    (`SaveLegalRetention`). The engine fixes a session's retention when it
-    creates it, so a save then sets it again for the org's unpurged identity
-    checks (`syncEngineRetention`, `Provider.SetSessionsRetention`); saving
-    the same settings repeats a run that failed. A check being sent in the
-    same moment can keep the retention it was created with. The form's bounds
-    are held to the Go constants by `lib/legal-retention.test.ts`. Not blocked:
-    `PurgeRequest`, the org's own purge through the API.
+    states years or months, and switching it off or shortening it asks to
+    confirm first (`legalRetentionLoss`). `Service.UpdateSettings` checks it
+    with the rest before saving any (`LegalRetention.check`), and saving it
+    moves the purge time of the org's unpurged external requests under the
+    settings lock (`SaveLegalRetention`). Its Down migration puts `purge_at`
+    back to the retention alone.
+    - **Engine retention.** The engine fixes a session's retention when it
+      creates it, so a save sets it again for the org's unpurged identity
+      checks (`syncEngineRetention`, `Provider.SetSessionsRetention`). The save
+      marks the org (`engine_retention_stale`) in its transaction; the sync
+      runs under the same settings write lock, reads the settings under it,
+      and clears the mark once every batch succeeded
+      (`OrgSettingsStore.SyncEngineRetention`). Two saves at once therefore
+      leave the engine at what was saved last, and a failed sync is not the
+      update's failure (logged): the hourly `PurgeDue` syncs every org still
+      marked (`syncStaleEngineRetention`). A check created against settings
+      that changed before its session was attached marks its org too
+      (`markIfRetentionMoved`), since a sync that ran in between did not see
+      it.
+    - **The org's own purge** (`PurgeRequest`, `DELETE
+      /proofing/sessions/{id}`) refuses a check the legal retention still
+      holds: 409 `legal_retention` (`RequestStore.HeldUntil`).
   - **Branding**: display name, `#rrggbb` colour, logo (PNG/JPEG/GIF/WebP,
     512 KiB; no SVG, mail clients do not render it), support contact, https
     privacy URL, and whether to hide "powered by" (§7). It applies to the
@@ -1164,9 +1188,9 @@ the server never guesses where the BSN is.
 A session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,
 `retention_override_seconds`) or, without one, for an external person's request the org's
-`data_retention_days` (§4), or for a member's `proofedNameRetention`
-(30 days), after it ends (completed, cancelled, expired, or gone to review: an
-undecided identity review is kept no longer than a decided one; a data request
+`data_retention_days` (§4, `defaultDataRetentionDays` without settings), or
+for a member's `proofedNameRetention` (30 days), after it ends (completed,
+cancelled, expired, or gone to review: an undecided identity review is kept no longer than a decided one; a data request
 in review lapses after `dataRequestReviewDays` instead): as `DELETE`
 above, erased in the engine, then its personal data cleared here (the subject's
 name and address, the proofed name, the redirect URL and Yivi transaction, its
@@ -1180,8 +1204,8 @@ dashboard shows the time as `purgeAt`.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
     request's review lapse after `dataRequestReviewDays`, an approved erasure
-    when it was decided; the legal retention is a floor of an external identity
-    check's retention, the later of two moments, not of two intervals:
+    when it was decided; the legal retention is a floor of an approved external
+    identity check's retention, the later of two moments, not of two intervals:
     PostgreSQL compares a month to 30 days, `TestLegalCountsCalendarMonths`).
   - Every write to one of its inputs calls `refreshPurgeAt` on the same
     transaction, after the write:
@@ -1554,17 +1578,17 @@ editor's Type, and the hosted page.
   (`DataExportWindow`, 7 days; 24 h through the hosted link). Reject records
   `MANUAL_REVIEW_REJECTED` unless a code is given.
 - **How an erasure is decided** is the org's `erasure_handling`
-  (`ErasureHandling`, in `identity_proofing_settings` and the Sessions settings
-  tab; `handleErasure`, run once as the
-  request reaches review, under the review lock):
+  (`ErasureHandling`, in `identity_proofing_settings`; "Who decides" on the
+  Data requests card of Settings › Data and privacy; `handleErasure`, run once
+  as the request reaches review, under the review lock):
   - `review` (default): a reviewer decides, as above.
   - `automatic`: the sure matches are erased at once. Without unsure ones the
     request is approved and purged then (reviewer `automatic`); with them it
     waits for a reviewer, who decides only those (the erased ones show
     "Erased" and stay ticked).
-  - `keep`: refused at once with `LEGAL_RETENTION`, for an org bound by
-    law to keep the data (Art. 17(3)(b)); nothing is erased.
-  A failure there leaves the request in review. An approved erasure stores how
+  What the law makes an org keep (Art. 17(3)(b)) is its legal retention, not a
+  handling: `keep`, which refused every erasure, is gone. A failure there
+  leaves the request in review. An approved erasure stores how
   many matches it kept (`data_matches_kept`), and the hosted page says so
   instead of "Your data was deleted."; a refused one says the org must
   keep the data by law. Its `purge_at` is its decision time, so a final purge
@@ -1574,15 +1598,20 @@ editor's Type, and the hosted page.
   `data_request_store.go`: the end of the check plus the legal period).
   `approvedMatches` leaves a held session out of the default choice and refuses
   a tick on one (`ErrLegalRetention`, 409 `legal_retention`); the review shows it
-  unticked with its date. When every session still found is held (and one is),
-  `declineHeldErasure` declines the request as it reaches review, without a
-  reviewer: rejected `LEGAL_RETENTION`, decided by `automatic`. The person's page
-  then shows the org's reason in their language and the date the last session
-  can go (`legalRetention` in the hosted progress, `withLegalNotice`). If some
-  session is free the request goes to review as before; an `automatic` erasure
-  likewise leaves a held session alone and erases the free sure ones. "See my data" is never
-  held. An approved erasure that leaves held sessions does not say so to the
-  person.
+  unticked with its date. When every identity check still found is held (and
+  one is), `declineHeldErasure` declines the request as it reaches review,
+  without a reviewer: rejected `LEGAL_RETENTION`, decided by `automatic`. The
+  person's earlier data requests among the matches do not count: each holds
+  only who asked and goes at its own retention, so it sends nobody to review.
+  If some identity check is free the request goes to review as before; an
+  `automatic` erasure likewise leaves a held session alone and erases the free
+  sure ones. Either decision records what the law still holds
+  (`data_matches_held`, `data_held_until`, `DataHold`), which outlives the
+  request's purge. The person's page then shows how many sessions are kept,
+  the org's reason in their language and the date the last of them goes
+  (`legalRetention` in the hosted progress, `withLegalNotice`, GDPR Art.
+  12(4)), on a declined request and on an approved one alike, until that date.
+  "See my data" is never held.
 - **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
   12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`. An identity
   review counts its retention from going to review, and lapses the same way

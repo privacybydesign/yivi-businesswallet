@@ -255,9 +255,10 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		ttl = settings.Session.SessionTTL
 	}
 	tenant := orgTenant(req.OrganizationID)
+	retention := engineRetention(&settings, req.FlowKind, req.RetentionOverride)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
-		Language: string(req.Language), Retention: engineRetention(&settings, req.FlowKind, req.RetentionOverride), ReferencePhoto: photo,
+		Language: string(req.Language), Retention: retention, ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)
@@ -276,6 +277,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		// session, holding the reference photo, is erased again.
 		return Sent{}, s.discardSession(ctx, tenant, sess, ErrLinkStarted)
 	}
+	s.markIfRetentionMoved(ctx, req.OrganizationID, req.FlowKind, req.RetentionOverride, retention)
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
 	}

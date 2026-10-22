@@ -430,7 +430,7 @@ func TestOrgSettingsDefaults(t *testing.T) {
 
 	got, err := store.Get(ctx, orgID)
 	if err != nil || got.OrganizationID != orgID || got.OrgName != "acme" || got.Session.SessionTTL != SessionTTL ||
-		got.Session.DataRetention() != proofedNameRetention || got.Branding != (Branding{}) ||
+		got.Session.DataRetentionDays != defaultDataRetentionDays || got.Branding != (Branding{}) ||
 		len(got.RedirectOrigins) != 0 || !got.UpdatedAt.IsZero() || got.SignedAs() != "acme" {
 		t.Errorf("Get = %+v, %v; want the defaults, signed with the org's name", got, err)
 	}
@@ -498,7 +498,7 @@ func TestOrgSettingsSession(t *testing.T) {
 	}
 
 	other, err := store.Get(ctx, otherOrg)
-	if err != nil || other.Session.SessionTTL != SessionTTL || other.Session.DataRetention() != proofedNameRetention {
+	if err != nil || other.Session.SessionTTL != SessionTTL || other.Session.DataRetentionDays != defaultDataRetentionDays {
 		t.Errorf("another org = %+v, %v; want its own defaults", other.Session, err)
 	}
 	if n := len(settingsAudits(t, pool, otherOrg)); n != 0 {
@@ -528,7 +528,7 @@ func TestSettingsRedirectOrigins(t *testing.T) {
 		t.Fatalf("SaveRedirectOrigins = %v, %v; want %v", saved.RedirectOrigins, err, origins)
 	}
 	// The row the save made holds the defaults for the rest.
-	if saved.Session.SessionTTL != SessionTTL || saved.Session.DataRetention() != proofedNameRetention || saved.Branding != (Branding{}) {
+	if saved.Session.SessionTTL != SessionTTL || saved.Session.DataRetentionDays != defaultDataRetentionDays || saved.Branding != (Branding{}) {
 		t.Errorf("settings after saving origins = %+v; want the defaults for the rest", saved)
 	}
 	again, err := store.SaveRedirectOrigins(ctx, orgID, origins)
