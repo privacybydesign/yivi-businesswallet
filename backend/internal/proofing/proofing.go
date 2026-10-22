@@ -299,10 +299,12 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
-// stored reports a status the store holds, which expired and cancelled are not.
-func (s Status) stored() bool {
+// known reports a status a request can read in (Request.EffectiveStatus),
+// stored or derived.
+func (s Status) known() bool {
 	switch s {
-	case StatusPending, StatusInProgress, StatusApproved, StatusRejected, StatusNeedsReview:
+	case StatusPending, StatusInProgress, StatusApproved, StatusRejected, StatusNeedsReview,
+		StatusExpired, StatusCancelled:
 		return true
 	}
 	return false
@@ -571,11 +573,11 @@ type RequestFilter struct {
 	// FlowID narrows to the requests sent on one flow, any version; the list's
 	// cap then counts only those.
 	FlowID *string
-	// Status narrows to the requests the store holds in that status; the
-	// list's cap then counts only those. A needs_review request whose engine
-	// session ended still matches, though its listed status reads expired.
-	// Those in review are listed oldest in review first, so the cap leaves
-	// out the newest, not the most overdue.
+	// Status narrows to the requests that read in that status
+	// (Request.EffectiveStatus), expired and cancelled included: a pending
+	// request whose link lapsed matches expired, not pending. The list's cap
+	// then counts only those. Those in review are listed oldest in review
+	// first, so the cap leaves out the newest, not the most overdue.
 	Status *Status
 	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
 	// the list's cap then counts only those.

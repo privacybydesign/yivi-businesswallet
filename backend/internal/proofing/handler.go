@@ -382,10 +382,11 @@ const flowKindDataRequest = "data_request"
 // listRequests shows an admin every request of the org and a member the ones they
 // sent; ?subjectUserId= narrows either to the ones proofing one member,
 // ?subjectKind= to those sent to members or to external people, ?flowId= to
-// those sent on one flow, ?status= to those held in one status, and
-// ?flowKind=data_request to the data requests. A member with the reviewer
-// right also sees the org's requests for a list ReviewScopeReviews holds whole:
-// those waiting for review and the data requests (listsEveryRequest).
+// those sent on one flow, ?status= to those that read in one status, expired
+// and cancelled included, and ?flowKind=data_request to the data requests. A
+// member with the reviewer right also sees the org's requests for a list
+// ReviewScopeReviews holds whole: those waiting for review and the data
+// requests (listsEveryRequest).
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
 	filter, err := requestFilterFrom(r.URL.Query())
@@ -440,8 +441,8 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 	}
 	if raw := query.Get("status"); raw != "" {
 		status := Status(raw)
-		if !status.stored() {
-			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, approved, rejected or needs_review"}
+		if !status.known() {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, needs_review, approved, rejected, expired or cancelled"}
 		}
 		filter.Status = &status
 	}

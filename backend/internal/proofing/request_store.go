@@ -55,6 +55,21 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 		AND r.status IN ('pending', 'in_progress') AND COALESCE(r.ips_session_expires_at, r.link_expires_at) > now()
 		THEN NULL ELSE r.purge_at END`
 
+// effectiveStatusColumn is Request.EffectiveStatus in SQL, at the database's
+// now(): what a list narrowed by status matches, so that its cap counts only
+// the requests that read in that status, and an unfinished one whose link or
+// session lapsed is not taken for a running one.
+// TestRequestListByEffectiveStatus holds the two to each other.
+const effectiveStatusColumn = `CASE
+		WHEN r.cancelled_at IS NOT NULL THEN 'cancelled'
+		WHEN r.link_token_hash IS NOT NULL AND r.ips_session_id IS NULL AND r.purged_at IS NULL
+			AND r.status = 'pending' AND r.link_expires_at > now() THEN r.status
+		WHEN r.status IN ('pending', 'in_progress') AND NOT COALESCE(r.ips_session_id IS NOT NULL
+			AND r.ips_session_ended_at IS NULL AND r.ips_session_expires_at > now(), false) THEN 'expired'
+		WHEN r.status = 'needs_review' AND r.ips_session_id IS NOT NULL
+			AND r.ips_session_ended_at IS NOT NULL THEN 'expired'
+		ELSE r.status END`
+
 // dataRequestReviewMonths is how long a data request may wait in review: GDPR
 // Art. 12(3)'s month to answer, a calendar month from when the person was proven
 // (completed_at): 16 Oct to 16 Nov, 31 Jan to the end of February. Its purge
@@ -825,7 +840,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
 			AND ($5::text IS NULL OR r.subject_kind = $5)
 			AND ($6::text IS NULL OR r.flow_id = $6)
-			AND ($7::text IS NULL OR r.status = $7)
+			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,

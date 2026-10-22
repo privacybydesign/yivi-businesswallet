@@ -47,9 +47,8 @@ export function reviewTabFrom(raw: string | null): ReviewTab {
   return REVIEW_TABS.find((tab) => tab === raw) ?? DEFAULT_REVIEW_TAB;
 }
 
-// Whether the request waits for a decision. The list holds a review whose
-// engine session ended too, but reads it expired, and a purged one has no
-// person left to decide on.
+// Whether the request waits for a decision: a purged one has no person left
+// to decide on.
 function isWaiting(request: ProofingRequest): boolean {
   return request.status === "needs_review" && request.purgedAt === undefined;
 }

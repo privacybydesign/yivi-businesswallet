@@ -1018,16 +1018,16 @@ func TestEffectiveStatusExpiry(t *testing.T) {
 	}
 }
 
-// Only a status the store holds can narrow a list: expired and cancelled are
-// derived, so a filter on them would match nothing.
-func TestStatusStored(t *testing.T) {
+// A list narrows to any status a request can read in, the derived expired and
+// cancelled included, and to no other.
+func TestStatusKnown(t *testing.T) {
 	for status, want := range map[Status]bool{
 		StatusPending: true, StatusInProgress: true, StatusApproved: true,
 		StatusRejected: true, StatusNeedsReview: true,
-		StatusExpired: false, StatusCancelled: false, Status("done"): false, Status(""): false,
+		StatusExpired: true, StatusCancelled: true, Status("done"): false, Status(""): false,
 	} {
-		if got := status.stored(); got != want {
-			t.Errorf("%q.stored() = %v, want %v", status, got, want)
+		if got := status.known(); got != want {
+			t.Errorf("%q.known() = %v, want %v", status, got, want)
 		}
 	}
 }

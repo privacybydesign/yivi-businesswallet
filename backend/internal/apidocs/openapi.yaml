@@ -5538,13 +5538,13 @@ paths:
         organisation, a member the requests they sent; `?subjectUserId=` narrows either to the
         ones proofing one member (a malformed id is 400 `invalid_id`), `?subjectKind=` to
         those sent to members or to external people (any other value is 400 `invalid_input`),
-        `?flowId=` to those sent on one flow, any of its versions, `?status=` to those held in
-        one stored status, and `?flowKind=data_request` to the data requests (`data_access` and
-        `data_erasure`); the narrowings combine. A member with the reviewer right also sees
-        every request of the organisation for `?status=needs_review` and for
-        `?flowKind=data_request`, whatever else narrows it; any other list is the requests they
-        sent. `external` is true for a request that went to an external person, not a member.
-        At most the 200 newest of those asked for (with
+        `?flowId=` to those sent on one flow, any of its versions, `?status=` to those that read
+        in one status (any other value is 400 `invalid_input`), and `?flowKind=data_request` to
+        the data requests (`data_access` and `data_erasure`); the narrowings combine. A member
+        with the reviewer right also sees every request of the organisation for
+        `?status=needs_review` and for `?flowKind=data_request`, whatever else narrows it; any
+        other list is the requests they sent. `external` is true for a request that went to an
+        external person, not a member. At most the 200 newest of those asked for (with
         `status=needs_review`, the 200 longest in review, oldest in review first), as stored:
         outcomes land as the engine reports them,
         and a list read does not re-check it. Only the outcome and assurance level are
@@ -5580,11 +5580,12 @@ paths:
           required: false
           schema:
             type: string
-            enum: [pending, in_progress, approved, rejected, needs_review]
+            enum: [pending, in_progress, needs_review, approved, rejected, expired, cancelled]
           description: >-
-            Only the requests held in this status. `expired` and `cancelled` are derived, not
-            held, so they are 400 `invalid_input`. A request in review whose session ended is
-            listed for `needs_review` and reads `expired`.
+            Only the requests whose `status` reads this, newest first (`needs_review`: the longest
+            in review first): a request whose link or session lapsed unfinished is `expired`, not
+            `pending` or `in_progress`, one in review whose session ended is `expired` too, and one
+            an API caller ended is `cancelled`. The 200 cap counts only those.
         - name: flowKind
           in: query
           required: false

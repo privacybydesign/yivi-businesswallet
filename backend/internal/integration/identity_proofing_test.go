@@ -1307,7 +1307,10 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=approved", nil)); len(list) != 0 {
 		t.Errorf("approved requests = %+v, want none yet", list)
 	}
-	wantProofingError(t, "a derived status", env.do(http.MethodGet, requests+"?status=expired", nil),
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=expired", nil)); len(list) != 0 {
+		t.Errorf("expired requests = %+v, want none", list)
+	}
+	wantProofingError(t, "an unknown status", env.do(http.MethodGet, requests+"?status=done", nil),
 		http.StatusBadRequest, "invalid_input")
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?flowKind=data_request", nil)); len(list) != 0 {
 		t.Errorf("data requests = %+v, want none: it is an identity check", list)

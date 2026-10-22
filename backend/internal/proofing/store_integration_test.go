@@ -2137,6 +2137,122 @@ func TestRequestListByStatus(t *testing.T) {
 	}
 }
 
+// A list narrowed by status matches the status a request reads in
+// (EffectiveStatus), not the one stored: a pending request whose link or
+// session lapsed is listed as expired, not pending, and so cannot use up the
+// cap of the running ones.
+func TestRequestListByEffectiveStatus(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	want := map[uuid.UUID]Status{}
+	create := func(in NewStoredRequest) Request {
+		t.Helper()
+		req, err := store.Create(ctx, in)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		return req
+	}
+	hosted := func(linkExpiresAt time.Time) NewStoredRequest {
+		t.Helper()
+		_, hash, err := newLinkToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := newStoredRequest(orgID, sam, externalSubject("a@example.org"))
+		in.LinkTokenHash, in.LinkExpiresAt = hash, linkExpiresAt
+		return in
+	}
+	started := func(sessionID string, expiresAt time.Time) Request {
+		t.Helper()
+		req := create(newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+		sess := attachedSession(sessionID)
+		sess.ExpiresAt = expiresAt
+		if ok, err := store.AttachSession(ctx, req, sess); err != nil || !ok {
+			t.Fatalf("AttachSession = %v, %v", ok, err)
+		}
+		req, err := store.Get(ctx, orgID, req.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		return req
+	}
+	running := time.Now().Add(SessionTTL)
+	lapsed := time.Now().Add(-time.Minute)
+
+	want[create(hosted(running)).ID] = StatusPending
+	want[create(hosted(lapsed)).ID] = StatusExpired
+	want[create(newStoredRequest(orgID, sam, externalSubject("a@example.org"))).ID] = StatusExpired
+	want[started("s-running", running).ID] = StatusPending
+	want[started("s-past-cap", lapsed).ID] = StatusExpired
+	inProgress := started("s-started", running)
+	if err := store.MarkStarted(ctx, inProgress, "s-started", proofingprovider.MethodIdem); err != nil {
+		t.Fatalf("MarkStarted: %v", err)
+	}
+	want[inProgress.ID] = StatusInProgress
+	ended := started("s-ended", running)
+	if err := store.EndSession(ctx, ended, "s-ended", proofingprovider.StatusExpired, ""); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	want[ended.ID] = StatusExpired
+	for sessionID, outcome := range map[string]Status{
+		"s-review": StatusNeedsReview, "s-review-ended": StatusNeedsReview,
+		"s-approved": StatusApproved, "s-rejected": StatusRejected,
+	} {
+		req := started(sessionID, running)
+		if err := store.RecordOutcome(ctx, req, sessionID, outcome, proofingprovider.Result{}); err != nil {
+			t.Fatalf("RecordOutcome: %v", err)
+		}
+		want[req.ID] = outcome
+		if sessionID == "s-review-ended" {
+			if err := store.EndSession(ctx, req, sessionID, proofingprovider.StatusExpired, ""); err != nil {
+				t.Fatalf("EndSession: %v", err)
+			}
+			want[req.ID] = StatusExpired
+		}
+	}
+	cancelled := started("s-cancelled", running)
+	if ok, err := store.Cancel(ctx, cancelled, nil); err != nil || !ok {
+		t.Fatalf("Cancel = %v, %v", ok, err)
+	}
+	want[cancelled.ID] = StatusCancelled
+
+	all, err := store.List(ctx, orgID, RequestFilter{})
+	if err != nil || len(all) != len(want) {
+		t.Fatalf("List = %d rows, %v; want %d", len(all), err, len(want))
+	}
+	now := time.Now()
+	for _, req := range all {
+		if got := req.EffectiveStatus(now); got != want[req.ID] {
+			t.Fatalf("request reads %s, want %s: the setup is off", got, want[req.ID])
+		}
+	}
+	for _, status := range []Status{
+		StatusPending, StatusInProgress, StatusNeedsReview, StatusApproved,
+		StatusRejected, StatusExpired, StatusCancelled,
+	} {
+		got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
+		if err != nil {
+			t.Fatalf("List %s: %v", status, err)
+		}
+		var ids []uuid.UUID
+		for _, req := range got {
+			ids = append(ids, req.ID)
+			if req.EffectiveStatus(now) != status {
+				t.Errorf("List %s holds a request that reads %s", status, req.EffectiveStatus(now))
+			}
+		}
+		for id, s := range want {
+			if s == status && !slices.Contains(ids, id) {
+				t.Errorf("List %s misses a request that reads %s", status, s)
+			}
+		}
+	}
+}
+
 // What waits for review is listed the longest in review first, so the cap
 // leaves out the newest and never the most overdue.
 func TestRequestListInReviewOldestFirst(t *testing.T) {
