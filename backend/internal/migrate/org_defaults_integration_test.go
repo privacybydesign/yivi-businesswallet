@@ -30,11 +30,12 @@ const day = 24 * time.Hour
 
 // TestUpCopiesOrgDefaultsIntoFlows fills the schema before an org's QR
 // lifetime and data retention were fixed with three orgs: one with its own
-// values, one on the fixed defaults and one that saved no settings. After the
-// migrations each flow and each sent external request runs as it did, with the
-// org's values copied into those that set none of their own, and the orgs are
-// on the fixed defaults. The down migrations run, and up again changes
-// nothing.
+// values, one on the fixed defaults and one that saved no settings, which
+// reads the fixed defaults already (20261021110200 gave the orgs that had sent
+// an external request a row with their 30 days). After the migrations each
+// flow and each sent external request runs as it did, with the org's values
+// copied into those that set none of their own, and the orgs are on the fixed
+// defaults. The down migrations run, and up again changes nothing.
 func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 	ctx := context.Background()
 	dsn := testdb.Bare(t)
@@ -135,7 +136,7 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 	wantFlow(own, "set", 1, day, 2*time.Minute)
 	wantFlow(own, "half", 2, day, 5*time.Minute)
 	wantFlow(fixed, "plain", 1, 0, 0)
-	wantFlow(unsaved, "plain", 2, 30*day, 0)
+	wantFlow(unsaved, "plain", 1, 0, 0)
 
 	copied, err := store.Get(ctx, own, "plain", 4)
 	if err != nil || len(copied.RequiredChecks) != 1 || copied.CreatedAt.IsZero() {
@@ -152,13 +153,13 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 			t.Errorf("%s retention = %v, want %v", what, got, want)
 		}
 	}
-	ninety, thirty := int(90*day/time.Second), int(30*day/time.Second)
+	ninety := int(90 * day / time.Second)
 	wantRetention("a request following its org's", ownFollows, &ninety)
 	wantRetention("a request with its own", ownSets, &hour)
 	wantRetention("a member's request", ownMember, nil)
 	wantRetention("a purged request", ownPurged, nil)
 	wantRetention("a request on the fixed defaults", fixedFollows, nil)
-	wantRetention("a request of an org without settings", unsavedFollows, &thirty)
+	wantRetention("a request of an org without settings", unsavedFollows, nil)
 
 	assertCount(t, ctx, conn, "orgs off the fixed defaults", 0,
 		`SELECT count(*) FROM identity_proofing_settings WHERE session_ttl_seconds <> 600 OR data_retention_days <> 7`)
@@ -177,8 +178,8 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 		t.Fatalf("version after down = %d, %v; want before %d", v, err, orgDefaultsVersion)
 	}
 	exec(`INSERT INTO identity_proofing_settings (organization_id) VALUES ($1)`, unsaved)
-	assertCount(t, ctx, conn, "a new org on the old default retention", 1,
-		`SELECT count(*) FROM identity_proofing_settings WHERE organization_id = $1 AND data_retention_days = 30`, unsaved)
+	assertCount(t, ctx, conn, "a new org on the week 20261021110200 set", 1,
+		`SELECT count(*) FROM identity_proofing_settings WHERE organization_id = $1 AND data_retention_days = 7`, unsaved)
 	exec(`DELETE FROM identity_proofing_settings WHERE organization_id = $1`, unsaved)
 	wantFlow(own, "plain", 4, 90*day, 5*time.Minute)
 
@@ -186,6 +187,6 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 		t.Fatalf("migrate up again: %v", err)
 	}
 	wantFlow(own, "plain", 4, 90*day, 5*time.Minute)
-	wantFlow(unsaved, "plain", 2, 30*day, 0)
+	wantFlow(unsaved, "plain", 1, 0, 0)
 	wantRetention("a request following its org's, after up again", ownFollows, &ninety)
 }

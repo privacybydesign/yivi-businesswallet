@@ -4,14 +4,15 @@
 -- flow sets its own in the flow editor. So that no flow changes, an active
 -- flow version that sets neither gets a new active version carrying the org's
 -- current value, where that is not the fixed default: the same definition
--- otherwise, under the flow's next version number. An org that saved no
--- settings had 30 days (proofing.proofedNameRetention) and 10 minutes. The
--- definition holds both as Go durations, in nanoseconds (FlowDefinition's
--- RetentionOverride and SessionTTL). Requests already sent keep the version
--- they were sent on.
+-- otherwise, under the flow's next version number. An org without a settings
+-- row is on the fixed defaults already: 20261021110200 gave every org that had
+-- sent an external request a row with the 30 days it had then, and the rest
+-- read 7 days and 10 minutes since. The definition holds both as Go
+-- durations, in nanoseconds (FlowDefinition's RetentionOverride and
+-- SessionTTL). Requests already sent keep the version they were sent on.
 CREATE TEMPORARY TABLE flow_org_default_copies AS
 WITH org AS (SELECT o.id                                  AS organization_id,
-                    COALESCE(st.data_retention_days, 30)  AS retention_days,
+                    COALESCE(st.data_retention_days, 7)   AS retention_days,
                     COALESCE(st.session_ttl_seconds, 600) AS ttl_seconds
              FROM organizations o
                       LEFT JOIN identity_proofing_settings st ON st.organization_id = o.id),

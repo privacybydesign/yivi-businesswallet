@@ -20,6 +20,8 @@ const (
 	legalRetentionVersion int64 = 20261021110000
 	// erasureKeepVersion drops the "keep" erasure handling.
 	erasureKeepVersion int64 = 20261021110100
+	// weekRetentionVersion makes a week the default retention.
+	weekRetentionVersion int64 = 20261021110200
 )
 
 // downTo steps the schema down until it is at version or below.
@@ -160,7 +162,9 @@ func TestErasureKeepBecomesReview(t *testing.T) {
 }
 
 // A new org's settings purge a week after a check ends; an org that sent an
-// external request without saving settings keeps the 30 days it had.
+// external request without saving settings keeps the 30 days it had. The test
+// stops there: 20261021114200 later fixes every org at a week, once the 30
+// days are copied into its flows and requests (TestUpCopiesOrgDefaultsIntoFlows).
 func TestWeekRetentionForNewOrgs(t *testing.T) {
 	ctx := context.Background()
 	dsn := testdb.Bare(t)
@@ -179,8 +183,8 @@ func TestWeekRetentionForNewOrgs(t *testing.T) {
 		t.Fatalf("insert request: %v", err)
 	}
 
-	if err := migrate.Up(ctx, dsn); err != nil {
-		t.Fatalf("migrate up: %v", err)
+	if err := migrate.UpTo(ctx, dsn, weekRetentionVersion); err != nil {
+		t.Fatalf("migrate up to the week retention: %v", err)
 	}
 	var days int
 	if err := conn.QueryRow(ctx, `SELECT data_retention_days FROM identity_proofing_settings WHERE organization_id = $1`, sender).Scan(&days); err != nil || days != 30 {
