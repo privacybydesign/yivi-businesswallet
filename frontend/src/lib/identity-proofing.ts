@@ -1,9 +1,13 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
-import { MAX_LISTED_REQUESTS, isDataRequest } from "../api/identity-proofing";
+import {
+  DATA_REQUEST_KINDS,
+  MAX_LISTED_REQUESTS,
+} from "../api/identity-proofing";
 import type {
   AddressMode,
   AddressVerification,
+  DataRequestKind,
   DiplomaMode,
   FlowKind,
   ProofingBranding,
@@ -1098,14 +1102,61 @@ export function readsIdentity(
   );
 }
 
-// Whether a flow of kind with diplomas must read the name and date of birth
-// (proofing.identityRequired): a data request's other sessions are found by
-// them, and a required diploma's holder is checked against them.
-export function identityRequired(
-  kind: FlowKind,
-  diplomas: DiplomaMode,
-): boolean {
-  return isDataRequest(kind) || diplomas !== "off";
+// Whether a flow with diplomas must read the name and date of birth
+// (proofing.identityRequired): a required diploma's holder is checked against
+// them.
+export function identityRequired(diplomas: DiplomaMode): boolean {
+  return diplomas !== "off";
+}
+
+// What the Verify a person form sends: an identity check on a flow, or one of
+// the data requests every org offers, on the org's own flow of that kind.
+export type SendKind = "identity" | DataRequestKind;
+
+export const SEND_KINDS: readonly SendKind[] = [
+  "identity",
+  ...DATA_REQUEST_KINDS,
+];
+
+// The send form's flows for kind: the identity flows an external person can be
+// sent from the app (externalFlows), or the org's own flow of a data request
+// kind, none while they load.
+export function sendKindFlows<
+  T extends { completable: boolean; default: boolean; kind?: string },
+>(
+  kind: SendKind,
+  identityFlows: readonly T[],
+  dataRequestFlows: readonly T[] | undefined,
+): { sendable: T[]; initial: T | undefined } {
+  if (kind === "identity") {
+    return externalFlows(identityFlows);
+  }
+  return withInitial(
+    (dataRequestFlows ?? []).filter((flow) => flow.kind === kind),
+  );
+}
+
+// What a request names: its flow, or a data request's kind.
+export function requestTarget(
+  kind: SendKind,
+  flowId: string,
+): { flowId: string } | { flowKind: DataRequestKind } {
+  return kind === "identity" ? { flowId } : { flowKind: kind };
+}
+
+// The on-screen page's query: the flow it runs, or the data request kind,
+// whose flow it reads itself.
+export function verifySearch(kind: SendKind, flowId: string): string {
+  const params: Record<string, string> =
+    kind === "identity" ? { flow: flowId } : { kind };
+  return new URLSearchParams(params).toString();
+}
+
+// The data request kind a query names, if it names one.
+export function dataRequestKindOf(
+  value: string | null,
+): DataRequestKind | undefined {
+  return DATA_REQUEST_KINDS.find((kind) => kind === value);
 }
 
 interface SendFields {
@@ -1215,6 +1266,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.diplomasNeedPage");
     case "hosted_disabled":
       return t("identityProofing.errors.hostedDisabled");
+    case "data_request_flow":
+      return t("identityProofing.errors.dataRequestFlow");
     case "diplomas_closed":
       return t("identityProofing.errors.diplomasClosed");
     case "diplomas_not_asked":
@@ -1835,15 +1888,18 @@ export function sessionEventDetail(
 
 // What the send form does with the flow and channel it is given: the flow it
 // sends (a pick no longer sendable falls back to the default), how (a flow that
-// asks for diplomas or the address cannot be mailed, so it runs on screen) and
-// whether it can check for one person (a flow reading name and date of birth).
-// sendRequestFields has what the fields send and lack.
+// asks for diplomas or the address cannot be mailed, so it runs on screen; one
+// whose "Allow sending this flow as a link" switch is off is neither mailed nor
+// a link, so it runs on screen too) and whether it can check for one person (a
+// flow reading name and date of birth). sendRequestFields has what the fields
+// send and lack.
 export function sendFormDecision<
   F extends {
     id: string;
     diplomaMode?: DiplomaMode;
     addressMode?: AddressMode;
     requestedAttributes?: string[];
+    hostedEnabled?: boolean;
   },
 >(input: {
   sendable: readonly F[];
@@ -1852,6 +1908,7 @@ export function sendFormDecision<
   channel: ProofingChannel;
 }): {
   flowId: string;
+  linkable: boolean;
   mailable: boolean;
   matchable: boolean;
   delivery: ProofingChannel;
@@ -1860,11 +1917,14 @@ export function sendFormDecision<
     ? input.picked
     : (input.initial?.id ?? "");
   const flow = input.sendable.find((f) => f.id === flowId);
+  const linkable = flow?.hostedEnabled ?? true;
   const mailable = sendableByMail(flow);
   const matchable = readsIdentity(flow);
   const delivery: ProofingChannel =
-    input.channel === "email" && !mailable ? "on_screen" : input.channel;
-  return { flowId, mailable, matchable, delivery };
+    !linkable || (input.channel === "email" && !mailable)
+      ? "on_screen"
+      : input.channel;
+  return { flowId, linkable, mailable, matchable, delivery };
 }
 
 // Whether a session's row shows its verified identity to this reader: an

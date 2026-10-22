@@ -26,18 +26,30 @@ func TestDataRequestStore(t *testing.T) {
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
 
-	// A flow's kind defaults to an identity check, and is listed once set.
+	// A flow's kind defaults to an identity check. A flow the wallet created
+	// for a data request is claimed as the org's standard flow of its kind; a
+	// later claim of that kind leaves its flow a data request flow nothing runs
+	// on, unless the standard flow it names is stale, which loses its mark.
 	if kind, err := data.FlowKind(ctx, orgID, "f-data"); err != nil || kind != FlowIdentity {
 		t.Fatalf("FlowKind before = %q, %v; want identity", kind, err)
 	}
-	if _, err := data.SaveFlowKind(ctx, orgID, "f-data", FlowDataErasure); err != nil {
-		t.Fatalf("SaveFlowKind: %v", err)
+	if standard, err := data.ClaimStandardFlow(ctx, orgID, FlowDataErasure, "f-data", ""); err != nil || standard != "f-data" {
+		t.Fatalf("ClaimStandardFlow = %q, %v; want f-data", standard, err)
 	}
-	if kinds, err := data.AllFlowKinds(ctx, orgID); err != nil || len(kinds) != 1 || kinds["f-data"] != FlowDataErasure {
-		t.Fatalf("AllFlowKinds = %v, %v; want f-data erasure", kinds, err)
+	if standard, err := data.ClaimStandardFlow(ctx, orgID, FlowDataErasure, "f-late", ""); err != nil || standard != "f-data" {
+		t.Fatalf("ClaimStandardFlow second = %q, %v; want f-data kept", standard, err)
 	}
-	if n := auditCount(t, pool, audit.IdentityProofingFlowKindConfigured); n != 1 {
-		t.Errorf("flow_kind_configured audited %d times, want 1", n)
+	if kinds, err := data.AllFlowKinds(ctx, orgID); err != nil || len(kinds) != 2 || kinds["f-data"] != FlowDataErasure || kinds["f-late"] != FlowDataErasure {
+		t.Fatalf("AllFlowKinds = %v, %v; want f-data and f-late erasure", kinds, err)
+	}
+	if standard, err := data.ClaimStandardFlow(ctx, orgID, FlowDataErasure, "f-new", "f-data"); err != nil || standard != "f-new" {
+		t.Fatalf("ClaimStandardFlow over a stale one = %q, %v; want f-new", standard, err)
+	}
+	if standard, err := data.StandardFlows(ctx, orgID); err != nil || len(standard) != 1 || standard[FlowDataErasure] != "f-new" {
+		t.Fatalf("StandardFlows = %v, %v; want only f-new for erasure", standard, err)
+	}
+	if n := auditCount(t, pool, audit.IdentityProofingFlowKindConfigured); n != 3 {
+		t.Errorf("flow_kind_configured audited %d times, want 3", n)
 	}
 
 	// The person's earlier session, and their data request.

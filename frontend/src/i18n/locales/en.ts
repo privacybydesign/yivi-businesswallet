@@ -557,6 +557,8 @@ export const en = {
         "The Idem app still has this session open: carry on there, or close it first.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
+      dataRequestFlow:
+        "See my data and Delete my data are the wallet's own flows: they cannot be changed.",
       diplomasNeedPage:
         "This flow asks for diplomas, which are uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       diplomasClosed:
@@ -650,6 +652,21 @@ export const en = {
     },
     send: {
       title: "Verify a person",
+      what: {
+        legend: "What do you send?",
+        identity: {
+          title: "An identity check",
+          hint: "The person proves who they are, with the steps of a flow you pick.",
+        },
+        data_access: {
+          title: "See my data",
+          hint: "The person asks what you hold about them. They prove who they are first, and see it once a reviewer approves.",
+        },
+        data_erasure: {
+          title: "Delete my data",
+          hint: "The person asks you to delete what you hold about them. They prove who they are first.",
+        },
+      },
       channel: "How does the person get the QR code?",
       channels: {
         email: {
@@ -677,6 +694,8 @@ export const en = {
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
         "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
+      notLinkable:
+        "This flow is not sent by e-mail or as a link, so the person does it on this screen.",
       addName: {
         title: "Add the person's name",
         hint: "Shown in your list until the check finishes; after that, the name from their document.",
@@ -1358,21 +1377,16 @@ export const en = {
         "How closely the face matched the document photo, and whether it was a live person.",
     },
     kinds: {
-      identity: {
-        title: "Identity check",
-        hint: "The person proves who they are; you get the outcome.",
-      },
-      data_access: {
-        title: "See my data",
-        hint: "A person asks your organisation what data is held about them. After the identity check the session goes to review with their other sessions; approving lets them download that data.",
-      },
-      data_erasure: {
-        title: "Delete my data",
-        hint: "A person asks your organisation to delete their data. After the identity check the session goes to review with their other sessions; approving erases them.",
-      },
+      identity: { title: "Identity check" },
+      data_access: { title: "See my data" },
+      data_erasure: { title: "Delete my data" },
+    },
+    dataRequests: {
+      title: "See my data and Delete my data are always available",
+      hint: "Every organisation offers these two GDPR requests. They are not flows you edit.",
+      link: "Settings › Data and privacy",
     },
     new: {
-      kind: "Type",
       title: "New flow",
       editTitle: "Edit {{name}}",
       name: "Name",
@@ -1390,7 +1404,7 @@ export const en = {
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
         identity:
-          "A data request or diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
+          "A diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
       },
     },
     editor: {

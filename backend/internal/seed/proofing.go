@@ -22,25 +22,26 @@ import (
 )
 
 // The identity proofing use cases of the demo orgs: each org runs proofing
-// for external people, with the flows its use case needs and the two data
-// request flows, as an org admin would set them up. A flow is found by its
-// name within its org, so a re-run creates only what is missing. What a session
-// of a use case needs beyond the flow (an expected person's name and date of
-// birth, a reference photo) is sent with the session through the API.
+// for external people, with the flows its use case needs, as an org admin
+// would set them up. See my data and Delete my data are not among them: the
+// wallet creates those for every org itself (proofing.Service.standardFlows).
+// A flow is found by its name within its org, so a re-run creates only what is
+// missing. What a session of a use case needs beyond the flow (an expected
+// person's name and date of birth, a reference photo) is sent with the session
+// through the API.
 
 // demoProofingFlow is one of a demo org's flows: its engine definition and
 // the wallet's own settings for it.
 type demoProofingFlow struct {
 	def      flow.FlowDefinition
-	kind     proofing.FlowKind
 	diplomas proofing.DiplomaMode
 	address  proofing.AddressMode
 }
 
 // demoProofingOrg is a demo org (by slug, one of demoOrganizations) with its
-// own flows, besides the data request flows every org has, the one of them that
-// is its default, how long its flows keep a session's personal data and
-// optionally its theme, which the Idem app also shows its sessions in.
+// own flows, the one of them that is its default, how long its flows keep a
+// session's personal data and optionally its theme, which the Idem app also
+// shows its sessions in.
 type demoProofingOrg struct {
 	slug          string
 	flows         []demoProofingFlow
@@ -196,20 +197,7 @@ const (
 	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
 	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
 	flowOdixusOnboarding = "Nieuwe klant met woonadres"
-	flowDataAccess       = "Mijn gegevens inzien"
-	flowDataErasure      = "Mijn gegevens verwijderen"
 )
-
-// purposeDataRequest is the processing purpose of the data request flows.
-const purposeDataRequest = "Verzoek van de betrokkene (AVG art. 15/17)"
-
-// dataRequestFlows are every org's: an external person asks what is held of
-// them, or for its erasure, and the session goes to review once they are
-// proven. Every org has them: each holds personal data a person may ask about.
-var dataRequestFlows = []demoProofingFlow{
-	{def: chipAndFace(flowDataAccess, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataAccess},
-	{def: chipAndFace(flowDataErasure, privacy.LegalBasisLegalObligation, purposeDataRequest), kind: proofing.FlowDataErasure},
-}
 
 var demoProofingOrgs = []demoProofingOrg{
 	{
@@ -279,10 +267,10 @@ var demoProofingOrgs = []demoProofingOrg{
 	},
 }
 
-// allFlows is o's own flows and the data request flows, each keeping a
-// session's personal data for o's retentionDays unless it sets its own.
-func (o demoProofingOrg) allFlows() []demoProofingFlow {
-	flows := append(slices.Clone(o.flows), dataRequestFlows...)
+// seededFlows is o's own flows, each keeping a session's personal data for o's
+// retentionDays unless it sets its own.
+func (o demoProofingOrg) seededFlows() []demoProofingFlow {
+	flows := slices.Clone(o.flows)
 	for i := range flows {
 		if flows[i].def.RetentionOverride == 0 {
 			flows[i].def.RetentionOverride = time.Duration(o.retentionDays) * day
@@ -310,7 +298,7 @@ func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string
 // default flow already keeps it.
 func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o demoProofingOrg) error {
 	recorder := audit.NewDBRecorder()
-	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.allFlows())
+	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.seededFlows())
 	if err != nil {
 		return err
 	}
@@ -435,8 +423,8 @@ func requireSeedOwned(ctx context.Context, orgs *organization.Store, o demoOrgan
 	return nil
 }
 
-// ensureProofingFlows creates each of want that orgID lacks, with its kind and
-// diploma setting, and returns every one's id by name.
+// ensureProofingFlows creates each of want that orgID lacks, with its diploma
+// and address settings, and returns every one's id by name.
 func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, want []demoProofingFlow) (map[string]string, error) {
 	existing, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
 	if err != nil {
@@ -458,7 +446,7 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 	return ids, nil
 }
 
-// createProofingFlow saves f for orgID with its kind, diploma and address settings in
+// createProofingFlow saves f for orgID with its diploma and address settings in
 // one transaction, so a re-run never finds the flow without them.
 func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, f demoProofingFlow) (string, error) {
 	tx, err := pool.Begin(ctx)
@@ -472,11 +460,6 @@ func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.
 	saved, err := flow.NewPostgresStore(tx).Save(ctx, def)
 	if err != nil {
 		return "", fmt.Errorf("seed: flow %s: %w", f.def.Name, err)
-	}
-	if f.kind != "" {
-		if _, err := proofing.NewDataRequestStore(tx, recorder, nil).SaveFlowKind(ctx, orgID, saved.ID, f.kind); err != nil {
-			return "", fmt.Errorf("seed: flow %s kind: %w", f.def.Name, err)
-		}
 	}
 	if f.diplomas != "" {
 		if _, err := proofing.NewFlowDiplomaStore(tx, recorder).Save(ctx, orgID, saved.ID, f.diplomas); err != nil {

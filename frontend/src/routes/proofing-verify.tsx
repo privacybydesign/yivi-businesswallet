@@ -11,6 +11,7 @@ import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useCreateRequestMutation,
+  useDataRequestFlowsQuery,
   useProofingFlowsQuery,
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
@@ -22,8 +23,9 @@ import type {
 } from "../api/identity-proofing";
 import {
   currentStage,
-  externalFlows,
+  dataRequestKindOf,
   proofingErrorMessage,
+  sendKindFlows,
   verifyStages,
   yiviAppAvailable,
 } from "../lib/identity-proofing";
@@ -59,7 +61,8 @@ function verifyState(state: unknown): VerifyState {
 
 // An external person verified on the sender's screen: what the org collects,
 // the app they pick, then that app's QR code for as long as the session runs.
-// Nothing is mailed; the session starts when the app is picked.
+// Nothing is mailed; the session starts when the app is picked. ?flow= is the
+// flow it runs, or ?kind= a data request, on the org's own flow of that kind.
 export default function ProofingVerify(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -79,10 +82,28 @@ export default function ProofingVerify(): React.JSX.Element {
   }, [hasState, navigate, location.pathname, location.search]);
   const org = useOrganizationQuery(slug);
   const settings = useProofingSettingsQuery(slug);
-  const flows = useProofingFlowsQuery(slug);
-  const { sendable, initial } = externalFlows(flows.data ?? []);
-  const flowId = searchParams.get("flow") ?? initial?.id;
-  const flow = sendable.find((f) => f.id === flowId);
+  const dataRequest = dataRequestKindOf(searchParams.get("kind"));
+  const identityFlows = useProofingFlowsQuery(slug, dataRequest === undefined);
+  const dataFlows = useDataRequestFlowsQuery(slug, dataRequest !== undefined);
+  const flows = dataRequest === undefined ? identityFlows : dataFlows;
+  const { sendable, initial } = sendKindFlows(
+    dataRequest ?? "identity",
+    identityFlows.data ?? [],
+    dataFlows.data,
+  );
+  const flowId =
+    dataRequest === undefined
+      ? (searchParams.get("flow") ?? initial?.id)
+      : initial?.id;
+  const found = sendable.find((f) => f.id === flowId);
+  // A data request's flow is named as the person asked for it.
+  const flow =
+    found && dataRequest
+      ? {
+          ...found,
+          name: t(`identityProofing.send.what.${dataRequest}.title`),
+        }
+      : found;
 
   let body: React.JSX.Element;
   if (settings.isPending || flows.isPending || org.isPending) {

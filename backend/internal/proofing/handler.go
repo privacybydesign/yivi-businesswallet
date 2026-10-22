@@ -96,11 +96,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.getFlowAddress)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.saveFlowAddress)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.getFlowKind)))
-	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/kind", admin(respond.HandlerFunc(h.saveFlowKind)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/data-request-flows", admin(respond.HandlerFunc(h.listDataRequestFlows)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
@@ -163,6 +162,10 @@ type flowResponse struct {
 	// person asking for their data or its erasure); absent on a single
 	// version, as DiplomaMode.
 	Kind FlowKind `json:"kind,omitempty"`
+	// HostedEnabled is the flow's "Allow sending this flow as a link" switch:
+	// off, the Verify a person dialog offers only Show on this screen. Absent
+	// on a single version, as DiplomaMode.
+	HostedEnabled *bool `json:"hostedEnabled,omitempty"`
 	// RetentionDays is how many days an external person's data is kept at most
 	// on this flow, as the on-screen page tells them; absent on a single version.
 	RetentionDays int `json:"retentionDays,omitempty"`
@@ -178,8 +181,17 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 }
 
+// newListedFlowResponse is a flow as a flow list has it, with the wallet's
+// settings for it.
+func newListedFlowResponse(f OrgFlow) flowResponse {
+	out := newFlowResponse(f)
+	out.HostedEnabled = &f.HostedEnabled
+	return out
+}
+
 // listFlows shows an admin every flow of the org and a member the ones the admin
-// made available to them.
+// made available to them. Neither sees the data request flows (See my data,
+// Delete my data): they are the wallet's, not flows anyone edits or picks.
 func (h *Handler) listFlows(w http.ResponseWriter, r *http.Request) error {
 	flows, err := h.service.Flows(r.Context(), orgFromRequest(r), flowView(r))
 	if err != nil {
@@ -187,7 +199,25 @@ func (h *Handler) listFlows(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]flowResponse, 0, len(flows))
 	for _, f := range flows {
-		out = append(out, newFlowResponse(f))
+		if f.Kind.dataRequest() {
+			continue
+		}
+		out = append(out, newListedFlowResponse(f))
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
+// listDataRequestFlows shows an admin the org's See my data and Delete my
+// data flows, creating them the first time.
+func (h *Handler) listDataRequestFlows(w http.ResponseWriter, r *http.Request) error {
+	flows, err := h.service.DataRequestFlows(r.Context(), orgFromRequest(r))
+	if err != nil {
+		return mapError(err)
+	}
+	out := make([]flowResponse, 0, len(flows))
+	for _, f := range flows {
+		out = append(out, newListedFlowResponse(f))
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -579,6 +609,9 @@ type createRequestRequest struct {
 	FlowID  string                  `json:"flowId"`
 	Method  proofingprovider.Method `json:"method"`
 	Channel Channel                 `json:"channel"`
+	// FlowKind data_access or data_erasure sends a data request, on the org's
+	// standard flow of that kind, instead of an identity check on FlowID.
+	FlowKind FlowKind `json:"flowKind"`
 	// Language is the sender's wallet language (en/nl).
 	Language email.Locale `json:"language"`
 	// BirthDate (YYYY-MM-DD) with Name makes an external request one for
@@ -610,7 +643,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 		Requester{UserID: caller.ID, Name: displayName(caller), Admin: organization.ActsAsAdmin(r.Context())}, NewRequest{
 			SubjectUserID: body.UserID,
 			SubjectEmail:  body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
-			Method: body.Method, Channel: body.Channel, Language: body.Language,
+			FlowKind: body.FlowKind, Method: body.Method, Channel: body.Channel, Language: body.Language,
 		})
 	if err != nil {
 		return mapError(err)
@@ -748,6 +781,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
 	case errors.Is(err, ErrFlowNoIdentity):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's holder is matched against them"}
+	case errors.Is(err, ErrDataRequestFlow):
+		return &respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}
 	case errors.Is(err, ErrDataFlowForMember):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}
 	case errors.Is(err, ErrLegalRetention):

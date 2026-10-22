@@ -71,12 +71,18 @@ export type RegisterAddress = z.infer<typeof registerAddressSchema>;
 // What a flow's sessions are for: an identity check, or an external person
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
-// proven, with the org's sessions of that person.
-export const FLOW_KINDS = ["identity", "data_access", "data_erasure"] as const;
+// proven, with the org's sessions of that person. The data requests are every
+// org's own flows (DATA_REQUEST_KINDS), not flows an admin sets up: they are
+// never in the flow list, and the backend has them at data-request-flows.
+export const DATA_REQUEST_KINDS = ["data_access", "data_erasure"] as const;
+export type DataRequestKind = (typeof DATA_REQUEST_KINDS)[number];
+export const FLOW_KINDS = ["identity", ...DATA_REQUEST_KINDS] as const;
 const flowKindSchema = z.enum(FLOW_KINDS).catch("identity");
 export type FlowKind = z.infer<typeof flowKindSchema>;
 
-export function isDataRequest(kind: FlowKind | undefined): boolean {
+export function isDataRequest(
+  kind: FlowKind | undefined,
+): kind is DataRequestKind {
   return kind === "data_access" || kind === "data_erasure";
 }
 export type DiplomaMode = z.infer<typeof diplomaModeSchema>;
@@ -161,6 +167,10 @@ const proofingFlowSchema = z.object({
   addressMode: addressModeSchema.optional(),
   // Absent on a single version, as diplomaMode.
   kind: flowKindSchema.optional(),
+  // The flow's "Allow sending this flow as a link" switch: off, the send
+  // form offers only Show on this screen. Absent on a single version, as
+  // diplomaMode.
+  hostedEnabled: z.boolean().optional(),
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
@@ -263,17 +273,18 @@ export interface ProofingFlowSelection {
 export type ProofingMethod = "idem_app" | "yivi_app";
 export type ProofingChannel = "email" | "on_screen" | "hosted";
 
+// An external person's request names its flow, or for a data request its
+// kind: it runs on the org's own flow of that kind.
 export type ProofingRequestInput =
   | { userId: string; flowId: string }
-  | {
+  | ({
       email: string;
       name: string;
       // YYYY-MM-DD: with name, only that person can pass.
       birthDate?: string;
-      flowId: string;
       method?: ProofingMethod;
       channel?: ProofingChannel;
-    };
+    } & ({ flowId: string } | { flowKind: DataRequestKind }));
 
 // How the org's "delete my data" requests are decided once the person is
 // proven: by a reviewer, or automatically (the sure matches erased at once, the
@@ -552,6 +563,18 @@ export function getProofingFlows(
   });
 }
 
+// The org's See my data and Delete my data flows, in that order: admin-only.
+// The first read creates them.
+export function getDataRequestFlows(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingFlow[]> {
+  return request(`${base(slug)}/data-request-flows`, {
+    schema: z.array(proofingFlowSchema),
+    signal,
+  });
+}
+
 export function createProofingFlow(
   slug: string,
   spec: ProofingFlowSpec,
@@ -638,22 +661,6 @@ export function saveProofingFlowAddress(
     body: { addressMode },
     signal,
   }).then((r) => r.addressMode);
-}
-
-const proofingFlowKindSchema = z.object({ kind: flowKindSchema });
-
-export function saveProofingFlowKind(
-  slug: string,
-  flowId: string,
-  kind: FlowKind,
-  signal?: AbortSignal,
-): Promise<FlowKind> {
-  return request(`${flowBase(slug, flowId)}/kind`, {
-    schema: proofingFlowKindSchema,
-    method: "PUT",
-    body: { kind },
-    signal,
-  }).then((r) => r.kind);
 }
 
 export function getProofingFlowVersions(

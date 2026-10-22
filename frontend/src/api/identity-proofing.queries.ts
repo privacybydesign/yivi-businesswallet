@@ -31,7 +31,7 @@ import {
   getHostedProofing,
   decideProofingReview,
   getProofingDataMatches,
-  saveProofingFlowKind,
+  getDataRequestFlows,
   getHostedProofingStatus,
   startHostedProofing,
   declineHostedProofing,
@@ -88,7 +88,6 @@ import type {
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
-  FlowKind,
   ProofingDataMatch,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
@@ -154,6 +153,19 @@ export function useProofingFlowsQuery(
   return useQuery({
     queryKey: proofingFlowsQueryKey(slug),
     queryFn: ({ signal }) => getProofingFlows(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// See my data and Delete my data: admin-only, so only read when an admin
+// picks one.
+export function useDataRequestFlowsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<ProofingFlow[], Error> {
+  return useQuery({
+    queryKey: [...proofingFlowsQueryKey(slug), "data-requests"],
+    queryFn: ({ signal }) => getDataRequestFlows(slug, signal),
     enabled: enabled && slug !== "",
   });
 }
@@ -296,17 +308,6 @@ export function useSaveFlowAddressMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowAddress(slug, flowId, mode),
-    meta: { suppressErrorToast: true },
-    onSuccess: () => invalidateFlow(queryClient, slug),
-  });
-}
-
-export function useSaveFlowKindMutation(
-  slug: string,
-): UseMutationResult<FlowKind, Error, { flowId: string; kind: FlowKind }> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ flowId, kind }) => saveProofingFlowKind(slug, flowId, kind),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });

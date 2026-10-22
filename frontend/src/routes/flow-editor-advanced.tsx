@@ -1,11 +1,9 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
 import type {
   AddressMode,
   DiplomaMode,
-  FlowKind,
   ProofingSettings,
 } from "../api/identity-proofing";
 import {
@@ -54,17 +52,13 @@ interface AdvancedSettingsProps {
   update: (patch: Partial<ProofingFlowDraft>) => void;
   // The org's own settings, for what a flow's choice defaults to.
   settings: ProofingSettings | undefined;
-  kind: FlowKind;
-  onKind: (kind: FlowKind) => void;
-  kindError: string | null;
   diplomaMode: DiplomaMode;
   onDiploma: (mode: DiplomaMode) => void;
   diplomaError: string | null;
   addressMode: AddressMode;
   onAddress: (mode: AddressMode) => void;
   addressError: string | null;
-  // Whether the flow must read the name and date of birth: a data request, or
-  // required diplomas.
+  // Whether the flow must read the name and date of birth: required diplomas.
   requiresIdentity: boolean;
   // The field the editor refused to save, once it was tried.
   error: FlowDraftError | null;
@@ -101,10 +95,6 @@ function toggled<T>(set: ReadonlySet<T>, value: T): Set<T> {
   return next;
 }
 
-function flowKindOf(value: string): FlowKind {
-  return FLOW_KINDS.find((kind) => kind === value) ?? "identity";
-}
-
 // What the draft's level says about a setting it needs on: the lock note and
 // the tooltip, or none when the level leaves it free.
 function useLevelLock(
@@ -125,9 +115,6 @@ function StepsSection({
   draft,
   update,
   settings,
-  kind,
-  onKind,
-  kindError,
   diplomaMode,
   onDiploma,
   diplomaError,
@@ -138,7 +125,6 @@ function StepsSection({
 }: Omit<AdvancedSettingsProps, "requiresIdentity">): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
-  const dataRequest = isDataRequest(kind);
   const orgTtl = settings?.sessionTtlSeconds;
 
   return (
@@ -146,30 +132,6 @@ function StepsSection({
       title={t("identityProofingFlows.editor.steps.title")}
       hint={t("identityProofingFlows.editor.steps.hint")}
     >
-      <div className="flex max-w-md flex-col gap-1.5">
-        <label htmlFor="flow-kind" className={LABEL}>
-          {t("identityProofingFlows.new.kind")}
-        </label>
-        <ChevronSelect
-          id="flow-kind"
-          value={kind}
-          onChange={(value) => onKind(flowKindOf(value))}
-        >
-          {FLOW_KINDS.map((option) => (
-            <option key={option} value={option}>
-              {t(`identityProofingFlows.kinds.${option}.title`)}
-            </option>
-          ))}
-        </ChevronSelect>
-        <span className={HINT}>
-          {t(`identityProofingFlows.kinds.${kind}.hint`)}
-        </span>
-        {kindError && (
-          <p role="alert" className={ERROR}>
-            {kindError}
-          </p>
-        )}
-      </div>
       <OptionRow
         id="flow-step-scan"
         checked={draft.documentAndChip}
@@ -205,8 +167,7 @@ function StepsSection({
       )}
       <OptionRow
         id="flow-step-address"
-        checked={addressMode !== "off" && !dataRequest}
-        disabled={dataRequest}
+        checked={addressMode !== "off"}
         label={t("identityProofingFlows.steps.address")}
         hint={t("identityProofingFlows.editor.steps.addressHint")}
         onChange={() => onAddress(addressMode === "off" ? "required" : "off")}
@@ -218,8 +179,7 @@ function StepsSection({
       )}
       <OptionRow
         id="flow-step-diplomas"
-        checked={diplomaMode !== "off" && !dataRequest}
-        disabled={dataRequest}
+        checked={diplomaMode !== "off"}
         label={t("identityProofingFlows.steps.diploma_upload")}
         hint={t("identityProofingFlows.editor.steps.diplomaHint")}
         onChange={() => onDiploma(diplomaMode === "off" ? "required" : "off")}

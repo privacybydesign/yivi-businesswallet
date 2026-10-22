@@ -7,13 +7,10 @@ import {
   useProofingSettingsQuery,
   useSaveFlowAddressMutation,
   useSaveFlowDiplomasMutation,
-  useSaveFlowKindMutation,
 } from "../api/identity-proofing.queries";
-import { isDataRequest } from "../api/identity-proofing";
 import type {
   AddressMode,
   DiplomaMode,
-  FlowKind,
   ProofingFlow,
 } from "../api/identity-proofing";
 import {
@@ -83,7 +80,7 @@ export function FlowEditor({
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
-  // a follow-up save (diplomas, address, kind) fails, a retry must not save
+  // a follow-up save (diplomas, address) fails, a retry must not save
   // the flow again: a create would make a second flow, an edit another version.
   const [saved, setSaved] = useState<{
     flow: ProofingFlow;
@@ -103,18 +100,14 @@ export function FlowEditor({
   const saveAddress = useSaveFlowAddressMutation(slug);
   const savedAddress: AddressMode = editing?.addressMode ?? "off";
   const [addressMode, setAddressMode] = useState<AddressMode>(savedAddress);
-  const saveKind = useSaveFlowKindMutation(slug);
-  const savedKind: FlowKind = editing?.kind ?? "identity";
-  const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
   const [draft, setDraft] = useState<ProofingFlowDraft>(() =>
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
   const [touched, setTouched] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // A data request asks for no address and no diplomas.
-  const address: AddressMode = isDataRequest(flowKind) ? "off" : addressMode;
-  const diplomas: DiplomaMode = isDataRequest(flowKind) ? "off" : diplomaMode;
-  const requiresIdentity = identityRequired(flowKind, diplomas);
+  const address = addressMode;
+  const diplomas = diplomaMode;
+  const requiresIdentity = identityRequired(diplomas);
   const invalid = flowDraftError(draft, requiresIdentity);
   const shown = touched ? invalid : null;
   const version = (editing?.version ?? 0) + 1;
@@ -123,13 +116,12 @@ export function FlowEditor({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  // Choosing a data request or required diplomas ticks Document data, which
-  // then stays ticked (identityRequired), and unticks the age check, which
-  // withholds the date of birth they need.
-  function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
-    setFlowKind(kind);
+  // Choosing required diplomas ticks Document data, which then stays ticked
+  // (identityRequired), and unticks the age check, which withholds the date
+  // of birth they need.
+  function chooseDiplomas(mode: DiplomaMode): void {
     setDiplomaMode(mode);
-    if (identityRequired(kind, isDataRequest(kind) ? "off" : mode)) {
+    if (identityRequired(mode)) {
       setDraft(withIdentity);
     }
   }
@@ -149,21 +141,14 @@ export function FlowEditor({
       onSaved?.(flow);
       onDone();
     };
-    // The diploma mode, the address, then the kind, each only when it changed.
+    // The diploma mode, then the address, each only when it changed.
     const saveSettings = (flowId: string, then: () => void): void => {
-      const kindThen = (): void => {
-        if (flowKind === savedKind) {
+      const addressThen = (): void => {
+        if (address === savedAddress) {
           then();
           return;
         }
-        saveKind.mutate({ flowId, kind: flowKind }, { onSuccess: then });
-      };
-      const addressThen = (): void => {
-        if (address === savedAddress) {
-          kindThen();
-          return;
-        }
-        saveAddress.mutate({ flowId, mode: address }, { onSuccess: kindThen });
+        saveAddress.mutate({ flowId, mode: address }, { onSuccess: then });
       };
       if (diplomas === savedDiplomas) {
         addressThen();
@@ -186,8 +171,8 @@ export function FlowEditor({
         },
       });
     };
-    // The service holds a data request or required-diplomas flow to reading
-    // the name and date of birth, in each version and setting. Settings that
+    // The service holds a required-diplomas flow to reading the name and date
+    // of birth, in each version and setting. Settings that
     // lift that go before a version that may drop it; otherwise the version
     // goes first, and the settings that need it check the version that reads
     // it.
@@ -299,15 +284,8 @@ export function FlowEditor({
                 draft={draft}
                 update={update}
                 settings={settings.data}
-                kind={flowKind}
-                onKind={(kind) => chooseKindAndDiplomas(kind, diplomaMode)}
-                kindError={
-                  saveKind.isError
-                    ? proofingErrorMessage(saveKind.error, t)
-                    : null
-                }
                 diplomaMode={diplomaMode}
-                onDiploma={(mode) => chooseKindAndDiplomas(flowKind, mode)}
+                onDiploma={chooseDiplomas}
                 diplomaError={
                   saveDiplomas.isError
                     ? proofingErrorMessage(saveDiplomas.error, t)

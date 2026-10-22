@@ -48,20 +48,18 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 	for _, o := range demoProofingOrgs {
 		orgID := orgsBySlug[o.slug].ID
 		flows, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
-		if err != nil || len(flows) != len(o.allFlows()) {
-			t.Fatalf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.allFlows()))
+		if err != nil || len(flows) != len(o.flows) {
+			t.Fatalf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.flows))
 		}
 		ids := map[string]string{}
 		for _, f := range flows {
 			ids[f.Name] = f.ID
 		}
-		for _, f := range o.allFlows() {
-			want := f.kind
-			if want == "" {
-				want = proofing.FlowIdentity
-			}
-			if kind, err := data.FlowKind(ctx, orgID, ids[f.def.Name]); err != nil || kind != want {
-				t.Errorf("%s %s kind = %q, %v; want %q", o.slug, f.def.Name, kind, err, want)
+		// See my data and Delete my data are the wallet's to create, not the
+		// seed's: every seeded flow is an identity check.
+		for _, f := range o.flows {
+			if kind, err := data.FlowKind(ctx, orgID, ids[f.def.Name]); err != nil || kind != proofing.FlowIdentity {
+				t.Errorf("%s %s kind = %q, %v; want identity", o.slug, f.def.Name, kind, err)
 			}
 		}
 
@@ -130,8 +128,8 @@ func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
 			t.Errorf("%s admins = %d, %v; want %d", o.slug, admins, err, len(yiviTeam))
 		}
 		flows, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
-		if err != nil || len(flows) != len(o.allFlows()) {
-			t.Errorf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.allFlows()))
+		if err != nil || len(flows) != len(o.flows) {
+			t.Errorf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.flows))
 		}
 	}
 }

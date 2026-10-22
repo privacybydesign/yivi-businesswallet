@@ -538,6 +538,9 @@ type OrgFlow struct {
 	Address AddressMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
+	// HostedEnabled is the flow's "Allow sending this flow as a link" switch
+	// (FlowHosted.Enabled): off, a member only shows it on their screen.
+	HostedEnabled bool
 	// RetentionDays is what an external person on this flow is told about
 	// keeping their data: subjectRetentionDays.
 	RetentionDays int
@@ -574,6 +577,11 @@ type NewRequest struct {
 	// with errorIdentityMismatch. Empty proofs whoever takes part.
 	SubjectBirthDate string
 	FlowID           string
+	// FlowKind is what the request is for: an identity check on FlowID (empty
+	// is the flow's own kind), or a data request (FlowDataAccess,
+	// FlowDataErasure), which runs on the org's standard flow of that kind and
+	// names no flow of another kind.
+	FlowKind FlowKind
 	// SkipMail leaves the mail out: an API caller that shows the deep link in
 	// its own interface.
 	SkipMail bool

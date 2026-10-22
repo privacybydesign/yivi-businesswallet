@@ -575,6 +575,8 @@ export const nl: Translation<typeof en> = {
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
       hostedDisabled:
         "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
+      dataRequestFlow:
+        "Mijn gegevens inzien en Mijn gegevens verwijderen zijn vaste flows van de wallet: ze kunnen niet worden gewijzigd.",
       diplomasNeedPage:
         "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       diplomasClosed:
@@ -668,6 +670,21 @@ export const nl: Translation<typeof en> = {
     },
     send: {
       title: "Een persoon verifiëren",
+      what: {
+        legend: "Wat verstuur je?",
+        identity: {
+          title: "Een identiteitscontrole",
+          hint: "De persoon bewijst wie hij of zij is, met de stappen van een flow die je kiest.",
+        },
+        data_access: {
+          title: "Mijn gegevens inzien",
+          hint: "De persoon vraagt wat je over hem of haar bewaart. Eerst bewijst die wie hij of zij is; de gegevens zijn te zien zodra een beoordelaar het goedkeurt.",
+        },
+        data_erasure: {
+          title: "Mijn gegevens verwijderen",
+          hint: "De persoon vraagt je te verwijderen wat je over hem of haar bewaart. Eerst bewijst die wie hij of zij is.",
+        },
+      },
       channel: "Hoe krijgt de persoon de QR-code?",
       channels: {
         email: {
@@ -695,6 +712,8 @@ export const nl: Translation<typeof en> = {
       emailRequired: "Vul een geldig e-mailadres in.",
       diplomasOnScreen:
         "Deze flow vraagt om een adres of diploma's, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+      notLinkable:
+        "Deze flow wordt niet per e-mail of als link verstuurd, dus de persoon doorloopt hem op dit scherm.",
       addName: {
         title: "Naam van de persoon toevoegen",
         hint: "Staat in je lijst tot de controle klaar is; daarna de naam van hun document.",
@@ -1386,21 +1405,17 @@ export const nl: Translation<typeof en> = {
         "Hoe goed het gezicht overeenkwam met de documentfoto, en of het een levend persoon was.",
     },
     kinds: {
-      identity: {
-        title: "Identiteitscontrole",
-        hint: "De persoon bewijst wie hij of zij is; jij krijgt de uitkomst.",
-      },
-      data_access: {
-        title: "Mijn gegevens inzien",
-        hint: "Iemand vraagt je organisatie welke gegevens er van hem of haar zijn. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren laat de persoon die gegevens downloaden.",
-      },
-      data_erasure: {
-        title: "Mijn gegevens verwijderen",
-        hint: "Iemand vraagt je organisatie om zijn of haar gegevens te verwijderen. Na de identiteitscontrole gaat de sessie ter beoordeling, met de andere sessies van die persoon; goedkeuren verwijdert ze.",
-      },
+      identity: { title: "Identiteitscontrole" },
+      data_access: { title: "Mijn gegevens inzien" },
+      data_erasure: { title: "Mijn gegevens verwijderen" },
+    },
+    dataRequests: {
+      title:
+        "Mijn gegevens inzien en Mijn gegevens verwijderen zijn altijd beschikbaar",
+      hint: "Elke organisatie biedt deze twee AVG-verzoeken. Het zijn geen flows die je bewerkt.",
+      link: "Instellingen › Gegevens en privacy",
     },
     new: {
-      kind: "Type",
       title: "Nieuwe flow",
       editTitle: "{{name}} bewerken",
       name: "Naam",
@@ -1419,7 +1434,7 @@ export const nl: Translation<typeof en> = {
         retentionSeconds: "Vul een heel aantal seconden in.",
         ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
         identity:
-          "Een gegevensverzoek of diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
+          "Een diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
       },
     },
     editor: {

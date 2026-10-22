@@ -136,6 +136,7 @@ type pauseStore interface {
 
 type flowHostedStore interface {
 	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowHosted, error)
+	Disabled(ctx context.Context, orgID uuid.UUID) ([]string, error)
 	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error)
 }
 
@@ -386,6 +387,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	unhosted, err := s.hostedDisabledFlows(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	settings, err := s.orgSettings.Get(ctx, org.ID)
 	if err != nil {
 		return nil, err
@@ -394,7 +399,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
-			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity,
+			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity, HostedEnabled: !slices.Contains(unhosted, f.ID),
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
@@ -490,10 +495,14 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 // EditFlow saves in as the next version of flow id. The engine makes it the active
 // version at once; requests already sent keep the version their session pinned.
 // A flow that must read the name and date of birth (identityRequired) keeps
-// naming dg1: an empty list would leave what it releases to the engine.
+// naming dg1: an empty list would leave what it releases to the engine. A data
+// request flow is the wallet's, and not edited (ErrDataRequestFlow).
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
 	in, err := normalizeFlow(in)
 	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, id); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	required, err := s.identityRequired(ctx, org.ID, id)
@@ -534,6 +543,9 @@ func (s *Service) FlowVersions(ctx context.Context, org Org, id string) ([]proof
 // requests run, and audits it. A flow that must read the name and date of
 // birth (identityRequired) only goes back to a version that reads them.
 func (s *Service) ActivateFlowVersion(ctx context.Context, org Org, id string, version int) (proofingprovider.Flow, error) {
+	if err := s.refuseDataRequestFlow(ctx, org, id); err != nil {
+		return proofingprovider.Flow{}, err
+	}
 	tenant := orgTenant(org.ID)
 	required, err := s.identityRequired(ctx, org.ID, id)
 	if err != nil {
@@ -636,7 +648,8 @@ type Sent struct {
 // CreateRequest sends a proofing request: to a member, on one of the flows the
 // org admin made available to members, or to an external person, on any flow of
 // the org an admin or an API key may send and a member only if members may use
-// it. It creates the request's engine session
+// it; a data request from an admin or an API key runs on the org's standard
+// flow of its kind (requestFlowID). It creates the request's engine session
 // for the chosen app, stores the request with it, and, for a mailed request,
 // mails the subject the session's vcmrtd deep link: SessionTTL runs from the
 // send. An on-screen request is created only once the subject accepted what is
@@ -659,8 +672,12 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if settings != nil && settings.Session.SessionTTL != 0 {
 		ttl = settings.Session.SessionTTL
 	}
+	flowID, err := s.requestFlowID(ctx, org, by, in)
+	if err != nil {
+		return Sent{}, err
+	}
 	tenant := orgTenant(org.ID)
-	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, by, subject)
+	flow, err := s.sendableFlow(ctx, org, tenant, flowID, by, subject)
 	if err != nil {
 		return Sent{}, err
 	}
@@ -848,6 +865,10 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
 	case in.Channel == ChannelHosted && !in.external():
 		return NewRequest{}, fmt.Errorf("%w: a link goes to an external person", ErrInvalidInput)
+	case in.FlowKind != "" && !in.FlowKind.valid():
+		return NewRequest{}, fmt.Errorf("%w: flowKind is identity, data_access or data_erasure", ErrInvalidInput)
+	case in.FlowKind.dataRequest() && !in.external():
+		return NewRequest{}, ErrDataFlowForMember
 	case in.RedirectURL != "" && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: only a hosted session redirects its subject", ErrInvalidInput)
 	}
@@ -943,16 +964,9 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 }
 
 // identityRequired reports whether flow flowID must read the name and date of
-// birth: a data request's other sessions are found by them, and a required
-// diploma's holder is checked against them.
+// birth: a required diploma's holder is checked against them. (A data
+// request flow must too, but it is the wallet's and never edited.)
 func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID string) (bool, error) {
-	kind, err := s.flowKind(ctx, orgID, flowID)
-	if err != nil {
-		return false, err
-	}
-	if kind.dataRequest() {
-		return true, nil
-	}
 	mode, err := s.flowDiplomas(ctx, orgID, flowID)
 	if err != nil {
 		return false, err

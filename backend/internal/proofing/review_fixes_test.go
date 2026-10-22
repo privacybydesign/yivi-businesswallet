@@ -31,37 +31,32 @@ func TestRequiredDiplomasNeedIdentity(t *testing.T) {
 	}
 }
 
-// A data request flow, or one requiring diplomas, keeps reading the name and
-// birth date: an edit or an older version that drops dg1 is refused, as
-// setting the kind on such a flow is.
+// A flow requiring diplomas keeps reading the name and birth date: an edit or
+// an older version that drops dg1 is refused. A flow without that need is
+// edited and rolled back freely.
 func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	ctx := context.Background()
-	noIdentity := proofingprovider.FlowSpec{Name: "Delete my data", Steps: []string{"document_capture", "nfc_read"}, RequestedAttributes: []string{"dg2"}}
+	noIdentity := proofingprovider.FlowSpec{Name: "Enrol", Steps: []string{"document_capture", "nfc_read"}, RequestedAttributes: []string{"dg2"}}
 	withIdentity := noIdentity
 	withIdentity.RequestedAttributes = []string{attributeDocument, "dg2"}
-
-	f, _ := newDataFixture(FlowDataErasure)
-	if _, err := f.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
-		t.Errorf("data flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
-	}
-	if _, err := f.svc.EditFlow(ctx, testOrg, chipFlow.ID, withIdentity); err != nil {
-		t.Errorf("data flow edited with dg1 = %v, want saved", err)
-	}
-	// The fake's version 1 lists no attributes.
-	if _, err := f.svc.ActivateFlowVersion(ctx, testOrg, chipFlow.ID, 1); !errors.Is(err, ErrFlowNoIdentity) {
-		t.Errorf("data flow back to a version without dg1 = %v, want ErrFlowNoIdentity", err)
-	}
-	if _, err := f.svc.EditFlow(ctx, testOrg, appFlow.ID, noIdentity); err != nil {
-		t.Errorf("identity flow edited without dg1 = %v, want saved", err)
-	}
-	if _, err := f.svc.ActivateFlowVersion(ctx, testOrg, appFlow.ID, 1); err != nil {
-		t.Errorf("identity flow back to version 1 = %v, want activated", err)
-	}
 
 	d := newFixture()
 	d.svc.flowDiplomaSettings = &fakeFlowDiplomas{modes: map[string]DiplomaMode{chipFlow.ID: DiplomasRequired}}
 	if _, err := d.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
 		t.Errorf("diplomas-required flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
+	}
+	if _, err := d.svc.EditFlow(ctx, testOrg, chipFlow.ID, withIdentity); err != nil {
+		t.Errorf("diplomas-required flow edited with dg1 = %v, want saved", err)
+	}
+	// The fake's version 1 lists no attributes.
+	if _, err := d.svc.ActivateFlowVersion(ctx, testOrg, chipFlow.ID, 1); !errors.Is(err, ErrFlowNoIdentity) {
+		t.Errorf("diplomas-required flow back to a version without dg1 = %v, want ErrFlowNoIdentity", err)
+	}
+	if _, err := d.svc.EditFlow(ctx, testOrg, appFlow.ID, noIdentity); err != nil {
+		t.Errorf("identity flow edited without dg1 = %v, want saved", err)
+	}
+	if _, err := d.svc.ActivateFlowVersion(ctx, testOrg, appFlow.ID, 1); err != nil {
+		t.Errorf("identity flow back to version 1 = %v, want activated", err)
 	}
 }
 

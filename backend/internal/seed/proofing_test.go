@@ -10,7 +10,7 @@ import (
 // Every demo flow is one the engine accepts, as its store checks on save.
 func TestDemoProofingFlowsAreValid(t *testing.T) {
 	for _, o := range demoProofingOrgs {
-		for _, f := range o.allFlows() {
+		for _, f := range o.flows {
 			def := f.def
 			def.TenantID = "tenant"
 			if err := flow.Validate(def); err != nil {
@@ -20,7 +20,7 @@ func TestDemoProofingFlowsAreValid(t *testing.T) {
 	}
 }
 
-// A demo org's default flow is one of its own flows, not a data request flow.
+// A demo org's default flow is one of its own flows.
 func TestDemoDefaultFlowIsOrgFlow(t *testing.T) {
 	for _, o := range demoProofingOrgs {
 		if !slices.ContainsFunc(o.flows, func(f demoProofingFlow) bool { return f.def.Name == o.defaultFlow }) {

@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import type { AuditEvent } from "../api/organization";
 import {
+  dataRequestKindOf,
   imageSource,
   isCheckOutcome,
+  requestTarget,
   sendFormDecision,
+  sendKindFlows,
   showsSessionIdentity,
   timelineActor,
+  verifySearch,
 } from "./identity-proofing";
 
 const t = i18n.getFixedT("en");
@@ -27,8 +31,15 @@ const diplomas = {
   diplomaMode: "required" as const,
 };
 
+const unlinked = {
+  id: "unlinked",
+  requestedAttributes: [],
+  diplomaMode: "off" as const,
+  hostedEnabled: false,
+};
+
 const base = {
-  sendable: [plain, matching, diplomas],
+  sendable: [plain, matching, diplomas, unlinked],
   initial: plain,
   picked: "",
   channel: "email" as const,
@@ -62,6 +73,61 @@ describe("sendFormDecision", () => {
     expect(sendFormDecision({ ...base, channel: "hosted" }).delivery).toBe(
       "hosted",
     );
+  });
+
+  it("runs a flow not sent as a link on screen, neither mailed nor linked", () => {
+    for (const channel of ["email", "hosted", "on_screen"] as const) {
+      const d = sendFormDecision({ ...base, picked: "unlinked", channel });
+      expect(d.linkable).toBe(false);
+      expect(d.delivery).toBe("on_screen");
+    }
+    expect(sendFormDecision(base).linkable).toBe(true);
+  });
+});
+
+describe("what the send form sends", () => {
+  const identity = { id: "check", completable: true, default: true };
+  const notHere = { id: "photo", completable: false, default: false };
+  const access = {
+    id: "see",
+    completable: true,
+    default: false,
+    kind: "data_access",
+  };
+  const erasure = {
+    id: "delete",
+    completable: true,
+    default: false,
+    kind: "data_erasure",
+  };
+
+  it("sends an identity check on a flow, a data request on its own flow", () => {
+    expect(sendKindFlows("identity", [identity, notHere], undefined)).toEqual({
+      sendable: [identity],
+      initial: identity,
+    });
+    expect(
+      sendKindFlows("data_erasure", [identity], [access, erasure]),
+    ).toEqual({ sendable: [erasure], initial: erasure });
+    expect(sendKindFlows("data_access", [identity], undefined)).toEqual({
+      sendable: [],
+      initial: undefined,
+    });
+  });
+
+  it("names the flow of an identity check, the kind of a data request", () => {
+    expect(requestTarget("identity", "check")).toEqual({ flowId: "check" });
+    expect(requestTarget("data_access", "see")).toEqual({
+      flowKind: "data_access",
+    });
+  });
+
+  it("opens the on-screen page on the flow, or on the data request", () => {
+    expect(verifySearch("identity", "check")).toBe("flow=check");
+    expect(verifySearch("data_erasure", "delete")).toBe("kind=data_erasure");
+    expect(dataRequestKindOf("data_access")).toBe("data_access");
+    expect(dataRequestKindOf("identity")).toBeUndefined();
+    expect(dataRequestKindOf(null)).toBeUndefined();
   });
 });
 

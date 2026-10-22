@@ -5045,8 +5045,11 @@ paths:
         `diplomaMode` is whether the flow asks for DUO diploma extracts and `retentionDays` is
         the most days an external person's data is kept on this flow (the flow's own retention
         when it sets one, else the organisation's `dataRetentionDays`, plus the day the
-        proofing engine needs to purge it). The organisation is the proofing engine's tenant
-        under its own id: nothing is provisioned first.
+        proofing engine needs to purge it). `hostedEnabled` is the flow's "Allow sending this
+        flow as a link" switch: off, the wallet's Verify a person dialog offers only Show on
+        this screen. The organisation is the proofing engine's tenant under its own id: nothing
+        is provisioned first. See my data and Delete my data are not listed: they are the
+        wallet's own flows (`GET .../data-request-flows`), and no flow is made one.
       responses:
         '200':
           description: The flows.
@@ -5077,6 +5080,7 @@ paths:
                       addressMode: "off"
                       needsReferencePhoto: false
                       kind: identity
+                      hostedEnabled: true
                       retentionDays: 31
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -5283,6 +5287,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow does not exist (`flow_not_found`), the proofing engine refused the configuration (`rejected_by_provider`), or a data request or diplomas-required flow would stop reading the name and date of birth (`flow_no_identity`).
           content:
@@ -5351,8 +5361,56 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow or version does not exist (`flow_not_found`), or the version does not read the name and date of birth that the flow's kind or diplomas need (`flow_no_identity`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/data-request-flows:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List the org's See my data and Delete my data flows
+      description: >-
+        Requires an administrator role in the organisation. The two data requests every
+        organisation offers, as the GDPR requires: `data_access` ("See my data") first, then
+        `data_erasure` ("Delete my data"), each as the flow list shows a flow. They are the
+        wallet's own flows, on its own definition: the person scans their document, its chip is
+        read and their face checked, at eIDAS Substantial, and the result carries the name and
+        date of birth the request finds their sessions by, with the checks' outcomes and scores,
+        never an image. The first read creates the ones the organisation lacks (audited
+        `identity_proofing.flow_created` and `identity_proofing.flow_kind_configured`, without an
+        actor), and one whose definition falls short of the wallet's gets it back in a new
+        version. Neither is listed among the flows, and changing one (its versions, hosted page,
+        branding, diplomas or address) is 409 `data_request_flow`. Send one with `flowKind` on
+        `POST .../requests`. A deployment without the Regula face check cannot create them (422
+        `rejected_by_provider`).
+      responses:
+        '200':
+          description: See my data, then Delete my data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The proofing engine refused to create a flow (`rejected_by_provider`).
           content:
             application/json:
               schema:
@@ -5529,9 +5587,15 @@ paths:
         an external person with `birthDate` (a past date, YYYY-MM-DD, with `name`) is for that
         one person: an approval of anyone else is recorded as `rejected` with `errorCode`
         `IDENTITY_MISMATCH`, and the request reads `expectedSubject: true`. The flow must read
-        the document data (dg1), and a member's request cannot carry `birthDate`. Other 400
-        `invalid_input` causes are an unknown `method`, `channel` or `language`, a `hosted`
-        channel for a member, and an invalid `email`.
+        the document data (dg1), and a member's request cannot carry `birthDate`. `flowKind`
+        `data_access` ("See my data") or `data_erasure` ("Delete my data") sends a data request
+        instead of an identity check, on the organisation's own flow of that kind (`GET
+        .../data-request-flows`, created the first time): only an administrator sends one,
+        only to an external person (else 422 `flow_not_allowed`, `data_flow_for_member`). A
+        `flowId` that names a data request flow sends a data request of its kind the same way.
+        Other 400 `invalid_input` causes are an unknown `method`, `channel`, `language` or
+        `flowKind`, a `flowKind` that is not the kind of the `flowId` given, a `hosted` channel
+        for a member, and an invalid `email`.
       requestBody:
         required: true
         content:
@@ -6003,6 +6067,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
           content:
@@ -6100,6 +6170,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
           content:
@@ -6147,82 +6223,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/kind:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-      - name: flowID
-        in: path
-        required: true
-        schema:
-          type: string
-        description: The flow's id.
-    get:
-      tags: [identity-proofing]
-      summary: Read a flow's kind
-      description: >-
-        Requires an administrator role in the organisation. `{kind}`: `identity` (an identity
-        check), `data_access` ("see my data") or `data_erasure` ("delete my data"). A flow never
-        set reads `identity`.
-      responses:
-        '200':
-          description: The flow's kind.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofingFlowKind'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ProofingForbidden'
-        '422':
-          description: The flow is not one of the organisation's (`flow_not_found`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    put:
-      tags: [identity-proofing]
-      summary: Set a flow's kind
-      description: >-
-        Requires an administrator role in the organisation. Body `{kind}`. An external person
-        gets a session on a data request flow like any other; once the person is proven the
-        session goes to review (`needs_review`) with the organisation's sessions of that person, and the
-        reviewer's approval erases them or opens their data for download. A data request flow
-        must read the name and date of birth (422 `flow_no_identity`) and cannot be offered to
-        members (422 `data_flow_for_member`). Sessions already sent keep the kind they were
-        sent with. Audited `identity_proofing.flow_kind_configured`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProofingFlowKind'
-      responses:
-        '200':
-          description: Saved.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofingFlowKind'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ProofingForbidden'
-        '422':
-          description: >-
-            The flow is not one of the organisation's (`flow_not_found`), reads no name and date of
-            birth (`flow_no_identity`), or is offered to members (`data_flow_for_member`).
           content:
             application/json:
               schema:
@@ -6309,6 +6309,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
           content:
@@ -6397,6 +6403,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`).
           content:
@@ -7558,7 +7570,8 @@ paths:
         flow of the organisation that a subject can finish, with the organisation's default
         flow marked (`default`). A session may use any of them. `needsReferencePhoto: true`
         marks a flow whose face check runs without the chip read: every session on it must
-        carry a `referencePhoto`.
+        carry a `referencePhoto`. See my data and Delete my data are not listed: start one
+        with `flowKind` on `POST /proofing/sessions`.
       security:
         - apiKey: []
       responses:
@@ -8253,7 +8266,11 @@ paths:
         Authenticated with the organisation's API key as a Bearer token. `email` and an optional
         `name` of the subject, an external person, `flowId` (any flow of the organisation a
         subject can finish; absent is the organisation's default flow, else 422
-        `no_default_flow`) and
+        `no_default_flow`), `flowKind` (`data_access` "See my data" or `data_erasure` "Delete
+        my data" starts a person's data request on the organisation's own flow of that kind
+        instead, which goes to the organisation's review once the person is proven; a
+        `flowId` naming a data request flow does the same; a `flowKind` that is not the kind
+        of the `flowId` given is 400 `invalid_input`) and
         `sendMail` (absent or true mails the subject as a request sent from the wallet would), and
         `language` (`en` or `nl`: the mail's and the Idem app's; absent is the deployment
         default for the mail and the phone's language in the app). The answer carries the session's Idem `deepLink`, for a caller that shows the QR code
@@ -10633,6 +10650,13 @@ components:
         flowId:
           type: string
           description: Any flow of the organisation a subject can finish; absent runs the organisation's default flow.
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+          description: >-
+            `data_access` ("See my data") or `data_erasure` ("Delete my data") starts a data
+            request on the organisation's own flow of that kind; absent or `identity` is an
+            identity check on `flowId`.
         sendMail:
           type: boolean
           default: true
@@ -11157,9 +11181,9 @@ components:
     ProofingFlow:
       description: >-
         A flow version as the organisation sees it. `allowed`, `default`, `diplomaMode`,
-        `kind` and `retentionDays` are only meaningful in the flow list; a single version
-        (create, edit, versions, activate) reads `allowed` and `default` false and leaves
-        `diplomaMode`, `kind` and `retentionDays` out.
+        `kind`, `hostedEnabled` and `retentionDays` are only meaningful in a flow list; a single
+        version (create, edit, versions, activate) reads `allowed` and `default` false and
+        leaves `diplomaMode`, `kind`, `hostedEnabled` and `retentionDays` out.
       allOf:
         - $ref: '#/components/schemas/ProofingFlowSpec'
         - type: object
@@ -11201,7 +11225,14 @@ components:
               enum: [identity, data_access, data_erasure]
               description: >-
                 What the flow's sessions are for: an identity check, or a person asking for their
-                data (`data_access`) or its erasure (`data_erasure`); absent on a single version.
+                data (`data_access`) or its erasure (`data_erasure`), which only the
+                `data-request-flows` list holds; absent on a single version.
+            hostedEnabled:
+              type: boolean
+              description: >-
+                The flow's "Allow sending this flow as a link" switch (its hosted page's
+                `enabled`): off, the wallet's Verify a person dialog offers only Show on this
+                screen. Absent on a single version.
             retentionDays:
               type: integer
               description: >-
@@ -11261,14 +11292,6 @@ components:
           type: string
           enum: [redirect, done]
       required: [enabled, completion]
-    ProofingFlowKind:
-      type: object
-      additionalProperties: false
-      properties:
-        kind:
-          type: string
-          enum: [identity, data_access, data_erasure]
-      required: [kind]
     ProofingDataMatches:
       type: object
       properties:
@@ -11586,6 +11609,13 @@ components:
             For a member, a flow members may use. For an external person, any flow a recipient
             can finish when the sender is an organisation admin, else a flow members may use;
             absent is the organisation's default flow.
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+          description: >-
+            `data_access` or `data_erasure` sends a data request on the organisation's own flow
+            of that kind, from an administrator to an external person; absent or `identity` is
+            an identity check on `flowId`.
         method:
           type: string
           enum: [idem_app, yivi_app]

@@ -19,16 +19,22 @@ import (
 
 // fakeDataRequests holds flow kinds and one data request's matches.
 type fakeDataRequests struct {
-	kinds      map[string]FlowKind
-	candidates []Request
-	unfinished []Request
-	matched    []Request
-	matches    []DataMatch
-	saved      []NewDataMatch
-	approved   []uuid.UUID
-	exportTill *time.Time
-	kept       *int
-	exported   int
+	kinds map[string]FlowKind
+	// standard is the org's standard flow of each data request kind; claims
+	// the flows ClaimStandardFlow was handed. beforeClaim runs first in a
+	// claim: another send's claim landing in between.
+	standard    map[FlowKind]string
+	claims      []string
+	beforeClaim func(FlowKind)
+	candidates  []Request
+	unfinished  []Request
+	matched     []Request
+	matches     []DataMatch
+	saved       []NewDataMatch
+	approved    []uuid.UUID
+	exportTill  *time.Time
+	kept        *int
+	exported    int
 	// checks are the candidates read per data request; matchingBusy makes
 	// TryLockMatching find the lock held; saveErr fails SaveMatches.
 	checks       map[uuid.UUID]MatchLevel
@@ -58,9 +64,21 @@ func (f *fakeDataRequests) AllFlowKinds(context.Context, uuid.UUID) (map[string]
 	return f.kinds, nil
 }
 
-func (f *fakeDataRequests) SaveFlowKind(_ context.Context, _ uuid.UUID, flowID string, kind FlowKind) (FlowKind, error) {
+func (f *fakeDataRequests) StandardFlows(context.Context, uuid.UUID) (map[FlowKind]string, error) {
+	return maps.Clone(f.standard), nil
+}
+
+func (f *fakeDataRequests) ClaimStandardFlow(_ context.Context, _ uuid.UUID, kind FlowKind, flowID, stale string) (string, error) {
+	if f.beforeClaim != nil {
+		f.beforeClaim(kind)
+	}
+	f.claims = append(f.claims, flowID)
 	f.kinds[flowID] = kind
-	return kind, nil
+	if current, ok := f.standard[kind]; ok && current != stale {
+		return current, nil
+	}
+	f.standard[kind] = flowID
+	return flowID, nil
 }
 
 func (f *fakeDataRequests) Candidates(context.Context, Request, SubjectIdentity) ([]Request, error) {
@@ -137,12 +155,29 @@ func (f *fakeDataRequests) RecordExported(context.Context, Request, int) error {
 	return nil
 }
 
-// newDataFixture is newFixture with chipFlow made a data request flow of kind.
+// newDataFixture is newFixture with the org's two standard flows, and chipFlow
+// made a flow of kind: for a data request kind, one made a data request before
+// the standard flows, so a request naming it runs on the standard flow of its
+// kind.
 func newDataFixture(kind FlowKind) (fixture, *fakeDataRequests) {
 	f := newFixture()
-	data := &fakeDataRequests{kinds: map[string]FlowKind{chipFlow.ID: kind}, requests: f.requests}
+	data := &fakeDataRequests{kinds: map[string]FlowKind{chipFlow.ID: kind}, standard: map[FlowKind]string{}, requests: f.requests}
+	for _, k := range standardKinds {
+		flow := standardTestFlow(k)
+		f.ips.flows = append(f.ips.flows, flow)
+		data.kinds[flow.ID], data.standard[k] = k, flow.ID
+	}
 	f.svc.dataRequests = data
 	return f, data
+}
+
+// standardTestFlow is kind's standard flow as the engine lists it.
+func standardTestFlow(kind FlowKind) proofingprovider.Flow {
+	spec, err := normalizeFlow(standardFlowSpec(kind))
+	if err != nil {
+		panic(err)
+	}
+	return proofingprovider.Flow{FlowSpec: spec, ID: "f-" + string(kind), Version: 1, Active: true}
 }
 
 // heldSession is a settled external session holding personal data.
@@ -291,29 +326,6 @@ func TestDataFlowsNotForMembers(t *testing.T) {
 	}
 	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{DefaultFlowID: chipFlow.ID}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("a data flow as the default = %v; want ErrInvalidInput", err)
-	}
-}
-
-func TestSaveFlowKindNeedsIdentity(t *testing.T) {
-	f, data := newDataFixture(FlowIdentity)
-	ctx := context.Background()
-	if _, err := f.svc.SaveFlowKind(ctx, testOrg, appFlow.ID, FlowDataErasure); !errors.Is(err, ErrFlowNoIdentity) {
-		t.Errorf("appFlow (reads no identity) = %v; want ErrFlowNoIdentity", err)
-	}
-	f.settings.selection = FlowSelection{FlowIDs: []string{chipFlow.ID}, DefaultFlowID: chipFlow.ID}
-	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrDataFlowForMember) {
-		t.Errorf("a flow members may send = %v; want ErrDataFlowForMember", err)
-	}
-	f.settings.selection = FlowSelection{DefaultFlowID: chipFlow.ID}
-	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataErasure); !errors.Is(err, ErrInvalidInput) {
-		t.Errorf("the default flow = %v; want ErrInvalidInput", err)
-	}
-	f.settings.selection = FlowSelection{}
-	if _, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, "everything"); !errors.Is(err, ErrInvalidInput) {
-		t.Errorf("unknown kind = %v; want ErrInvalidInput", err)
-	}
-	if kind, err := f.svc.SaveFlowKind(ctx, testOrg, chipFlow.ID, FlowDataAccess); err != nil || data.kinds[chipFlow.ID] != FlowDataAccess {
-		t.Errorf("chipFlow = %q, %v; want data_access", kind, err)
 	}
 }
 

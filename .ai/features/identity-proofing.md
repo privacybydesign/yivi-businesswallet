@@ -23,9 +23,13 @@ when its Flow filter picks one, whose retention line then states that flow's
 retention. A count read from a list of 200, the cap, may be short, so it shows
 as "200+" ("12+" for a part of it). "Verify a person" in the
 header of the Overview, of All people and of a flow opens the send form, for any member. From a
-flow the dialog sends on that flow; from the Overview or All people it asks for the flow first. It
-asks how the person gets the QR code (the e-mail address sits inside the e-mail option) and has
-two switches, off by default: "Add the person's name" and "Only let this person pass". Only a
+flow the dialog sends on that flow; from the Overview or All people it asks first what to send
+(for an admin: an identity check, See my data or Delete my data, §15) and, for an identity
+check, the flow. It asks how the person gets the QR code (the e-mail address sits inside the
+e-mail option; a flow whose "Allow sending this flow as a link" switch is off offers only Show on
+this screen) and has two switches, off by default: "Add the person's name" and "Only let this
+person pass". The Flows page lists neither GDPR request: one line under the table says See my
+data and Delete my data are always available and links to Settings › Data and privacy. Only a
 platform admin pauses an org's proofing, after which no request can be sent
 (`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
 request from their member detail page (admin-only, like that page). The people
@@ -523,8 +527,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   independent of `member_allowed`; it must be an identity flow an external person
   can be sent (`externalCompletable`), never a data request flow (a CHECK, and
   400 `invalid_input` from `validSelection`). That table is the wallet's one row per org and
-  flow id, shared with the hosted, diploma and kind settings below; saving one of
-  the four leaves the others alone, and no row reads as every default.
+  flow id, shared with the hosted, diploma, address and kind settings below; saving one
+  leaves the others alone, and no row reads as every default. `GET .../flows` (and
+  the API's `GET /proofing/flows`) never lists a data request flow (§15), and its rows
+  carry `hostedEnabled`, the flow's "Allow sending this flow as a link" switch.
   `PUT /flow-selection {flowIds, defaultFlowId}` replaces the selection whole
   (`flowIds` are the flows members may use), audited `identity_proofing.flows_configured`
   with before/after. `GET .../flows` rows carry `allowed`, `default` and
@@ -1427,10 +1433,10 @@ Everything this feature does not do yet, in one place.
   combined with the expected-subject match, which needs the document data.
 - **Data requests (§15):** no matching across orgs (each org is the controller
   of its own sessions); no mail to the person when decided; no data requests on
-  members' own proofing requests; data requests are a kind of flow, not a
-  standard feature of the org: not hidden from the flows list and the pickers,
-  with no place in the app to send one. An erasure cannot take a `probable`, `email` or
-  `name` match: those wait for the org's retention.
+  members' own proofing requests; only an admin (or an API key) sends one. An
+  erasure cannot take a `probable`, `email` or `name` match: those wait for the
+  org's retention. A deployment without Regula cannot create the standard flows
+  (they check the face), so it cannot send a data request.
 - **Chip Authentication** over DG14 is not run: `nfc.chip_auth` is checked
   through Active Authentication only (`chip_verify.go`), so a chip with
   Chip Authentication and no AA key is not proven genuine against cloning.
@@ -1488,9 +1494,9 @@ only: the engine knows nothing of it.
   audited `flow_diplomas_configured`. A step is in the flow or not, so there is
   no optional diploma step. `required` needs a flow that reads the name and
   date of birth (`flow_no_identity`): each extract's holder is matched
-  against them. `identityRequired` holds such a flow, and a data request
-  flow, to it in `EditFlow` (the spec must name `dg1`) and
-  `ActivateFlowVersion` too; the editor locks Name and document details on
+  against them. `identityRequired` holds such a flow to it in `EditFlow` (the
+  spec must name `dg1`) and `ActivateFlowVersion` too (a data request flow is
+  never edited, §15); the editor locks Name and document details on
   and saves a setting that lifts the rule before a version that drops `dg1`.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
   for the admin, never sent to the engine (its steps are the app's, and it
@@ -1637,24 +1643,61 @@ holder's change of bank account).
 ## 15. Data requests (GDPR access and erasure)
 
 A person asks the org what is held of them ("see my data", Art. 15) or for
-its erasure ("delete my data", Art. 17). The org sends them a session on
-a flow of that kind, like any other session (API, hosted link, mail or
-on-screen); the person proves who they are, and the session goes to the
-org's **needs review**, where an org admin decides. For now a data request is
-a flow of the kind `data_access` or `data_erasure`; it is not yet a standard
-feature of its own. Code:
-`data_request*.go`; frontend `routes/data-request-review.tsx`, the flow
-editor's Type, and the hosted page.
+its erasure ("delete my data", Art. 17). See my data and Delete my data are a
+standard feature of every org, not flows anyone sets up: the org sends the
+person a session on its standard flow of that kind, like any other session
+(API, hosted link, mail or on-screen); the person proves who they are, and the
+session goes to the org's **needs review**, where an org admin decides. Code:
+`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`,
+the Verify a person dialog's "What do you send?" and the hosted page.
 
-- **Flow kind.** `identity_proofing_flow_settings.kind`: `identity` (the
-  default), `data_access` or `data_erasure`, set in the flow editor
-  (`PUT …/flows/{id}/kind`, audited `identity_proofing.flow_kind_configured`).
-  A data request flow must read the name and date of birth
-  (`flow_no_identity`) and is never a members' flow (`data_flow_for_member`,
-  a CHECK and both service paths) and never the org's default flow (a CHECK,
-  and 400 `invalid_input` from `validSelection` and `SaveFlowKind`); it asks for
-  no diplomas. A request keeps
-  the kind it was sent with (`identity_proofing_requests.flow_kind`).
+- **Standard flows.** One flow per org of each kind, `data_access` and
+  `data_erasure` (`identity_proofing_flow_settings.kind`, `standard` true; a
+  partial unique index allows one per kind, a CHECK none of kind `identity`).
+  The wallet creates them (`Service.standardFlows`) the first time an org
+  needs them: `GET .../data-request-flows` (admin; the dialog and the on-screen
+  page read them there) or a send of a data request. That is lazy rather than
+  a backfill because the flows live in the proofing engine, which validates
+  and stores a flow only through its own interface (a migration would have to
+  write the engine's definition JSON), and it covers new and existing orgs
+  alike. Their definition is the wallet's (`standardFlowSpec`): document scan,
+  chip read and a face check (Regula, liveness) at eIDAS Substantial, releasing
+  the document data (`dg1`, the name and date of birth a request finds the
+  person's sessions by), `chip_checks` and `biometrics`, never an image; legal
+  basis `legal_obligation`. A standard flow whose active version falls short of
+  it (`meetsStandard`) gets it back in a new version under its own name, and
+  one the engine no longer lists is replaced. Both are audited
+  `flow_created`/`flow_version_created` and `flow_kind_configured` without an
+  actor. Two first sends at once each create a flow; `ClaimStandardFlow`
+  (an advisory lock per org and kind) makes the first the standard one and
+  leaves the other a hidden data request flow.
+- **Not a flow anyone edits.** No flow becomes a data request any other way
+  (the flow editor's Type and `PUT …/flows/{id}/kind` are gone). A data
+  request flow is not in `GET .../flows`, the API's `GET /proofing/flows` or
+  any flow picker, and `EditFlow`, `ActivateFlowVersion` and the hosted,
+  branding, diploma and address saves refuse it (409 `data_request_flow`). It
+  is never a members' flow (`data_flow_for_member`, a CHECK and both service
+  paths) nor the org's default flow (a CHECK, and 400 `invalid_input` from
+  `validSelection`); it asks for no diplomas and no address.
+- **Sending one.** `flowKind` `data_access` or `data_erasure` on
+  `POST .../requests` (the dialog) and the API's `POST /proofing/sessions`
+  runs on the standard flow of that kind, created first if need be
+  (`requestFlowID`); only an admin or an API key sends one
+  (`flow_not_allowed`), only to an external person. A `flowId` that names a data
+  request flow (an API caller that kept a standard flow's id) runs on the
+  standard flow of its kind, and a `flowKind` that is not the named flow's kind
+  is 400 `invalid_input`. A request keeps the kind it was sent with
+  (`identity_proofing_requests.flow_kind`).
+- **Flows from before (migration 20261021122000).** Only the seed made data
+  request flows (it no longer does). An org that has flows of a data request
+  kind keeps the oldest of each kind as its standard flow: the one whose first
+  engine version is oldest, else (a flow the engine does not hold, as under the
+  in-memory stub) the one whose settings were written first. The others stay
+  data request flows: hidden, not editable, and a request naming one runs on the
+  standard flow of its kind; their past requests keep pointing at them. Every
+  data request flow's hosted page goes back to the default (on, every language,
+  ending on the redirect), since nobody can open its Hosted page tab any more;
+  Down drops the mark and leaves the hosted pages on.
 - **The subject's page.** A data request refused after the person proved who
   they are (`dataRequestRefusal`: `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
   `ORG_PAUSED`, `LEGAL_RETENTION`) reads "Request refused" with the reason in

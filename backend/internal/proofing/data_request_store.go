@@ -69,29 +69,71 @@ func (s *DataRequestStore) AllFlowKinds(ctx context.Context, orgID uuid.UUID) (m
 	return out, nil
 }
 
-// SaveFlowKind sets the flow's kind and audits
-// identity_proofing.flow_kind_configured with before and after. Saving what it
-// already has changes nothing.
-func (s *DataRequestStore) SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error) {
+// StandardFlows returns the id of the org's standard flow of each data request
+// kind it has one of.
+func (s *DataRequestStore) StandardFlows(ctx context.Context, orgID uuid.UUID) (map[FlowKind]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT kind, flow_id FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND standard`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list standard flows org %s: %w", orgID, err)
+	}
+	out := map[FlowKind]string{}
+	var kind FlowKind
+	var flowID string
+	if _, err := pgx.ForEachRow(rows, []any{&kind, &flowID}, func() error {
+		out[kind] = flowID
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("proofing: list standard flows org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
+// ClaimStandardFlow records flowID, a flow the wallet just created for kind,
+// as a data request flow of kind and audits
+// identity_proofing.flow_kind_configured. It becomes the org's standard flow of
+// kind unless another flow already is: stale, a standard flow the engine no
+// longer lists, loses the mark to it. It returns the standard flow's id:
+// flowID, or the one that won a concurrent claim, which leaves flowID a data
+// request flow nothing runs on.
+func (s *DataRequestStore) ClaimStandardFlow(ctx context.Context, orgID uuid.UUID, kind FlowKind, flowID, stale string) (string, error) {
+	standard := flowID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		before, err := getFlowKind(ctx, q, orgID, flowID)
-		if err != nil || before == kind {
-			return err
+		// Two first sends of one org may claim at once: one of them wins.
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('identity_proofing_standard_flow:' || $1 || '/' || $2, 0))`,
+			orgID.String(), string(kind)); err != nil {
+			return fmt.Errorf("proofing: lock standard flow %s org %s: %w", kind, orgID, err)
 		}
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, kind)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (organization_id, flow_id) DO UPDATE SET kind = EXCLUDED.kind, updated_at = now()`,
-			orgID, flowID, string(kind)); err != nil {
-			return fmt.Errorf("proofing: save kind flow %s: %w", flowID, err)
+		var current string
+		err := q.QueryRow(ctx, `SELECT flow_id FROM identity_proofing_flow_settings
+			WHERE organization_id = $1 AND kind = $2 AND standard`, orgID, string(kind)).Scan(&current)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("proofing: read standard flow %s org %s: %w", kind, orgID, err)
+		}
+		if current != "" && current == stale {
+			if _, err := q.Exec(ctx, `UPDATE identity_proofing_flow_settings SET standard = false, updated_at = now()
+				WHERE organization_id = $1 AND flow_id = $2`, orgID, current); err != nil {
+				return fmt.Errorf("proofing: retire standard flow %s org %s: %w", current, orgID, err)
+			}
+			current = ""
+		}
+		if current != "" {
+			standard = current
+		}
+		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, kind, standard)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (organization_id, flow_id) DO UPDATE SET kind = EXCLUDED.kind, standard = EXCLUDED.standard, updated_at = now()`,
+			orgID, flowID, string(kind), standard == flowID); err != nil {
+			return fmt.Errorf("proofing: save standard flow %s org %s: %w", flowID, orgID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingFlowKindConfigured,
 			audit.Target{Type: audit.TargetIdentityProofingFlow, ID: flowID, OrgID: &orgID},
-			audit.Updated(map[string]any{"kind": string(before)}, map[string]any{"kind": string(kind)}))
+			audit.Updated(map[string]any{"kind": string(FlowIdentity)}, map[string]any{"kind": string(kind)}))
 	})
 	if err != nil {
 		return "", err
 	}
-	return kind, nil
+	return standard, nil
 }
 
 // Candidates is every external session of req's org that still

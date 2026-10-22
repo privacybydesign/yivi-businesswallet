@@ -219,7 +219,8 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]apiFlowResponse, 0, len(flows))
 	for _, f := range flows {
-		if !externalCompletable(f.Flow) {
+		// A data request is sent by its flowKind, on the org's standard flow.
+		if !externalCompletable(f.Flow) || f.Kind.dataRequest() {
 			continue
 		}
 		attrs := f.RequestedAttributes
@@ -305,7 +306,11 @@ type apiCreateSessionRequest struct {
 	// for a flow that matches the face without the chip read.
 	ReferencePhoto string `json:"referencePhoto"`
 	FlowID         string `json:"flowId"`
-	SendMail       *bool  `json:"sendMail"`
+	// FlowKind data_access or data_erasure starts a data request ("see my
+	// data", "delete my data") on the org's standard flow of that kind;
+	// empty or identity is an identity check on FlowID.
+	FlowKind FlowKind `json:"flowKind"`
+	SendMail *bool    `json:"sendMail"`
 	// Language (en/nl) is the mail's and the Idem app's; empty is the default.
 	Language email.Locale `json:"language"`
 	// Hosted asks for a link to the hosted page instead of a session: the
@@ -331,7 +336,8 @@ func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error
 	sent, err := h.service.CreateRequest(r.Context(), caller.Org,
 		Requester{Name: caller.KeyName, APIKeyID: &caller.KeyID}, NewRequest{
 			Channel: channel, SubjectEmail: body.Email, SubjectName: body.Name,
-			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
+			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, FlowKind: body.FlowKind,
+			SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
 			RedirectURL: body.RedirectURL,
 		})
 	if err != nil {

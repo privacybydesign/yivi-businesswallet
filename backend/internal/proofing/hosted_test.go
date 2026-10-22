@@ -173,6 +173,16 @@ func (f *fakeFlowHosted) Get(_ context.Context, _ uuid.UUID, flowID string) (Flo
 	return DefaultFlowHosted(), nil
 }
 
+func (f *fakeFlowHosted) Disabled(context.Context, uuid.UUID) ([]string, error) {
+	var out []string
+	for id, h := range f.byFlow {
+		if !h.Enabled {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s FlowHosted) (FlowHosted, error) {
 	f.byFlow[flowID] = s
 	return s, nil

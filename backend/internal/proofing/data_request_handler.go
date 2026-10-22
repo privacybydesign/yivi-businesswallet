@@ -12,32 +12,6 @@ import (
 // dataExportFilename is the name a "see my data" export downloads as.
 const dataExportFilename = "my-data.json"
 
-type flowKindBody struct {
-	Kind FlowKind `json:"kind"`
-}
-
-func (h *Handler) getFlowKind(w http.ResponseWriter, r *http.Request) error {
-	kind, err := h.service.FlowKind(r.Context(), orgFromRequest(r), r.PathValue("flowID"))
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, flowKindBody{Kind: kind})
-	return nil
-}
-
-func (h *Handler) saveFlowKind(w http.ResponseWriter, r *http.Request) error {
-	var body flowKindBody
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	kind, err := h.service.SaveFlowKind(r.Context(), orgFromRequest(r), r.PathValue("flowID"), body.Kind)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, flowKindBody{Kind: kind})
-	return nil
-}
-
 // dataMatchesResponse is what a data request's review shows next to the
 // person's identity: what they ask for, and the org's sessions of them.
 type dataMatchesResponse struct {

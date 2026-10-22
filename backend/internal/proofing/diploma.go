@@ -349,8 +349,8 @@ func (s *Service) FlowDiplomas(ctx context.Context, org Org, flowID string) (Dip
 	return s.flowDiplomas(ctx, org.ID, flowID)
 }
 
-// SaveFlowDiplomas sets one of the org's flows' DiplomaMode. Requests already
-// sent keep the mode they were sent with. Requiring diplomas needs a flow that
+// SaveFlowDiplomas sets one of the org's flows' DiplomaMode, not a data request
+// flow's. Requests already sent keep the mode they were sent with. Requiring diplomas needs a flow that
 // reads the name and date of birth: each extract's holder is matched against
 // them, so without them no extract could ever be taken.
 func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, mode DiplomaMode) (DiplomaMode, error) {
@@ -367,6 +367,9 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
 	if i < 0 {
 		return "", ErrFlowNotFound
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
+		return "", err
 	}
 	if mode.asked() && !readsIdentity(flows[i]) {
 		return "", ErrFlowNoIdentity

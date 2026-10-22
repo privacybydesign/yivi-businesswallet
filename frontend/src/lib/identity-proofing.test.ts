@@ -11,8 +11,10 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import {
+  DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
   ERASURE_HANDLINGS,
+  FLOW_KINDS,
   MAX_LISTED_REQUESTS,
 } from "../api/identity-proofing";
 import {
@@ -756,12 +758,10 @@ describe("flowDraftError", () => {
   });
 });
 
-describe("identity for data requests and diplomas", () => {
-  it("is needed by a data request or required diplomas", () => {
-    expect(identityRequired("identity", "off")).toBe(false);
-    expect(identityRequired("identity", "required")).toBe(true);
-    expect(identityRequired("data_erasure", "off")).toBe(true);
-    expect(identityRequired("data_access", "off")).toBe(true);
+describe("identity for diplomas", () => {
+  it("is needed by required diplomas", () => {
+    expect(identityRequired("off")).toBe(false);
+    expect(identityRequired("required")).toBe(true);
   });
 
   it("refuses a draft that drops the name and date of birth when needed", () => {
@@ -1609,6 +1609,31 @@ describe("diploma modes mirror backend/internal/proofing", () => {
     for (const mode of DIPLOMA_MODES) {
       expect(backend).toContain(mode);
     }
+  });
+});
+
+// The flow kinds, and of them the data requests the send form offers, are the
+// backend's, both ways.
+describe("flow kinds mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/data_request.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/Flow\w+\s+FlowKind = "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend kind and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...FLOW_KINDS].sort()).toEqual([...backend].sort());
+    expect([...DATA_REQUEST_KINDS].sort()).toEqual(
+      backend.filter((kind) => kind !== "identity").sort(),
+    );
   });
 });
 

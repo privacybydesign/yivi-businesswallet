@@ -8,7 +8,6 @@ import {
   useProofingStatsQuery,
   useSetFlowSelectionMutation,
 } from "../api/identity-proofing.queries";
-import { isDataRequest } from "../api/identity-proofing";
 import type { ProofingFlow } from "../api/identity-proofing";
 import {
   assuranceLevelLabel,
@@ -72,6 +71,7 @@ export default function IdentityProofingFlows(): React.JSX.Element {
               />
             )}
             <FlowsTable slug={slug} flows={flows.data} />
+            <DataRequestsNote slug={slug} />
           </>
         )}
       </div>
@@ -98,11 +98,10 @@ function FlowsTable({
     () => flows.find((f) => f.default)?.id ?? "",
   );
 
-  // A flow that can no longer be ticked drops out. The default is any identity
-  // flow an external person can be sent, whether or not members may use it.
-  const selectable = flows.filter(
-    (f) => f.completable && !isDataRequest(f.kind),
-  );
+  // A flow that can no longer be ticked drops out. The default is any flow an
+  // external person can be sent, whether or not members may use it. The list
+  // holds no data request flow.
+  const selectable = flows.filter((f) => f.completable);
   const { selection, dirty } = editedFlowSelection(
     selectable,
     allowed,
@@ -178,13 +177,6 @@ function FlowsTable({
                         >
                           {flow.name}
                         </Link>
-                        {flow.kind && isDataRequest(flow.kind) && (
-                          <Tag tone="amber">
-                            {t(
-                              `identityProofingFlows.kinds.${flow.kind}.title`,
-                            )}
-                          </Tag>
-                        )}
                         {!flow.completable && (
                           <Tag tone="amber">
                             {t("identityProofingFlows.notCompletable")}
@@ -266,6 +258,31 @@ function FlowsTable({
         </Button>
       </div>
     </form>
+  );
+}
+
+// See my data and Delete my data are not in the list: every org offers them,
+// and they are set in Settings › Data and privacy, not edited as flows.
+function DataRequestsNote({ slug }: { slug: string }): React.JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div className="flex flex-col gap-1">
+        <span className="text-ink text-[14px] font-semibold">
+          {t("identityProofingFlows.dataRequests.title")}
+        </span>
+        <span className="text-ink-soft text-[13px]">
+          {t("identityProofingFlows.dataRequests.hint")}
+        </span>
+      </div>
+      <Link
+        to={`/${slug}/settings?tab=privacy`}
+        className="text-link text-[14px] font-semibold hover:underline"
+      >
+        {t("identityProofingFlows.dataRequests.link")}
+      </Link>
+    </Card>
   );
 }
 

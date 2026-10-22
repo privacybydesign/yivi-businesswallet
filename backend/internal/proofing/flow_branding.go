@@ -192,7 +192,7 @@ func (s *Service) FlowBranding(ctx context.Context, org Org, flowID string) (Flo
 }
 
 // SaveFlowBranding replaces one of the org's flows' own branding, checked as
-// the org's is. A save that is not Custom removes it, so its fields go
+// the org's is; a data request flow has the org's. A save that is not Custom removes it, so its fields go
 // unchecked.
 func (s *Service) SaveFlowBranding(ctx context.Context, org Org, flowID string, f FlowBranding, logo LogoChange) (FlowBranding, error) {
 	if s.flowBrandings == nil {
@@ -206,6 +206,9 @@ func (s *Service) SaveFlowBranding(ctx context.Context, org Org, flowID string, 
 		f.Branding = b
 	}
 	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
+		return FlowBranding{}, err
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return FlowBranding{}, err
 	}
 	return s.flowBrandings.Save(ctx, org.ID, flowID, f, logo)

@@ -17,8 +17,9 @@ import (
 
 // A data request is a session on a flow of kind FlowDataAccess ("see my
 // data", GDPR Art. 15) or FlowDataErasure ("delete my data", Art. 17): a
-// person asked the org for their data, and the org sends them a
-// session on that flow like any other. Once the person is proven, the wallet
+// person asked the org for their data, and the org sends them a session on
+// its standard flow of that kind (standard_flow.go), which the wallet sets
+// up for every org and no admin edits. Once the person is proven, the wallet
 // does not approve it: it finds the org's external sessions of that person
 // (findDataMatches) and holds the session in needs_review. The reviewer sees
 // who asks, for what, how surely they were proven and the matches, and their
@@ -29,8 +30,7 @@ import (
 type FlowKind string
 
 const (
-	// FlowIdentity is an identity check: what every flow was before data
-	// requests, and a flow's kind until an admin sets another.
+	// FlowIdentity is an identity check: every flow an admin creates.
 	FlowIdentity    FlowKind = "identity"
 	FlowDataAccess  FlowKind = "data_access"
 	FlowDataErasure FlowKind = "data_erasure"
@@ -142,7 +142,8 @@ type NewDataMatch struct {
 type dataRequestStore interface {
 	FlowKind(ctx context.Context, orgID uuid.UUID, flowID string) (FlowKind, error)
 	AllFlowKinds(ctx context.Context, orgID uuid.UUID) (map[string]FlowKind, error)
-	SaveFlowKind(ctx context.Context, orgID uuid.UUID, flowID string, kind FlowKind) (FlowKind, error)
+	StandardFlows(ctx context.Context, orgID uuid.UUID) (map[FlowKind]string, error)
+	ClaimStandardFlow(ctx context.Context, orgID uuid.UUID, kind FlowKind, flowID, stale string) (string, error)
 	Candidates(ctx context.Context, req Request, requester SubjectIdentity) ([]Request, error)
 	RecordIdentityKey(ctx context.Context, req Request, id SubjectIdentity) error
 	UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error)
@@ -169,47 +170,6 @@ func (s *Service) allFlowKinds(ctx context.Context, orgID uuid.UUID) (map[string
 		return map[string]FlowKind{}, nil
 	}
 	return s.dataRequests.AllFlowKinds(ctx, orgID)
-}
-
-// FlowKind returns one of the org's flows' kind.
-func (s *Service) FlowKind(ctx context.Context, org Org, flowID string) (FlowKind, error) {
-	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
-		return "", err
-	}
-	return s.flowKind(ctx, org.ID, flowID)
-}
-
-// SaveFlowKind sets one of the org's flows' kind. A data request kind needs a
-// flow that reads the name and date of birth, and one members may not send:
-// only external people ask for their data. Requests already sent keep
-// the kind they were sent with.
-func (s *Service) SaveFlowKind(ctx context.Context, org Org, flowID string, kind FlowKind) (FlowKind, error) {
-	if s.dataRequests == nil {
-		return "", errors.New("proofing: no data request store configured")
-	}
-	if !kind.valid() {
-		return "", fmt.Errorf("%w: kind is identity, data_access or data_erasure", ErrInvalidInput)
-	}
-	flows, err := s.Flows(ctx, org, FlowsAll)
-	if err != nil {
-		return "", err
-	}
-	i := slices.IndexFunc(flows, func(f OrgFlow) bool { return f.ID == flowID })
-	if i < 0 {
-		return "", ErrFlowNotFound
-	}
-	if kind.dataRequest() {
-		if !readsIdentity(flows[i].Flow) {
-			return "", ErrFlowNoIdentity
-		}
-		if flows[i].Allowed {
-			return "", ErrDataFlowForMember
-		}
-		if flows[i].Default {
-			return "", fmt.Errorf("%w: the default flow must be an identity check", ErrInvalidInput)
-		}
-	}
-	return s.dataRequests.SaveFlowKind(ctx, org.ID, flowID, kind)
 }
 
 // checkMemberFlowKinds refuses a members' selection holding a data request flow.
