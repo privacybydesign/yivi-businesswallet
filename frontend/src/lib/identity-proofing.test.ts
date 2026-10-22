@@ -7,6 +7,7 @@ import type {
   ProofingBranding,
   ProofingFlow,
   ProofingFlowBranding,
+  ProofingFlowHosted,
   WebhookDelivery,
 } from "../api/identity-proofing";
 import {
@@ -29,6 +30,10 @@ import {
   identityRequired,
   proofingRejectionReason,
   effectiveBranding,
+  appLook,
+  dropsOwnBranding,
+  hostedDraft,
+  hostedDraftDirty,
   savedLocales,
   selectedLocales,
   diplomaRejectionReason,
@@ -2020,6 +2025,125 @@ describe("effective branding", () => {
       ...org,
       primaryColor: "#abcdef",
     });
+  });
+});
+
+describe("app look", () => {
+  const bare: ProofingBranding = {
+    displayName: "",
+    primaryColor: "",
+    secondaryColor: "",
+    textColor: "",
+    surfaceColor: "",
+    borderColor: "",
+    linkColor: "",
+    successColor: "",
+    warningColor: "",
+    errorColor: "",
+    topbarColor: "",
+    fontFamily: "",
+    supportContact: "help@acme.example",
+    privacyUrl: "https://acme.example/privacy",
+    logoUri: "",
+    hidePoweredBy: false,
+  };
+  const theme = {
+    primaryColor: "#036bd2",
+    topbarColor: "#101e1e",
+    logoUri: "/theme-logo",
+  };
+
+  it("is the org's theme under the branding's name without a look of its own", () => {
+    expect(
+      appLook({ ...bare, displayName: "Acme Trips" }, theme, "Acme"),
+    ).toEqual({
+      name: "Acme Trips",
+      primaryColor: "#036bd2",
+      headerColor: "#101e1e",
+      logoUri: "/theme-logo",
+    });
+  });
+
+  it("takes the branding's logo over the theme's", () => {
+    expect(appLook({ ...bare, logoUri: "/flow-logo" }, theme, "Acme")).toEqual({
+      name: "Acme",
+      primaryColor: "#036bd2",
+      headerColor: "#101e1e",
+      logoUri: "/flow-logo",
+    });
+  });
+
+  it("is the branding alone once it has a colour or a font, the app's own for the rest", () => {
+    expect(
+      appLook({ ...bare, primaryColor: "#22337a" }, theme, "Acme"),
+    ).toEqual({
+      name: "Acme",
+      primaryColor: "#22337a",
+      headerColor: "",
+      logoUri: "",
+    });
+    expect(
+      appLook({ ...bare, fontFamily: "Inter, sans-serif" }, theme, "Acme")
+        .primaryColor,
+    ).toBe("");
+    expect(
+      appLook(
+        { ...bare, secondaryColor: "#112233", topbarColor: "#0a3d2e" },
+        theme,
+        "Acme",
+      ).headerColor,
+    ).toBe("#0a3d2e");
+  });
+
+  it("does not count the support contact or privacy link as a look", () => {
+    expect(appLook(bare, theme, "Acme").primaryColor).toBe("#036bd2");
+  });
+});
+
+describe("going back to the organisation's branding", () => {
+  const saved: ProofingFlowBranding = {
+    custom: true,
+    displayName: "Acme Trips",
+    primaryColor: "",
+    supportContact: "",
+    privacyUrl: "",
+    logoUri: "/flow-logo",
+  };
+
+  it("drops the flow's own branding only when it had one", () => {
+    expect(dropsOwnBranding(saved, false)).toBe(true);
+    expect(dropsOwnBranding(saved, true)).toBe(false);
+    expect(dropsOwnBranding({ ...saved, custom: false }, false)).toBe(false);
+    expect(dropsOwnBranding({ ...saved, custom: false }, true)).toBe(false);
+  });
+});
+
+describe("hosted page form", () => {
+  const saved: ProofingFlowHosted = {
+    enabled: true,
+    locales: [],
+    completion: "redirect",
+  };
+
+  it("starts from what is saved, every language ticked for none", () => {
+    expect(hostedDraft(saved)).toEqual({
+      ...saved,
+      locales: [...SUPPORTED_LANGUAGES],
+    });
+    expect(hostedDraftDirty(hostedDraft(saved), saved)).toBe(false);
+  });
+
+  it("holds a change until it is reset to what is saved", () => {
+    const changed = { ...hostedDraft(saved), enabled: false, locales: ["nl"] };
+    expect(hostedDraftDirty(changed, saved)).toBe(true);
+    expect(hostedDraftDirty({ ...changed, enabled: true }, saved)).toBe(true);
+    expect(hostedDraftDirty(hostedDraft(saved), saved)).toBe(false);
+    expect(
+      hostedDraftDirty(
+        { ...hostedDraft(saved), completion: "done" as const },
+        saved,
+      ),
+    ).toBe(true);
   });
 });
 

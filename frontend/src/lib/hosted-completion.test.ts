@@ -201,4 +201,25 @@ describe("hostedTheme", () => {
     expect(theme.topbarColor).toBe("#101e1e");
     expect(theme.surfaceColor).toBe("#fbfbfc");
   });
+
+  it("puts the branding's own colour, a flow's, over the session's theme", () => {
+    const sessionTheme = {
+      primaryColor: "#036bd2",
+      secondaryColor: "#5412c7",
+      textColor: "",
+      surfaceColor: "",
+      borderColor: "",
+      linkColor: "",
+      successColor: "",
+      warningColor: "",
+      errorColor: "",
+      headerColor: "#101e1e",
+      fontFamily: "",
+    };
+    const theme = hostedTheme(sessionTheme, "#22337a");
+    expect(theme.primaryColor).toBe("#22337a");
+    expect(theme.accentColor).toBe("#5412c7");
+    expect(theme.topbarColor).toBe("#101e1e");
+    expect(hostedTheme(sessionTheme, "red").primaryColor).toBe("#036bd2");
+  });
 });

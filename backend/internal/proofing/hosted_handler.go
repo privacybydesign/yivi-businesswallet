@@ -243,13 +243,14 @@ type hostedViewResponse struct {
 	// Diplomas are the extracts the subject added, as the page lists them.
 	Diplomas []hostedDiplomaResponse `json:"diplomas"`
 	// Theme is the look the page takes: the one the Idem app shows the
-	// session in. Absent when neither the org's proofing nor its theme set one.
+	// session in, the flow's own branding over the org's. Absent when neither
+	// the proofing branding nor the org's theme set one.
 	Theme *hostedThemeResponse `json:"theme,omitempty"`
 }
 
 // hostedThemeResponse is AppBranding as the hosted page applies it: #rrggbb
 // colours and a CSS font-family list, "" keeping the page's own. The logo is
-// the org's, already in Organization.Branding.
+// already in Organization.Branding.
 type hostedThemeResponse struct {
 	PrimaryColor   string `json:"primaryColor"`
 	SecondaryColor string `json:"secondaryColor"`
@@ -326,8 +327,9 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		SupportContact: st.Branding.SupportContact, PrivacyURL: st.Branding.PrivacyURL,
 		HidePoweredBy: st.Branding.HidePoweredBy,
 	}
-	// The logo is the one the theme comes with: the org's proofing logo, or the
-	// org's theme's for an org without white-labeling of its own.
+	// The logo is the one the theme comes with: the flow's own, else the org's
+	// proofing logo, or the org's theme's for an org without white-labeling of
+	// its own.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
 	if err != nil {
 		return fmt.Errorf("proofing: hosted page theme: %w", err)

@@ -766,18 +766,17 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 }
 
 // SubjectKindOf returns whether the org's request went to a member or to an
-// external person, or ErrRequestNotFound.
-func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (SubjectKind, error) {
-	var kind SubjectKind
-	err := s.db.QueryRow(ctx, `SELECT subject_kind FROM identity_proofing_requests
-		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&kind)
+// external person, and the flow it runs, or ErrRequestNotFound.
+func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (kind SubjectKind, flowID string, err error) {
+	err = s.db.QueryRow(ctx, `SELECT subject_kind, flow_id FROM identity_proofing_requests
+		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&kind, &flowID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrRequestNotFound
+		return "", "", ErrRequestNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("proofing: subject kind of request %s: %w", id, err)
+		return "", "", fmt.Errorf("proofing: subject kind of request %s: %w", id, err)
 	}
-	return kind, nil
+	return kind, flowID, nil
 }
 
 // GetExternal returns one of the org's external requests, or ErrRequestNotFound:

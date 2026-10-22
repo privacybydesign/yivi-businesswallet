@@ -10,6 +10,7 @@ import type {
   ProofingChannel,
   ProofingFlow,
   ProofingFlowBranding,
+  ProofingFlowHosted,
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
@@ -18,6 +19,7 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
+import type { OrgTheme } from "../api/theme";
 import { SUPPORTED_LANGUAGES } from "../i18n/language";
 import { errorCode } from "./api-error";
 import { auditActorLabel } from "./audit-event";
@@ -1594,6 +1596,66 @@ export function effectiveBranding(
   };
 }
 
+// Whether saving a flow's Branding tab deletes branding of its own: it was
+// custom and goes back to the organisation's, its fields and logo included.
+export function dropsOwnBranding(
+  saved: ProofingFlowBranding,
+  custom: boolean,
+): boolean {
+  return saved.custom && !custom;
+}
+
+// The fields that give a branding a look of its own in the Idem app: a colour
+// or the font. A name, logo, support contact or privacy link alone do not.
+const APP_LOOK_FIELDS = [
+  "primaryColor",
+  "secondaryColor",
+  "textColor",
+  "surfaceColor",
+  "borderColor",
+  "linkColor",
+  "successColor",
+  "warningColor",
+  "errorColor",
+  "topbarColor",
+  "fontFamily",
+] as const satisfies readonly (keyof ProofingBranding)[];
+
+// What the Idem app shows a person outside the org of a flow's branding (see
+// effectiveBranding): the name its mail signs with, its colour, the app's
+// header and the logo; "" keeps the app's own. A branding with a look of its
+// own is shown as it is; otherwise the org's theme, with the branding's logo
+// when it has one. Mirrors AppBrandingResolver and whiteLabeled in
+// backend/internal/proofing/app_branding.go.
+export interface AppLook {
+  name: string;
+  primaryColor: string;
+  headerColor: string;
+  logoUri: string;
+}
+
+export function appLook(
+  branding: ProofingBranding,
+  theme: Pick<OrgTheme, "primaryColor" | "topbarColor" | "logoUri">,
+  orgName: string,
+): AppLook {
+  const name = branding.displayName || orgName;
+  if (APP_LOOK_FIELDS.some((field) => branding[field] !== "")) {
+    return {
+      name,
+      primaryColor: branding.primaryColor,
+      headerColor: branding.topbarColor,
+      logoUri: branding.logoUri,
+    };
+  }
+  return {
+    name,
+    primaryColor: theme.primaryColor,
+    headerColor: theme.topbarColor,
+    logoUri: branding.logoUri || theme.logoUri,
+  };
+}
+
 // The languages a hosted page form shows ticked: none saved is every one.
 export function selectedLocales(saved: readonly string[]): string[] {
   return saved.length === 0 ? [...SUPPORTED_LANGUAGES] : [...saved];
@@ -1603,6 +1665,24 @@ export function selectedLocales(saved: readonly string[]): string[] {
 // too.
 export function savedLocales(selected: readonly string[]): string[] {
   return selected.length === SUPPORTED_LANGUAGES.length ? [] : [...selected];
+}
+
+// A flow's Hosted page form as saved: Cancel goes back to it.
+export function hostedDraft(saved: ProofingFlowHosted): ProofingFlowHosted {
+  return { ...saved, locales: selectedLocales(saved.locales) };
+}
+
+// Whether the Hosted page form holds a change from what is saved.
+export function hostedDraftDirty(
+  draft: ProofingFlowHosted,
+  saved: ProofingFlowHosted,
+): boolean {
+  const seed = hostedDraft(saved);
+  return (
+    draft.enabled !== seed.enabled ||
+    draft.completion !== seed.completion ||
+    draft.locales.join() !== seed.locales.join()
+  );
 }
 
 // The text colour readable on a #rrggbb fill (WCAG relative luminance): the

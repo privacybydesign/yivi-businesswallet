@@ -211,11 +211,7 @@ function FlowView({
               ) : tab === "branding" ? (
                 <FlowBrandingSettings slug={slug} flowId={flow.id} />
               ) : (
-                <FlowHostedSettings
-                  slug={slug}
-                  flow={flow}
-                  onCancel={() => setEditing(false)}
-                />
+                <FlowHostedSettings slug={slug} flow={flow} />
               )}
             </FlowTabPanel>
           ))}

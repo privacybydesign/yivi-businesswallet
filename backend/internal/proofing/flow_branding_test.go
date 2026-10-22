@@ -83,8 +83,17 @@ func brandedFixture(t *testing.T) fixture {
 
 func TestBrandingOver(t *testing.T) {
 	base := Branding{
-		DisplayName: "Org", PrimaryColor: "#111111", SupportContact: "org@example.org",
-		PrivacyURL: "https://org.example/privacy", HasLogo: true, HidePoweredBy: true,
+		DisplayName: "Org", PrimaryColor: "#111111", SecondaryColor: "#333333", TextColor: "#444444",
+		SurfaceColor: "#555555", BorderColor: "#666666", LinkColor: "#777777", SuccessColor: "#888888",
+		WarningColor: "#999999", ErrorColor: "#AAAAAA", TopbarColor: "#BBBBBB", FontFamily: "Nunito, sans-serif",
+		SupportContact: "org@example.org", PrivacyURL: "https://org.example/privacy", HasLogo: true, HidePoweredBy: true,
+	}
+	// with is base with the fields of own's name, colour, contact and privacy
+	// link replaced: the white-label colours and font are not a flow's to set.
+	with := func(name, color, contact, privacy string) Branding {
+		b := base
+		b.DisplayName, b.PrimaryColor, b.SupportContact, b.PrivacyURL = name, color, contact, privacy
+		return b
 	}
 	cases := map[string]struct {
 		own  Branding
@@ -96,17 +105,15 @@ func TestBrandingOver(t *testing.T) {
 				DisplayName: "Own", PrimaryColor: "#222222", SupportContact: "own@example.org",
 				PrivacyURL: "https://own.example/privacy", HasLogo: true,
 			},
-			Branding{
-				DisplayName: "Own", PrimaryColor: "#222222", SupportContact: "own@example.org",
-				PrivacyURL: "https://own.example/privacy", HasLogo: true, HidePoweredBy: true,
-			},
+			with("Own", "#222222", "own@example.org", "https://own.example/privacy"),
 		},
 		"one field": {
 			Branding{PrimaryColor: "#222222"},
-			Branding{
-				DisplayName: "Org", PrimaryColor: "#222222", SupportContact: "org@example.org",
-				PrivacyURL: "https://org.example/privacy", HasLogo: true, HidePoweredBy: true,
-			},
+			with("Org", "#222222", "org@example.org", "https://org.example/privacy"),
+		},
+		"white-label of its own": {
+			Branding{SecondaryColor: "#CCCCCC", TopbarColor: "#DDDDDD", FontFamily: "Inter, sans-serif"},
+			base,
 		},
 	}
 	for name, c := range cases {

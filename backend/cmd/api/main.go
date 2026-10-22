@@ -944,7 +944,8 @@ func run() error {
 		slog.WarnContext(ctx, "identity proofing is off: IDENTITY_PROOFING_ENCRYPTION_KEY is not set, so no proofing request can be sent and no webhook is delivered")
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
-	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewOrgSettingsStore(pool, recorder), themeSettingsStore)
+	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewOrgSettingsStore(pool, recorder),
+		proofing.NewFlowBrandingStore(pool, recorder), themeSettingsStore)
 	branding := appBranding{brandingResolver}
 	// The proofing jobs outlive the HTTP drain, so the notices and webhook
 	// deliveries the last requests cause still go out; they stop when run

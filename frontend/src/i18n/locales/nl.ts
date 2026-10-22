@@ -1276,7 +1276,7 @@ export const nl: Translation<typeof en> = {
     },
     branding: {
       title: "Huisstijl voor deze flow",
-      hint: "Gebruikt in de verificatiemail en op de gehoste pagina van deze flow.",
+      hint: "Gebruikt in de verificatiemail, op de gehoste pagina en in de Idem-app van deze flow, voor iemand buiten de organisatie.",
       which: "Welke huisstijl",
       same: {
         title: "Zelfde als de organisatie",
@@ -1289,6 +1289,20 @@ export const nl: Translation<typeof en> = {
       },
       orgEmpty: "Organisatie: leeg",
       logoInherited: "Het logo van de organisatie",
+      preview: {
+        caption: "Voorbeeld",
+        mail: "Verificatiemail",
+        app: "Idem-app",
+        start: "Starten",
+        appNote:
+          "Zo toont de Idem-app de naam, het logo en de kleur van deze flow als de persoon het verzoek opent.",
+      },
+      dropConfirm: {
+        title: "De huisstijl van de organisatie gebruiken?",
+        message:
+          "De eigen weergavenaam, het logo, de kleur, het supportcontact en de URL van de privacyverklaring van deze flow worden verwijderd. De mail, de gehoste pagina en de Idem-app tonen daarna de huisstijl van de organisatie.",
+        confirm: "Die van de organisatie gebruiken",
+      },
     },
     hosted: {
       title: "Gehoste pagina",

@@ -6070,10 +6070,11 @@ paths:
         organisation's: `displayName`, `primaryColor` (`#rrggbb`), `supportContact`,
         `privacyUrl` (an https URL) and a `logo` file (PNG, JPEG, GIF or WebP, at most 512
         KiB) or `removeLogo=true`; a field left empty falls back to the organisation's. `custom`
-        false removes the flow's branding, its logo included. The flow's proofing mail and
-        hosted page use the result. Audited `identity_proofing.flow_branding_configured` with
-        before and after (whether a logo is set, never its bytes); saving what it already holds
-        changes and audits nothing.
+        false removes the flow's branding, its logo included. The flow's proofing mail, its
+        hosted page (`organization`, `theme` and the logo) and the Idem app (for an external
+        person) use the result, over the organisation's white-label colours and font. Audited
+        `identity_proofing.flow_branding_configured` with before and after (whether a logo is
+        set, never its bytes); saving what it already holds changes and audits nothing.
       requestBody:
         required: true
         content:
@@ -12312,8 +12313,8 @@ components:
               type: object
               description: >-
                 The look the page takes, the one the Idem app shows the session in: the
-                organisation's proofing look when it has a colour or a font of its own, else
-                the organisation's theme. Colours are `#rrggbb`,
+                proofing look (the flow's own branding over the organisation's) when it has a
+                colour or a font of its own, else the organisation's theme. Colours are `#rrggbb`,
                 `fontFamily` a CSS font-family list; "" keeps the page's own. Absent when neither
                 the organisation's proofing nor its theme set any.
               properties:

@@ -1061,14 +1061,19 @@ post-review outcome stay the system's.
     logo, and `GET /app/{token}/branding/logo` serves the logo to a device
     holding the session. It is resolved from the session alone (tenant = org,
     client reference = request), never from the request, through
-    `AppBrandingResolver` over `RequestStore.SubjectKindOf` and the org's
-    settings: a request to an external person gets the org's white-label when it
-    has one (its colours, font and logo; what it leaves out keeps the design's
-    own, not the org's theme's), else the org theme under the name the proofing
-    mail signs with, with the proofing logo or else the org's. A request to a
-    member gets the org theme under the org's name. Nothing set at either level
-    is no `branding`. `relyingParty` stays the org's own name next to it. The
-    hosted page applies the same look (`theme` in the hosted view).
+    `AppBrandingResolver` over `RequestStore.SubjectKindOf` (the subject kind
+    and the request's flow), the org's settings and the flow's own branding: a
+    request to an external person gets the proofing branding its mail and
+    hosted page wear, the flow's own over the org's (`Settings.brandedFor`).
+    With white-label (a colour or the font, a flow's own colour included) that
+    is its colours, font and logo (the flow's, else the org's proofing logo);
+    what it leaves out keeps the design's own, not the org's theme's. Without,
+    the org theme under the name the proofing mail signs with, with the
+    proofing logo (the flow's, else the org's) or else the theme's. A request
+    to a member gets the org theme under the org's name, whatever its flow.
+    Nothing set at either level is no `branding`. `relyingParty` stays the
+    org's own name next to it. The hosted page applies the same look (`theme`
+    in the hosted view).
   - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
     org and flow, `flow_branding.go`; a row is "custom for this flow", none is
     "same as the organisation"): `GET` and `PUT
@@ -1076,18 +1081,23 @@ post-review outcome stay the system's.
     true or false, is required) and `GET .../branding/logo`, admin only. It holds
     the org's name, colour, logo, support contact and privacy URL; the
     white-label colours and font and "powered by" stay the org's. Each field it
-    sets replaces the org's, and one left empty, or no logo, falls back to it
-    (`Branding.over`, mirrored by `effectiveBranding` in
-    `lib/identity-proofing.ts`). It styles the flow's proofing mail
-    (`proofingMail`: a branding that cannot be read blocks the mail, a logo that
-    cannot be read leaves the wordmark) and its hosted page (`HostedRequest`,
-    `HostedLogo`), over the org's white-label there. The on-screen page, a
-    member's mail and the Idem app still show the org's. Going back to "same
-    as the organisation" deletes the row, logo included, and checks none of
-    the form's fields or its logo upload (the handler does not read it): the
-    tab sends its hidden draft text fields in that mode too. Audited
-    `identity_proofing.flow_branding_configured` with before and after. The
-    form is the Branding tab of Edit flow, with a preview of the mail.
+    sets replaces the org's, and one left empty, or no logo, falls back to it;
+    the org's white-label colours and font stay under it (`Branding.over`,
+    mirrored by `effectiveBranding` in `lib/identity-proofing.ts`). It styles
+    the flow's proofing mail (`proofingMail`: a branding that cannot be read
+    blocks the mail, a logo that cannot be read leaves the wordmark), its
+    hosted page (`HostedRequest`, `HostedLogo`; where `SetAppBranding` is
+    wired, as in `cmd/api` and the integration harness, the page's `theme` and
+    logo come from `AppBrandingResolver`, which applies it as well) and the
+    Idem app of an external person. The on-screen page, a member's mail and a
+    member's app session still show the org's. Going back to "same as the
+    organisation" deletes the row, logo included, after the tab asks to
+    confirm, and checks none of the form's fields or its logo upload (the
+    handler does not read it): the tab sends its hidden draft text fields in
+    that mode too. Audited `identity_proofing.flow_branding_configured` with
+    before and after. The form is the Branding tab of Edit flow, with a preview
+    that switches between the proofing mail and the Idem app (`appLook` in
+    `lib/identity-proofing.ts` mirrors the resolver for an external person).
   - **Allowed redirect origins** (§7).
   - Branding is under Settings › Branding (the org's, for every flow; the
     wallet's own look is the separate Settings › Wallet theme).
@@ -1183,7 +1193,7 @@ name or an IP address (`validHost`): the origins are written into the page's
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
 400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
 `embedOrigins`, `language` and `organization` (name, branding and data
-retention; the org's own, so the page is in the org's branding). Once `Session` reports an outcome
+retention; the branding is the flow's own over the org's). Once `Session` reports an outcome
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
 to its parent for each allowed origin (never `*`), then redirects
 (`location.replace`, so back does not land on the link and redirect again) with
@@ -1211,10 +1221,13 @@ hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
 with another `language` is 400; the page keeps to them), and `completion`
 (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
 Admins edit them on the Hosted page tab of a flow's Edit flow view, with a
-preview of the overview step in the flow's branding. The languages show ticked
-when none is saved, and all ticked saves as none. No row is the defaults.
-**Theme:** the page applies the org's branding `primaryColor` through
-`applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
+preview of the overview step in the flow's branding; Cancel there discards
+that tab's changes only, so Edit flow and the other tabs' drafts stay. The
+languages show ticked when none is saved, and all ticked saves as none. No row
+is the defaults.
+**Theme:** the page applies `theme` through `applyOrgTheme` (`hostedTheme`)
+while it shows, with the branding's own `primaryColor` (the flow's, else the
+org's) over the theme's, and a "Powered by Yivi" line the
 org can leave off (`hide_powered_by`, Settings › Branding).
 
 ## 8. Pausing an org's proofing

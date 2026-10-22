@@ -56,32 +56,39 @@ type appBrandingSettings interface {
 	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
+type appBrandingFlows interface {
+	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowBranding, error)
+	Logo(ctx context.Context, orgID uuid.UUID, flowID string) (Logo, error)
+}
+
 type appBrandingThemes interface {
 	GetSettings(ctx context.Context, orgID uuid.UUID) (themesettings.Settings, error)
 	GetLogo(ctx context.Context, orgID uuid.UUID) (themesettings.Logo, error)
 }
 
-// AppBrandingResolver picks a request's branding from who it was sent to,
-// never from anything the app sends. A request to a member gets the org's
-// theme. A request to an external person gets the org's proofing white-labeling
-// when it has one (see whiteLabeled): its colours, font and logo, the design's
-// own for the rest; else the org's theme, with the proofing logo when it has one
-// and the org's otherwise. Either way under the name the org's proofing mail
-// signs with.
+// AppBrandingResolver picks a request's branding from who it was sent to and
+// the flow it runs, never from anything the app sends. A request to a member
+// gets the org's theme under the org's name. A request to an external person
+// gets the proofing branding its mail and hosted page wear: the flow's own over
+// the org's (Settings.brandedFor). When that has white-labeling (see
+// whiteLabeled), its colours, font and logo, the design's own for the rest;
+// else the org's theme, with the proofing logo when it has one and the org's
+// otherwise. Either way under the name the proofing mail signs with.
 type AppBrandingResolver struct {
 	requests *RequestStore
 	settings appBrandingSettings
+	flows    appBrandingFlows
 	themes   appBrandingThemes
 }
 
-func NewAppBrandingResolver(requests *RequestStore, settings appBrandingSettings, themes appBrandingThemes) *AppBrandingResolver {
-	return &AppBrandingResolver{requests: requests, settings: settings, themes: themes}
+func NewAppBrandingResolver(requests *RequestStore, settings appBrandingSettings, flows appBrandingFlows, themes appBrandingThemes) *AppBrandingResolver {
+	return &AppBrandingResolver{requests: requests, settings: settings, flows: flows, themes: themes}
 }
 
-// Branding is the org's requestID's branding, nil when neither the org's
-// proofing settings nor its theme set any.
+// Branding is the org's requestID's branding, nil when neither the proofing
+// branding nor the org's theme set any.
 func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uuid.UUID) (*AppBranding, error) {
-	kind, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
+	kind, flowID, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +96,12 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 	if err != nil {
 		return nil, fmt.Errorf("proofing: app branding org theme: %w", err)
 	}
-	settings, err := r.settings.Get(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: app branding settings: %w", err)
-	}
 	var out AppBranding
 	if kind == SubjectExternal {
+		settings, _, err := r.externalBranding(ctx, orgID, flowID)
+		if err != nil {
+			return nil, err
+		}
 		if b := settings.Branding; whiteLabeled(b) {
 			out = AppBranding{
 				Name: settings.SignedAs(), PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor,
@@ -107,6 +114,10 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 			out.HasLogo = out.HasLogo || b.HasLogo
 		}
 	} else {
+		settings, err := r.settings.Get(ctx, orgID)
+		if err != nil {
+			return nil, fmt.Errorf("proofing: app branding settings: %w", err)
+		}
 		out = fromTheme(settings.OrgName, theme)
 	}
 	if out == (AppBranding{Name: out.Name}) {
@@ -117,17 +128,17 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 
 // Logo is the logo Branding reported, or ErrNoAppLogo.
 func (r *AppBrandingResolver) Logo(ctx context.Context, orgID, requestID uuid.UUID) (Logo, error) {
-	kind, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
+	kind, flowID, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
 	if err != nil {
 		return Logo{}, err
 	}
 	if kind == SubjectExternal {
-		settings, err := r.settings.Get(ctx, orgID)
+		settings, own, err := r.externalBranding(ctx, orgID, flowID)
 		if err != nil {
-			return Logo{}, fmt.Errorf("proofing: app branding settings: %w", err)
+			return Logo{}, err
 		}
 		if whiteLabeled(settings.Branding) || settings.Branding.HasLogo {
-			logo, err := r.settings.Logo(ctx, orgID)
+			logo, err := flowOrOrgLogo(ctx, r.flows, r.settings, orgID, flowID, own)
 			if errors.Is(err, ErrNoLogo) {
 				return Logo{}, ErrNoAppLogo
 			}
@@ -142,6 +153,20 @@ func (r *AppBrandingResolver) Logo(ctx context.Context, orgID, requestID uuid.UU
 		return Logo{}, fmt.Errorf("proofing: app branding org logo: %w", err)
 	}
 	return Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
+}
+
+// externalBranding is the org's proofing settings with flowID's own branding
+// over them, and that own branding.
+func (r *AppBrandingResolver) externalBranding(ctx context.Context, orgID uuid.UUID, flowID string) (Settings, FlowBranding, error) {
+	settings, err := r.settings.Get(ctx, orgID)
+	if err != nil {
+		return Settings{}, FlowBranding{}, fmt.Errorf("proofing: app branding settings: %w", err)
+	}
+	own, err := r.flows.Get(ctx, orgID, flowID)
+	if err != nil {
+		return Settings{}, FlowBranding{}, fmt.Errorf("proofing: app branding flow: %w", err)
+	}
+	return settings.brandedFor(own), own, nil
 }
 
 // whiteLabeled reports whether the org's proofing has white-labeling of its

@@ -141,18 +141,21 @@ export function originLines(text: string): string[] {
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 // The hosted page's theme: the white-label design in the look the Idem app
-// shows the session in (the org's proofing look, else its theme),
-// its header as the page's header. Without one, the org's own colour as
-// the brand colour when it has a valid one. Applied through applyOrgTheme,
-// which keeps text on it readable and drops what is not a valid colour.
+// shows the session in (the proofing look, the flow's own over the org's,
+// else the org's theme), its header as the page's header. The branding's
+// own colour (the flow's, else the org's) is the brand colour when it has a
+// valid one, so a flow's colour shows over a theme's. Applied through
+// applyOrgTheme, which keeps text on it readable and drops what is not a
+// valid colour.
 export function hostedTheme(
   theme: HostedTheme | undefined,
   primaryColor: string,
 ): OrgTheme {
   return {
     configured: true,
-    primaryColor:
-      theme?.primaryColor || (HEX_COLOR.test(primaryColor) ? primaryColor : ""),
+    primaryColor: HEX_COLOR.test(primaryColor)
+      ? primaryColor
+      : (theme?.primaryColor ?? ""),
     accentColor: theme?.secondaryColor ?? "",
     textColor: theme?.textColor ?? "",
     surfaceColor: theme?.surfaceColor ?? "",

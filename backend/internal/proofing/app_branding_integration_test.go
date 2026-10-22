@@ -33,7 +33,7 @@ func TestAppBrandingResolver(t *testing.T) {
 	requests := NewRequestStore(pool, recorder, newTestCipher(t))
 	settings := NewOrgSettingsStore(pool, recorder)
 	themes := themesettings.NewStore(pool, recorder)
-	resolver := NewAppBrandingResolver(requests, settings, themes)
+	resolver := NewAppBrandingResolver(requests, settings, NewFlowBrandingStore(pool, recorder), themes)
 
 	otherOrgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
@@ -191,7 +191,8 @@ func TestAppBrandingResolverNone(t *testing.T) {
 	ctx := context.Background()
 	recorder := audit.NopRecorder{}
 	requests := NewRequestStore(pool, recorder, newTestCipher(t))
-	resolver := NewAppBrandingResolver(requests, NewOrgSettingsStore(pool, recorder), themesettings.NewStore(pool, recorder))
+	resolver := NewAppBrandingResolver(requests, NewOrgSettingsStore(pool, recorder), NewFlowBrandingStore(pool, recorder),
+		themesettings.NewStore(pool, recorder))
 
 	orgID := makeOrg(t, pool, "acme")
 	requester := makeUser(t, pool, "sam@example.org")
@@ -218,7 +219,7 @@ func TestAppBrandingColoursOnly(t *testing.T) {
 	requests := NewRequestStore(pool, recorder, newTestCipher(t))
 	settings := NewOrgSettingsStore(pool, recorder)
 	themes := themesettings.NewStore(pool, recorder)
-	resolver := NewAppBrandingResolver(requests, settings, themes)
+	resolver := NewAppBrandingResolver(requests, settings, NewFlowBrandingStore(pool, recorder), themes)
 
 	orgID := makeOrg(t, pool, "cm")
 	requester := makeUser(t, pool, "sam@example.org")
@@ -240,4 +241,113 @@ func TestAppBrandingColoursOnly(t *testing.T) {
 	if _, err := resolver.Logo(ctx, orgID, req.ID); !errors.Is(err, ErrNoAppLogo) {
 		t.Errorf("Logo = %v; want ErrNoAppLogo", err)
 	}
+}
+
+// A request to an external person on a flow with its own branding gets that
+// branding in the app, over the org's: its name, colour and logo, the org's
+// white-label for the rest. A flow with the org's branding, and a request to a
+// member on any flow, look as they did without one.
+func TestAppBrandingFlow(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	recorder := audit.NopRecorder{}
+	requests := NewRequestStore(pool, recorder, newTestCipher(t))
+	settings := NewOrgSettingsStore(pool, recorder)
+	flows := NewFlowBrandingStore(pool, recorder)
+	themes := themesettings.NewStore(pool, recorder)
+	resolver := NewAppBrandingResolver(requests, settings, flows, themes)
+
+	requester := makeUser(t, pool, "sam@example.org")
+	member := Subject{Kind: SubjectMember, UserID: &requester, Name: "Sam de Vries", Email: "sam@example.org"}
+	external := externalSubject("anna@example.org")
+	themeLogo, orgLogo, ownLogo := []byte("theme-logo"), []byte("org-logo"), []byte("flow-logo")
+	png := func(b []byte) LogoChange {
+		return LogoChange{Replace: true, Logo: Logo{Bytes: b, ContentType: contentTypePNG}}
+	}
+
+	// newOrg is an org with the theme above and the proofing branding and logo
+	// given, whose flow "custom" has own as its branding and logo.
+	slugs := 0
+	newOrg := func(org Branding, orgLogo []byte, own Branding, ownLogo []byte) uuid.UUID {
+		t.Helper()
+		slugs++
+		orgID := makeOrg(t, pool, fmt.Sprintf("cm-%d", slugs))
+		if _, err := themes.Save(ctx, orgID, orgThemeInput,
+			themesettings.LogoUpdate{Replace: true, Logo: themesettings.Logo{Bytes: themeLogo, ContentType: contentTypePNG}}); err != nil {
+			t.Fatalf("save org theme: %v", err)
+		}
+		change := LogoChange{}
+		if orgLogo != nil {
+			change = png(orgLogo)
+		}
+		if _, err := settings.SaveBranding(ctx, orgID, org, change); err != nil {
+			t.Fatalf("save proofing branding: %v", err)
+		}
+		change = LogoChange{}
+		if ownLogo != nil {
+			change = png(ownLogo)
+		}
+		if _, err := flows.Save(ctx, orgID, "custom", FlowBranding{Custom: true, Branding: own}, change); err != nil {
+			t.Fatalf("save flow branding: %v", err)
+		}
+		return orgID
+	}
+	request := func(orgID uuid.UUID, flowID string, subject Subject) uuid.UUID {
+		t.Helper()
+		in := newStoredRequest(orgID, requester, subject)
+		in.Flow.ID = flowID
+		req, err := requests.Create(ctx, in)
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		return req.ID
+	}
+	check := func(name string, orgID, requestID uuid.UUID, want AppBranding, wantLogo []byte) {
+		t.Helper()
+		got, err := resolver.Branding(ctx, orgID, requestID)
+		if err != nil || got == nil || *got != want {
+			t.Errorf("%s: Branding = %+v, %v; want %+v", name, got, err, want)
+		}
+		logo, err := resolver.Logo(ctx, orgID, requestID)
+		switch {
+		case wantLogo == nil && !errors.Is(err, ErrNoAppLogo):
+			t.Errorf("%s: Logo = %q, %v; want ErrNoAppLogo", name, logo.Bytes, err)
+		case wantLogo != nil && (err != nil || !bytes.Equal(logo.Bytes, wantLogo)):
+			t.Errorf("%s: Logo = %q, %v; want %q", name, logo.Bytes, err, wantLogo)
+		}
+	}
+	orgTheme := func(name string) AppBranding {
+		return AppBranding{
+			Name: name, PrimaryColor: "#036BD2", SecondaryColor: "#5412C7", TextColor: "#101E1E",
+			SurfaceColor: "#FBFBFC", ErrorColor: "#D1293D", HeaderColor: "#101E1E",
+			FontFamily: `"Alexandria", system-ui, sans-serif`, HasLogo: true,
+		}
+	}
+
+	// An org with white-labeling of its own: the flow's colour and logo go over
+	// it, its second colour and font stay.
+	whiteLabel := Branding{DisplayName: "CM Tickets", SecondaryColor: "#112233", FontFamily: `"Nunito", system-ui, sans-serif`}
+	orgID := newOrg(whiteLabel, orgLogo, Branding{DisplayName: "CM Concerten", PrimaryColor: "#0A7C59"}, ownLogo)
+	check("custom flow over white-labeling", orgID, request(orgID, "custom", external), AppBranding{
+		Name: "CM Concerten", PrimaryColor: "#0A7C59", SecondaryColor: "#112233",
+		FontFamily: `"Nunito", system-ui, sans-serif`, HasLogo: true,
+	}, ownLogo)
+	check("org-branded flow with white-labeling", orgID, request(orgID, "org", external), AppBranding{
+		Name: "CM Tickets", SecondaryColor: "#112233", FontFamily: `"Nunito", system-ui, sans-serif`, HasLogo: true,
+	}, orgLogo)
+	var orgName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&orgName); err != nil {
+		t.Fatalf("read org name: %v", err)
+	}
+	check("member on a custom flow", orgID, request(orgID, "custom", member), orgTheme(orgName), themeLogo)
+
+	// An org without white-labeling: a flow with only a name and a logo keeps
+	// the org's theme under its own name and logo; a colour of its own is a look
+	// of its own, and the org's proofing logo is its logo.
+	orgID = newOrg(Branding{DisplayName: "CM Festivals"}, orgLogo, Branding{DisplayName: "CM Zomer"}, ownLogo)
+	check("custom flow name and logo over the org theme", orgID, request(orgID, "custom", external), orgTheme("CM Zomer"), ownLogo)
+	check("org-branded flow over the org theme", orgID, request(orgID, "org", external), orgTheme("CM Festivals"), orgLogo)
+	orgID = newOrg(Branding{DisplayName: "CM Musea"}, orgLogo, Branding{PrimaryColor: "#8E2440"}, nil)
+	check("custom flow colour", orgID, request(orgID, "custom", external),
+		AppBranding{Name: "CM Musea", PrimaryColor: "#8E2440", HasLogo: true}, orgLogo)
 }

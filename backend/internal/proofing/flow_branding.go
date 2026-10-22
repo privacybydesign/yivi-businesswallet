@@ -24,17 +24,18 @@ type FlowBranding struct {
 	UpdatedAt time.Time
 }
 
-// over is the branding a flow's mail and hosted page wear: b's own fields
-// where set, else base's.
+// over is the branding a flow's mail, hosted page and Idem app wear: b's own
+// name, colour, contact, privacy link and logo where set, else base's. The
+// white-label colours, the font and HidePoweredBy are not a flow's to set, so
+// they stay base's.
 func (b Branding) over(base Branding) Branding {
-	return Branding{
-		DisplayName:    cmp.Or(b.DisplayName, base.DisplayName),
-		PrimaryColor:   cmp.Or(b.PrimaryColor, base.PrimaryColor),
-		SupportContact: cmp.Or(b.SupportContact, base.SupportContact),
-		PrivacyURL:     cmp.Or(b.PrivacyURL, base.PrivacyURL),
-		HasLogo:        b.HasLogo || base.HasLogo,
-		HidePoweredBy:  base.HidePoweredBy,
-	}
+	out := base
+	out.DisplayName = cmp.Or(b.DisplayName, base.DisplayName)
+	out.PrimaryColor = cmp.Or(b.PrimaryColor, base.PrimaryColor)
+	out.SupportContact = cmp.Or(b.SupportContact, base.SupportContact)
+	out.PrivacyURL = cmp.Or(b.PrivacyURL, base.PrivacyURL)
+	out.HasLogo = b.HasLogo || base.HasLogo
+	return out
 }
 
 // brandedFor is s with the flow's own branding over the org's. UpdatedAt, the
@@ -223,8 +224,22 @@ func (s *Service) FlowBrandingLogo(ctx context.Context, org Org, flowID string) 
 
 // brandLogo is the logo a flow's branding shows: its own, else the org's.
 func (s *Service) brandLogo(ctx context.Context, orgID uuid.UUID, flowID string, fb FlowBranding) (Logo, error) {
+	return flowOrOrgLogo(ctx, s.flowBrandings, s.orgSettings, orgID, flowID, fb)
+}
+
+type flowLogoReader interface {
+	Logo(ctx context.Context, orgID uuid.UUID, flowID string) (Logo, error)
+}
+
+type orgLogoReader interface {
+	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
+}
+
+// flowOrOrgLogo is the logo fb shows: the flow's own when it is custom and has
+// one, else the org's proofing logo.
+func flowOrOrgLogo(ctx context.Context, flows flowLogoReader, org orgLogoReader, orgID uuid.UUID, flowID string, fb FlowBranding) (Logo, error) {
 	if fb.Custom && fb.HasLogo {
-		return s.flowBrandings.Logo(ctx, orgID, flowID)
+		return flows.Logo(ctx, orgID, flowID)
 	}
-	return s.orgSettings.Logo(ctx, orgID)
+	return org.Logo(ctx, orgID)
 }

@@ -60,7 +60,8 @@ type Handler struct {
 func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
 
 // SetAppBranding gives the hosted page the branding the Idem app shows its
-// session in: the org's proofing look when it has one, else its theme.
+// session in: the proofing look, the flow's own over the org's, when it has
+// one, else the org's theme.
 func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {

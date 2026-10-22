@@ -15,9 +15,10 @@ import type {
 import { SUPPORTED_LANGUAGES } from "../i18n";
 import {
   effectiveBranding,
+  hostedDraft,
+  hostedDraftDirty,
   proofingErrorMessage,
   savedLocales,
-  selectedLocales,
 } from "../lib/identity-proofing";
 import { Button, Card } from "../ui";
 import { CAPTION } from "./proofing-branding-fields";
@@ -37,11 +38,9 @@ const COMPLETIONS: readonly ProofingFlowHosted["completion"][] = [
 export function FlowHostedSettings({
   slug,
   flow,
-  onCancel,
 }: {
   slug: string;
   flow: ProofingFlow;
-  onCancel: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingFlowHostedQuery(slug, flow.id);
@@ -54,39 +53,28 @@ export function FlowHostedSettings({
   }
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-      <HostedForm
-        slug={slug}
-        flow={flow}
-        saved={settings.data}
-        onCancel={onCancel}
-      />
+      <HostedForm slug={slug} flow={flow} saved={settings.data} />
       <HostedPreview slug={slug} flow={flow} />
     </div>
   );
 }
 
+// Cancel discards this tab's changes only: Edit flow stays open, and the
+// other tabs keep their drafts.
 function HostedForm({
   slug,
   flow,
   saved,
-  onCancel,
 }: {
   slug: string;
   flow: ProofingFlow;
   saved: ProofingFlowHosted;
-  onCancel: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveFlowHostedMutation(slug, flow.id);
-  const [draft, setDraft] = useState(() => ({
-    ...saved,
-    locales: selectedLocales(saved.locales),
-  }));
+  const [draft, setDraft] = useState(() => hostedDraft(saved));
   const noLocale = draft.locales.length === 0;
-  const dirty =
-    draft.enabled !== saved.enabled ||
-    draft.completion !== saved.completion ||
-    draft.locales.join() !== selectedLocales(saved.locales).join();
+  const dirty = hostedDraftDirty(draft, saved);
 
   function toggleLocale(locale: string, on: boolean): void {
     setDraft((current) => ({
@@ -200,7 +188,15 @@ function HostedForm({
           )}
         </div>
         <div className="border-line flex justify-end gap-2 border-t px-6 py-4">
-          <Button type="button" variant="ghost" onClick={onCancel}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!dirty || save.isPending}
+            onClick={() => {
+              save.reset();
+              setDraft(hostedDraft(saved));
+            }}
+          >
             {t("common.cancel")}
           </Button>
           <Button

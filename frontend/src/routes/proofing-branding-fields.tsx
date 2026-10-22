@@ -266,77 +266,87 @@ export function ColorField({
   );
 }
 
-// A sketch of the proofing mail with the draft branding: what the subject
-// sees before they scan.
-export function MailPreview({
-  name,
-  color,
-  logoUri,
-  supportContact,
-  privacyUrl,
-}: {
+interface MailPreviewProps {
   name: string;
   color: string;
   logoUri: string;
   supportContact: string;
   privacyUrl: string;
-}): React.JSX.Element {
+}
+
+// A sketch of the proofing mail with the draft branding, under its caption:
+// what the subject sees before they scan.
+export function MailPreview(props: MailPreviewProps): React.JSX.Element {
   const { t } = useTranslation();
-  const fill = color || FALLBACK_PREVIEW_COLOR;
-  const onFill = readableTextOn(fill);
   return (
     <div>
       <div className={`${CAPTION} mb-2`}>
         {t("identityProofing.branding.preview.caption")}
       </div>
-      <div className="border-line bg-surface-2 rounded-xl border p-4">
-        <div className="mb-3 flex items-center gap-2">
-          {logoUri ? (
-            <img
-              src={logoUri}
-              alt=""
-              className={`bg-surface-3 object-contain ${PREVIEW_MARK}`}
-            />
-          ) : (
-            <InitialMark name={name} color={fill} className={PREVIEW_MARK} />
-          )}
-          <span className="text-ink text-[13px] font-semibold">{name}</span>
-        </div>
-        <div className="bg-surface border-line rounded-lg border p-5">
-          <h3 className="text-ink text-[17px] leading-snug font-bold">
-            {t("identityProofing.branding.preview.heading", { name })}
-          </h3>
-          <p className="text-ink-soft mt-2 text-[12.5px]">
-            {t("identityProofing.branding.preview.body", { name })}
-          </p>
-          <div className="border-line text-muted mx-auto my-4 flex h-24 w-24 items-center justify-center rounded-md border">
-            <Icon name="scan_qrcode" size={PREVIEW_QR_ICON} />
-          </div>
-          <div
-            className="rounded-md py-2.5 text-center text-[13px] font-semibold"
-            style={{ backgroundColor: fill, color: onFill }}
-          >
-            {t("identityProofing.branding.preview.button")}
-          </div>
-          {supportContact && (
-            <p className="text-ink-soft mt-3 text-[12px]">
-              {t("identityProofing.branding.preview.support", {
-                contact: supportContact,
-              })}
-            </p>
-          )}
-          {privacyUrl && (
-            <p className="text-ink-soft mt-1 text-[12px] break-all">
-              {t("identityProofing.branding.preview.privacy", {
-                url: privacyUrl,
-              })}
-            </p>
-          )}
-        </div>
-        <p className="text-muted mt-3 text-center text-[11px]">
-          {t("identityProofing.branding.preview.footer")}
-        </p>
+      <MailPreviewCard {...props} />
+    </div>
+  );
+}
+
+// The proofing mail sketch alone, for a preview that names it itself.
+export function MailPreviewCard({
+  name,
+  color,
+  logoUri,
+  supportContact,
+  privacyUrl,
+}: MailPreviewProps): React.JSX.Element {
+  const { t } = useTranslation();
+  const fill = color || FALLBACK_PREVIEW_COLOR;
+  const onFill = readableTextOn(fill);
+  return (
+    <div className="border-line bg-surface-2 rounded-xl border p-4">
+      <div className="mb-3 flex items-center gap-2">
+        {logoUri ? (
+          <img
+            src={logoUri}
+            alt=""
+            className={`bg-surface-3 object-contain ${PREVIEW_MARK}`}
+          />
+        ) : (
+          <InitialMark name={name} color={fill} className={PREVIEW_MARK} />
+        )}
+        <span className="text-ink text-[13px] font-semibold">{name}</span>
       </div>
+      <div className="bg-surface border-line rounded-lg border p-5">
+        <h3 className="text-ink text-[17px] leading-snug font-bold">
+          {t("identityProofing.branding.preview.heading", { name })}
+        </h3>
+        <p className="text-ink-soft mt-2 text-[12.5px]">
+          {t("identityProofing.branding.preview.body", { name })}
+        </p>
+        <div className="border-line text-muted mx-auto my-4 flex h-24 w-24 items-center justify-center rounded-md border">
+          <Icon name="scan_qrcode" size={PREVIEW_QR_ICON} />
+        </div>
+        <div
+          className="rounded-md py-2.5 text-center text-[13px] font-semibold"
+          style={{ backgroundColor: fill, color: onFill }}
+        >
+          {t("identityProofing.branding.preview.button")}
+        </div>
+        {supportContact && (
+          <p className="text-ink-soft mt-3 text-[12px]">
+            {t("identityProofing.branding.preview.support", {
+              contact: supportContact,
+            })}
+          </p>
+        )}
+        {privacyUrl && (
+          <p className="text-ink-soft mt-1 text-[12px] break-all">
+            {t("identityProofing.branding.preview.privacy", {
+              url: privacyUrl,
+            })}
+          </p>
+        )}
+      </div>
+      <p className="text-muted mt-3 text-center text-[11px]">
+        {t("identityProofing.branding.preview.footer")}
+      </p>
     </div>
   );
 }

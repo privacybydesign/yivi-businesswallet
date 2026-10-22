@@ -4,6 +4,8 @@ package integration
 
 import (
 	"bytes"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"strings"
@@ -13,7 +15,10 @@ import (
 )
 
 // A flow's own branding is set by an admin, shown on the flow's hosted page
-// over the org's, and gone again once the flow goes back to the org's.
+// over the org's (its name, its colour as the page's theme, its logo; the org's
+// white-label and contact for the rest), and gone again once the flow goes
+// back to the org's. The harness wires the app branding the hosted page takes
+// its theme and logo from, as cmd/api does.
 func TestFlowBrandingHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
@@ -24,6 +29,10 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 	key := env.proofingKey("acme", "Portal")
 	path := "/api/v1/orgs/acme/identity-proofing/flows/" + flow.ID + "/branding"
 	logo := testLogoPNG(t)
+	var orgLogo bytes.Buffer
+	if err := png.Encode(&orgLogo, image.NewGray(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatalf("encode org logo: %v", err)
+	}
 
 	type brandingView struct {
 		Custom         bool   `json:"custom"`
@@ -37,7 +46,10 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 
 	// The org's branding is what a flow without its own, or a field it leaves
 	// empty, falls back to.
-	resp := env.putBranding("acme", map[string]string{"displayName": "Acme Identity", "supportContact": "help@acme.example"}, nil)
+	resp := env.putBranding("acme", map[string]string{
+		"displayName": "Acme Identity", "supportContact": "help@acme.example",
+		"primaryColor": "#1F5B4A", "secondaryColor": "#112233",
+	}, orgLogo.Bytes())
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save org branding = %d, want 200", resp.StatusCode)
 	}
@@ -51,7 +63,7 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 		env.putBrandingForm("/api/v1/orgs/acme/identity-proofing/flows/nope/branding", map[string]string{"custom": "true"}, nil),
 		http.StatusUnprocessableEntity, "flow_not_found")
 
-	resp = env.putBrandingForm(path, map[string]string{"custom": "true", "displayName": "Acme Reizen"}, logo)
+	resp = env.putBrandingForm(path, map[string]string{"custom": "true", "displayName": "Acme Reizen", "primaryColor": "#22337A"}, logo)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save flow branding = %d, want 200", resp.StatusCode)
 	}
@@ -67,8 +79,8 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 	}
 	_ = served.Body.Close()
 
-	// The hosted page of the flow wears it: the flow's name and logo, and the
-	// org's support contact.
+	// The hosted page of the flow wears it: the flow's name, colour and logo,
+	// and the org's support contact and second colour.
 	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret, map[string]any{"hosted": true})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create hosted = %d, want 201", resp.StatusCode)
@@ -82,30 +94,42 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 			Name     string `json:"name"`
 			Branding struct {
 				DisplayName    string `json:"displayName"`
+				PrimaryColor   string `json:"primaryColor"`
 				SupportContact string `json:"supportContact"`
 				LogoURI        string `json:"logoUri"`
 			} `json:"branding"`
 		} `json:"organization"`
+		Theme *struct {
+			PrimaryColor   string `json:"primaryColor"`
+			SecondaryColor string `json:"secondaryColor"`
+		} `json:"theme"`
 	}
-	page := decodeJSON[hostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
-	if b := page.Organization.Branding; page.Organization.Name != "Acme Reizen" || b.DisplayName != "Acme Reizen" ||
-		b.SupportContact != "help@acme.example" || !strings.HasPrefix(b.LogoURI, hostedPath+"/logo") {
-		t.Errorf("hosted page = %+v; want the flow's name and logo over the org's contact", page)
+	// wantPage checks the hosted page wears name, colour and the logo bytes.
+	wantPage := func(when, name, color string, logo []byte) {
+		t.Helper()
+		page := decodeJSON[hostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
+		b := page.Organization.Branding
+		if page.Organization.Name != name || b.DisplayName != name || b.PrimaryColor != color ||
+			b.SupportContact != "help@acme.example" || !strings.HasPrefix(b.LogoURI, hostedPath+"/logo") {
+			t.Errorf("%s: hosted page = %+v; want %s in %s with a logo, over the org's contact", when, page, name, color)
+		}
+		if page.Theme == nil || page.Theme.PrimaryColor != color || page.Theme.SecondaryColor != "#112233" {
+			t.Errorf("%s: hosted theme = %+v; want %s over the org's second colour", when, page.Theme, color)
+		}
+		served := env.apiCall(http.MethodGet, hostedPath+"/logo", "", nil)
+		if body, _ := io.ReadAll(served.Body); served.StatusCode != http.StatusOK || !bytes.Equal(body, logo) {
+			t.Errorf("%s: hosted logo = %d, want 200 with the right logo", when, served.StatusCode)
+		}
+		_ = served.Body.Close()
 	}
-	hostedLogo := env.apiCall(http.MethodGet, hostedPath+"/logo", "", nil)
-	if body, _ := io.ReadAll(hostedLogo.Body); hostedLogo.StatusCode != http.StatusOK || !bytes.Equal(body, logo) {
-		t.Errorf("hosted logo = %d, want 200 with the flow's logo", hostedLogo.StatusCode)
-	}
-	_ = hostedLogo.Body.Close()
+	wantPage("custom", "Acme Reizen", "#22337A", logo)
 
-	// Back to the org's branding: the flow's fields and logo are gone.
+	// Back to the org's branding: the flow's fields and logo are gone, and the
+	// page wears the org's.
 	resp = env.putBrandingForm(path, map[string]string{"custom": "false"}, nil)
 	if got := decodeJSON[brandingView](t, resp); got.Custom || got.DisplayName != "" || got.LogoURI != "" {
 		t.Errorf("after going back = %+v, want the org's", got)
 	}
-	page = decodeJSON[hostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
-	if page.Organization.Name != "Acme Identity" || page.Organization.Branding.LogoURI != "" {
-		t.Errorf("hosted page after going back = %+v; want the org's name and no logo", page)
-	}
+	wantPage("the org's", "Acme Identity", "#1F5B4A", orgLogo.Bytes())
 	wantProofingError(t, "the logo of a flow without one", env.do(http.MethodGet, path+"/logo", nil), http.StatusNotFound, "not_found")
 }

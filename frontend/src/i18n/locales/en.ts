@@ -1249,7 +1249,7 @@ export const en = {
     },
     branding: {
       title: "Branding for this flow",
-      hint: "Used in the proofing mail and on the hosted page of this flow.",
+      hint: "Used in this flow's proofing mail, on its hosted page and in the Idem app, for a person outside the organisation.",
       which: "Which branding",
       same: {
         title: "Same as the organisation",
@@ -1262,6 +1262,20 @@ export const en = {
       },
       orgEmpty: "Organisation's: empty",
       logoInherited: "The organisation's logo",
+      preview: {
+        caption: "Preview",
+        mail: "Proofing mail",
+        app: "Idem app",
+        start: "Start",
+        appNote:
+          "How the Idem app shows this flow's name, logo and colour when the person opens the request.",
+      },
+      dropConfirm: {
+        title: "Use the organisation's branding?",
+        message:
+          "This flow's own display name, logo, colour, support contact and privacy statement URL are deleted. Its mail, hosted page and the Idem app then show the organisation's branding.",
+        confirm: "Use the organisation's",
+      },
     },
     hosted: {
       title: "Hosted page",
