@@ -1,6 +1,4 @@
-import type { TFunction } from "i18next";
 import type { ListedStatus, ProofingRequest } from "../api/identity-proofing";
-import { MAX_LISTED_REQUESTS } from "../api/identity-proofing";
 import { isProofingLive } from "./identity-proofing";
 import { waitingOldestFirst } from "./proofing-reviews";
 
@@ -85,34 +83,13 @@ export function finishedChecks(
     .sort((a, b) => Date.parse(finishedOn(b)) - Date.parse(finishedOn(a)));
 }
 
-// A count of rows read from lists the backend caps: the number, unless one of
-// those lists hit the cap, when more may exist than were read and the count
-// only says it is at least that many.
-export interface ListedCount {
-  count: number;
-  atLeast: boolean;
-}
-
-export function listedCount(rows: number, capped: boolean): ListedCount {
-  return capped
-    ? { count: Math.max(rows, MAX_LISTED_REQUESTS), atLeast: true }
-    : { count: rows, atLeast: false };
-}
-
-// Whether one of statuses' reads hit the cap.
+// Whether one of statuses' reads hit the cap, so a count of rows read from them
+// is only a lower bound (listedCount).
 export function cappedAmong(
   capped: readonly ListedStatus[],
   statuses: readonly ListedStatus[],
 ): boolean {
   return statuses.some((status) => capped.includes(status));
-}
-
-// How a count reads: "200+" once it is only a lower bound, so a busy org is
-// never shown a number it has passed.
-export function countLabel(count: ListedCount, t: TFunction): string {
-  return count.atLeast
-    ? t("common.atLeast", { number: MAX_LISTED_REQUESTS })
-    : String(count.count);
 }
 
 // What stands in for the name of a person without one: their data was purged,

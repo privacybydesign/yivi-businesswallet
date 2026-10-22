@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import type { ProofingRequest } from "../api/identity-proofing";
 import { MAX_LISTED_REQUESTS } from "../api/identity-proofing";
+import { listedCount } from "./identity-proofing";
 import {
   TODO_ROWS,
   cappedAmong,
-  countLabel,
   finishedChecks,
-  listedCount,
   namelessKey,
   todoShows,
   todoStatuses,
@@ -144,28 +143,23 @@ describe("waitingForOthers", () => {
   });
 });
 
-describe("listedCount", () => {
+describe("counts from capped reads", () => {
   const en = i18n.getFixedT("en");
-  const nl = i18n.getFixedT("nl");
 
-  it("is the number of rows while no list hit the cap", () => {
-    const count = listedCount(3, false);
-    expect(count).toEqual({ count: 3, atLeast: false });
-    expect(countLabel(count, en)).toBe("3");
-  });
-
-  it("says 200+ once a list hit the cap, in en and nl", () => {
-    const count = listedCount(MAX_LISTED_REQUESTS + 4, true);
-    expect(count.atLeast).toBe(true);
-    for (const t of [en, nl]) {
-      expect(countLabel(count, t)).toBe(`${MAX_LISTED_REQUESTS}+`);
-    }
+  it("say at least the rows once a read hit the cap", () => {
+    const rows = MAX_LISTED_REQUESTS + 4;
     expect(
       en("dashboard.waiting.unfinished", {
-        count: count.count,
-        number: countLabel(count, en),
+        count: rows,
+        number: listedCount(rows, true, en),
       }),
-    ).toBe(`${MAX_LISTED_REQUESTS}+ identity checks not finished`);
+    ).toBe(`${rows}+ identity checks not finished`);
+    expect(
+      en("dashboard.waiting.unfinished", {
+        count: 3,
+        number: listedCount(3, false, en),
+      }),
+    ).toBe("3 identity checks not finished");
   });
 
   it("knows which statuses' reads hit the cap", () => {

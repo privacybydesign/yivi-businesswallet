@@ -21,9 +21,6 @@ export const en = {
       en: "English",
       nl: "Nederlands",
     },
-    // A count that is only a lower bound: a list it was counted from hit the
-    // backend's cap.
-    atLeast: "{{number}}+",
     loading: "Loading…",
     logOut: "Log out",
     name: "Name",

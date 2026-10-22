@@ -18,7 +18,6 @@ import {
   getProofingFlows,
   getProofingRequests,
   getProofingStats,
-  hitsListCap,
   setProofingFlowSelection,
   updateProofingSettings,
   createProofingApiKey,
@@ -104,6 +103,7 @@ import {
   deliveriesPollInterval,
   isProofingLive,
   progressPollContinues,
+  requestListCapped,
   reviewPollContinues,
 } from "../lib/identity-proofing";
 
@@ -454,7 +454,9 @@ export function combineStatusReads(
     data: results.every((r) => r.data !== undefined)
       ? results.flatMap((r) => r.data ?? [])
       : undefined,
-    capped: statuses.filter((_, i) => hitsListCap(results[i]?.data ?? [])),
+    capped: statuses.filter((_, i) =>
+      requestListCapped(results[i]?.data ?? []),
+    ),
     isPending: results.some((r) => r.isPending),
     isError: results.some((r) => r.isError),
     error: results.find((r) => r.error)?.error ?? null,

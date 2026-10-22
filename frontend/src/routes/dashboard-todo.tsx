@@ -2,13 +2,16 @@ import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMemberInsightsQuery } from "../api/organization.queries";
-import { hitsListCap } from "../api/identity-proofing";
 import {
   useExternalRequestsInQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
-import { proofingErrorMessage } from "../lib/identity-proofing";
+import {
+  listedCount,
+  proofingErrorMessage,
+  requestListCapped,
+} from "../lib/identity-proofing";
 import {
   notIdentifiedCount,
   screeningAttentionCount,
@@ -18,8 +21,6 @@ import {
   HELD_STATUSES,
   UNFINISHED_STATUSES,
   cappedAmong,
-  countLabel,
-  listedCount,
   todoStatuses,
   unfinishedChecks,
 } from "../lib/proofing-todo";
@@ -84,16 +85,13 @@ export function DashboardTodo({
   // A disabled query keeps its last result, from before the right was
   // withdrawn too.
   const held = canReview ? (waiting.data ?? []) : [];
-  const reviews = listedCount(
-    waitingOldestFirst(held).length,
-    hitsListCap(held),
-  );
-  if (reviews.count > 0) {
+  const reviews = waitingOldestFirst(held).length;
+  if (reviews > 0) {
     items.push({
       key: "reviews",
       title: t("dashboard.todo.reviews", {
-        count: reviews.count,
-        number: countLabel(reviews, t),
+        count: reviews,
+        number: listedCount(reviews, requestListCapped(held), t),
       }),
       detail: t("dashboard.todo.reviewsDetail"),
       to: reviewPath(slug),
@@ -176,16 +174,17 @@ export function DashboardWaiting({
   const items: Item[] = [];
   const overview = `/${slug}/identity-proofing`;
 
-  const unfinished = listedCount(
-    unfinishedChecks(all).length,
-    cappedAmong(requests.capped, UNFINISHED_STATUSES),
-  );
-  if (unfinished.count > 0) {
+  const unfinished = unfinishedChecks(all).length;
+  if (unfinished > 0) {
     items.push({
       key: "unfinished",
       title: t("dashboard.waiting.unfinished", {
-        count: unfinished.count,
-        number: countLabel(unfinished, t),
+        count: unfinished,
+        number: listedCount(
+          unfinished,
+          cappedAmong(requests.capped, UNFINISHED_STATUSES),
+          t,
+        ),
       }),
       detail: t("dashboard.waiting.unfinishedDetail"),
       to: overview,
@@ -193,16 +192,17 @@ export function DashboardWaiting({
     });
   }
 
-  const forAdmin = listedCount(
-    canReview ? 0 : waitingOldestFirst(all).length,
-    !canReview && cappedAmong(requests.capped, HELD_STATUSES),
-  );
-  if (forAdmin.count > 0) {
+  const forAdmin = canReview ? 0 : waitingOldestFirst(all).length;
+  if (forAdmin > 0) {
     items.push({
       key: "forAdmin",
       title: t("dashboard.waiting.forAdmin", {
-        count: forAdmin.count,
-        number: countLabel(forAdmin, t),
+        count: forAdmin,
+        number: listedCount(
+          forAdmin,
+          cappedAmong(requests.capped, HELD_STATUSES),
+          t,
+        ),
       }),
       detail: t("dashboard.waiting.forAdminDetail"),
       to: overview,

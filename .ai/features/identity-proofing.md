@@ -1441,8 +1441,9 @@ Each list is its own read, `GET .../requests?subjectKind=external&status=<s>`, o
 per status (`useExternalRequestsInQuery`, `todoStatuses`): `?status=` matches the
 status a request reads in (`EffectiveStatus`, in SQL `effectiveStatusColumn`), so a
 link that lapsed unstarted is `expired`, not `pending`, and cannot use up the 200 cap
-of the running ones. A count from a read that hit the cap shows "200+"
-(`listedCount`, `countLabel`). While a platform admin has paused the org's
+of the running ones. A count from a read that hit the cap shows as at least
+that many, "200+" (`listedCount` and `requestListCapped` in
+`lib/identity-proofing.ts`, `cappedAmong`). While a platform admin has paused the org's
 proofing, only **Verify a person** is hidden on both pages (`todoShows`): every list
 route stays open, and the Overview puts why above the lists. The pure parts
 (`lib/proofing-todo.ts`) are tested; the counts come from the same lists as the

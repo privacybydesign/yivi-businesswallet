@@ -11,13 +11,15 @@ import {
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
-import { hitsListCap, isDataRequest } from "../api/identity-proofing";
+import { isDataRequest } from "../api/identity-proofing";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
 import {
+  listedCount,
   proofingErrorMessage,
   proofingMethodLabel,
   proofingStatusLabel,
+  requestListCapped,
   requestSubject,
   sumProofingStats,
 } from "../lib/identity-proofing";
@@ -30,10 +32,8 @@ import {
 import {
   TODO_ROWS,
   cappedAmong,
-  countLabel,
   finishedChecks,
   finishedOn,
-  listedCount,
   namelessKey,
   todoShows,
   todoStatuses,
@@ -164,12 +164,16 @@ function DecisionSection({ slug }: { slug: string }): React.JSX.Element {
   const formatWhen = useWhenFormatter();
   const waiting = useWaitingReviewsQuery(slug, { enabled: true });
   const held = waitingOldestFirst(waiting.data ?? []);
-  const count = listedCount(held.length, hitsListCap(waiting.data ?? []));
+  const count = listedCount(
+    held.length,
+    requestListCapped(waiting.data ?? []),
+    t,
+  );
 
   return (
     <TaskSection
       title={t("identityProofing.overview.decision.title")}
-      count={held.length > 0 ? countLabel(count, t) : undefined}
+      count={held.length > 0 ? count : undefined}
       action={
         held.length > 0 ? (
           <Link to={reviewPath(slug)} className={SECTION_LINK}>
@@ -272,12 +276,13 @@ function WaitingSection({
   const count = listedCount(
     waiting.length,
     cappedAmong(requests.capped, todoStatuses({ canReview, finished: false })),
+    t,
   );
 
   return (
     <TaskSection
       title={t("identityProofing.overview.waiting.title")}
-      count={requests.data ? countLabel(count, t) : undefined}
+      count={requests.data ? count : undefined}
       hint={t("identityProofing.overview.waiting.hint")}
       action={
         waiting.length > TODO_ROWS ? (

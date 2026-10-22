@@ -32,7 +32,6 @@ export const nl: Translation<typeof en> = {
       en: "English",
       nl: "Nederlands",
     },
-    atLeast: "{{number}}+",
     loading: "Laden…",
     logOut: "Uitloggen",
     name: "Naam",
