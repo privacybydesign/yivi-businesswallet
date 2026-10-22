@@ -453,6 +453,7 @@ func ensureDemoProofingOrg(ctx context.Context, pool *pgxpool.Pool, users *user.
 	if err != nil {
 		return organization.Organization{}, err
 	}
+
 	// requireSeedOwned proved it the seed's: an older seed's name (one
 	// without "(Demo)") follows the current one.
 	if org.Name != o.name {
@@ -461,6 +462,7 @@ func ensureDemoProofingOrg(ctx context.Context, pool *pgxpool.Pool, users *user.
 		}
 		org.Name = o.name
 	}
+
 	for _, m := range yiviTeam {
 		if err := ensureTeamMember(ctx, users, orgs, org.ID, m); err != nil {
 			return organization.Organization{}, err

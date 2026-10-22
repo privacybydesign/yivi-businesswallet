@@ -267,8 +267,8 @@ const (
 	// document's chip over NFC.
 	MethodIdem Method = "idem_app"
 	// MethodYivi is a disclosure of existing identity credentials from the Yivi
-	// app, over OpenID4VP at the wallet's verifier, whose photo the engine then checks
-	// the live face against (biometric_bound_login).
+	// app, over OpenID4VP at the wallet's verifier, which decides the session
+	// (biometric_bound_login).
 	MethodYivi Method = "yivi_app"
 	// MethodBrowser is the web device alone, with no app involved.
 	MethodBrowser Method = "browser"

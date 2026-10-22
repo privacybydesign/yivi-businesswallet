@@ -465,17 +465,17 @@ func (f *fakeCustomers) Logo(_ context.Context, _, id uuid.UUID) (CustomerLogo, 
 type fakeIPS struct {
 	// identity is who SessionIdentity reads off the document; Anna Jansen,
 	// born testBirthDate, when unset.
-	identity  proofingprovider.Identity
-	flows     []proofingprovider.Flow
-	flowLists int
+	identity    proofingprovider.Identity
+	flows       []proofingprovider.Flow
+	flowLists   int
+	decisions   []proofingprovider.ReviewDecision
+	sessionKeys []proofingprovider.Tenant
+	statusReads int
+	resultReads int
+	result      proofingprovider.Result
+	resultErr   error
 	// flowVersions answers ListFlowVersions when set.
 	flowVersions []proofingprovider.Flow
-	decisions    []proofingprovider.ReviewDecision
-	sessionKeys  []proofingprovider.Tenant
-	statusReads  int
-	resultReads  int
-	result       proofingprovider.Result
-	resultErr    error
 	// identityErr fails SessionIdentity alone, after a status read succeeded.
 	identityErr    error
 	identityReads  int
@@ -591,11 +591,11 @@ func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, 
 // fakeVerifier is the OpenID4VP verifier: a presentation stays pending until
 // presentation is set.
 type fakeVerifier struct {
-	started int
-	// claims are each start's extra claims.
-	claims       [][]string
+	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
+	// claims are each start's extra claims.
+	claims [][]string
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {

@@ -555,8 +555,8 @@ const (
 	ChannelHosted Channel = "hosted"
 	// ChannelOnScreen shows the session on the sender's screen once the subject
 	// accepted what will be collected: nothing is mailed, and a customer's
-	// subject needs no address. The Yivi app's face check runs on that screen,
-	// so a Yivi session is only ever delivered this way.
+	// subject needs no address. The Yivi app's session starts from that
+	// screen's QR code, so a Yivi session is only ever delivered this way.
 	ChannelOnScreen Channel = "on_screen"
 )
 
@@ -683,8 +683,8 @@ var faceProviders = []string{faceProviderRegula}
 
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
 // photographs the document, which only the Idem app does, matches the face
-// against a customer's reference photo (the Yivi app matches against its
-// credential's photo), checks an age the Yivi credentials carry no claim for
+// against a customer's reference photo (the Yivi app runs no face check),
+// checks an age the Yivi credentials carry no claim for
 // (openid4vpverifier.AgeClaim), or requires a level above what a Yivi session
 // reaches (yiviEIDASLevel), which enforceAssurance would only reject at the
 // end.

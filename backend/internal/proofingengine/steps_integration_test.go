@@ -322,6 +322,7 @@ func TestAgeCheckStoresNoBirthDate(t *testing.T) {
 		t.Fatalf("submit = %d %v", code, step)
 	}
 	h.storedWithout(t, sess.ID, "submit", leaks...)
+
 	id, err := h.engine.SessionIdentity(ctx, h.tenant, sess.ID, sess.Token)
 	if err != nil {
 		t.Fatalf("SessionIdentity: %v", err)

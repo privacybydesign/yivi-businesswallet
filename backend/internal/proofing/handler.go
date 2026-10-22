@@ -539,7 +539,9 @@ func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proo
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{Done: true, OK: disclosure.OK, Code: disclosure.Code})
+	respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{
+		Done: true, OK: disclosure.OK, Code: disclosure.Code,
+	})
 	return nil
 }
 

@@ -678,8 +678,8 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 }
 
 // normalizeRequest fills in the default app and delivery and refuses a
-// combination that cannot run: the Yivi app's face check runs in the browser
-// that shows its QR, and a mailed subject has no such page.
+// combination that cannot run: the Yivi app's session starts from a QR code
+// shown in the browser, and a mailed subject has no such page.
 func normalizeRequest(in NewRequest) (NewRequest, error) {
 	if in.Method == "" {
 		in.Method = proofingprovider.MethodIdem
@@ -1677,6 +1677,7 @@ func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: flow of request %s: %w", req.ID, err)
 	}
+
 	i := slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Version == req.FlowVersion })
 	if i < 0 {
 		i = slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Active })
@@ -1684,11 +1685,13 @@ func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error)
 	if i < 0 {
 		return nil, ErrFlowNotFound
 	}
+
 	f := versions[i]
 	var claims []string
 	if keepsFacePhoto(f) {
 		claims = append(claims, openid4vpverifier.ClaimPhoto)
 	}
+
 	if !slices.Contains(f.RequestedAttributes, attributeAgeOver) {
 		return claims, nil
 	}

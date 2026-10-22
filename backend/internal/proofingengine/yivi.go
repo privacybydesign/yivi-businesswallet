@@ -109,6 +109,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		ageOver = disclosedAgeOver(info.Attributes, fd.AgeOver)
 		withholdDisclosedBirthDate(&info)
 	}
+
 	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
 	if failed, errorCode := disclosureComplianceFailure(fd, documentFromDisclosure(info), time.Now()); failed {
 		details[detailReason] = disclosureCodeDocumentRefused
@@ -118,6 +119,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 
 	_, redaction := effectivePrivacyPolicy(fd)
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
+
 	if sess.Status == session.StatusCreated {
 		opened := sess
 		opened.Status = session.StatusOpened

@@ -150,6 +150,7 @@ func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
 	if _, ok := AgeClaim(17); ok {
 		t.Error("AgeClaim(17) answered: the credentials carry no over17")
 	}
+
 	has := func(c dcqlCredential, name string) bool {
 		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == name })
 	}
@@ -158,6 +159,7 @@ func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
 			t.Errorf("%s claims = %+v, want over18 without dateOfBirth", c.ID, c.Claims)
 		}
 	}
+
 	for _, c := range queryFor(ScopeProofing, nil).Credentials {
 		if !has(c, ClaimDateOfBirth) {
 			t.Errorf("%s without an age check does not ask the date of birth", c.ID)

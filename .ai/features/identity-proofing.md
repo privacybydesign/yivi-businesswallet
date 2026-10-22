@@ -251,7 +251,7 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       - Yivi app: the disclosure asks the passport or id-card's age claim
         (`over12`, `over16`, `over18`, `over21`, `over65`,
         `openid4vpverifier.AgeClaim`) instead of `dateOfBirth`, and the engine
-        answers from it (`disclosedAgeOver`, kept as `Yivi.AgeOver`).
+        answers from it (`disclosedAgeOver`, released as `result.ageOver`).
         - A date of birth the app discloses anyway is dropped before storing
           (`withholdDisclosedBirthDate`). `TestYiviAgeCheckStoresNoBirthDate`
           checks it.

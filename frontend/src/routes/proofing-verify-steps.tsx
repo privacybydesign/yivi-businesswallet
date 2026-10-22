@@ -28,6 +28,8 @@ import type {
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  ATTRIBUTE_AGE_OVER,
+  ATTRIBUTE_DOCUMENT,
   addressLookup,
   assuranceLevelLabel,
   diplomaRejectionReason,
@@ -128,7 +130,8 @@ export function Overview({
       label: t(`identityProofingFlows.attributes.${value}`),
       // The age check withholds the date of birth from the document data.
       detail:
-        value === "dg1" && flow.requestedAttributes?.includes("age_over")
+        value === ATTRIBUTE_DOCUMENT &&
+        flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
           ? t("customers.onScreen.attributeDetails.dg1WithoutBirthDate")
           : t(`customers.onScreen.attributeDetails.${value}`),
     }));
