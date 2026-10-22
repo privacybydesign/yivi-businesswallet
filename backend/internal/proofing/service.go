@@ -2045,14 +2045,12 @@ func sessionTTLAllowed(seconds int) bool {
 	})
 }
 
-// checkSettingsChange reports whether every session setting in change is one of
-// its options.
+// checkSettingsChange reports whether every session setting in change is one
+// the org may change. Its session lifetime and data retention are fixed
+// defaults (SessionTTL, defaultDataRetentionDays): a flow sets its own.
 func checkSettingsChange(change SessionSettingsChange) error {
-	if change.SessionTTL != nil && !slices.Contains(SessionTTLOptions, *change.SessionTTL) {
-		return fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
-	}
-	if change.DataRetentionDays != nil && !slices.Contains(DataRetentionDayOptions, *change.DataRetentionDays) {
-		return fmt.Errorf("%w: the data retention must be 7, 30, 90, 180 or 365 days", ErrInvalidInput)
+	if change.SessionTTL != nil || change.DataRetentionDays != nil {
+		return fmt.Errorf("%w: the session lifetime and the data retention are set per flow", ErrInvalidInput)
 	}
 	if change.ErasureHandling != nil && !change.ErasureHandling.valid() {
 		return fmt.Errorf("%w: erasure requests are decided by review or automatically", ErrInvalidInput)

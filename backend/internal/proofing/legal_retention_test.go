@@ -166,12 +166,12 @@ func TestLegalSyncsEngineRetention(t *testing.T) {
 	flowOverride := 100 * 24 * time.Hour
 	f.requests.identitySessions = map[time.Duration][]string{0: {"a", "b"}, flowOverride: {"c"}}
 
-	ninety := 90
-	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, SettingsChange{DataRetentionDays: &ninety}); err != nil {
-		t.Fatalf("UpdateSettings retention: %v", err)
+	automatic := ErasureAutomatic
+	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, SettingsChange{ErasureHandling: &automatic}); err != nil {
+		t.Fatalf("UpdateSettings erasure handling: %v", err)
 	}
 	if len(f.ips.retentions) != 0 {
-		t.Fatalf("a retention change set %v in the engine; want nothing", f.ips.retentions)
+		t.Fatalf("an erasure handling change set %v in the engine; want nothing", f.ips.retentions)
 	}
 
 	oneMonth := LegalRetention{Months: 1, ReasonEN: "Kept.", ReasonNL: "Bewaard."}
@@ -180,9 +180,9 @@ func TestLegalSyncsEngineRetention(t *testing.T) {
 	}
 	got := f.ips.retentions
 	slices.SortFunc(got, func(a, b engineRetentionCall) int { return cmp.Compare(a.retention, b.retention) })
-	// The org's 90 days outlast the month; the flow's 100 days outlast both.
+	// The month outlasts the org's 7 days; the flow's 100 days outlast both.
 	want := []engineRetentionCall{
-		{ids: []string{"a", "b"}, retention: 90*24*time.Hour + retentionGrace},
+		{ids: []string{"a", "b"}, retention: oneMonth.longest() + retentionGrace},
 		{ids: []string{"c"}, retention: flowOverride + retentionGrace},
 	}
 	if !slices.EqualFunc(got, want, func(a, b engineRetentionCall) bool {

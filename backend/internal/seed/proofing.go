@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,8 +39,8 @@ type demoProofingFlow struct {
 
 // demoProofingOrg is a demo org (by slug, one of demoOrganizations) with its
 // own flows, besides the data request flows every org has, the one of them that
-// is its default, how long it keeps a session's personal data and optionally
-// its theme, which the Idem app also shows its sessions in.
+// is its default, how long its flows keep a session's personal data and
+// optionally its theme, which the Idem app also shows its sessions in.
 type demoProofingOrg struct {
 	slug          string
 	flows         []demoProofingFlow
@@ -161,9 +162,9 @@ var (
 	cmAttributes = []string{"dg1", flow.AttributeAgeOver, "chip_checks", "biometrics"}
 )
 
-// demoRetentionDays and shortRetentionDays are how long a demo org keeps a
-// session's personal data: the default, and CM's minimum for a ticket's age
-// check.
+// demoRetentionDays and shortRetentionDays are how long a demo org's flows
+// keep a session's personal data: most orgs', and CM's minimum for a ticket's
+// age check. The org's own retention is a fixed default, so each flow sets it.
 const (
 	demoRetentionDays  = 30
 	shortRetentionDays = 7
@@ -171,6 +172,9 @@ const (
 
 // cmAgeOver is the age a CM ticket buyer must be.
 const cmAgeOver = 18
+
+// day turns a retention in days into the flow's duration.
+const day = 24 * time.Hour
 
 // chipAndFace is an eIDAS substantial flow: the document's chip read in the
 // Idem app (passport, identity card or Dutch driving licence) and a live face
@@ -275,13 +279,20 @@ var demoProofingOrgs = []demoProofingOrg{
 	},
 }
 
-// allFlows is o's own flows and the data request flows.
+// allFlows is o's own flows and the data request flows, each keeping a
+// session's personal data for o's retentionDays unless it sets its own.
 func (o demoProofingOrg) allFlows() []demoProofingFlow {
-	return append(slices.Clone(o.flows), dataRequestFlows...)
+	flows := append(slices.Clone(o.flows), dataRequestFlows...)
+	for i := range flows {
+		if flows[i].def.RetentionOverride == 0 {
+			flows[i].def.RetentionOverride = time.Duration(o.retentionDays) * day
+		}
+	}
+	return flows
 }
 
-// seedProofing gives each demo proofing org, found in orgsBySlug, its flows,
-// default flow and retention.
+// seedProofing gives each demo proofing org, found in orgsBySlug, its flows
+// and default flow.
 func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string]organization.Organization) error {
 	for _, o := range demoProofingOrgs {
 		org, ok := orgsBySlug[o.slug]
@@ -295,8 +306,8 @@ func seedProofing(ctx context.Context, pool *pgxpool.Pool, orgsBySlug map[string
 	return nil
 }
 
-// seedProofingOrg gives orgID o's flows, default flow and retention. An org
-// that has a default flow already keeps it.
+// seedProofingOrg gives orgID o's flows and default flow. An org that has a
+// default flow already keeps it.
 func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o demoProofingOrg) error {
 	recorder := audit.NewDBRecorder()
 	flowIDs, err := ensureProofingFlows(ctx, pool, recorder, orgID, o.allFlows())
@@ -316,18 +327,6 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o
 		if err := selections.SaveFlowSelection(ctx, orgID, sel); err != nil {
 			return fmt.Errorf("seed: default flow %s: %w", o.slug, err)
 		}
-	}
-	settings := proofing.NewOrgSettingsStore(pool, recorder)
-	current, err := settings.Get(ctx, orgID)
-	if err != nil {
-		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
-	}
-	if !current.UpdatedAt.IsZero() {
-		return nil
-	}
-
-	if _, err := settings.SaveSession(ctx, orgID, proofing.SessionSettingsChange{DataRetentionDays: &o.retentionDays}); err != nil {
-		return fmt.Errorf("seed: proofing settings %s: %w", o.slug, err)
 	}
 	return nil
 }

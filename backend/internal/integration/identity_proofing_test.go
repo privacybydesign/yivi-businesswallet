@@ -228,7 +228,7 @@ func TestProofingMemberCannotManage(t *testing.T) {
 		{http.MethodPost, base + "/flows", `{"name":"x","steps":["nfc_read"]}`},
 		{http.MethodPut, base + "/flow-selection", `{"flowIds":[],"defaultFlowId":""}`},
 		{http.MethodPost, base + "/flows/f/versions", `{"name":"x","steps":["nfc_read"]}`},
-		{http.MethodPatch, base + "/settings", `{"dataRetentionDays":90}`},
+		{http.MethodPatch, base + "/settings", `{"allowedRedirectOrigins":[]}`},
 		{http.MethodPut, base + "/settings/branding", ""},
 		{http.MethodGet, base + "/api-keys", ""},
 		{http.MethodPost, base + "/api-keys", `{"name":"x"}`},
@@ -476,9 +476,14 @@ func assertAdminRequestLists(t *testing.T, env *testEnv, base string, shared, re
 	}
 }
 
+// fixedRetentionDays is an org's data retention, a fixed default a flow
+// overrides (proofing.defaultDataRetentionDays).
+const fixedRetentionDays = 7
+
 type proofingSettingsResp struct {
-	SessionTTLSeconds int `json:"sessionTtlSeconds"`
-	DataRetentionDays int `json:"dataRetentionDays"`
+	SessionTTLSeconds int    `json:"sessionTtlSeconds"`
+	DataRetentionDays int    `json:"dataRetentionDays"`
+	ErasureHandling   string `json:"erasureHandling"`
 	Branding          struct {
 		DisplayName    string `json:"displayName"`
 		PrimaryColor   string `json:"primaryColor"`
@@ -559,16 +564,15 @@ func TestBadPatchChangesNothing(t *testing.T) {
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 	base := "/api/v1/orgs/acme/identity-proofing"
 
-	const defaultRetentionDays = 7
-	wantProofingError(t, "valid retention with a bad origin",
-		env.patchSettings("acme", `{"dataRetentionDays":90,"allowedRedirectOrigins":["https://portal.example.org/a"]}`),
+	wantProofingError(t, "valid erasure handling with a bad origin",
+		env.patchSettings("acme", `{"erasureHandling":"automatic","allowedRedirectOrigins":["https://portal.example.org/a"]}`),
 		http.StatusBadRequest, "invalid_input")
-	wantProofingError(t, "bad retention with a valid origin",
-		env.patchSettings("acme", `{"dataRetentionDays":31,"allowedRedirectOrigins":["https://portal.example.org"]}`),
+	wantProofingError(t, "bad erasure handling with a valid origin",
+		env.patchSettings("acme", `{"erasureHandling":"sometimes","allowedRedirectOrigins":["https://portal.example.org"]}`),
 		http.StatusBadRequest, "invalid_input")
 
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
-	if settings.DataRetentionDays != defaultRetentionDays || len(settings.AllowedRedirectOrigins) != 0 {
+	if settings.ErasureHandling != "review" || len(settings.AllowedRedirectOrigins) != 0 {
 		t.Errorf("settings after rejected updates = %+v; want the defaults", settings)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 0 {
@@ -576,8 +580,9 @@ func TestBadPatchChangesNothing(t *testing.T) {
 	}
 }
 
-// The org sets its session lifetime, data retention, branding and redirect
-// origins once, for all its flows.
+// The org sets its branding and redirect origins once, for all its flows. Its
+// session lifetime and data retention are fixed defaults a flow overrides: a
+// change to either is refused.
 func TestOrgSettingsHTTPFlow(t *testing.T) {
 	env := setup(t)
 	orgID := env.createOrg("Acme", "acme")
@@ -585,59 +590,58 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	env.addMembership(me.ID, orgID, organization.RoleAdmin)
 	base := "/api/v1/orgs/acme/identity-proofing"
 
-	const defaultRetentionDays = 7
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
-	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) || settings.DataRetentionDays != defaultRetentionDays ||
+	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) || settings.DataRetentionDays != fixedRetentionDays ||
 		settings.Branding.DisplayName != "" || settings.Branding.LogoURI != "" || settings.AllowedRedirectOrigins == nil ||
 		len(settings.AllowedRedirectOrigins) != 0 {
 		t.Errorf("default settings = %+v; want the defaults, no branding and an empty (not null) origin list", settings)
 	}
 
 	wantProofingError(t, "empty update", env.patchSettings("acme", `{}`), http.StatusBadRequest, "invalid_body")
-	wantProofingError(t, "session lifetime that is not an option", env.patchSettings("acme", `{"sessionTtlSeconds":123}`),
-		http.StatusBadRequest, "invalid_input")
-	wantProofingError(t, "retention that is not an option", env.patchSettings("acme", `{"dataRetentionDays":31}`),
-		http.StatusBadRequest, "invalid_input")
+	for name, body := range map[string]string{
+		"a session lifetime":          `{"sessionTtlSeconds":300}`,
+		"the session lifetime it has": `{"sessionTtlSeconds":600}`,
+		"a data retention":            `{"dataRetentionDays":90}`,
+		"the data retention it has":   `{"dataRetentionDays":7}`,
+	} {
+		wantProofingError(t, name, env.patchSettings("acme", body), http.StatusBadRequest, "invalid_input")
+	}
 	wantProofingError(t, "redirect origin with a path", env.patchSettings("acme", `{"allowedRedirectOrigins":["https://portal.example.org/a"]}`),
 		http.StatusBadRequest, "invalid_input")
 
-	const (
-		sessionTTLSeconds = 300
-		retentionDays     = 90
-		origin            = "https://portal.example.org"
-	)
-	update := fmt.Sprintf(`{"sessionTtlSeconds":%d,"dataRetentionDays":%d,"allowedRedirectOrigins":[%q]}`,
-		sessionTTLSeconds, retentionDays, origin)
+	const origin = "https://portal.example.org"
+	update := fmt.Sprintf(`{"allowedRedirectOrigins":[%q]}`, origin)
 	resp := env.patchSettings("acme", update)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("update settings = %d, want 200", resp.StatusCode)
 	}
 	settings = decodeJSON[proofingSettingsResp](t, resp)
-	if settings.SessionTTLSeconds != sessionTTLSeconds || settings.DataRetentionDays != retentionDays ||
+	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) || settings.DataRetentionDays != fixedRetentionDays ||
 		len(settings.AllowedRedirectOrigins) != 1 || settings.AllowedRedirectOrigins[0] != origin {
-		t.Errorf("updated settings = %+v, want the new lifetime, retention and origin", settings)
+		t.Errorf("updated settings = %+v, want the fixed lifetime and retention, and the new origin", settings)
 	}
 	// Saving what is already saved changes and audits nothing.
 	_ = env.patchSettings("acme", update).Body.Close()
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 1 {
-		t.Errorf("settings_updated audits = %d, want 1 (session settings and origins, saved together)", n)
+		t.Errorf("settings_updated audits = %d, want 1 (origins)", n)
 	}
 
 	// Every flow tells the external person how long their data is kept: the
-	// org's retention, and the day the engine keeps a session beyond it.
+	// org's fixed retention on a flow without its own, and the day the engine
+	// keeps a session beyond it.
 	env.proofingFlow("acme", "Passport only")
 	flows := decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
-	if len(flows) != 1 || flows[0].RetentionDays != retentionDays+1 {
-		t.Errorf("flows = %+v, want a retention of %d days", flows, retentionDays+1)
+	if len(flows) != 1 || flows[0].RetentionDays != fixedRetentionDays+1 {
+		t.Errorf("flows = %+v, want a retention of %d days", flows, fixedRetentionDays+1)
 	}
 
-	assertOrgBranding(t, env, orgID, base, sessionTTLSeconds, retentionDays)
+	assertOrgBranding(t, env, orgID, base)
 }
 
 // assertOrgBranding saves the org's branding with a logo, checks it round trips
-// beside the session settings saved before (sessionTTLSeconds and
-// retentionDays), refuses bad fields, and keeps or removes the logo as asked.
-func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string, sessionTTLSeconds, retentionDays int) {
+// beside the other settings saved before, refuses bad fields, and keeps or
+// removes the logo as asked.
+func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string) {
 	t.Helper()
 	logo := testLogoPNG(t)
 	form := map[string]string{
@@ -654,8 +658,8 @@ func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string,
 		b.PrivacyURL != "https://acme.test/privacy" || !b.HidePoweredBy || !strings.HasPrefix(b.LogoURI, base+"/settings/logo?v=") {
 		t.Errorf("branding = %+v; want the saved fields and a logo link", b)
 	}
-	if settings.SessionTTLSeconds != sessionTTLSeconds || settings.DataRetentionDays != retentionDays {
-		t.Errorf("settings after branding = %+v, want the session settings kept", settings)
+	if len(settings.AllowedRedirectOrigins) != 1 || settings.DataRetentionDays != fixedRetentionDays {
+		t.Errorf("settings after branding = %+v, want the other settings kept", settings)
 	}
 	resp = env.do(http.MethodGet, base+"/settings/logo", nil)
 	served, err := io.ReadAll(resp.Body)
@@ -694,7 +698,6 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 	base := "/api/v1/orgs/acme/identity-proofing"
 	env.proofingFlow("acme", "Passport only")
 
-	const defaultRetentionDays = 7
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
 	if settings.LegalRetention != nil {
 		t.Errorf("default legal retention = %+v; want null", settings.LegalRetention)
@@ -706,7 +709,7 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 		"no English":       `{"legalRetention":{"months":60,"reasonEn":"","reasonNl":"b"}}`,
 		"no Dutch":         `{"legalRetention":{"months":60,"reasonEn":"a"}}`,
 		"an empty object":  `{"legalRetention":{}}`,
-		"valid beside bad": `{"dataRetentionDays":90,"legalRetention":{"months":60,"reasonEn":"a"}}`,
+		"valid beside bad": `{"erasureHandling":"automatic","legalRetention":{"months":60,"reasonEn":"a"}}`,
 	} {
 		wantProofingError(t, name, env.patchSettings("acme", body), http.StatusBadRequest, "invalid_input")
 	}
@@ -717,7 +720,7 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 		wantProofingError(t, name, env.patchSettings("acme", body), http.StatusBadRequest, "invalid_body")
 	}
 	settings = decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
-	if settings.LegalRetention != nil || settings.DataRetentionDays != defaultRetentionDays {
+	if settings.LegalRetention != nil || settings.ErasureHandling != "review" {
 		t.Errorf("settings after rejected updates = %+v; want the defaults", settings)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 0 {
@@ -734,7 +737,7 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 	if legal := settings.LegalRetention; legal == nil || legal.Months != 60 || legal.ReasonEN != reasonEN || legal.ReasonNL != reasonNL {
 		t.Fatalf("legal retention = %+v; want five years with both reasons", legal)
 	}
-	if settings.DataRetentionDays != defaultRetentionDays {
+	if settings.DataRetentionDays != fixedRetentionDays {
 		t.Errorf("retention = %d days; want the org's own kept", settings.DataRetentionDays)
 	}
 	assertLegalRetentionApplied(t, env, orgID, base, update)
@@ -752,13 +755,13 @@ func assertLegalRetentionApplied(t *testing.T, env *testEnv, orgID uuid.UUID, ba
 	}
 
 	// A change of another setting leaves it; saving it again changes nothing.
-	kept := decodeJSON[proofingSettingsResp](t, env.patchSettings("acme", `{"dataRetentionDays":90}`))
+	kept := decodeJSON[proofingSettingsResp](t, env.patchSettings("acme", `{"erasureHandling":"automatic"}`))
 	if kept.LegalRetention == nil || kept.LegalRetention.Months != 60 {
 		t.Errorf("legal retention after another change = %+v; want it kept", kept.LegalRetention)
 	}
 	_ = env.patchSettings("acme", update).Body.Close()
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
-		t.Errorf("settings_updated audits = %d, want 2 (legal retention, retention)", n)
+		t.Errorf("settings_updated audits = %d, want 2 (legal retention, erasure handling)", n)
 	}
 
 	removed := decodeJSON[proofingSettingsResp](t, env.patchSettings("acme", `{"legalRetention":null}`))
@@ -766,7 +769,7 @@ func assertLegalRetentionApplied(t *testing.T, env *testEnv, orgID uuid.UUID, ba
 		t.Errorf("legal retention after null = %+v; want none", removed.LegalRetention)
 	}
 	flows = decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
-	if len(flows) != 1 || flows[0].RetentionDays != 90+1 {
+	if len(flows) != 1 || flows[0].RetentionDays != fixedRetentionDays+1 {
 		t.Errorf("flows = %+v; want the org's retention again", flows)
 	}
 }

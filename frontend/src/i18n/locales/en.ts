@@ -981,21 +981,6 @@ export const en = {
       failedBecause: "{{status}} · {{reason}}",
     },
     settings: {
-      sessionsTitle: "Sessions",
-      qrLifetime: "QR lifetime",
-      qrLifetimeHint:
-        "After this the session expires and a new request is needed.",
-      minutes_one: "{{count}} min",
-      minutes_other: "{{count}} min",
-      retention: "Data retention",
-      retentionHint:
-        "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay. A change applies to existing sessions too.",
-      shortenConfirm: {
-        title: "Shorten retention to {{days}}?",
-        message:
-          "This applies to existing sessions too: every session that ended more than {{days}} ago loses its personal data within the hour, in the wallet and in the proofing service. This cannot be undone.",
-        confirm: "Shorten retention",
-      },
       days_one: "{{count}} day",
       days_other: "{{count}} days",
     },
@@ -1149,10 +1134,6 @@ export const en = {
       subtitle:
         "Everything in the Business Wallet works without setup. Come here only to do the same from your own software: mint a token to call the API, and add an endpoint that receives results.",
       adminOnly: "Only an administrator can see this page.",
-      tabs: {
-        api: "API and webhook",
-        settings: "Session settings",
-      },
     },
     apiKeys: {
       title: "API tokens",

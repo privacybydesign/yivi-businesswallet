@@ -12,10 +12,9 @@ for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
 with the people each identified in 30 days, the default flow and which flows
 members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
 with **People** and **Versions** tabs, **Edit flow** and "Verify a person") and
-**Developers** (tabs: API and webhook, and Session settings, a temporary
-home). The API and webhook tab holds the **API tokens**
+**Developers** (no tabs: the **API tokens**
 table (name, created with who by, last used, revoke; revoked ones are not
-listed), the **Webhook endpoint** and its **Recent deliveries**. The **All people** list
+listed), the **Webhook endpoint** and its **Recent deliveries**). The **All people** list
 (`/{org}/identity-proofing/people`, opened from the Overview;
 `?session=<id>` opens a row) is not in the sidebar; a flow's People tab is the
 same table narrowed to that flow by the backend (`?flowId=`), as is All people
@@ -30,7 +29,7 @@ an org verifies are its members, or external people with no login: an e-mail
 address and an optional name, a request without a `userId`. The org's own
 backend can send to them through the public API with one of its keys. Sending
 creates an engine session (2, 5 or 10 minutes: the flow's own lifetime when it
-sets one, else the org's session lifetime for an external person) and mails its vcmrtd deep link as a QR code
+sets one, else the org's fixed 10 minutes for an external person) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
 outcome lands on the request, in the audit log and, for an external person, at
 the org's webhook.
@@ -67,8 +66,8 @@ handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
 `frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
-`developers-webhook.tsx` + `proofing-settings.tsx` (the Developers page and
-its tabs), `proofing-branding.tsx` (Settings › Branding),
+`developers-webhook.tsx` (the Developers page), `proofing-branding.tsx`
+(Settings › Branding),
 `internal/proofing/api_handler.go` (the
 public API and the API key routes), `apikey_store.go` (keys),
 `org_settings_store.go` + `settings_handler.go` + `branding_handler.go` (the org's
@@ -177,7 +176,7 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 - **Retention.** Every session the wallet creates carries its own retention,
   the one the wallet purges the request after, plus a day (`engineRetention`),
   so `PurgeDue` erases it first: its flow's retention override when set, else
-  the org's data retention for an external person's request, else for a member's
+  the org's fixed 7 days for an external person's request, else for a member's
   request `proofedNameRetention` (30 days); for an external person's identity
   check never less than the org's legal retention (§4). A legal retention
   saved later is given to the sessions already created (`syncEngineRetention`,
@@ -221,14 +220,14 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   request. The org holds (§4 has the detail):
   - **Settings**, one row per org (`identity_proofing_settings`,
     `OrgSettingsStore` in `org_settings_store.go`, `Settings` in `proofing.go`):
-    session (QR) lifetime 2, 5 or 10 minutes, which a flow may replace with its
-    own (`SessionTTLSeconds` on the flow, §2); data retention 7, 30, 90, 180 or
-    365 days (default 7); how "delete my data" requests are decided (`review`
-    or `automatic`, default `review`); a legal retention; branding (display
-    name, colours, font, logo, support contact, privacy URL, hide "powered
-    by"); allowed redirect origins. No row reads as the defaults (10 minutes,
-    7 days, review, no legal retention, the org's own look, no redirect
-    origins).
+    session (QR) lifetime and data retention, fixed defaults of 10 minutes and
+    7 days that each flow overrides (`SessionTTLSeconds` and
+    `RetentionOverrideSeconds` on the flow, §2, §10); how "delete my data"
+    requests are decided (`review` or `automatic`, default `review`); a legal
+    retention; branding (display name, colours, font, logo, support contact,
+    privacy URL, hide "powered by"); allowed redirect origins. No row reads as
+    the defaults (10 minutes, 7 days, review, no legal retention, the org's own
+    look, no redirect origins).
   - **API keys**, one set: a key works on every flow and reaches every
     external request of the org. No key is needed to send from the app.
   - **One webhook endpoint** for the events of all its flows.
@@ -444,11 +443,11 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - "Keep face photos after the match" is `keepFacePhotos` (off in a new
       flow): off pixelates the chip portrait and the selfie once the match
       ran.
-    - Retention in days (the org's, 1, 30 or 90; stored in seconds, and a
-      stored value that is none of them stays a choice), which replaces the
-      org's data retention for the flow's sessions of external people.
-    - The session (QR) lifetime (the org's, 2, 5 or 10 minutes), saved on the
-      flow version.
+    - Retention in days ("Organisation default (7 days)", 1, 30 or 90; stored
+      in seconds, and a stored value that is none of them stays a choice),
+      which replaces the org's fixed 7 days for the flow's sessions.
+    - The session (QR) lifetime (the org's fixed 10 minutes, 2, 5 or 10
+      minutes), saved on the flow version.
   - The face match threshold has no field in the editor: a stored one is carried
     over unchanged.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
@@ -623,9 +622,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 
 ## 2. The mail is the session
 
-A session runs its flow's own lifetime when the flow sets one, else the org's
-session lifetime (2, 5 or 10 minutes; a member's runs the flow's, else
-`SessionTTL`, 10; `flowSessionTTL`) within the
+A session runs its flow's own lifetime when the flow sets one (2, 5 or 10
+minutes), else `SessionTTL`, 10, the org's fixed default (`flowSessionTTL`),
+within the
 engine's hard cap `SessionMaxLifetime` (15), and its claim, the `handover`
 token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
 claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
@@ -922,10 +921,10 @@ post-review outcome stay the system's.
   from a delivery's `first_attempt_at` (or the last success, if later):
   `last_attempt_at` moves with every retry.
 - **Settings** (`identity_proofing_settings`, one row per org): `GET` and
-  `PATCH /orgs/{slug}/identity-proofing/settings` (any of `sessionTtlSeconds`,
-  `dataRetentionDays`, `erasureHandling`, `legalRetention` (null removes it),
-  `allowedRedirectOrigins`; absent is
-  left as is), `PUT .../settings/branding` (multipart) and `GET .../settings/logo`.
+  `PATCH /orgs/{slug}/identity-proofing/settings` (any of `erasureHandling`,
+  `legalRetention` (null removes it), `allowedRedirectOrigins`; absent is
+  left as is; `sessionTtlSeconds` or `dataRetentionDays` is 400
+  `invalid_input`, `checkSettingsChange`), `PUT .../settings/branding` (multipart) and `GET .../settings/logo`.
   Any member reads them (the verify page needs the branding); an admin writes
   them. Audited `identity_proofing.settings_updated` on target
   `org_identity_proofing_settings`, with before and after (whether a logo is
@@ -938,19 +937,27 @@ post-review outcome stay the system's.
   `OrgSettingsStore.Save`, `TestSettingsSaveIsOneTransaction`). The white-label
   columns and `erasure_handling` were columns of the customers: migration
   `20261021100000` merges them into the org's settings (§1).
-  - **Session**: `session_ttl_seconds` (120/300/600, default 600),
-    `data_retention_days` (7/30/90/180/365, default 7: "purged 7 days after a
-    check ends", VC3; the design's maximum is a year) and `erasure_handling`
-    (`review`/`automatic`, default `review`, §15). Migration `20261021110200`
-    set the column's default to 7, as `defaultDataRetentionDays` is, and first
-    gave an org that had sent an external request without saving settings a
-    row with the 30 days it had then. `keep` (refuse every erasure) is gone:
-    the legal retention says what the law keeps; migration `20261021110100`
-    made it `review`. A change of the retention moves the purge time of the
-    org's unpurged external requests (§10). The frontend options are held to
-    the Go lists by `lib/identity-proofing.test.ts`. In the app the QR
-    lifetime and the retention are on Developers › Session settings; "Who
-    decides" and the redirect origins on Settings › Data and privacy.
+  - **Session**: `session_ttl_seconds` (600) and `data_retention_days` (7:
+    "purged 7 days after a check ends", VC3) are fixed defaults
+    (`SessionTTL`, `defaultDataRetentionDays`), which a flow overrides in the
+    flow editor, and `erasure_handling` (`review`/`automatic`, default
+    `review`, §15). Migration `20261021110200` set the retention column's
+    default to 7, as `defaultDataRetentionDays` is, and first gave an org that
+    had sent an external request without saving settings a row with the 30
+    days it had then. `keep` (refuse every erasure) is gone: the legal
+    retention says what the law keeps; migration `20261021110100` made it
+    `review`. The lifetime and the retention were the org's to set until
+    migrations `20261021114000` to `20261021114200`: those gave every active
+    flow version that set neither a new version carrying the org's value where
+    it was not the default (an org without a settings row was already on it),
+    stamped its unpurged external requests without a retention of their own
+    with it (`retention_override_seconds`), then set every org to 600 seconds
+    and 7 days. No flow or sent request changes; a member's request on such a
+    flow now follows the flow's copied retention rather than
+    `proofedNameRetention`. The Downs leave the copies, since the org's own
+    values are not given back. The editor's lifetime options are held to the Go
+    list by `lib/identity-proofing.test.ts`. In the app "Who decides", the legal
+    retention and the redirect origins are on Settings › Data and privacy.
   - **Legal retention** (`legal_retention_months` 1 to 600, with
     `legal_retention_reason_en` and `_nl`, all or none; Settings › Data and
     privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
@@ -1020,9 +1027,7 @@ post-review outcome stay the system's.
     hosted page applies the same look (`theme` in the hosted view).
   - **Allowed redirect origins** (§7).
   - Branding is under Settings › Branding (the org's, for every flow; the
-    wallet's own look is the separate Settings › Wallet theme). The session
-    settings have no page of their own yet: they are a tab of the Developers
-    page.
+    wallet's own look is the separate Settings › Wallet theme).
 
 ## 5. No test mode
 
@@ -1084,7 +1089,8 @@ Its routes: the page, `status`, `start` (once: a second start is 409
 `link_started`), the org's `logo`, and the Yivi `start`/`disclosure`
 routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
-and runs the org's session TTL. An unstarted link reads as pending until
+and runs its flow's session lifetime, else the org's fixed 10 minutes. An
+unstarted link reads as pending until
 it lapses, then expired, in `EffectiveStatus` and the stats alike.
 
 A member makes the same link from the wallet: "Copy a link" in the Verify a
@@ -1107,8 +1113,7 @@ after a confirmation that says the link stops working, calls
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
 actor label `hosted_link`); a started link is 409 `link_started`. The org
 lists `allowedRedirectOrigins` (org settings, `PATCH .../settings`; stored
-`identity_proofing_settings.allowed_redirect_origins`; the "Sessions" settings tab
-of the Developers page): https origins, or http
+`identity_proofing_settings.allowed_redirect_origins`): https origins, or http
 on a loopback host, at most 10, normalised lowercase. The host must be a DNS
 name or an IP address (`validHost`): the origins are written into the page's
 `frame-ancestors`, where `*`, a quote or a `;` would mean something else. A hosted create may carry
@@ -1236,9 +1241,10 @@ treated as Dutch (`coversDocumentBSN`).
 A session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,
 `retention_override_seconds`) or, without one, for an external person's request the org's
-`data_retention_days` (§4, `defaultDataRetentionDays` without settings), or
-for a member's `proofedNameRetention` (30 days), after it ends (completed,
-cancelled, expired, or gone to review: an undecided identity review is kept no longer than a decided one; a data request
+`data_retention_days` (§4; `defaultDataRetentionDays`, 7, without a settings
+row), or for a member's `proofedNameRetention`
+(30 days), after it ends (completed, cancelled, expired, or gone to review: an
+undecided identity review is kept no longer than a decided one; a data request
 in review lapses after `dataRequestReviewDays` instead): as `DELETE`
 above, erased in the engine, then its personal data cleared here (the subject's
 name and address, the proofed name, the redirect URL and Yivi transaction, its
@@ -1268,11 +1274,10 @@ dashboard shows the time as `purgeAt`.
 
     A new write to one of those columns must call it too;
     `TestPurgeAtSetOnEveryWrite` checks each against the rule.
-  - An org's changed `data_retention_days` (`OrgSettingsStore.SaveSession`)
-    recomputes the purge time of its unpurged external requests that follow
-    its retention, with no flow override (`refreshOrgPurgeAt`). A shorter one
-    therefore erases older sessions within the hour: the settings page
-    confirms it first. Lock order (rule at `lockSettings`, an advisory lock
+  - An org's changed `data_retention_days` (`OrgSettingsStore.SaveSession`;
+    no longer reachable from the API, the value is fixed) recomputes the purge
+    time of its unpurged external requests that follow its retention, with no
+    flow override (`refreshOrgPurgeAt`). Lock order (rule at `lockSettings`, an advisory lock
     on the org: an org that saved nothing has no settings row to lock):
 
     | Transaction | Settings lock | Request rows |

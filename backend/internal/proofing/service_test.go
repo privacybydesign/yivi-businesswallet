@@ -1284,38 +1284,36 @@ func TestReconcileAuditsAppActor(t *testing.T) {
 	}
 }
 
-// The org's session lifetime is what IPS is asked for and what the mail says.
+// On a flow without a lifetime of its own, the org's fixed one is what IPS is
+// asked for and what the mail says.
 func TestExternalRequestLifetime(t *testing.T) {
 	f := newFixture()
-	ctx := context.Background()
-	short := SessionSettings{SessionTTL: 2 * time.Minute, DataRetentionDays: 7}
-	change := SettingsChange{SessionTTL: &short.SessionTTL, DataRetentionDays: &short.DataRetentionDays}
-	if _, err := f.svc.UpdateSettings(ctx, testOrg.ID, change); err != nil {
-		t.Fatalf("UpdateSettings: %v", err)
-	}
 	f.sendExternal(t, "anna@example.org", "")
-	if got := f.ips.sessions[0].TTL; got != short.SessionTTL {
-		t.Errorf("session TTL = %v, want %v", got, short.SessionTTL)
+	if got := f.ips.sessions[0].TTL; got != SessionTTL {
+		t.Errorf("session TTL = %v, want %v", got, SessionTTL)
 	}
-	if got := f.mailer.sent[0].validFor; got != short.SessionTTL {
-		t.Errorf("mail validFor = %v, want %v", got, short.SessionTTL)
+	if got := f.mailer.sent[0].validFor; got != SessionTTL {
+		t.Errorf("mail validFor = %v, want %v", got, SessionTTL)
 	}
 }
 
+// The org's session lifetime and data retention are fixed defaults, which a
+// flow overrides: a change to either is refused, even to the value it has, and
+// so is an erasure handling that is none of the options.
 func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 	f := newFixture()
-	for _, settings := range []SessionSettings{
-		{SessionTTL: 3 * time.Minute, DataRetentionDays: 30},
-		{SessionTTL: SessionTTL, DataRetentionDays: 366},
-		{SessionTTL: SessionTTL, DataRetentionDays: 60},
-		{SessionTTL: SessionTTL, DataRetentionDays: 30, ErasureHandling: "sometimes"},
+	ttl, retention := SessionTTL, defaultDataRetentionDays
+	shorter, longer := 2*time.Minute, 90
+	sometimes := ErasureHandling("sometimes")
+	for name, change := range map[string]SettingsChange{
+		"the lifetime it has":  {SessionTTL: &ttl},
+		"a shorter lifetime":   {SessionTTL: &shorter},
+		"the retention it has": {DataRetentionDays: &retention},
+		"a longer retention":   {DataRetentionDays: &longer},
+		"no erasure option":    {ErasureHandling: &sometimes},
 	} {
-		change := SettingsChange{SessionTTL: &settings.SessionTTL, DataRetentionDays: &settings.DataRetentionDays}
-		if settings.ErasureHandling != "" {
-			change.ErasureHandling = &settings.ErasureHandling
-		}
 		if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); !errors.Is(err, ErrInvalidInput) {
-			t.Errorf("UpdateSettings(%+v) = %v, want ErrInvalidInput", settings, err)
+			t.Errorf("UpdateSettings(%s) = %v, want ErrInvalidInput", name, err)
 		}
 	}
 }
@@ -1323,14 +1321,14 @@ func TestSaveSettingsOwnOptionsOnly(t *testing.T) {
 func TestUpdateSettingsAtomic(t *testing.T) {
 	f := newFixture()
 	before := f.orgSettings.settings
-	retention := 90
-	badRetention := 31
+	automatic := ErasureAutomatic
+	sometimes := ErasureHandling("sometimes")
 	validOrigins := []string{"https://portal.example.org"}
 	badOrigins := []string{"https://portal.example.org/a"}
 
 	for name, change := range map[string]SettingsChange{
-		"valid session with a bad origin": {DataRetentionDays: &retention, RedirectOrigins: &badOrigins},
-		"bad session with a valid origin": {DataRetentionDays: &badRetention, RedirectOrigins: &validOrigins},
+		"valid session with a bad origin": {ErasureHandling: &automatic, RedirectOrigins: &badOrigins},
+		"bad session with a valid origin": {ErasureHandling: &sometimes, RedirectOrigins: &validOrigins},
 	} {
 		if _, err := f.svc.UpdateSettings(context.Background(), testOrg.ID, change); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: UpdateSettings = %v, want ErrInvalidInput", name, err)
@@ -1346,12 +1344,12 @@ func TestUpdateSettingsAtomic(t *testing.T) {
 
 	// Both parts go to the store in one save, which is one transaction.
 	saved, err := f.svc.UpdateSettings(context.Background(), testOrg.ID,
-		SettingsChange{DataRetentionDays: &retention, RedirectOrigins: &validOrigins})
+		SettingsChange{ErasureHandling: &automatic, RedirectOrigins: &validOrigins})
 	if err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
 	}
-	if saved.Session.DataRetentionDays != retention || !slices.Equal(saved.RedirectOrigins, validOrigins) {
-		t.Errorf("saved = %+v, want retention %d and origins %v", saved, retention, validOrigins)
+	if saved.Session.ErasureHandling != automatic || !slices.Equal(saved.RedirectOrigins, validOrigins) {
+		t.Errorf("saved = %+v, want erasure %q and origins %v", saved, automatic, validOrigins)
 	}
 	if f.orgSettings.saves != 1 {
 		t.Errorf("saves = %d, want the session settings and the origins in one", f.orgSettings.saves)

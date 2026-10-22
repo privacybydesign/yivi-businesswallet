@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,8 +17,13 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-// Each proofing org seeds its flows, default flow and retention once, however
-// often the seed runs, and only its own.
+// defaultOrgRetentionDays is the org's fixed data retention
+// (proofing.defaultDataRetentionDays).
+const defaultOrgRetentionDays = 7
+
+// Each proofing org seeds its flows, with its retention, and its default flow
+// once, however often the seed runs, and only its own. The org's own
+// retention stays the fixed default.
 func TestSeedProofingIsIdempotent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
@@ -63,9 +69,14 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		if err != nil || sel.DefaultFlowID != ids[o.defaultFlow] {
 			t.Errorf("%s default flow = %q, %v; want %s", o.slug, sel.DefaultFlowID, err, o.defaultFlow)
 		}
+		for _, f := range flows {
+			if want := time.Duration(o.retentionDays) * day; f.RetentionOverride != want {
+				t.Errorf("%s %s retention = %v, want %v", o.slug, f.Name, f.RetentionOverride, want)
+			}
+		}
 		got, err := settings.Get(ctx, orgID)
-		if err != nil || got.Session.DataRetentionDays != o.retentionDays {
-			t.Errorf("%s retention = %d, %v; want %d", o.slug, got.Session.DataRetentionDays, err, o.retentionDays)
+		if err != nil || got.Session.DataRetentionDays != defaultOrgRetentionDays {
+			t.Errorf("%s org retention = %d, %v; want the fixed %d", o.slug, got.Session.DataRetentionDays, err, defaultOrgRetentionDays)
 		}
 	}
 

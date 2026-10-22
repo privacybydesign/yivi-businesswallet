@@ -68,7 +68,6 @@ import {
   shortRequestId,
   sumProofingStats,
   verifiedShare,
-  DATA_RETENTION_DAY_OPTIONS,
   isHexColor,
   isSuccessStatus,
   ownEndpointDeliveries,
@@ -1185,13 +1184,6 @@ describe("session settings mirror backend/internal/proofing", () => {
     expect(list).not.toBeNull();
     const backend = list![1].split(",").map((e) => minutes(e) * 60);
     expect([...SESSION_TTL_OPTIONS_SECONDS]).toEqual(backend);
-  });
-
-  it("offers every data retention and no other", () => {
-    const list = /DataRetentionDayOptions = \[\]int\{([^}]*)\}/.exec(source);
-    expect(list).not.toBeNull();
-    const backend = list![1].split(",").map((e) => Number(e.trim()));
-    expect([...DATA_RETENTION_DAY_OPTIONS]).toEqual(backend);
   });
 
   it("caps a request list where the backend does", () => {

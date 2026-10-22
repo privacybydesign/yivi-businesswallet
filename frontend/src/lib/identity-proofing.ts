@@ -1437,11 +1437,10 @@ export function shortRequestId(id: string): string {
   return id.replaceAll("-", "").slice(0, SHORT_ID_LENGTH);
 }
 
-// The session settings an admin may pick, mirroring
-// SessionTTLOptions and DataRetentionDayOptions in backend/internal/proofing
-// (identity-proofing.test.ts holds the two together).
+// The session lifetimes a flow may set, mirroring SessionTTLOptions in
+// backend/internal/proofing (identity-proofing.test.ts holds the two
+// together).
 export const SESSION_TTL_OPTIONS_SECONDS = [120, 300, 600] as const;
-export const DATA_RETENTION_DAY_OPTIONS = [7, 30, 90, 180, 365] as const;
 
 const SECONDS_IN_MINUTE = 60;
 

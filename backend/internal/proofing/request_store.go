@@ -88,19 +88,20 @@ const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
 //     org's data_retention_days, or defaultDataRetentionDays in an org that
 //     saved no settings, else proofedNameRetention: a member's) after it
 //     settled (settledAt), and for an approved external identity check
-//     (legalHeld) never before the org's legal retention has passed. The later of two moments, not of two intervals: PostgreSQL
-//     compares a month to 30 days. A cap is stored before it passes; the
-//     purge asks purge_at <= now(), which holds only after the cap anyway,
-//     since a retention is never zero. An identity review counts as settled
-//     when it went there: undecided, it is kept no longer than a decided one,
-//     the most its subject was told.
+//     (legalHeld) never before the org's legal retention has passed. The
+//     later of two moments, not of two intervals: PostgreSQL compares a month
+//     to 30 days. A cap is stored before it passes; the purge asks
+//     purge_at <= now(), which holds only after the cap anyway, since a
+//     retention is never zero. An identity review counts as settled when it
+//     went there: undecided, it is kept no longer than a decided one, the
+//     most its subject was told.
 //   - a data request in review: dataRequestReviewDays after it went there.
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
-// The org's retention is read in the statement: OrgSettingsStore.Save and
-// SaveLegalRetention set it again for the org's requests (refreshOrgPurgeAt).
-// $3 is defaultDataRetentionDays.
+// The org's retention is read in the statement: OrgSettingsStore.Save (and
+// its SaveSession and SaveLegalRetention wrappers) sets it again for the
+// org's requests (refreshOrgPurgeAt).
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 		GREATEST(` + settledAt + `
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),

@@ -105,7 +105,8 @@ func (f purgeFixture) birthDateKept(t *testing.T, id uuid.UUID) bool {
 
 // An org's changed retention moves the purge of its settled external requests,
 // and only those: not another org's, not a flow's own retention, not a member's
-// request, which keeps the wallet's own.
+// request, which keeps the wallet's own. The API no longer changes it (it is a
+// fixed default), but the store's rule still holds for a value an org kept.
 func TestPurgeDueFollowsRetention(t *testing.T) {
 	f := newPurgeFixture(t)
 	ctx := context.Background()
@@ -142,7 +143,7 @@ func TestPurgeDueFollowsRetention(t *testing.T) {
 	}
 
 	// Back to a longer retention takes it out of the due ones again.
-	if _, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 30})); err != nil {
+	if _, err := f.settings.SaveSession(ctx, f.orgID, sessionChange(month)); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	if due := f.purgeDue(t); len(due) != 0 {
@@ -512,7 +513,7 @@ func TestPurgeAtSetOnEveryWrite(t *testing.T) {
 }
 
 // An unsent request's purge time is its link's lapse plus its org's retention,
-// defaultDataRetentionDays for an org that saved none.
+// the fixed defaultDataRetentionDays for an org that saved no settings.
 func TestPurgeAtFollowsTheLink(t *testing.T) {
 	f := newPurgeFixture(t)
 	ctx := context.Background()

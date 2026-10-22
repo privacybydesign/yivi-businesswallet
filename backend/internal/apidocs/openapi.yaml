@@ -5427,8 +5427,8 @@ paths:
         the 200 newest of those asked for, as stored: outcomes land as the engine reports them,
         and a list read does not re-check it. Only the outcome and assurance level are
         returned, and for an external person's approved request the name read off the document
-        (`proofedName`), until the organisation's data retention (`dataRetentionDays`, default
-        7 days) clears it. No other document data.
+        (`proofedName`), until its flow's retention, else the organisation's fixed 7 days
+        (`dataRetentionDays`), clears it. No other document data.
       parameters:
         - name: subjectUserId
           in: query
@@ -6853,12 +6853,13 @@ paths:
       summary: Get the organisation's identity proofing settings
       description: >-
         Requires organisation membership. What the organisation set once for all its flows:
-        `sessionTtlSeconds` (how long each session runs), `dataRetentionDays` (how long an
-        approved external person's name is kept), `erasureHandling` (how "delete my data"
-        requests are decided), `legalRetention` (what the law makes the organisation keep, or
-        null), `branding` (with `logoUri` and `hidePoweredBy`) and `allowedRedirectOrigins`.
-        An organisation that set nothing reads the defaults: 600 seconds, 7 days, review, no
-        legal retention, no branding and no origins.
+        `sessionTtlSeconds` (how long a session runs) and `dataRetentionDays` (how long an
+        external person's data is kept after the check), fixed defaults of 600 seconds and 7
+        days for a flow that sets no lifetime or retention of its own; `erasureHandling` (how
+        "delete my data" requests are decided), `legalRetention` (what the law makes the
+        organisation keep, or null), `branding` (with `logoUri` and `hidePoweredBy`) and
+        `allowedRedirectOrigins`. An organisation that set nothing reads the defaults:
+        review, no legal retention, no branding and no origins.
       responses:
         '200':
           description: The settings.
@@ -6871,7 +6872,7 @@ paths:
                   summary: Configured settings
                   value:
                     sessionTtlSeconds: 600
-                    dataRetentionDays: 30
+                    dataRetentionDays: 7
                     erasureHandling: review
                     legalRetention:
                       months: 60
@@ -6894,9 +6895,10 @@ paths:
       tags: [identity-proofing]
       summary: Change the organisation's identity proofing settings
       description: >-
-        Requires an administrator role in the organisation. `sessionTtlSeconds` (120, 300 or
-        600) is how long each session runs; `dataRetentionDays` (7, 30, 90, 180 or 365;
-        default 7) how long an approved external person's name is kept. `erasureHandling` is
+        Requires an administrator role in the organisation. The session lifetime and the data
+        retention are fixed defaults, which each flow overrides (`sessionTtlSeconds` and
+        `retentionOverrideSeconds` on its version): a body with `sessionTtlSeconds` or
+        `dataRetentionDays` is 400 `invalid_input`, whatever their value. `erasureHandling` is
         how the organisation's "delete my data" requests are decided once the person is proven:
         `review` (default) by a reviewer; `automatic` erases the sessions proven to be the
         person's at once and leaves a reviewer only those found by e-mail address or name.
@@ -6924,10 +6926,8 @@ paths:
               $ref: '#/components/schemas/ProofingUpdateSettings'
             examples:
               settings:
-                summary: Shorter sessions, longer retention, automatic erasure, a return origin
+                summary: Automatic erasure, a legal retention, a return origin
                 value:
-                  sessionTtlSeconds: 300
-                  dataRetentionDays: 90
                   erasureHandling: automatic
                   legalRetention:
                     months: 60
@@ -7508,7 +7508,7 @@ paths:
                         privacyUrl: https://acme.example/privacy
                         logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
                         hidePoweredBy: false
-                      dataRetentionDays: 30
+                      dataRetentionDays: 7
                       erasureHandling: review
                     flow:
                       name: Onboarding
@@ -10982,13 +10982,14 @@ components:
           maximum: 31536000
           description: >-
             How long the flow's finished sessions keep their data, at most a year. Set, it
-            applies in place of the organisation's data retention; absent, the organisation's applies.
+            applies in place of the organisation's data retention; absent, the organisation's
+            fixed 7 days apply.
         sessionTtlSeconds:
           type: integer
           enum: [120, 300, 600]
           description: >-
-            How long a session of this flow runs. Absent, the organisation's session lifetime
-            applies. Any other value is 400 `invalid_input`.
+            How long a session of this flow runs. Absent, the organisation's fixed 10 minutes
+            apply. Any other value is 400 `invalid_input`.
         assuranceTiers:
           type: array
           items:
@@ -11734,10 +11735,12 @@ components:
       properties:
         sessionTtlSeconds:
           type: integer
-          description: How long a session runs.
+          description: How long a session runs on a flow without a lifetime of its own, a fixed 600.
         dataRetentionDays:
           type: integer
-          description: How long an approved external person's proofed name is kept.
+          description: >-
+            How long an external person's data is kept after the check on a flow without a
+            retention of its own, a fixed 7.
         erasureHandling:
           type: string
           enum: [review, automatic]
@@ -11785,10 +11788,12 @@ components:
       properties:
         sessionTtlSeconds:
           type: integer
-          enum: [120, 300, 600]
+          deprecated: true
+          description: Refused with 400 `invalid_input`; a flow sets its own (`sessionTtlSeconds`).
         dataRetentionDays:
           type: integer
-          enum: [7, 30, 90, 180, 365]
+          deprecated: true
+          description: Refused with 400 `invalid_input`; a flow sets its own (`retentionOverrideSeconds`).
         erasureHandling:
           type: string
           enum: [review, automatic]

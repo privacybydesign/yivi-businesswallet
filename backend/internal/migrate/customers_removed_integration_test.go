@@ -48,6 +48,11 @@ type customerOrgs struct {
 	pausedAt, selfPausedAt time.Time
 }
 
+// customersRemovedVersion is the last of the migrations that remove them. The
+// checks run there: a later migration changes what they read (20261021114200
+// fixes the org's QR lifetime and retention).
+const customersRemovedVersion int64 = 20261021101200
+
 // TestUpFoldsCustomersIntoOrg applies the history up to the last one with
 // customers, fills it with customers' data in several orgs, and checks that
 // what the customers held is the org's afterwards: their settings merged, every
@@ -79,7 +84,7 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 		t.Errorf("orgs whose keys reach other customers = %v, %v; want only %s", flagged, err, orgs.acme)
 	}
 
-	if err := migrate.Up(ctx, dsn); err != nil {
+	if err := migrate.UpTo(ctx, dsn, customersRemovedVersion); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
 

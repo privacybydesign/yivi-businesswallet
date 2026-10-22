@@ -1005,21 +1005,6 @@ export const nl: Translation<typeof en> = {
       failedBecause: "{{status}} · {{reason}}",
     },
     settings: {
-      sessionsTitle: "Sessies",
-      qrLifetime: "Geldigheid QR-code",
-      qrLifetimeHint:
-        "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
-      minutes_one: "{{count}} min",
-      minutes_other: "{{count}} min",
-      retention: "Bewaartermijn",
-      retentionHint:
-        "De persoonsgegevens van een sessie (de naam en het e-mailadres waarheen hij is verstuurd, alles wat van het document en de chip is gelezen, de foto's en eventuele diploma's) worden zo lang na afloop gewist. Het resultaat en het auditspoor blijven. Een wijziging geldt ook voor bestaande sessies.",
-      shortenConfirm: {
-        title: "Bewaartermijn verkorten tot {{days}}?",
-        message:
-          "Dit geldt ook voor bestaande sessies: elke sessie die meer dan {{days}} geleden is afgelopen, verliest binnen het uur haar persoonsgegevens, in de wallet en in de verificatiedienst. Dit kan niet ongedaan worden gemaakt.",
-        confirm: "Bewaartermijn verkorten",
-      },
       days_one: "{{count}} dag",
       days_other: "{{count}} dagen",
     },
@@ -1175,10 +1160,6 @@ export const nl: Translation<typeof en> = {
       subtitle:
         "Alles in de Business Wallet werkt zonder installatie. Kom hier alleen om hetzelfde vanuit je eigen software te doen: maak een token om de API aan te roepen en voeg een endpoint toe dat de resultaten ontvangt.",
       adminOnly: "Alleen een beheerder kan deze pagina zien.",
-      tabs: {
-        api: "API en webhook",
-        settings: "Sessie-instellingen",
-      },
     },
     apiKeys: {
       title: "API-tokens",

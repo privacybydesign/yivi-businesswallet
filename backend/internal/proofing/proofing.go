@@ -40,8 +40,9 @@ import (
 // session it starts then runs its own SessionTTL.
 const hostedLinkTTL = 72 * time.Hour
 
-// SessionTTL is how long a mailed session runs, counted from the send. The mail
-// states it in minutes, so it is whole minutes.
+// SessionTTL is how long a mailed session runs, counted from the send, on a
+// flow that sets no lifetime of its own: the org's, a fixed default
+// (checkSettingsChange). The mail states it in minutes, so it is whole minutes.
 const SessionTTL = 10 * time.Minute
 
 // readReconcileEvery is how often a single-request read may re-check the
@@ -64,18 +65,17 @@ const proofedNameRetention = 30 * 24 * time.Hour
 // hoursPerDay converts the org's data retention in days to a duration.
 const hoursPerDay = 24
 
-// defaultDataRetentionDays is the data retention of an org that set none: a
-// week after a check ends, as Settings › Data and privacy says. The column's
-// default (identity_proofing_settings.data_retention_days) is the same.
+// defaultDataRetentionDays is how long an external person's session data is
+// kept after it ends on a flow that sets no retention of its own: the org's,
+// a fixed default (checkSettingsChange), a week, as Settings › Data and privacy
+// says. Migration 20261021114000 gave each flow the org's own value, where it
+// had another, when it became fixed. The column's default
+// (identity_proofing_settings.data_retention_days) is the same.
 const defaultDataRetentionDays = 7
 
-// SessionTTLOptions are the session lifetimes an admin may pick; SessionTTL is
+// SessionTTLOptions are the session lifetimes a flow may set; SessionTTL is
 // the default and the longest.
 var SessionTTLOptions = []time.Duration{2 * time.Minute, 5 * time.Minute, SessionTTL}
-
-// DataRetentionDayOptions are the proofed-name retentions, in days, an admin
-// may pick: up to a year; defaultDataRetentionDays (7) is the default.
-var DataRetentionDayOptions = []int{7, 30, 90, 180, 365}
 
 // Branding is how the proofing mail to external people and the hosted pages
 // look: DisplayName signs the mail ("" is the org's name), PrimaryColor colours

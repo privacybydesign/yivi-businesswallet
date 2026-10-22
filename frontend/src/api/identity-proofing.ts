@@ -347,7 +347,8 @@ export type ProofingLegalRetention = z.infer<
   typeof proofingLegalRetentionSchema
 >;
 
-// What the org set once for all its flows.
+// What the org set once for all its flows. Its session lifetime and data
+// retention are fixed defaults, which a flow overrides.
 const proofingSettingsSchema = z.object({
   sessionTtlSeconds: z.number(),
   dataRetentionDays: z.number(),
@@ -384,10 +385,9 @@ const proofingStatsSchema = z.object({
 
 export type ProofingStats = z.infer<typeof proofingStatsSchema>;
 
-// An absent field is left as it is.
+// An absent field is left as it is. The session lifetime and data retention
+// are not the org's to change.
 export interface ProofingSettingsUpdate {
-  sessionTtlSeconds?: number;
-  dataRetentionDays?: number;
   erasureHandling?: ErasureHandling;
   // Null removes it.
   legalRetention?: ProofingLegalRetention | null;
