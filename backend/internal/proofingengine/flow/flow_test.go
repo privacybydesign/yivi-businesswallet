@@ -42,7 +42,7 @@ func TestValidateAgeOver(t *testing.T) {
 	noChip.RequiredChecks = nil
 	noAge, tooOld, ageOnly := ok, ok, validFlow()
 	noAge.AgeOver = 0
-	tooOld.AgeOver = MaxAgeOver + 1
+	tooOld.AgeOver = maxAgeOver + 1
 	ageOnly.AgeOver = 18
 
 	for name, tc := range map[string]struct {

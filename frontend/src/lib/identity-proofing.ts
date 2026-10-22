@@ -458,7 +458,7 @@ export function flowDraftError(
   }
   if (asksAge(draft)) {
     const age = Number(draft.ageOver);
-    if (!Number.isInteger(age) || age < 1 || age > MAX_AGE_OVER) {
+    if (!Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER) {
       return "ageOver";
     }
   }
@@ -880,9 +880,10 @@ export const ATTRIBUTE_DOCUMENT = "dg1";
 // The age check: only whether the holder is the flow's age or older, derived
 // from the chip's date of birth (flow.AttributeAgeOver).
 export const ATTRIBUTE_AGE_OVER = "age_over";
-// The age a new age check answers for, and the highest the service takes
-// (flow.MaxAgeOver).
+// The age a new age check answers for, and the lowest and highest the service
+// takes (flow.minAgeOver, flow.maxAgeOver).
 const DEFAULT_AGE_OVER = 18;
+const MIN_AGE_OVER = 1;
 const MAX_AGE_OVER = 120;
 // The ages the editor offers: the usual legal limits, as ISO mDL and the EUDI
 // PID name them (age_over_NN), and the ones the Yivi passport and id-card

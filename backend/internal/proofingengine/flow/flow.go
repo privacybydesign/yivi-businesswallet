@@ -410,8 +410,12 @@ const DocumentTypeDrivingLicence = "drivers_license"
 // holder is AgeOver or older, derived from the chip's date of birth.
 const AttributeAgeOver = "age_over"
 
-// MaxAgeOver is the highest age a flow can ask the holder to be over.
-const MaxAgeOver = 120
+// minAgeOver and maxAgeOver are the lowest and highest age a flow can ask the
+// holder to be over.
+const (
+	minAgeOver = 1
+	maxAgeOver = 120
+)
 
 // DocumentTypeEUDrivingLicence is the other spelling of an EU driving
 // licence: mrtdEvidence's documentType for a licence chip.
@@ -640,8 +644,8 @@ func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	if !seenSteps[StepNFCRead] {
 		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
 	}
-	if fd.AgeOver < 1 || fd.AgeOver > MaxAgeOver {
-		return fmt.Errorf("flow: ageOver must be between 1 and %d", MaxAgeOver)
+	if fd.AgeOver < minAgeOver || fd.AgeOver > maxAgeOver {
+		return fmt.Errorf("flow: ageOver must be between %d and %d", minAgeOver, maxAgeOver)
 	}
 	return nil
 }
