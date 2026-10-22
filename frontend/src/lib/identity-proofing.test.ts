@@ -746,19 +746,27 @@ describe("ageOverChoices", () => {
 });
 
 describe("attribute reasons", () => {
-  const chipOnly = draft({ faceVerification: false });
+  // A draft with every item ticked, explained in both languages: a new flow
+  // starts with none ticked.
+  const ticked = (patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft =>
+    draft({ requestedAttributes: EVERY_ATTRIBUTE, ...patch });
+  const chipOnly = ticked({ faceVerification: false });
   const bare = (patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft =>
-    draft({ attributeReasons: {}, ...patch });
+    ticked({ attributeReasons: {}, ...patch });
 
-  it("asks a new flow for a reason on every item it starts with", () => {
-    expect(flowDraftError({ ...emptyFlowDraft(), name: "F" })).toBe("reasons");
+  it("asks a new flow no reason until it collects an item, then one for each", () => {
+    const fresh = { ...emptyFlowDraft(), name: "F" };
+    expect(flowDraftError(fresh)).toBeNull();
+    expect(
+      flowDraftError({ ...fresh, requestedAttributes: EVERY_ATTRIBUTE }),
+    ).toBe("reasons");
   });
 
   it("wants each collected item explained in every language the page offers", () => {
     expect(flowDraftError(bare(), false, ["en", "nl"])).toBe("reasons");
-    expect(flowDraftError(draft(), false, ["en", "nl"])).toBeNull();
+    expect(flowDraftError(ticked(), false, ["en", "nl"])).toBeNull();
 
-    const dutchMissing = draft({
+    const dutchMissing = ticked({
       attributeReasons: {
         ...EXPLAINED,
         dg1: { en: "To check your age." },
@@ -769,7 +777,7 @@ describe("attribute reasons", () => {
   });
 
   it("counts a blank reason as none", () => {
-    const blank = draft({
+    const blank = ticked({
       attributeReasons: {
         ...EXPLAINED,
         dg1: { en: "  ", nl: "Om te controleren." },
@@ -784,7 +792,7 @@ describe("attribute reasons", () => {
     expect(flowDraftError(outcomeOnly, false, ["en", "nl"])).toBeNull();
 
     // Selfie stays ticked while its step is off, and is not collected.
-    const stepOff = draft({
+    const stepOff = ticked({
       faceVerification: false,
       attributeReasons: { ...EXPLAINED, selfie: {}, biometrics: {} },
     });
@@ -805,7 +813,7 @@ describe("attribute reasons", () => {
 
   it("sends the trimmed reasons of the collected items only", () => {
     const spec = flowSpecFromDraft(
-      draft({
+      ticked({
         faceVerification: false,
         attributeReasons: {
           ...EXPLAINED,
@@ -822,7 +830,7 @@ describe("attribute reasons", () => {
   });
 
   it("sends none for a flow that collects nothing", () => {
-    const spec = flowSpecFromDraft(draft({ requestedAttributes: new Set() }));
+    const spec = flowSpecFromDraft(ticked({ requestedAttributes: new Set() }));
     expect(spec.requestedAttributes).toEqual([OUTCOME_ONLY]);
     expect(spec).not.toHaveProperty("attributeReasons");
   });
@@ -853,7 +861,7 @@ describe("attribute reasons", () => {
   });
 
   it("names the language a reason is missing in", () => {
-    const englishMissing = draft({
+    const englishMissing = ticked({
       attributeReasons: {
         ...EXPLAINED,
         dg1: { nl: "Om je leeftijd te zien." },

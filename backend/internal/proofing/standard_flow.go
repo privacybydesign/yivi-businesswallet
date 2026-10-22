@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -49,6 +50,39 @@ const (
 	standardProcessingPurpose = "Answering a person's request to see or delete their data (GDPR Art. 15 and 17)"
 )
 
+// standardReasons are why a standard flow collects each item, in every
+// language a hosted page offers (email.Locales): what the person reads under
+// the item before they start (withReasons). The wallet gives them, since no
+// admin edits these flows.
+var standardReasons = map[string]map[email.Locale]string{
+	attributeDocument: {
+		email.LocaleEN: "To find the data we hold about you, by your name and date of birth.",
+		email.LocaleNL: "Om de gegevens te vinden die we over je hebben, aan de hand van je naam en geboortedatum.",
+	},
+	attributeChipChecks: {
+		email.LocaleEN: "To make sure your document is real.",
+		email.LocaleNL: "Om te controleren dat je document echt is.",
+	},
+	attributeBiometrics: {
+		email.LocaleEN: "To make sure only the document's holder can make this request.",
+		email.LocaleNL: "Om zeker te weten dat alleen de houder van het document dit verzoek doet.",
+	},
+}
+
+// standardFlowReasons is standardReasons as a flow version holds them, a copy
+// of its own.
+func standardFlowReasons() map[string]map[string]string {
+	out := make(map[string]map[string]string, len(standardReasons))
+	for attribute, byLocale := range standardReasons {
+		reasons := make(map[string]string, len(byLocale))
+		for locale, reason := range byLocale {
+			reasons[string(locale)] = reason
+		}
+		out[attribute] = reasons
+	}
+	return out
+}
+
 // substantialChecks are the checks the engine holds an eIDAS Substantial flow
 // to: a genuine, original chip and a live face matched against its portrait.
 var substantialChecks = []string{"nfc.passive_auth", "nfc.chip_auth", "face.match", "face.liveness"}
@@ -61,12 +95,13 @@ var ErrDataRequestFlow = errors.New("proofing: See my data and Delete my data ar
 // person proves who they are at eIDAS Substantial (the document scanned, its
 // chip read, a face check), and the org receives the name and date of birth
 // a data request finds their sessions by (findDataMatches), with how surely
-// they were proven.
+// they were proven, each with its reason (standardReasons).
 func standardFlowSpec(kind FlowKind) proofingprovider.FlowSpec {
 	return proofingprovider.FlowSpec{
 		Name:                   standardFlowNames[kind],
 		Steps:                  []string{stepDocumentCapture, stepNFCRead, stepFaceVerification},
 		RequestedAttributes:    []string{attributeDocument, attributeChipChecks, attributeBiometrics},
+		AttributeReasons:       standardFlowReasons(),
 		RequiredChecks:         substantialChecks,
 		RequiredAssuranceLevel: eidasSubstantial,
 		LegalBasis:             legalBasisLegalObligation,
@@ -77,11 +112,14 @@ func standardFlowSpec(kind FlowKind) proofingprovider.FlowSpec {
 // meetsStandard reports whether f, the active version of a standard flow,
 // holds what the wallet's definition requires: it reads the name and date of
 // birth, scans the document, reads its chip and checks the face in the app, at
-// eIDAS Substantial or above.
+// eIDAS Substantial or above, and gives a reason for each item it collects in
+// every language its hosted page offers (one made before reasons existed
+// gets the definition again, with them).
 func meetsStandard(f proofingprovider.Flow) bool {
+	_, _, unexplained := missingReason(f.FlowSpec, email.Locales())
 	return readsIdentity(f) && meetsAssurance(f.RequiredAssuranceLevel, eidasSubstantial) &&
 		slices.Contains(f.Steps, stepDocumentCapture) && slices.Contains(f.Steps, stepNFCRead) &&
-		hasFaceStep(f.Steps) && flowCompletable(f)
+		hasFaceStep(f.Steps) && flowCompletable(f) && !unexplained
 }
 
 // DataRequestFlows returns the org's standard flows, See my data first, as

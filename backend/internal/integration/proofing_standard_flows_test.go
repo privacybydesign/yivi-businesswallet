@@ -13,8 +13,10 @@ import (
 // proofingListedFlowResp is a flow as a flow list has it.
 type proofingListedFlowResp struct {
 	proofingFlowResp
-	Kind          string `json:"kind"`
-	HostedEnabled *bool  `json:"hostedEnabled"`
+	Kind                string                       `json:"kind"`
+	HostedEnabled       *bool                        `json:"hostedEnabled"`
+	RequestedAttributes []string                     `json:"requestedAttributes"`
+	AttributeReasons    map[string]map[string]string `json:"attributeReasons"`
 }
 
 type proofingKindedRequestResp struct {
@@ -73,11 +75,21 @@ func TestProofingStandardFlows(t *testing.T) {
 }
 
 // assertStandardFlowListed checks a standard flow as its list has it:
-// sendable as a link, completable, not for members and not the default.
+// sendable as a link, completable, not for members and not the default, with
+// a reason in either language for each item it collects.
 func assertStandardFlowListed(t *testing.T, f proofingListedFlowResp) {
 	t.Helper()
 	if f.HostedEnabled == nil || !*f.HostedEnabled || !f.Completable || f.Allowed || f.Default {
 		t.Errorf("standard flow = %+v; want sendable as a link, completable, not for members, not the default", f)
+	}
+	// The person reads why each item is collected, in either language.
+	if len(f.RequestedAttributes) == 0 {
+		t.Errorf("standard flow %s lists no items", f.Kind)
+	}
+	for _, attribute := range f.RequestedAttributes {
+		if f.AttributeReasons[attribute]["en"] == "" || f.AttributeReasons[attribute]["nl"] == "" {
+			t.Errorf("standard flow %s gives %s the reasons %v; want one in en and nl", f.Kind, attribute, f.AttributeReasons[attribute])
+		}
 	}
 }
 
