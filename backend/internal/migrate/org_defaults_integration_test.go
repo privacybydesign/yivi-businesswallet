@@ -17,10 +17,13 @@ import (
 
 // orgDefaultsVersion is 20261021114000_copy_org_defaults_into_identity_proofing_flow_versions.sql,
 // the first of the migrations that fix an org's QR lifetime and data
-// retention; orgDefaultsMigrations is how many there are.
+// retention, and orgDefaultsLastVersion the last; orgDefaultsMigrations is how
+// many there are. The test runs up to the last, so a later migration does not
+// change what it reads or how far its downs go.
 const (
-	orgDefaultsVersion    int64 = 20261021114000
-	orgDefaultsMigrations       = 3
+	orgDefaultsVersion     int64 = 20261021114000
+	orgDefaultsLastVersion int64 = 20261021114200
+	orgDefaultsMigrations        = 3
 )
 
 const day = 24 * time.Hour
@@ -112,7 +115,7 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 	fixedFollows := request(fixed, "external", nil, false)
 	unsavedFollows := request(unsaved, "external", nil, false)
 
-	if err := migrate.Up(ctx, dsn); err != nil {
+	if err := migrate.UpTo(ctx, dsn, orgDefaultsLastVersion); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
 
