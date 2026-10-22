@@ -220,27 +220,11 @@ func TestProofingReviewerDataRequests(t *testing.T) {
 	admin := env.login("admin@acme.test")
 	env.addMembership(admin.ID, orgID, organization.RoleAdmin)
 	env.proofingDefaultFlow("acme")
-	// A data request finds the person's sessions by the name and date of birth
-	// it reads.
-	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
-		"name": "See my data", "steps": []string{"document_capture", "nfc_read"}, "requiredChecks": []string{"nfc.passive_auth"},
-		"requestedAttributes": []string{"dg1"},
-		"attributeReasons": map[string]any{"dg1": map[string]string{
-			"en": "To find the data we hold of you.", "nl": "Om de gegevens te vinden die we van je hebben.",
-		}},
-	})
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create the data flow = %d, want 201", resp.StatusCode)
-	}
-	dataFlow := decodeJSON[proofingFlowResp](t, resp)
-	resp = env.putJSON("/api/v1/orgs/acme/identity-proofing/flows/"+dataFlow.ID+"/kind", map[string]any{"kind": "data_access"})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("make the flow a data request = %d, want 200", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
+	// See my data runs on the org's standard flow (#344), created on the first
+	// send of its kind.
 	key := env.proofingKey("acme", "CI")
 	asked := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
-		map[string]any{"email": "anna@example.org", "flowId": dataFlow.ID, "sendMail": false}))
+		map[string]any{"email": "anna@example.org", "flowKind": "data_access", "sendMail": false}))
 	// The read is what puts the proven person's request in review.
 	if read := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+asked.ID,
 		key.Secret, nil)); read.Status != "needs_review" {
@@ -250,7 +234,7 @@ func TestProofingReviewerDataRequests(t *testing.T) {
 	reviewer := env.loginAs("reviewer@acme.test")
 	env.addMembership(reviewer, orgID, organization.RoleMember)
 	env.loginAs("admin@acme.test")
-	resp = env.putJSON("/api/v1/orgs/acme/members/"+reviewer.String()+"/review-right", map[string]any{"canReview": true})
+	resp := env.putJSON("/api/v1/orgs/acme/members/"+reviewer.String()+"/review-right", map[string]any{"canReview": true})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("giving the right = %d, want 200", resp.StatusCode)
 	}
