@@ -41,6 +41,15 @@ func TestStandardFlowSpecMeetsStandard(t *testing.T) {
 		}) {
 			t.Errorf("%s releases %v; want the document data and the checks only, no image", kind, spec.RequestedAttributes)
 		}
+
+		// The age check withholds the date of birth a data request finds the
+		// person's sessions by: a version with it falls short of the standard.
+		withAge := f
+		withAge.RequestedAttributes = append(slices.Clone(spec.RequestedAttributes), attributeAgeOver)
+		withAge.AgeOver = 18
+		if meetsStandard(withAge) {
+			t.Errorf("%s with the age check meets the standard; want not", kind)
+		}
 	}
 	weak := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{stepDocumentCapture, stepNFCRead}, RequestedAttributes: []string{attributeDocument}}}
 	if meetsStandard(weak) {

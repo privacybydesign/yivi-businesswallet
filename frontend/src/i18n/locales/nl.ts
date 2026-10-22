@@ -1523,7 +1523,7 @@ export const nl: Translation<typeof en> = {
         ageOverHint:
           "Alleen leeftijdscontrole beantwoordt of de persoon op de dag van de controle deze leeftijd of ouder is.",
         ageOverLocked:
-          "Uit bij een gegevensverzoek of diploma's: die hebben de geboortedatum nodig.",
+          "Uit bij verplichte diploma's: die worden met de geboortedatum vergeleken.",
       },
       checks: {
         title: "Controles",

@@ -1663,9 +1663,11 @@ the Verify a person dialog's "What do you send?" and the hosted page.
   alike. Their definition is the wallet's (`standardFlowSpec`): document scan,
   chip read and a face check (Regula, liveness) at eIDAS Substantial, releasing
   the document data (`dg1`, the name and date of birth a request finds the
-  person's sessions by), `chip_checks` and `biometrics`, never an image; legal
-  basis `legal_obligation`. A standard flow whose active version falls short of
-  it (`meetsStandard`) gets it back in a new version under its own name, and
+  person's sessions by), `chip_checks` and `biometrics`, never an image and
+  never the age check, which would withhold that date of birth; legal basis
+  `legal_obligation`. A standard flow whose active version falls short of it
+  (`meetsStandard`, which needs `readsIdentity`: `dg1` without `age_over`)
+  gets it back in a new version under its own name, and
   one the engine no longer lists is replaced. Both are audited
   `flow_created`/`flow_version_created` and `flow_kind_configured` without an
   actor. Two first sends at once each create a flow; `ClaimStandardFlow`

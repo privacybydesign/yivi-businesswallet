@@ -1493,7 +1493,7 @@ export const en = {
         ageOverHint:
           "Age check only answers whether the person is this age or older on the day of the check.",
         ageOverLocked:
-          "Off for a data request or diplomas: they need the date of birth.",
+          "Off with required diplomas: they are checked against the date of birth.",
       },
       checks: {
         title: "Checks",
