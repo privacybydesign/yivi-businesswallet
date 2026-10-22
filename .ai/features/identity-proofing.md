@@ -888,8 +888,8 @@ post-review outcome stay the system's.
   already holds changes and audits nothing. Held in `OrgSettingsStore`; no row
   reads as the defaults. A session change sets only what it names, applied under
   the advisory lock on the org (`lockSettings`), and a `PATCH` checks every part
-  before it saves any, then saves the session settings and the redirect origins
-  in one transaction with one audit event (`UpdateSettings`,
+  before it saves any, then saves the session settings, the legal retention and
+  the redirect origins in one transaction with one audit event (`UpdateSettings`,
   `OrgSettingsStore.Save`, `TestSettingsSaveIsOneTransaction`). The white-label
   columns and `erasure_handling` were columns of the customers: migration
   `20261021100000` merges them into the org's settings (§1).

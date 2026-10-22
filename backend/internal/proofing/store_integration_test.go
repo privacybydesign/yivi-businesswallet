@@ -576,7 +576,7 @@ func TestSettingsSaveIsOneTransaction(t *testing.T) {
 			t.Fatalf("refuse origins: %v", err)
 		}
 	}
-	if _, err := store.Save(ctx, orgID, sessionChange(week), &origins); err == nil {
+	if _, err := store.Save(ctx, orgID, sessionChange(week), nil, &origins); err == nil {
 		t.Fatal("Save with refused origins succeeded")
 	}
 	got, err := store.Get(ctx, orgID)
@@ -590,7 +590,7 @@ func TestSettingsSaveIsOneTransaction(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DROP TRIGGER refuse_origins ON identity_proofing_settings`); err != nil {
 		t.Fatalf("allow origins: %v", err)
 	}
-	saved, err := store.Save(ctx, orgID, sessionChange(week), &origins)
+	saved, err := store.Save(ctx, orgID, sessionChange(week), nil, &origins)
 	if err != nil || saved.Session != week || !slices.Equal(saved.RedirectOrigins, origins) {
 		t.Fatalf("Save = %+v, %v; want the week and the origins", saved, err)
 	}

@@ -359,9 +359,15 @@ type fakeOrgSettings struct {
 
 func (f *fakeOrgSettings) Get(context.Context, uuid.UUID) (Settings, error) { return f.settings, nil }
 
-func (f *fakeOrgSettings) Save(_ context.Context, _ uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error) {
+func (f *fakeOrgSettings) Save(_ context.Context, _ uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error) {
 	f.saves++
 	f.settings.Session = change.apply(f.settings.Session)
+	if legal != nil {
+		if f.settings.LegalRetention != *legal {
+			f.stale = true
+		}
+		f.settings.LegalRetention = *legal
+	}
 	if origins != nil {
 		f.settings.RedirectOrigins = *origins
 	}
@@ -376,14 +382,6 @@ func (f *fakeOrgSettings) SaveBranding(_ context.Context, _ uuid.UUID, b Brandin
 		b.HasLogo = f.settings.Branding.HasLogo
 	}
 	f.settings.Branding = b
-	return f.settings, nil
-}
-
-func (f *fakeOrgSettings) SaveLegalRetention(_ context.Context, _ uuid.UUID, legal LegalRetention) (Settings, error) {
-	if f.settings.LegalRetention != legal {
-		f.stale = true
-	}
-	f.settings.LegalRetention = legal
 	return f.settings, nil
 }
 

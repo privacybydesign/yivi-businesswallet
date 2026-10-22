@@ -120,9 +120,8 @@ type apiKeyStore interface {
 
 type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
-	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error)
+	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error)
 	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
-	SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error)
 	SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error
 	MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error
 	StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error)
@@ -2064,12 +2063,13 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 	if err := checkSettingsChange(session); err != nil {
 		return Settings{}, err
 	}
-	var legal LegalRetention
+	var legal *LegalRetention
 	if change.LegalRetention != nil {
-		legal = change.LegalRetention.tidy()
-		if err := legal.check(); err != nil {
+		tidy := change.LegalRetention.tidy()
+		if err := tidy.check(); err != nil {
 			return Settings{}, err
 		}
+		legal = &tidy
 	}
 	var origins *[]string
 	if change.RedirectOrigins != nil {
@@ -2079,24 +2079,16 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 		}
 		origins = &normalized
 	}
-	if session.empty() && origins == nil && change.LegalRetention == nil {
+	if session.empty() && origins == nil && legal == nil {
 		return s.orgSettings.Get(ctx, orgID)
 	}
-	current, err := s.orgSettings.Get(ctx, orgID)
+	current, err := s.orgSettings.Save(ctx, orgID, session, legal, origins)
 	if err != nil {
 		return Settings{}, err
 	}
-	if !session.empty() || origins != nil {
-		if current, err = s.orgSettings.Save(ctx, orgID, session, origins); err != nil {
-			return Settings{}, err
-		}
-	}
-	if change.LegalRetention != nil {
-		if current, err = s.orgSettings.SaveLegalRetention(ctx, orgID, legal); err != nil {
-			return Settings{}, err
-		}
-		// Last, and not the update's failure: the change is saved, and the
-		// org stays marked until a sync succeeds, which the pruner retries.
+	// Last, and not the update's failure: the change is saved, and the org
+	// stays marked until a sync succeeds, which the pruner retries.
+	if legal != nil {
 		if err := s.syncEngineRetention(ctx, orgID); err != nil {
 			slog.ErrorContext(ctx, "identity proofing: engine retention sync failed; the pruner retries it",
 				slog.String("org_id", orgID.String()), slog.Any("error", err))

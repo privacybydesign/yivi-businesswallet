@@ -125,26 +125,28 @@ func scanSettings(row pgx.CollectableRow) (Settings, error) {
 // identity_proofing.settings_updated with before and after. A change to what
 // is already set changes and audits nothing.
 func (s *OrgSettingsStore) SaveSession(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange) (Settings, error) {
-	return s.Save(ctx, orgID, change, nil)
+	return s.Save(ctx, orgID, change, nil, nil)
 }
 
 // SaveRedirectOrigins replaces the origins the org's hosted pages may redirect
 // to and be embedded on, and audits identity_proofing.settings_updated with
 // before and after. Saving the origins it already has changes nothing.
 func (s *OrgSettingsStore) SaveRedirectOrigins(ctx context.Context, orgID uuid.UUID, origins []string) (Settings, error) {
-	return s.Save(ctx, orgID, SessionSettingsChange{}, &origins)
+	return s.Save(ctx, orgID, SessionSettingsChange{}, nil, &origins)
 }
 
-// Save applies change to the org's session settings and, when origins is set,
-// replaces its redirect origins, in one transaction: both are saved or
-// neither. It audits identity_proofing.settings_updated once, with before and
-// after of what it changed; a change to what is already set changes and
-// audits nothing.
-func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, origins *[]string) (Settings, error) {
+// Save applies change to the org's session settings and, when legal or
+// origins is set, replaces its legal retention or its redirect origins, in one
+// transaction: all of it is saved or none of it. It audits
+// identity_proofing.settings_updated once, with before and after of what it
+// changed; a change to what is already set changes and audits nothing. A new
+// legal retention marks the org's engine sessions for a sync
+// (engine_retention_stale, SyncEngineRetention).
+func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error) {
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// A request created meanwhile waits on this lock (settingsLockCreate),
 		// so it reads the new retention for its purge time.
-		if !change.empty() {
+		if !change.empty() || legal != nil {
 			if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
 				return err
 			}
@@ -161,6 +163,13 @@ func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change Ses
 			}
 			maps.Copy(auditBefore, before.Session.auditFields())
 			maps.Copy(auditAfter, session.auditFields())
+		}
+		if legal != nil && *legal != before.LegalRetention {
+			if err := saveLegalRetention(ctx, q, orgID, *legal); err != nil {
+				return err
+			}
+			maps.Copy(auditBefore, before.LegalRetention.auditFields())
+			maps.Copy(auditAfter, legal.auditFields())
 		}
 		if origins != nil && !slices.Equal(before.RedirectOrigins, *origins) {
 			after := *origins
@@ -214,40 +223,27 @@ func saveSession(ctx context.Context, q database.Querier, orgID uuid.UUID, befor
 // sessions for a sync (engine_retention_stale, SyncEngineRetention). Saving the
 // legal retention it has changes, marks and audits nothing.
 func (s *OrgSettingsStore) SaveLegalRetention(ctx context.Context, orgID uuid.UUID, legal LegalRetention) (Settings, error) {
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		if err := lockSettings(ctx, q, orgID, settingsLockWrite); err != nil {
-			return err
-		}
-		before, err := getSettings(ctx, q, orgID)
-		if err != nil {
-			return err
-		}
-		if before.LegalRetention == legal {
-			return nil
-		}
-		// The engine's sessions hold the old retention until a sync gives them
-		// the new one (SyncEngineRetention).
-		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
-				(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl,
-				 engine_retention_stale)
-			VALUES ($1, NULLIF($2, 0), NULLIF($3, ''), NULLIF($4, ''), true)
-			ON CONFLICT (organization_id) DO UPDATE SET
-				legal_retention_months = EXCLUDED.legal_retention_months,
-				legal_retention_reason_en = EXCLUDED.legal_retention_reason_en,
-				legal_retention_reason_nl = EXCLUDED.legal_retention_reason_nl,
-				engine_retention_stale = true, updated_at = now()`,
-			orgID, legal.Months, legal.ReasonEN, legal.ReasonNL); err != nil {
-			return fmt.Errorf("proofing: save legal retention org %s: %w", orgID, err)
-		}
-		if err := refreshOrgPurgeAt(ctx, q, orgID); err != nil {
-			return err
-		}
-		return s.recordUpdated(ctx, q, orgID, before.LegalRetention.auditFields(), legal.auditFields())
-	})
-	if err != nil {
-		return Settings{}, err
+	return s.Save(ctx, orgID, SessionSettingsChange{}, &legal, nil)
+}
+
+// saveLegalRetention stores the org's legal retention, marks its engine
+// sessions for a sync (they hold the old retention until SyncEngineRetention
+// gives them the new one) and moves its requests' purge time. The caller holds
+// the settings write lock.
+func saveLegalRetention(ctx context.Context, q database.Querier, orgID uuid.UUID, legal LegalRetention) error {
+	if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings
+			(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl,
+			 engine_retention_stale)
+		VALUES ($1, NULLIF($2, 0), NULLIF($3, ''), NULLIF($4, ''), true)
+		ON CONFLICT (organization_id) DO UPDATE SET
+			legal_retention_months = EXCLUDED.legal_retention_months,
+			legal_retention_reason_en = EXCLUDED.legal_retention_reason_en,
+			legal_retention_reason_nl = EXCLUDED.legal_retention_reason_nl,
+			engine_retention_stale = true, updated_at = now()`,
+		orgID, legal.Months, legal.ReasonEN, legal.ReasonNL); err != nil {
+		return fmt.Errorf("proofing: save legal retention org %s: %w", orgID, err)
 	}
-	return s.Get(ctx, orgID)
+	return refreshOrgPurgeAt(ctx, q, orgID)
 }
 
 // SyncEngineRetention runs sync with the org's settings as they stand under its
