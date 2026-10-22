@@ -76,7 +76,7 @@ func TestStringifyNonStringClaim(t *testing.T) {
 	}
 }
 
-var stagingVCTs = vctsFor(DefaultCredentialScheme)
+var stagingVCTs = vctsFor(defaultCredentialScheme)
 
 func TestVCTsFollowTheScheme(t *testing.T) {
 	if got := vctsFor("pbdf"); got.passport != "pbdf.pbdf.passport" || got.email != "pbdf.sidn-pbdf.email" {

@@ -86,7 +86,7 @@ type Presentation struct {
 	// identity credential or its `iat` could not be read.
 	IdentityIssuedAt time.Time
 	// vcts names Document's credential; zero (a hand-built value) means
-	// DefaultCredentialScheme's.
+	// defaultCredentialScheme's.
 	vcts vcts
 }
 
@@ -116,7 +116,7 @@ type IdentityDocument struct {
 func (p Presentation) Document() (IdentityDocument, bool) {
 	v := p.vcts
 	if v == (vcts{}) {
-		v = vctsFor(DefaultCredentialScheme)
+		v = vctsFor(defaultCredentialScheme)
 	}
 	for _, c := range [...]struct{ id, vct string }{{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}} {
 		if claims, ok := p.ByCredential[c.id]; ok {

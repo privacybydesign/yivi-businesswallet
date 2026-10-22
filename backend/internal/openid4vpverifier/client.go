@@ -38,7 +38,7 @@ type Client struct {
 }
 
 // credentialScheme is the Yivi scheme the requested credentials come from
-// (DefaultCredentialScheme when empty).
+// (defaultCredentialScheme when empty).
 func New(baseURL, issuerChain, intendedUseID, registrationCertificate, credentialScheme string, httpClient *http.Client) *Client {
 	return &Client{
 		baseURL:                 strings.TrimRight(baseURL, "/"),

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -343,6 +344,10 @@ const (
 	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
+// eudiCredentialSchemes are the Yivi schemes EUDI_CREDENTIAL_SCHEME may name;
+// empty means the openid4vpverifier default (pbdf-staging).
+var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
+
 type Config struct {
 	DatabaseDSN string
 	LogLevel    string
@@ -574,6 +579,13 @@ func Load() (Config, error) {
 		intendedUseID = defaultEudiIntendedUseID
 	}
 
+	// A typo would otherwise only surface when a user logs in: the boot probe's
+	// presentation request does not check the vcts it names.
+	credentialScheme := os.Getenv(envEudiCredentialScheme)
+	if credentialScheme != "" && !slices.Contains(eudiCredentialSchemes, credentialScheme) {
+		return Config{}, fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), credentialScheme)
+	}
+
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
 	if err != nil {
 		return Config{}, err
@@ -775,7 +787,7 @@ func Load() (Config, error) {
 		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
 		EudiIntendedUseID:           intendedUseID,
 		EudiRegistrationCertificate: registrationCertificate,
-		EudiCredentialScheme:        os.Getenv(envEudiCredentialScheme),
+		EudiCredentialScheme:        credentialScheme,
 		SessionCookieSecure:         cookieSecure,
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,

@@ -2,9 +2,9 @@ package openid4vpverifier
 
 import "slices"
 
-// DefaultCredentialScheme is the Yivi scheme whose credentials we request when
+// defaultCredentialScheme is the Yivi scheme whose credentials we request when
 // none is configured (EUDI_CREDENTIAL_SCHEME); production uses "pbdf".
-const DefaultCredentialScheme = "pbdf-staging"
+const defaultCredentialScheme = "pbdf-staging"
 
 // vcts are the vct values of the credentials we request (SD-JWT VC /
 // dc+sd-jwt), each "<scheme>.<issuer>.<credential>".
@@ -24,7 +24,7 @@ type vcts struct {
 
 func vctsFor(scheme string) vcts {
 	if scheme == "" {
-		scheme = DefaultCredentialScheme
+		scheme = defaultCredentialScheme
 	}
 	return vcts{
 		passport:        scheme + ".pbdf.passport",
