@@ -87,6 +87,38 @@ func TestVCTsFollowTheScheme(t *testing.T) {
 	}
 }
 
+// The scheme set at New reaches both the start request and the credential
+// Result names.
+func TestClientUsesTheConfiguredScheme(t *testing.T) {
+	var started startRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"vp_token":{"idcard":["jwt~~"]}}`))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&started)
+		_, _ = w.Write([]byte(`{"transaction_id":"tx","client_id":"cid","request_uri":"https://verifier.example/req"}`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "", "1", "", "pbdf", srv.Client())
+	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
+		t.Fatalf("StartPresentation: %v", err)
+	}
+	if got := started.DCQLQuery.Credentials[0].Meta.VctValues; !slices.Equal(got, []string{"pbdf.sidn-pbdf.email"}) {
+		t.Errorf("login vct_values = %v, want the pbdf email credential", got)
+	}
+
+	p, err := client.Result(context.Background(), "tx")
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if doc, ok := p.Document(); !ok || doc.Credential != "pbdf.pbdf.idcard" {
+		t.Errorf("Document() = %+v, %v, want the pbdf id-card", doc, ok)
+	}
+}
+
 func TestLoginQueryIsEmailOnly(t *testing.T) {
 	q := stagingVCTs.loginQuery()
 	if len(q.Credentials) != 1 || q.Credentials[0].ID != "email" {
