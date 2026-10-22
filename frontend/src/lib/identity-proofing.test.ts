@@ -1491,6 +1491,12 @@ describe("listedCount", () => {
     expect(listedCount(12, false, t)).toBe("12");
     expect(listedCount(0, false, t)).toBe("0");
   });
+
+  it("shows it so in Dutch too", () => {
+    const nl = i18n.getFixedT("nl");
+    expect(listedCount(MAX_LISTED_REQUESTS, true, nl)).toBe("200+");
+    expect(listedCount(12, false, nl)).toBe("12");
+  });
 });
 
 describe("peopleRetentionOf", () => {

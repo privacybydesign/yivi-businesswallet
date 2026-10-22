@@ -526,7 +526,6 @@ export const nl: Translation<typeof en> = {
       expired: "Verlopen",
       cancelled: "Geannuleerd",
     },
-    listedCountAtLeast: "{{count}}+",
     rejectionReasons: {
       documentTypeNotAccepted: "documenttype niet toegestaan in de flow",
       documentCountryNotAccepted:

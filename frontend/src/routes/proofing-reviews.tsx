@@ -12,8 +12,10 @@ import { isDataRequest } from "../api/identity-proofing";
 import { useDayMonthFormatter, useWhenFormatter } from "../lib/format-when";
 import {
   assuranceLevelLabel,
+  listedCount,
   proofingErrorMessage,
   proofingRejectionReason,
+  requestListCapped,
   requestSubject,
   requestedBy,
 } from "../lib/identity-proofing";
@@ -31,7 +33,6 @@ import {
   waitingSince,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
-import { listIsCapped, listedCount } from "../lib/listed-requests";
 import { Card, Table, Tag, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -55,7 +56,7 @@ export default function ProofingReviews(): React.JSX.Element {
   const counts = reviewCounts(waitingNow);
   // The backend lists at most the 200 longest in review: past that the counts
   // are lower bounds.
-  const capped = listIsCapped(waiting.data ?? []);
+  const capped = requestListCapped(waiting.data ?? []);
 
   return (
     <>

@@ -510,8 +510,6 @@ export const en = {
       expired: "Expired",
       cancelled: "Cancelled",
     },
-    // A count taken from a list the backend caps: it may be more.
-    listedCountAtLeast: "{{count}}+",
     rejectionReasons: {
       documentTypeNotAccepted: "document type not accepted by the flow",
       documentCountryNotAccepted: "issuing country not accepted by the flow",

@@ -6,7 +6,7 @@ import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { useWaitingReviewsQuery } from "../api/identity-proofing.queries";
 import { waitingOldestFirst } from "../lib/proofing-reviews";
-import { listIsCapped, listedCount } from "../lib/listed-requests";
+import { listedCount, requestListCapped } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
@@ -222,7 +222,7 @@ export function Sidebar({
         signing: showSigning,
         admin: isOrgAdmin,
         waitingReviews: waitingOldestFirst(waiting.data ?? []).length,
-        waitingReviewsCapped: listIsCapped(waiting.data ?? []),
+        waitingReviewsCapped: requestListCapped(waiting.data ?? []),
       })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS

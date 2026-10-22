@@ -1356,7 +1356,7 @@ request shows "Answer by" = `purge_at`, a calendar month after it went to review
 The list is `GET .../requests?status=needs_review`: the filter is applied before
 the list's cap of 200, and that list is the longest in review first, so the cap
 leaves out the newest, never the most overdue. A count from a capped list shows
-"200+" (`lib/listed-requests.ts`), on the tabs and the sidebar. Closed reads
+"200+" (`listedCount`, `requestListCapped`), on the tabs and the sidebar. Closed reads
 `?flowKind=data_request&status=approved` and `...&status=rejected`, each narrowed
 before its cap. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
@@ -1429,7 +1429,8 @@ A session is purged by the `identity_proofing_purge` pruner
 row), or for a member's `proofedNameRetention`
 (30 days), after it ends (completed, cancelled, expired, or gone to review: an
 undecided identity review is kept no longer than a decided one; a data request
-in review lapses after `dataRequestReviewDays` instead): as `DELETE`
+in review lapses a calendar month after it went there, `dataRequestReviewMonths`,
+instead): as `DELETE`
 above, erased in the engine, then its personal data cleared here (the subject's
 name and address, the proofed name, the redirect URL and Yivi transaction, its
 diplomas and stored idempotent answers, a data request's own matches), the
@@ -1441,7 +1442,7 @@ dashboard shows the time as `purgeAt`.
   computing the time for every unpurged row.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
-    request's review lapse after `dataRequestReviewDays`, an approved erasure
+    request's review lapse after `dataRequestReviewMonths`, an approved erasure
     when it was decided; the legal retention is a floor of an approved external
     identity check's retention, the later of two moments, not of two intervals:
     PostgreSQL compares a month to 30 days, `TestLegalCountsCalendarMonths`).
