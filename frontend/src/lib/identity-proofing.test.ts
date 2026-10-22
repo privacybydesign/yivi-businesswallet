@@ -10,7 +10,9 @@ import {
   MAX_LISTED_REQUESTS,
 } from "../api/identity-proofing";
 import {
+  ATTRIBUTE_AGE_OVER,
   DOCUMENT_KINDS,
+  REQUESTED_ATTRIBUTES,
   PROOFING_REJECTION_CODES,
   addressLookup,
   addressVerificationNote,
@@ -89,6 +91,14 @@ function draft(patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft {
   return { ...emptyFlowDraft(), name: "  Passport check ", ...patch };
 }
 
+// Every item What you receive offers, ticked, but the age check, which
+// withholds the date of birth from the document data next to it.
+const EVERY_ATTRIBUTE: ReadonlySet<string> = new Set(
+  REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+    (value) => value !== ATTRIBUTE_AGE_OVER,
+  ),
+);
+
 describe("flowSpecFromDraft", () => {
   it("sends the age check with its age instead of the document data", () => {
     const spec = flowSpecFromDraft(
@@ -103,7 +113,9 @@ describe("flowSpecFromDraft", () => {
   });
 
   it("sends the document scan and chip scan as a pair with passive auth locked on", () => {
-    const spec = flowSpecFromDraft(draft({ faceVerification: false }));
+    const spec = flowSpecFromDraft(
+      draft({ faceVerification: false, requestedAttributes: EVERY_ATTRIBUTE }),
+    );
     expect(spec).toMatchObject({
       name: "Passport check",
       steps: ["document_capture", "nfc_read"],
@@ -137,7 +149,11 @@ describe("flowSpecFromDraft", () => {
 
   it("drops data and checks whose step is not in the flow", () => {
     const spec = flowSpecFromDraft(
-      draft({ documentAndChip: false, chipAuthentication: true }),
+      draft({
+        documentAndChip: false,
+        chipAuthentication: true,
+        requestedAttributes: EVERY_ATTRIBUTE,
+      }),
     );
     expect(spec.steps).toEqual(["face_verification"]);
     expect(spec.requiredChecks).toEqual(["face.match"]);
@@ -166,7 +182,7 @@ describe("flowSpecFromDraft", () => {
       }),
     );
     expect(spec).toMatchObject({
-      acceptedDocumentTypes: ["P"],
+      acceptedDocumentTypes: ["passport"],
       acceptedIssuingCountries: ["NLD", "BEL"],
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "mask",
@@ -193,6 +209,13 @@ describe("flowSpecFromDraft", () => {
       keepFacePhotos: false,
     });
   });
+
+  it("receives only the outcome in a new flow", () => {
+    expect(emptyFlowDraft().requestedAttributes.size).toBe(0);
+    expect(flowSpecFromDraft(draft()).requestedAttributes).toEqual([
+      OUTCOME_ONLY,
+    ]);
+  });
 });
 
 describe("accepted documents", () => {
@@ -210,14 +233,18 @@ describe("accepted documents", () => {
     expect(flowSpecFromDraft(draft()).acceptedDocumentTypes).toEqual([]);
   });
 
-  it("names the codes of the kinds that are ticked", () => {
-    const only = (kind: (typeof DOCUMENT_KINDS)[number]): string[] =>
-      flowSpecFromDraft(draft({ documentKinds: new Set([kind]) }))
-        .acceptedDocumentTypes ?? [];
-    expect(only("passport")).toEqual(["P"]);
-    expect(only("id_card")).toEqual(["I", "ID"]);
-    expect(only("residence_permit")).toEqual(["residence_permit"]);
-    expect(only("drivers_license")).toEqual(["drivers_license"]);
+  it("names the kinds that are ticked, as the engine names them", () => {
+    for (const kind of DOCUMENT_KINDS) {
+      expect(
+        flowSpecFromDraft(draft({ documentKinds: new Set([kind]) }))
+          .acceptedDocumentTypes,
+      ).toEqual([kind]);
+    }
+    expect(
+      flowSpecFromDraft(
+        draft({ documentKinds: new Set(["identity_card", "passport"]) }),
+      ).acceptedDocumentTypes,
+    ).toEqual(["passport", "identity_card"]);
   });
 
   it("refuses a flow that accepts no kind", () => {
@@ -230,24 +257,98 @@ describe("accepted documents", () => {
     expect(draftFromFlow(stored).documentKinds).toEqual(
       new Set(DOCUMENT_KINDS),
     );
+    const codes = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "I", "ID"],
+    });
+    expect(codes.documentKinds).toEqual(new Set(["passport", "identity_card"]));
+    expect(codes.otherDocumentTypes).toEqual([]);
     const mixed = draftFromFlow({
       ...stored,
       acceptedDocumentTypes: ["P", "IR"],
     });
     expect(mixed.documentKinds).toEqual(new Set(["passport"]));
     expect(mixed.otherDocumentTypes).toEqual(["IR"]);
-    expect(flowSpecFromDraft(mixed).acceptedDocumentTypes).toEqual(["P", "IR"]);
-    // Not every kind ticked, next to a code of its own: no longer any document.
-    const all = draftFromFlow({
+    const uppercased = draftFromFlow({
       ...stored,
-      acceptedDocumentTypes: ["P", "ID", "IR"],
+      acceptedDocumentTypes: ["DRIVERS_LICENSE", "Residence_Permit"],
     });
-    expect(flowSpecFromDraft(all).acceptedDocumentTypes).toEqual([
-      "P",
-      "I",
-      "ID",
+    expect(uppercased.documentKinds).toEqual(
+      new Set(["drivers_license", "residence_permit"]),
+    );
+  });
+
+  it("sends a stored list unchanged while its kinds are ticked", () => {
+    for (const types of [
+      [],
+      ["P", "I"],
+      ["P", "ID", "IR"],
+      ["DRIVERS_LICENSE"],
+      [...DOCUMENT_KINDS],
+    ]) {
+      const unchanged = draftFromFlow({
+        ...stored,
+        acceptedDocumentTypes: types,
+      });
+      expect(flowSpecFromDraft(unchanged).acceptedDocumentTypes).toEqual(types);
+    }
+  });
+
+  it("sends kinds once the kinds ticked change, keeping a code no kind covers", () => {
+    const codes = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "I"],
+    });
+    const more = {
+      ...codes,
+      documentKinds: new Set([...codes.documentKinds, "residence_permit"]),
+    } satisfies ProofingFlowDraft;
+    expect(flowSpecFromDraft(more).acceptedDocumentTypes).toEqual([
+      "passport",
+      "identity_card",
+      "residence_permit",
+    ]);
+    const mixed = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "IR"],
+    });
+    const withCards = {
+      ...mixed,
+      documentKinds: new Set([...mixed.documentKinds, "identity_card"]),
+    } satisfies ProofingFlowDraft;
+    expect(flowSpecFromDraft(withCards).acceptedDocumentTypes).toEqual([
+      "passport",
+      "identity_card",
       "IR",
     ]);
+    // Every kind ticked is any document again.
+    const every = { ...codes, documentKinds: new Set(DOCUMENT_KINDS) };
+    expect(flowSpecFromDraft(every).acceptedDocumentTypes).toEqual([]);
+  });
+});
+
+// The kinds the editor saves are the ones the proofing engine reads.
+describe("document kinds mirror backend/internal/proofingengine", () => {
+  it("saves every kind the engine names and no other", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofingengine/flow/flow.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const constant = (name: string): string | undefined =>
+      new RegExp(`\\b${name}\\s*= "([a-z_]+)"`).exec(source)?.[1];
+    const engine = [
+      "DocumentKindPassport",
+      "DocumentKindIdentityCard",
+      "DocumentKindResidencePermit",
+      "DocumentTypeDrivingLicence",
+    ].map(constant);
+    expect(new Set(engine)).toEqual(new Set(DOCUMENT_KINDS));
+    expect(engine).toHaveLength(DOCUMENT_KINDS.length);
   });
 });
 
@@ -646,7 +747,9 @@ describe("identity for data requests and diplomas", () => {
     const noDocumentData = draft({ requestedAttributes: new Set(["dg2"]) });
     expect(flowDraftError(noDocumentData)).toBeNull();
     expect(flowDraftError(noDocumentData, true)).toBe("identity");
-    expect(flowDraftError(draft(), true)).toBeNull();
+    expect(
+      flowDraftError(draft({ requestedAttributes: new Set(["dg1"]) }), true),
+    ).toBeNull();
     // Without the document scan there is no document data to read.
     expect(
       flowDraftError(

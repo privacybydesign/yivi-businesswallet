@@ -175,24 +175,56 @@ type BsnPolicy = (typeof BSN_POLICIES)[number];
 const NEW_FLOW_BSN_POLICY: BsnPolicy = "omit";
 const UNSET_BSN_POLICY: BsnPolicy = "omit";
 
-// The kinds of document the editor lets a flow accept, and what each goes by
-// on a chip: the ICAO 9303 code "P" for a passport; an ID card is "I" or "ID",
-// the second letter being the issuer's choice; a residence permit and an EU
-// driving licence go by the engine's own kind names.
+// The kinds of document the editor lets a flow accept, saved as the proofing
+// engine names them (flow.DocumentKindPassport, DocumentKindIdentityCard,
+// DocumentKindResidencePermit and DocumentTypeDrivingLicence;
+// identity-proofing.test.ts holds the two together). The engine tells a
+// document's kind from its code, issuing state and holder's nationality
+// (flow.DocumentKindOf), and the Yivi app's from its credential, so a
+// residence permit coded ID is not taken for an identity card, and a
+// diplomatic passport (PD) is a passport.
 export const DOCUMENT_KINDS = [
   "passport",
-  "id_card",
+  "identity_card",
   "residence_permit",
   "drivers_license",
 ] as const;
-type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
-const DOCUMENT_CODES: Record<DocumentKind, readonly string[]> = {
+// The ICAO 9303 document codes earlier editors saved for a kind: "P" for a
+// passport, "I" and "ID" for an identity card. A stored one reads as its
+// kind; any other stored code is kept as it is.
+const DOCUMENT_KIND_CODES: Record<DocumentKind, readonly string[]> = {
   passport: ["P"],
-  id_card: ["I", "ID"],
-  residence_permit: ["residence_permit"],
-  drivers_license: ["drivers_license"],
+  identity_card: ["I", "ID"],
+  residence_permit: [],
+  drivers_license: [],
 };
+
+// The kind a stored document type reads as, a kind by its name in any case
+// (the old editor uppercased them) or one of DOCUMENT_KIND_CODES; undefined
+// for another code.
+function documentKindOf(type: string): DocumentKind | undefined {
+  const upper = type.toUpperCase();
+  return DOCUMENT_KINDS.find(
+    (kind) =>
+      kind.toUpperCase() === upper || DOCUMENT_KIND_CODES[kind].includes(upper),
+  );
+}
+
+// The kinds a stored list of document types reads as: every kind for an
+// empty one, which accepts any document.
+function storedDocumentKinds(
+  types: readonly string[],
+): ReadonlySet<DocumentKind> {
+  return new Set(
+    DOCUMENT_KINDS.filter(
+      (kind) =>
+        types.length === 0 ||
+        types.some((type) => documentKindOf(type) === kind),
+    ),
+  );
+}
 
 type CountryScope = "any" | "only";
 
@@ -266,6 +298,9 @@ export interface ProofingFlowDraft {
   documentKinds: ReadonlySet<DocumentKind>;
   // Document codes of a stored version that no kind covers, kept as stored.
   otherDocumentTypes: readonly string[];
+  // The document types of the version being edited, as stored: sent as they
+  // are while the kinds ticked are the ones they read as. Null for a new flow.
+  storedDocumentTypes: readonly string[] | null;
   countryScope: CountryScope;
   // ICAO codes in the order picked; only sent with the scope "only".
   issuingCountries: readonly string[];
@@ -371,9 +406,11 @@ export function attributeAvailable(
   return attr !== undefined && draftSteps(draft).includes(attr.step);
 }
 
-// A new flow starts like the service's editor: every step the Idem app runs
-// and every requested data item on, the mandatory checks on. The document
-// photo starts off: the app cannot take it yet. It leaves the BSN out, blacks
+// A new flow starts with every step the Idem app runs on and the mandatory
+// checks on, and receives nothing but the outcome until an item is ticked
+// (data minimisation; a data request or required diplomas tick Name and
+// document details, identityRequired). The document photo starts off: the
+// app cannot take it yet. It accepts any document, leaves the BSN out, blacks
 // it out on document photos and keeps no face photos.
 export function emptyFlowDraft(): ProofingFlowDraft {
   return {
@@ -385,16 +422,11 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
     faceMatchThreshold: "",
-    // The age check releases less than the document data it would sit next
-    // to, so it starts off.
-    requestedAttributes: new Set(
-      REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
-        (value) => value !== ATTRIBUTE_AGE_OVER,
-      ),
-    ),
+    requestedAttributes: new Set(),
     ageOver: String(DEFAULT_AGE_OVER),
     documentKinds: new Set(DOCUMENT_KINDS),
     otherDocumentTypes: [],
+    storedDocumentTypes: null,
     countryScope: "any",
     issuingCountries: [],
     assuranceLevel: "",
@@ -438,17 +470,11 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     faceMatchThreshold: threshold === undefined ? "" : String(threshold),
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
-    documentKinds: new Set(
-      DOCUMENT_KINDS.filter(
-        (kind) =>
-          storedTypes.length === 0 ||
-          DOCUMENT_CODES[kind].some((code) => storedTypes.includes(code)),
-      ),
-    ),
+    documentKinds: storedDocumentKinds(storedTypes),
     otherDocumentTypes: storedTypes.filter(
-      (type) =>
-        !DOCUMENT_KINDS.some((kind) => DOCUMENT_CODES[kind].includes(type)),
+      (type) => documentKindOf(type) === undefined,
     ),
+    storedDocumentTypes: storedTypes,
     countryScope: storedCountries.length === 0 ? "any" : "only",
     issuingCountries: storedCountries,
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
@@ -527,20 +553,34 @@ function ageOverInvalid(draft: ProofingFlowDraft): boolean {
   return !Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER;
 }
 
-// The document codes a draft accepts: every kind ticked and no other code is
-// any document, which an empty list says.
+// The document types a draft accepts: as stored while the kinds ticked are
+// the ones the stored list reads as, so an unchanged save sends what the
+// version had; else the kinds ticked and any stored code no kind covers.
+// Every kind ticked and no other code is any document, which an empty list
+// says: a flow listing all four kinds would refuse a document whose kind the
+// engine cannot tell (flow.DocumentKindOf: a foreigner's card coded ID is a
+// residence permit in Belgium, an identity card in Estonia), though it is
+// one of them. The Yivi app's credentials always have a kind, so it accepts
+// either list.
 function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
   const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
+  const stored = draft.storedDocumentTypes;
+  if (stored !== null) {
+    const storedKinds = storedDocumentKinds(stored);
+    if (
+      ticked.length === storedKinds.size &&
+      ticked.every((kind) => storedKinds.has(kind))
+    ) {
+      return [...stored];
+    }
+  }
   if (
     ticked.length === DOCUMENT_KINDS.length &&
     draft.otherDocumentTypes.length === 0
   ) {
     return [];
   }
-  return [
-    ...ticked.flatMap((kind) => DOCUMENT_CODES[kind]),
-    ...draft.otherDocumentTypes,
-  ];
+  return [...ticked, ...draft.otherDocumentTypes];
 }
 
 // The request body for a draft, as the service's editor builds it. Call only

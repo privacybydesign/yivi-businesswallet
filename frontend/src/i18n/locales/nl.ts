@@ -1412,6 +1412,7 @@ export const nl: Translation<typeof en> = {
         mandatory: "Dit is verplicht voor {{level}}",
         passiveAuth: "Altijd aan als de chip wordt gelezen",
         faceMatch: "Altijd aan bij de gezichtscontrole",
+        everyFlow: "Altijd aan, voor elke flow",
       },
       steps: {
         title: "Wat de persoon doet",
@@ -1441,7 +1442,7 @@ export const nl: Translation<typeof en> = {
         hint: "Een document dat niet is aangevinkt wordt geweigerd.",
         types: "Documenttypen",
         passport: "Paspoort",
-        id_card: "Identiteitskaart",
+        identity_card: "Identiteitskaart",
         residence_permit: "Verblijfsvergunning",
         drivers_license: "Nederlands rijbewijs",
         countries: "Landen van uitgifte",
@@ -1462,6 +1463,7 @@ export const nl: Translation<typeof en> = {
       checks: {
         title: "Controles",
         hint: "Een mislukte controle wijst de sessie af. De gezichtsvergelijking gebruikt de drempel van Regula.",
+        expired: "Verlopen documenten weigeren",
       },
       privacy: {
         title: "Privacy",

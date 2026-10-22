@@ -62,3 +62,26 @@ func TestDisclosureCompliance(t *testing.T) {
 		}
 	}
 }
+
+// A flow that lists document kinds, as the flow editor saves them, accepts a
+// Yivi disclosure of a listed kind and refuses another: the credential tells
+// the kind, though the disclosure names no document code (proofingQuery asks
+// none). A flow that lists codes refuses every one.
+func TestDisclosureByKind(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	kinds := &flow.FlowDefinition{AcceptedDocumentTypes: []string{flow.DocumentKindPassport, flow.DocumentKindResidencePermit}}
+	codes := &flow.FlowDefinition{AcceptedDocumentTypes: []string{"P", "I", "ID"}}
+	for credential, want := range map[string]string{
+		"pbdf-staging.pbdf.passport":        "",
+		"pbdf-staging.pbdf.residencepermit": "",
+		"pbdf-staging.pbdf.idcard":          errCodeDocTypeRefused,
+	} {
+		doc := documentFromDisclosure(disclosureInfo{Credential: credential})
+		if _, code := disclosureComplianceFailure(kinds, doc, now); code != want {
+			t.Errorf("%s on kinds: error code %q, want %q", credential, code, want)
+		}
+		if _, code := disclosureComplianceFailure(codes, doc, now); code != errCodeDocTypeRefused {
+			t.Errorf("%s on codes: error code %q, want %q", credential, code, errCodeDocTypeRefused)
+		}
+	}
+}

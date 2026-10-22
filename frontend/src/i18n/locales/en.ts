@@ -1383,6 +1383,7 @@ export const en = {
         mandatory: "This is mandatory for {{level}}",
         passiveAuth: "Always on when the chip is read",
         faceMatch: "Always on with the face check",
+        everyFlow: "Always on, for every flow",
       },
       steps: {
         title: "What the person does",
@@ -1412,7 +1413,7 @@ export const en = {
         hint: "A document that is not ticked is refused.",
         types: "Document types",
         passport: "Passport",
-        id_card: "Identity card",
+        identity_card: "Identity card",
         residence_permit: "Residence permit",
         drivers_license: "Dutch driving licence",
         countries: "Issuing countries",
@@ -1433,6 +1434,7 @@ export const en = {
       checks: {
         title: "Checks",
         hint: "A failed check rejects the session. The face match uses Regula's threshold.",
+        expired: "Reject expired documents",
       },
       privacy: {
         title: "Privacy",

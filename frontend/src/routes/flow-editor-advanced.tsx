@@ -508,6 +508,15 @@ function ChecksSection({
         lock={levelLock("liveness")}
         onChange={() => update({ liveness: !draft.liveness })}
       />
+      {/* The engine refuses an expired document on every flow (DOC_EXPIRED);
+          nothing turns it off. */}
+      <OptionRow
+        id="flow-check-expired"
+        checked
+        disabled
+        label={t("identityProofingFlows.editor.checks.expired")}
+        lock={{ note: t("identityProofingFlows.editor.locks.everyFlow") }}
+      />
     </Section>
   );
 }
@@ -545,7 +554,8 @@ function PrivacySection({
       title={t("identityProofingFlows.editor.privacy.title")}
       hint={t("identityProofingFlows.editor.privacy.hint")}
     >
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-x-6 gap-y-5">
+      {/* Two columns where 260 px each fit, else one as wide as there is. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-x-6 gap-y-5">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="flow-retention" className={LABEL}>
             {t("identityProofingFlows.editor.privacy.retention")}

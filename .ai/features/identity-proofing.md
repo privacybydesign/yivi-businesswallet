@@ -253,13 +253,16 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
-    `face.match`.
+    `face.match`. "Reject expired documents" is a read-only row, always on: the
+    engine refuses an expired document on every flow (`DOC_EXPIRED`).
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
     codes, in the order of `REQUESTED_ATTRIBUTES`. Each item is available only
     with its step and cleared otherwise;
-    none is forced on. With none ticked the editor saves `outcome_only`, which
+    none is forced on, and a new flow starts with none ticked; a data request
+    or required diplomas tick and lock `dg1` (`identityRequired`). With none
+    ticked the editor saves `outcome_only`, which
     releases the outcome only (status and assurance), as the subject is told.
     A flow saved without a list releases everything its steps collect
     (`requestedAttributesOf`), and a flow read back always lists what it
@@ -325,11 +328,22 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     and ICAO's own codes named by the editor), and a Go test beside
     `ValidIssuingCountry` holds every code on it to the engine's. "Any country"
     saves an empty list.
-  - Document types: `acceptedDocumentTypes` is a list of ICAO document codes;
-    the editor offers Passport (`P`) and Identity card (`I`, `ID`). Both ticked
-    saves an empty list, which accepts any document, because the Yivi route
-    refuses a flow that lists types (`openid4vpverifier.proofingQuery` asks no
-    document type). A code of a stored version that neither kind covers is kept.
+  - Document types: `acceptedDocumentTypes` lists document codes or kinds
+    (`AcceptsDocumentType` matches either). The editor saves kinds, as the
+    engine names them: Passport (`passport`), Identity card
+    (`identity_card`), Residence permit (`residence_permit`) and Dutch driving
+    licence (`drivers_license`); `lib/identity-proofing.test.ts` holds them to
+    `flow.go`. The engine tells a chip's kind from its code, issuing state and
+    nationality (`DocumentKindOf`), so a residence permit coded `ID` is no
+    identity card and a `PD` passport is a passport; a Yivi credential's kind
+    is its credential (`yiviDocumentKinds`), as the disclosure carries no code
+    (`openid4vpverifier.proofingQuery`), so a flow listing codes refuses every
+    Yivi disclosure and one listing kinds does not. A stored code reads as its
+    kind (`P`; `I`, `ID`; a kind in any case), and an unchanged save sends the
+    stored list as it was; another code is kept. All four ticked saves an
+    empty list, any document: `DocumentKindOf` leaves some cards without a
+    kind (a foreigner's card coded `ID` is a residence permit in Belgium, an
+    identity card in Estonia), which a list of all four would refuse.
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
@@ -1357,9 +1371,10 @@ Everything this feature does not do yet, in one place.
 - **Yivi app:**
   - It reaches low only, so it is offered on no flow requiring substantial;
     a Yivi path to substantial is planned.
-  - Its disclosure (`proofingQuery`, `dcql.go`) asks no document type,
-    issuing country or expiry, so a flow that restricts the type or country
-    refuses every Yivi disclosure.
+  - Its disclosure (`proofingQuery`, `dcql.go`) asks no document code,
+    issuing country or expiry, so a flow that restricts the country, or the
+    document codes, refuses every Yivi disclosure; one listing kinds, as the
+    editor saves them, is held to the credential's kind.
 - **Yivi route end to end.** It does not work end to end yet. Still to do:
   - require the device token on the Yivi routes, as on the Idem ones;
   - give a failed hosted Yivi session a restart (R26);
