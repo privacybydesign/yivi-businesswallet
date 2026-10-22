@@ -294,9 +294,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - It decides no outcome: an approved minor is approved with `over: false`;
       the relying party decides.
     - Off in a new flow, never in a flow without a list (`attributesForSteps`).
-    - Reaches the customer API and admin result as `identity.ageOver`, and the
-      Sessions tab. The Idem app's consent screen names the age from the app
-      session view's `ageOver`.
+    - Reaches the public API and admin result as `identity.ageOver`, and the
+      Sessions page ("18 or older: Yes/No"). The Idem app's consent screen
+      names the age from the app session view's `ageOver`.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
