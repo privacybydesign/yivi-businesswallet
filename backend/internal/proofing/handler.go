@@ -455,20 +455,27 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
-// sent them: an admin always, a reviewer only what the Reviews page reads, the
-// requests waiting for review and the external ones that ended.
+// sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
+// whole, the requests waiting for review (?status=needs_review) or the data
+// requests (?flowKind=data_request). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
 	}
-	if !organization.MayReview(ctx) || filter.Status == nil {
+	if !organization.MayReview(ctx) {
 		return false
 	}
-	if *filter.Status == StatusNeedsReview {
-		return true
+	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview)
+}
+
+// reviewScope is the requests the caller reaches on a review route, which
+// RequireReviewer let them onto: an admin every one, a member with the reviewer
+// right what the Reviews page shows.
+func reviewScope(ctx context.Context) ReviewScope {
+	if organization.ActsAsAdmin(ctx) {
+		return ReviewScopeAll
 	}
-	return (*filter.Status == StatusApproved || *filter.Status == StatusRejected) &&
-		filter.SubjectKind != nil && *filter.SubjectKind == SubjectExternal
+	return ReviewScopeReviews
 }
 
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
@@ -496,13 +503,12 @@ func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 }
 
 // mayOpen reports whether a caller who is not an admin opens req: one they sent,
-// or as a reviewer one the review pages read, an external request or one waiting
-// for review.
+// or as a reviewer one the Reviews page shows (ReviewScopeReviews).
 func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
 	if req.RequestedBy != nil && *req.RequestedBy == caller {
 		return true
 	}
-	return organization.MayReview(ctx) && (req.External() || req.Status == StatusNeedsReview)
+	return organization.MayReview(ctx) && ReviewScopeReviews.reaches(req)
 }
 
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
@@ -553,7 +559,7 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id, string(caller.Email),
 		ReviewInput{
 			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
-			ReviewerID: caller.ID,
+			ReviewerID: caller.ID, Scope: reviewScope(r.Context()),
 		})
 	if err != nil {
 		return mapError(err)

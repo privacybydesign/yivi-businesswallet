@@ -114,6 +114,8 @@ var catalog = []CatalogEntry{
 	{audit.MembershipDeclined, GroupMembership},
 	{audit.MembershipRevoked, GroupMembership},
 	{audit.MembershipRoleChanged, GroupMembership},
+	// Its metadata is the right before and after, as role_changed's is the role.
+	{audit.MembershipReviewChanged, GroupMembership},
 	{audit.MembershipExpired, GroupMembership},
 	{audit.MembershipIdentityRequested, GroupMembership},
 	{audit.MembershipIdentityReverified, GroupMembership},

@@ -1513,12 +1513,14 @@ func (s *Service) RequestResult(ctx context.Context, orgID, id uuid.UUID) (Reque
 // external requests in the wallet: audited identity_proofing.result_read with
 // the admin as actor. A member's request is not found: its subject is a
 // colleague, whose identity the wallet shows nowhere.
-func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
-	req, err := s.Request(ctx, orgID, id, nil)
+func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID, scope ReviewScope) (Request, proofingprovider.Identity, error) {
+	// One out of scope is never re-checked in the engine, and one a re-check
+	// moved out of it (decided meanwhile) is not read either.
+	req, err := s.RequestIf(ctx, orgID, id, func(req Request) bool { return req.External() && scope.reaches(req) })
 	if err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
-	if !req.External() {
+	if !scope.reaches(req) {
 		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
 	}
 	return s.requestResult(ctx, req)

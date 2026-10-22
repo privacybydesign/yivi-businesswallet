@@ -4083,7 +4083,10 @@ paths:
     patch:
       tags: [organizations]
       summary: Update an organisation member
-      description: Requires an administrator role in the organisation.
+      description: >-
+        Requires an administrator role in the organisation. A change of `role` clears the
+        member's reviewer right (audited `membership.review_changed`): an admin reviews by their
+        role, and one made a member again is given it anew.
       requestBody:
         required: true
         content:
@@ -4214,8 +4217,11 @@ paths:
       description: |
         Requires an administrator role in the organisation. The body is
         `{"canReview": true}` or `{"canReview": false}`. A member with the right
-        decides identity checks and data requests in identity proofing, as an
-        admin does; an admin needs no right.
+        decides identity checks and data requests in identity proofing: it reaches
+        what waits for review and every data request, not the organisation's
+        other checks. An admin reviews by their role, so the right for an admin is
+        409 `admin_reviews`, and a role change clears it. Audited
+        `membership.review_changed` when it changes.
       requestBody:
         required: true
         content:
@@ -4238,6 +4244,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The member is an admin, who reviews by their role (`admin_reviews`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/members/{userId}/request-identification:
     parameters:
       - name: slug
@@ -5529,9 +5541,10 @@ paths:
         `?flowId=` to those sent on one flow, any of its versions, `?status=` to those held in
         one stored status, and `?flowKind=data_request` to the data requests (`data_access` and
         `data_erasure`); the narrowings combine. A member with the reviewer right also sees
-        every request waiting for review (`?status=needs_review`) and the external ones that
-        ended (`?status=approved` or `rejected` with `?subjectKind=external`). `external` is true for a request that went to
-        an external person, not a member. At most the 200 newest of those asked for (with
+        every request of the organisation for `?status=needs_review` and for
+        `?flowKind=data_request`, whatever else narrows it; any other list is the requests they
+        sent. `external` is true for a request that went to an external person, not a member.
+        At most the 200 newest of those asked for (with
         `status=needs_review`, the 200 longest in review, oldest in review first), as stored:
         outcomes land as the engine reports them,
         and a list read does not re-check it. Only the outcome and assurance level are
@@ -5782,7 +5795,7 @@ paths:
         Requires organisation membership. The request, re-checked with the engine
         (at most every 10 seconds) while it is live: what an on-screen session's page
         polls. An administrator sees any request, a member only one they sent, and a member
-        with the reviewer right also an external one or one waiting for review.
+        with the reviewer right also one waiting for review and a data request in any status.
       responses:
         '200':
           description: The request.
@@ -6543,7 +6556,9 @@ paths:
       tags: [identity-proofing]
       summary: Read an external person's request's verified identity
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. A settled external request's result,
+        Requires an administrator role in the organisation, or the reviewer right, which reaches
+        a request waiting for review and a data request only (any other is 404). A settled
+        external request's result,
         read from the engine's session on each call, in the shape of the API's `GET
         /proofing/sessions/{id}/result`: `identity` for an approval and for a check waiting for
         review, `evidence`, and `diplomas` (the DUO extracts the subject added). For an approval,
@@ -6625,7 +6640,8 @@ paths:
       tags: [identity-proofing]
       summary: Decide a request under review
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. `decision` is `approve` or `reject`,
+        Requires an administrator role in the organisation, or the reviewer right (a request
+        that waits for review; any other is 404 for a reviewer). `decision` is `approve` or `reject`,
         `reason` (required, at most 500 characters) says why, and a rejection may name what is
         wrong as `errorCode`: `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED` (it
         looks altered), `EVIDENCE_NOT_AS_REQUESTED` (it is not what was asked for) or
@@ -6910,7 +6926,9 @@ paths:
       tags: [identity-proofing]
       summary: Read a data request's matched sessions
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. What a data request's review shows
+        Requires an administrator role in the organisation, or the reviewer right, which reaches
+        a request waiting for review and a data request only (any other is 404). What a data
+        request's review shows
         beside the person's identity (`GET .../result`): its `flowKind` and the organisation's
         sessions whose proofed identity is the person's (`strong` on the same document,
         `probable` on the same name and date of birth off another document's chip), and its
@@ -6949,7 +6967,8 @@ paths:
       tags: [identity-proofing]
       summary: Download an approved data request's data
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. An approved `data_access` session's
+        Requires an administrator role in the organisation, or the reviewer right, which reaches
+        a data request only (any other is 404). An approved `data_access` session's
         data, as a JSON attachment, for 7 days after the decision, to hand the person who asked.
         Audited `identity_proofing.data_exported`.
       responses:

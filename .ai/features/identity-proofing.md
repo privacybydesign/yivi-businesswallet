@@ -1394,24 +1394,31 @@ from the wallet, which none yet carries.
 **The reviewer right.** An admin gives a member the right to decide in the
 member's edit page, "Can review" (`PUT .../members/{userId}/review-right`,
 `memberships.can_review`, audited `membership.review_changed` only when it
-changes; an admin's is ignored, they review as admins). `organization.MayReview`
-is an admin whose mandate is not withdrawn, or a member with the right, and
-`organization.RequireReviewer` gates the four `reviewer(...)` routes in
-`proofing/handler.go`: `review`, `result`, `data-matches` and `data-export`.
-Everything else stays a member's. A reviewer reads more only where the pages need
-it: `GET .../requests` lists every request in the org for `?status=needs_review`
-(Waiting) and for `?status=approved` or `rejected` with `?subjectKind=external`
-(Closed, read separately); any other list is the requests they sent. So are the
-stats, All people and the member routes. `GET .../requests/{id}` opens one they
-sent, an external one or one waiting for review (`mayOpen`, judged on the stored
-request through `Service.RequestIf`, before the engine is asked); any other is a
-404, as for a member. The app reads `canReview` from `GET /orgs/{slug}`
-(the same `MayReview`): it shows the sidebar's Reviews item and count, the
-Reviews and review pages, and the Overview's needs-review tile, which counts what
-waits in the org as the sidebar does. The Reviews footer links to Members for an
-admin only, as only an admin reads that page. Not yet: the review link on a row of
-All people and the flow's People tab is an admin's, and the dashboard's to-do list
-(#320) does not exist.
+changes, and subscribable in Notifications like `membership.role_changed`). The
+right is a member's: a PUT on an admin is 409 `admin_reviews`, a role change
+clears it (audited too), so an admin made a member again has to be given it
+anew, and `memberships_can_review_member` holds every row to that.
+`organization.MayReview` is an admin whose mandate is not withdrawn, or a member
+with the right, and `organization.RequireReviewer` gates the four `reviewer(...)`
+routes in `proofing/handler.go`: `review`, `result`, `data-matches` and
+`data-export`. Everything else stays a member's. A reviewer who is not an admin
+reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
+request waiting for review, and a data request (`data_access`, `data_erasure`)
+in any status. An identity check that is not waiting holds a person's identity
+and photos the right was never given for. So `GET .../requests` lists every
+request in the org only for `?status=needs_review` (Waiting) and for
+`?flowKind=data_request` (Closed reads it with `status=approved` and `rejected`);
+any other list is the requests they sent. So are the stats, All people and the
+member routes. `GET .../requests/{id}` opens one they sent or one in that scope
+(`mayOpen`, judged on the stored request through `Service.RequestIf`, before the
+engine is asked), and `result`, `data-matches`, `data-export` and the decision
+take the same scope (`reviewScope`); any other is a 404, as for a member. The
+app reads `canReview` from `GET /orgs/{slug}` (the same `MayReview`): it shows
+the sidebar's Reviews item and count, the Reviews and review pages, and the
+Overview's needs-review tile, which counts what waits in the org as the sidebar
+does. The Reviews footer links to Members for an admin only, as only an admin
+reads that page. Not yet: the review link on a row of All people and the flow's
+People tab is an admin's, and the dashboard's to-do list (#320) does not exist.
 
 ## 10. Data minimisation
 

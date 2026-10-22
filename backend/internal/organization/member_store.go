@@ -327,12 +327,13 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 
 	var current string
 	var oldJobTitle, oldDeptName *string
+	var couldReview bool
 	err = tx.QueryRow(ctx, `
-		SELECT m.role, m.job_title, d.name
+		SELECT m.role, m.job_title, d.name, m.can_review
 		FROM memberships m
 		LEFT JOIN departments d ON d.id = m.department_id
 		WHERE m.organization_id = $1 AND m.user_id = $2`, orgID, userID).
-		Scan(&current, &oldJobTitle, &oldDeptName)
+		Scan(&current, &oldJobTitle, &oldDeptName, &couldReview)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Member{}, ErrNotMember
 	}
@@ -350,7 +351,10 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 		}
 	}
 
-	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5
+	// A role change clears the reviewer right: an admin reviews by their role,
+	// and one demoted again has to be given it anew.
+	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5,
+			can_review = can_review AND COALESCE($3, role) = role
 		WHERE organization_id = $1 AND user_id = $2
 		RETURNING (SELECT name FROM departments WHERE id = $5 AND organization_id = $1)`
 	var newDeptName *string
@@ -376,6 +380,11 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 			map[string]any{"role": current, "jobTitle": oldJobTitle, "department": oldDeptName},
 			map[string]any{"role": newRole, "jobTitle": jobTitle, "department": newDeptName})); err != nil {
 		return Member{}, err
+	}
+	if couldReview && newRole != current {
+		if err := s.recordReviewChanged(ctx, tx, orgID, userID, true, false); err != nil {
+			return Member{}, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

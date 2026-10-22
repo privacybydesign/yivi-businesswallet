@@ -115,6 +115,9 @@ var (
 	ErrDepartmentNotFound  = errors.New("department not found")
 	ErrDepartmentNameTaken = errors.New("department name already taken")
 	ErrDepartmentInUse     = errors.New("department still has members")
+	// ErrAdminReviews is the reviewer right set on an admin, who reviews by
+	// their role: the right is a member's.
+	ErrAdminReviews = errors.New("an admin reviews by their role, not by the reviewer right")
 )
 
 // Organization is a business wallet: identity from the KVK register plus the

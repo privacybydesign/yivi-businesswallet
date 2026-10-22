@@ -21,18 +21,18 @@ func TestAdminRequestResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrResultNotReady) {
 		t.Errorf("AdminRequestResult while pending = %v, want %v", err, ErrResultNotReady)
 	}
 	f.requests.stored.Status = StatusApproved
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
-	_, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID)
+	_, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
 	if err != nil || identity.FamilyName != "Jansen" || f.requests.resultReads != 1 {
 		t.Fatalf("AdminRequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
 	}
 
 	f.requests.stored.SubjectKind = SubjectMember
-	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("AdminRequestResult on a member's request = %v, want %v", err, ErrRequestNotFound)
 	}
 	if f.requests.resultReads != 1 {

@@ -2035,6 +2035,32 @@ func TestOwnReviewRefused(t *testing.T) {
 	}
 }
 
+// A reviewer who is not an admin reaches what the Reviews page shows: a
+// request waiting for review, and a data request in any status. An identity
+// check that is not waiting is an admin's alone.
+func TestReviewScopeReaches(t *testing.T) {
+	for name, tc := range map[string]struct {
+		req  Request
+		want bool
+	}{
+		"a check waiting":         {Request{FlowKind: FlowIdentity, Status: StatusNeedsReview}, true},
+		"an approved check":       {Request{FlowKind: FlowIdentity, Status: StatusApproved}, false},
+		"a rejected check":        {Request{FlowKind: FlowIdentity, Status: StatusRejected}, false},
+		"a pending check":         {Request{FlowKind: FlowIdentity, Status: StatusPending}, false},
+		"a data request waiting":  {Request{FlowKind: FlowDataErasure, Status: StatusNeedsReview}, true},
+		"an approved access":      {Request{FlowKind: FlowDataAccess, Status: StatusApproved}, true},
+		"a pending data request":  {Request{FlowKind: FlowDataAccess, Status: StatusPending}, true},
+		"a rejected data request": {Request{FlowKind: FlowDataErasure, Status: StatusRejected}, true},
+	} {
+		if got := ReviewScopeReviews.reaches(tc.req); got != tc.want {
+			t.Errorf("%s: a reviewer reaches it = %v, want %v", name, got, tc.want)
+		}
+		if !ReviewScopeAll.reaches(tc.req) {
+			t.Errorf("%s: an admin does not reach it", name)
+		}
+	}
+}
+
 func TestOwnReview(t *testing.T) {
 	sender, subject, other := uuid.New(), uuid.New(), uuid.New()
 	check := Request{FlowKind: FlowIdentity, RequestedBy: &sender, SubjectUserID: &subject}

@@ -76,6 +76,8 @@ func (h *Handler) updateReviewRight(w http.ResponseWriter, r *http.Request) erro
 	switch {
 	case errors.Is(err, ErrNotMember):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "member_not_found", Message: "member not found"}
+	case errors.Is(err, ErrAdminReviews):
+		return &respond.APIError{Status: http.StatusConflict, Code: "admin_reviews", Message: "an admin reviews by their role; the reviewer right is for members"}
 	case err != nil:
 		return fmt.Errorf("updating review right: %w", err)
 	}

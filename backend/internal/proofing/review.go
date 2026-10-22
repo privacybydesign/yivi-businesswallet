@@ -46,6 +46,26 @@ const (
 // "something else", and also what a rejection naming none records.
 var reviewerRejectCodes = []string{errorReviewNotHolder, errorReviewAltered, errorEvidenceNotAsRequested, ErrorReviewRejected}
 
+// ReviewScope is which of the org's requests a caller reaches on the review
+// routes: the result read, data-matches, data-export and the decision.
+type ReviewScope int
+
+const (
+	// ReviewScopeAll is an admin's: every request of the org.
+	ReviewScopeAll ReviewScope = iota
+	// ReviewScopeReviews is a member's with the reviewer right: only what the
+	// Reviews page shows, a request waiting for review and a data request in
+	// any status. An identity check that is not waiting holds a person's
+	// identity and photos the right was never given for.
+	ReviewScopeReviews
+)
+
+// reaches reports whether the scope reaches req. One it does not is
+// ErrRequestNotFound, so the caller learns nothing of it.
+func (sc ReviewScope) reaches(req Request) bool {
+	return sc == ReviewScopeAll || req.Status == StatusNeedsReview || req.FlowKind.dataRequest()
+}
+
 // ReviewInput is a decision on a request under review: approve, or reject with
 // an optional ErrorCode. Reason is required and audited.
 type ReviewInput struct {
@@ -61,6 +81,8 @@ type ReviewInput struct {
 	// ReviewerID is the member deciding; uuid.Nil when the wallet decides on
 	// its own (a paused org's open reviews).
 	ReviewerID uuid.UUID
+	// Scope is the requests the deciding member reaches.
+	Scope ReviewScope
 }
 
 // ownReview reports whether reviewer is the one who sent req or its subject:
@@ -97,6 +119,9 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	req, err := s.requests.Get(ctx, orgID, id)
 	if err != nil {
 		return Request{}, err
+	}
+	if !in.Scope.reaches(req) {
+		return Request{}, ErrRequestNotFound
 	}
 	if req.Status != StatusNeedsReview || req.session == nil || req.session.EndedAt != nil || req.PurgedAt != nil {
 		return Request{}, ErrNotUnderReview

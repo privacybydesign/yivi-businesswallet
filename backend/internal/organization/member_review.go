@@ -21,8 +21,9 @@ func (m Membership) ReviewRight() ReviewRight {
 }
 
 // SetReviewRight gives a member the reviewer right or takes it away, and audits
-// a change. The right outlasts a role change, but only a member's counts: an
-// admin reviews as an admin (MayReview).
+// a change. An admin reviews by their role (MayReview), so setting it on one is
+// ErrAdminReviews: a right stored on an admin would come back with a demotion
+// nobody gave it for. A role change clears it (UpdateMembership).
 func (s *Store) SetReviewRight(ctx context.Context, orgID, userID uuid.UUID, right ReviewRight) (Member, error) {
 	if right != ReviewRightGranted && right != ReviewRightNone {
 		return Member{}, fmt.Errorf("organization: unknown review right %q", right)
@@ -30,28 +31,37 @@ func (s *Store) SetReviewRight(ctx context.Context, orgID, userID uuid.UUID, rig
 	canReview := right == ReviewRightGranted
 
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const update = `
-			WITH old AS (SELECT can_review FROM memberships WHERE organization_id = $1 AND user_id = $2 FOR UPDATE)
-			UPDATE memberships m SET can_review = $3
-			FROM old WHERE m.organization_id = $1 AND m.user_id = $2
-			RETURNING old.can_review`
+		var role string
 		var was bool
-		err := q.QueryRow(ctx, update, orgID, userID, canReview).Scan(&was)
+		err := q.QueryRow(ctx, `SELECT role, can_review FROM memberships
+			WHERE organization_id = $1 AND user_id = $2 FOR UPDATE`, orgID, userID).Scan(&role, &was)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotMember
 		}
 		if err != nil {
-			return fmt.Errorf("organization: set review right user %s org %s: %w", userID, orgID, err)
+			return fmt.Errorf("organization: read review right user %s org %s: %w", userID, orgID, err)
+		}
+		if role != RoleMember {
+			return ErrAdminReviews
 		}
 		if was == canReview {
 			return nil
 		}
-		return s.audit.Record(ctx, q, audit.MembershipReviewChanged,
-			audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
-			audit.Updated(map[string]any{"canReview": was}, map[string]any{"canReview": canReview}))
+		if _, err := q.Exec(ctx, `UPDATE memberships SET can_review = $3 WHERE organization_id = $1 AND user_id = $2`,
+			orgID, userID, canReview); err != nil {
+			return fmt.Errorf("organization: set review right user %s org %s: %w", userID, orgID, err)
+		}
+		return s.recordReviewChanged(ctx, q, orgID, userID, was, canReview)
 	})
 	if err != nil {
 		return Member{}, err
 	}
 	return s.GetMember(ctx, orgID, userID)
+}
+
+// recordReviewChanged audits the reviewer right going from was to now.
+func (s *Store) recordReviewChanged(ctx context.Context, q database.Querier, orgID, userID uuid.UUID, was, now bool) error {
+	return s.audit.Record(ctx, q, audit.MembershipReviewChanged,
+		audit.Target{Type: audit.TargetMembership, ID: userID.String(), OrgID: &orgID},
+		audit.Updated(map[string]any{"canReview": was}, map[string]any{"canReview": now}))
 }

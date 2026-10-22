@@ -35,6 +35,7 @@
     "membership.declined": "Declined invitation",
     "membership.revoked": "Revoked membership",
     "membership.role_changed": "Changed role",
+    "membership.review_changed": "Changed reviewer right",
     "membership.expired": "Invitation expired",
     "membership.identity_requested": "Requested identification",
     "membership.identity_reverified": "Re-confirmed identity",

@@ -533,7 +533,7 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	req, identity, err := h.service.AdminRequestResult(r.Context(), orgFromRequest(r).ID, id)
+	req, identity, err := h.service.AdminRequestResult(r.Context(), orgFromRequest(r).ID, id, reviewScope(r.Context()))
 	if err != nil {
 		return mapError(err)
 	}

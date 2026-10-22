@@ -2115,7 +2115,7 @@ export const en = {
       roleChanged: "Changed role",
       inviteExpired: "Invitation expired",
       memberTypeChanged: "Changed member type",
-      reviewRightChanged: "Changed review right",
+      reviewRightChanged: "Changed reviewer right",
       identityRequested: "Requested identification",
       identityReverified: "Re-confirmed identity",
       identityReverifyRejected: "Rejected re-identification attempt",
