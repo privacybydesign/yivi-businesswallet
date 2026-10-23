@@ -2150,35 +2150,15 @@ func TestRequestListByEffectiveStatus(t *testing.T) {
 	want := map[uuid.UUID]Status{}
 	create := func(in NewStoredRequest) Request {
 		t.Helper()
-		req, err := store.Create(ctx, in)
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		return req
+		return createdRequest(t, store, in)
 	}
 	hosted := func(linkExpiresAt time.Time) NewStoredRequest {
 		t.Helper()
-		_, hash, err := newLinkToken()
-		if err != nil {
-			t.Fatal(err)
-		}
-		in := newStoredRequest(orgID, sam, externalSubject("a@example.org"))
-		in.LinkTokenHash, in.LinkExpiresAt = hash, linkExpiresAt
-		return in
+		return hostedRequestIn(t, orgID, sam, linkExpiresAt)
 	}
 	started := func(sessionID string, expiresAt time.Time) Request {
 		t.Helper()
-		req := create(newStoredRequest(orgID, sam, externalSubject("a@example.org")))
-		sess := attachedSession(sessionID)
-		sess.ExpiresAt = expiresAt
-		if ok, err := store.AttachSession(ctx, req, sess); err != nil || !ok {
-			t.Fatalf("AttachSession = %v, %v", ok, err)
-		}
-		req, err := store.Get(ctx, orgID, req.ID)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		return req
+		return startedUntil(t, store, orgID, sam, sessionID, expiresAt)
 	}
 	running := time.Now().Add(SessionTTL)
 	lapsed := time.Now().Add(-time.Minute)
@@ -2220,7 +2200,56 @@ func TestRequestListByEffectiveStatus(t *testing.T) {
 	}
 	want[cancelled.ID] = StatusCancelled
 
-	all, err := store.List(ctx, orgID, RequestFilter{})
+	assertListsByEffectiveStatus(t, store, orgID, want)
+}
+
+// createdRequest creates in, failing the test on an error.
+func createdRequest(t *testing.T, store *RequestStore, in NewStoredRequest) Request {
+	t.Helper()
+	req, err := store.Create(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return req
+}
+
+// hostedRequestIn is a hosted request by sam to an external person, its link
+// lasting until linkExpiresAt.
+func hostedRequestIn(t *testing.T, orgID, sam uuid.UUID, linkExpiresAt time.Time) NewStoredRequest {
+	t.Helper()
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newStoredRequest(orgID, sam, externalSubject("a@example.org"))
+	in.LinkTokenHash, in.LinkExpiresAt = hash, linkExpiresAt
+	return in
+}
+
+// startedUntil is a request by sam to an external person, created with session
+// sessionID attached and running until expiresAt, as the store reads it back.
+func startedUntil(t *testing.T, store *RequestStore, orgID, sam uuid.UUID, sessionID string, expiresAt time.Time) Request {
+	t.Helper()
+	ctx := context.Background()
+	req := createdRequest(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+	sess := attachedSession(sessionID)
+	sess.ExpiresAt = expiresAt
+	if ok, err := store.AttachSession(ctx, req, sess); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	req, err := store.Get(ctx, orgID, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	return req
+}
+
+// assertListsByEffectiveStatus checks that the org's requests read in the
+// statuses want gives them, and that a list narrowed to each status holds
+// exactly the ones that read in it.
+func assertListsByEffectiveStatus(t *testing.T, store *RequestStore, orgID uuid.UUID, want map[uuid.UUID]Status) {
+	t.Helper()
+	all, err := store.List(context.Background(), orgID, RequestFilter{})
 	if err != nil || len(all) != len(want) {
 		t.Fatalf("List = %d rows, %v; want %d", len(all), err, len(want))
 	}
@@ -2234,21 +2263,28 @@ func TestRequestListByEffectiveStatus(t *testing.T) {
 		StatusPending, StatusInProgress, StatusNeedsReview, StatusApproved,
 		StatusRejected, StatusExpired, StatusCancelled,
 	} {
-		got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
-		if err != nil {
-			t.Fatalf("List %s: %v", status, err)
+		assertListedInStatus(t, store, orgID, status, want, now)
+	}
+}
+
+// assertListedInStatus checks that the org's list narrowed to status holds
+// every request that reads in it at now, and no other.
+func assertListedInStatus(t *testing.T, store *RequestStore, orgID uuid.UUID, status Status, want map[uuid.UUID]Status, now time.Time) {
+	t.Helper()
+	got, err := store.List(context.Background(), orgID, RequestFilter{Status: &status})
+	if err != nil {
+		t.Fatalf("List %s: %v", status, err)
+	}
+	var ids []uuid.UUID
+	for _, req := range got {
+		ids = append(ids, req.ID)
+		if req.EffectiveStatus(now) != status {
+			t.Errorf("List %s holds a request that reads %s", status, req.EffectiveStatus(now))
 		}
-		var ids []uuid.UUID
-		for _, req := range got {
-			ids = append(ids, req.ID)
-			if req.EffectiveStatus(now) != status {
-				t.Errorf("List %s holds a request that reads %s", status, req.EffectiveStatus(now))
-			}
-		}
-		for id, s := range want {
-			if s == status && !slices.Contains(ids, id) {
-				t.Errorf("List %s misses a request that reads %s", status, s)
-			}
+	}
+	for id, s := range want {
+		if s == status && !slices.Contains(ids, id) {
+			t.Errorf("List %s misses a request that reads %s", status, s)
 		}
 	}
 }

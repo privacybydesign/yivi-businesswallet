@@ -106,21 +106,23 @@ export default function IdentityProofingOverview(): React.JSX.Element {
       />
       <div className="flex max-w-240 flex-col gap-6 p-4 sm:p-8">
         {pause.data?.paused && <ProofingPausedNotice pause={pause.data} />}
-        {org.isError ? (
+        {org.isError && (
           <Card className="p-6">
             <p role="alert" className="text-error text-[14px]">
               {accessMessage(org.error, t)}
             </p>
           </Card>
-        ) : org.data ? (
-          // Which lists there are hangs on the reader's right to decide, so
-          // they wait for it.
+        )}
+        {/* Which lists there are hangs on the reader's right to decide, so
+            they wait for it. */}
+        {!org.isError && org.data !== undefined && (
           <OverviewLists
             slug={slug}
             isAdmin={isAdmin}
             canReview={shows.decisions}
           />
-        ) : (
+        )}
+        {!org.isError && org.data === undefined && (
           <Card>
             <TaskEmpty>{t("common.loading")}</TaskEmpty>
           </Card>

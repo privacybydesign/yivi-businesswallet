@@ -127,13 +127,14 @@ export function DashboardTodo({
 
   const loading =
     (isAdmin && insights.isPending) || (canReview && waiting.isPending);
-  const failure = insights.isError
-    ? t("dashboard.todo.error", {
-        message: accessMessage(insights.error, t),
-      })
-    : canReview && waiting.isError
-      ? proofingErrorMessage(waiting.error, t)
-      : undefined;
+  let failure: string | undefined;
+  if (insights.isError) {
+    failure = t("dashboard.todo.error", {
+      message: accessMessage(insights.error, t),
+    });
+  } else if (canReview && waiting.isError) {
+    failure = proofingErrorMessage(waiting.error, t);
+  }
 
   return (
     <TaskSection
@@ -210,24 +211,30 @@ export function DashboardWaiting({
     });
   }
 
+  let body: React.JSX.Element;
+  if (requests.isError) {
+    body = (
+      <p role="alert" className={ERROR}>
+        {proofingErrorMessage(requests.error, t)}
+      </p>
+    );
+  } else if (items.length > 0) {
+    body = <ItemRows items={items} className={SECONDARY_LINK} />;
+  } else {
+    body = (
+      <TaskEmpty>
+        {requests.isPending
+          ? t("common.loading")
+          : t("dashboard.waiting.empty")}
+      </TaskEmpty>
+    );
+  }
   return (
     <TaskSection
       title={t("dashboard.waiting.title")}
       hint={t("dashboard.waiting.hint")}
     >
-      {requests.isError ? (
-        <p role="alert" className={ERROR}>
-          {proofingErrorMessage(requests.error, t)}
-        </p>
-      ) : items.length > 0 ? (
-        <ItemRows items={items} className={SECONDARY_LINK} />
-      ) : (
-        <TaskEmpty>
-          {requests.isPending
-            ? t("common.loading")
-            : t("dashboard.waiting.empty")}
-        </TaskEmpty>
-      )}
+      {body}
     </TaskSection>
   );
 }

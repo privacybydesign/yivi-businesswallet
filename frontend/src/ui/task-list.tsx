@@ -6,8 +6,8 @@ interface TaskSectionProps {
   title: string;
   // How many items the section holds, beside the title: a number, or a
   // label such as "200+".
-  count?: number | string | undefined;
-  hint?: string | undefined;
+  count?: number | string;
+  hint?: string;
   // Beside the title, e.g. the link to the whole list.
   action?: ReactNode;
   children?: ReactNode;
