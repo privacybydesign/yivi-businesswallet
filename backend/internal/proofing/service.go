@@ -73,6 +73,7 @@ type requestStore interface {
 	Purge(ctx context.Context, req Request, endSession func(context.Context) error) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
+	RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
@@ -98,6 +99,8 @@ type requestStore interface {
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
+	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
+	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -1227,6 +1230,12 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	// What the engine reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
+	// A review the wallet opened after the engine approved, its decision, and
+	// a rejection for a missing Verzekeringsbericht are the wallet's alone:
+	// the engine still reports the approval.
+	if req.ReviewReason != "" || req.ErrorCode == ErrorEmploymentNotProvided {
+		return req, nil
+	}
 	req, res, ok, err := s.readSession(ctx, tenant, req)
 	if !ok || err != nil {
 		return req, err
@@ -1817,7 +1826,11 @@ func (s *Service) lapseReview(ctx context.Context, req Request) error {
 	if req.Status != StatusNeedsReview || req.session == nil {
 		return nil
 	}
-	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
+	record := s.requests.RecordOutcome
+	if req.ReviewReason != "" {
+		record = s.requests.RecordWalletOutcome
+	}
+	return record(ctx, req, req.session.ID, StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
 }
 

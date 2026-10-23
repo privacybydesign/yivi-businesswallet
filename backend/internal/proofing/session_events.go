@@ -54,6 +54,13 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	if lapsed == maxReconcilePerRound {
 		return now, nil
 	}
+	missing, err := s.requests.RejectMissingEmployment(ctx, now, maxReconcilePerRound)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if missing == maxReconcilePerRound {
+		return now, nil
+	}
 	due, err := s.requests.ListDue(ctx, now, maxReconcilePerRound)
 	if err != nil {
 		return time.Time{}, err
@@ -72,6 +79,13 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	next, err := s.requests.NextDeadline(ctx, now)
 	if err != nil {
 		return time.Time{}, err
+	}
+	employmentDue, err := s.requests.NextMissingEmployment(ctx, now)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !employmentDue.IsZero() && (next.IsZero() || employmentDue.Before(next)) {
+		next = employmentDue
 	}
 	if retry := now.Add(deadlineRetry); open && (next.IsZero() || retry.Before(next)) {
 		next = retry

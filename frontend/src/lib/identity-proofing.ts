@@ -1070,6 +1070,7 @@ const REJECTION_REASON_KEYS = {
   REVIEW_LAPSED: "reviewLapsed",
   LEGAL_RETENTION: "legalRetention",
   ORG_PAUSED: "orgPaused",
+  EMPLOYMENT_NOT_PROVIDED: "employmentNotProvided",
 } as const;
 
 export type ProofingRejectionCode = keyof typeof REJECTION_REASON_KEYS;
@@ -1455,6 +1456,16 @@ export function employmentStepDone(
   secondsLeft: number,
 ): boolean {
   return kept !== undefined || secondsLeft === 0;
+}
+
+// Why a kept statement sends the session to review, as the wallet decides it:
+// no current job, or a current UWV benefit beside one. undefined for neither.
+export function employmentReview(
+  kept: ProofingEmployment,
+): "noJob" | "benefit" | undefined {
+  if (!kept.employed) return "noJob";
+  if (kept.relations.some((r) => r.kind === "benefit")) return "benefit";
+  return undefined;
 }
 
 // The copy an identity proofing API error shows, keyed on its stable code.

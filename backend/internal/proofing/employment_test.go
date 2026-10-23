@@ -10,6 +10,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
 type fakeFlowEmployment struct{ modes map[string]EmploymentMode }
@@ -37,6 +38,7 @@ var testStatement = &employment.Statement{
 		{
 			Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", ContractForm: "schriftelijke arbeidsovereenkomst voor onbepaalde tijd",
 			From: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
+			Worked: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), Kind: employment.KindEmployment,
 		},
 		{
 			Employer: "VORIGE WERKGEVER B.V.", PayrollTaxNumber: "987654321L01", ContractForm: "oproepovereenkomst",
@@ -45,8 +47,25 @@ var testStatement = &employment.Statement{
 	},
 }
 
+// noJobStatement is a statement whose only current relation is a WW benefit.
+var noJobStatement = &employment.Statement{
+	Initials: []string{"A"}, Surname: "Jansen", Date: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC),
+	Relations: []employment.Relation{{
+		Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02", Kind: employment.KindBenefit,
+		From: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
+	}},
+}
+
+// benefitStatement is a statement with a current job and a current WW
+// benefit beside it.
+var benefitStatement = &employment.Statement{
+	Initials: []string{"A"}, Surname: "Jansen", Date: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC),
+	Relations: append([]employment.Relation{testStatement.Relations[0]}, noJobStatement.Relations...),
+}
+
 // fakeEmploymentChecker reads a file's bytes as the reason to refuse it, and
-// accepts testStatement for any other.
+// accepts noJobStatement for "no job", benefitStatement for "benefit" and
+// testStatement for any other.
 type fakeEmploymentChecker struct{ holders []diploma.Person }
 
 func (f *fakeEmploymentChecker) Check(_ context.Context, pdf []byte, holder diploma.Person) (employment.Outcome, error) {
@@ -54,6 +73,10 @@ func (f *fakeEmploymentChecker) Check(_ context.Context, pdf []byte, holder dipl
 	switch reason := string(pdf); reason {
 	case employment.ReasonNotAStatement, employment.ReasonSignature, employment.ReasonHolder, employment.ReasonStale:
 		return employment.Outcome{Reason: reason}, nil
+	case "no job":
+		return employment.Outcome{Statement: noJobStatement}, nil
+	case "benefit":
+		return employment.Outcome{Statement: benefitStatement}, nil
 	}
 	return employment.Outcome{Statement: testStatement}, nil
 }
@@ -114,19 +137,161 @@ func TestAddEmploymentKeepsOnce(t *testing.T) {
 		t.Fatalf("AddEmployment = %+v, %v; want it kept", kept, err)
 	}
 	want := EmploymentRelation{
-		Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", ContractForm: "schriftelijke arbeidsovereenkomst voor onbepaalde tijd",
+		Kind: "employment", Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", ContractForm: "schriftelijke arbeidsovereenkomst voor onbepaalde tijd",
 		From: "2025-01-01", To: "2026-09-30",
 	}
 	got := e.requests.stored.SubjectEmployment
-	if got == nil || got.StatementDate != "2026-10-15" || len(got.Relations) != 1 || got.Relations[0] != want {
+	if got == nil || got.StatementDate != "2026-10-15" || !got.Employed || len(got.Relations) != 1 || got.Relations[0] != want {
 		t.Errorf("kept %+v, want the statement of 2026-10-15 with only the current %+v", got, want)
 	}
 	if h := e.checker.holders[0]; h.GivenNames != "Anna" || h.Surname != "Jansen" || h.DateOfBirth != testBirthDate {
 		t.Errorf("checked against %+v, want the identity IPS approved", h)
 	}
+	if e.requests.stored.Status != StatusApproved || e.requests.stored.ReviewReason != "" {
+		t.Errorf("a statement with a current job left the request %s (%q), want it approved", e.requests.stored.Status, e.requests.stored.ReviewReason)
+	}
 
 	if _, err := e.upload(*e.requests.stored, "statement"); !errors.Is(err, ErrEmploymentClosed) {
 		t.Errorf("a second statement = %v, want ErrEmploymentClosed", err)
+	}
+}
+
+// No current job sends the approved request to review, which the wallet
+// decides itself: the engine approved the session and holds no review.
+func TestNoCurrentEmploymentGoesToReview(t *testing.T) {
+	for _, approve := range []bool{true, false} {
+		checkNoJobReviewDecided(t, approve)
+	}
+}
+
+// checkNoJobReviewDecided keeps a statement without a job, then decides the
+// review it opens as approve says, in the wallet alone.
+func checkNoJobReviewDecided(t *testing.T, approve bool) {
+	t.Helper()
+	e := newEmploymentFixture(EmploymentRequired)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	verdict, err := e.upload(req, "no job")
+	if err != nil || verdict.Employment == nil || verdict.Employment.Employed {
+		t.Fatalf("a statement without a job = %+v, %v; want it kept, not employed", verdict, err)
+	}
+	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
+		t.Fatalf("request = %s (%q), want needs_review for no current employment", got.Status, got.ReviewReason)
+	}
+	if got := e.requests.stored.SubjectEmployment.Relations; len(got) != 1 || got[0].Kind != "benefit" {
+		t.Errorf("kept relations = %+v, want the WW benefit", got)
+	}
+
+	decided, err := e.svc.DecideReview(context.Background(), testOrg.ID, req.ID, "admin@example.org",
+		ReviewInput{Approve: approve, Reason: "checked the player's income"})
+	if err != nil {
+		t.Fatalf("DecideReview(approve %v): %v", approve, err)
+	}
+	want := StatusRejected
+	if approve {
+		want = StatusApproved
+	}
+	if decided.Status != want || len(e.ips.decisions) != 0 {
+		t.Errorf("decided %s with %d engine decisions, want %s decided in the wallet alone", decided.Status, len(e.ips.decisions), want)
+	}
+	if !approve && decided.ErrorCode != ErrorReviewRejected {
+		t.Errorf("a rejection without a code = %q, want %s", decided.ErrorCode, ErrorReviewRejected)
+	}
+}
+
+// A current benefit beside a job sends the approved request to review too.
+func TestCurrentBenefitGoesToReview(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	verdict, err := e.upload(req, "benefit")
+	if err != nil || verdict.Employment == nil || !verdict.Employment.Employed {
+		t.Fatalf("a statement with a job and a benefit = %+v, %v; want it kept, employed", verdict, err)
+	}
+	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != ReviewCurrentBenefit {
+		t.Fatalf("request = %s (%q), want needs_review for a current benefit", got.Status, got.ReviewReason)
+	}
+}
+
+func TestEmploymentReviewReason(t *testing.T) {
+	job := EmploymentRelation{Kind: string(employment.KindEmployment)}
+	sick := EmploymentRelation{Kind: string(employment.KindSickViaEmployer)}
+	benefit := EmploymentRelation{Kind: string(employment.KindBenefit)}
+	for _, tc := range []struct {
+		name string
+		emp  Employment
+		want string
+	}{
+		{"job", Employment{Employed: true, Relations: []EmploymentRelation{job}}, ""},
+		{"sick via employer", Employment{Employed: true, Relations: []EmploymentRelation{sick}}, ""},
+		{"job and benefit", Employment{Employed: true, Relations: []EmploymentRelation{job, benefit}}, ReviewCurrentBenefit},
+		{"benefit only", Employment{Relations: []EmploymentRelation{benefit}}, ReviewNoCurrentEmployment},
+		{"nothing", Employment{}, ReviewNoCurrentEmployment},
+	} {
+		if got := tc.emp.reviewReason(); got != tc.want {
+			t.Errorf("%s: reviewReason = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The engine still reports the approval of a session the wallet put in
+// review: reading it must not flip the request back.
+func TestWalletReviewIsNotReconciled(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	if _, err := e.upload(req, "no job"); err != nil {
+		t.Fatal(err)
+	}
+	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
+	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
+	if err != nil || got.Status != StatusNeedsReview || e.requests.stored.Status != StatusNeedsReview {
+		t.Errorf("after a reconcile the request is %s (stored %s), %v; want it still in review", got.Status, e.requests.stored.Status, err)
+	}
+}
+
+// No statement within the window rejects the session: a flow that requires
+// one does not pass without it.
+func TestMissingEmploymentRejects(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		completedAgo time.Duration
+		kept         bool
+		want         Status
+	}{
+		{"window still open", EmploymentWindow - time.Minute, false, StatusApproved},
+		{"window passed", EmploymentWindow + time.Minute, false, StatusRejected},
+		{"kept in time", EmploymentWindow + time.Minute, true, StatusApproved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEmploymentFixture(EmploymentRequired)
+			sendApprovedAddress(t, e.fixture, tc.completedAgo)
+			if tc.kept {
+				e.requests.stored.SubjectEmployment = &Employment{Employed: true}
+			}
+			if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
+				t.Fatalf("ReconcileDue: %v", err)
+			}
+			got := e.requests.stored
+			if got.Status != tc.want {
+				t.Errorf("status = %s, want %s", got.Status, tc.want)
+			}
+			if tc.want == StatusRejected && got.ErrorCode != ErrorEmploymentNotProvided {
+				t.Errorf("error code = %q, want %s", got.ErrorCode, ErrorEmploymentNotProvided)
+			}
+		})
+	}
+}
+
+// A rejection for a missing statement is the wallet's: the engine's approval,
+// read again, leaves it.
+func TestMissingEmploymentIsNotReconciled(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	sendApprovedAddress(t, e.fixture, EmploymentWindow+time.Minute)
+	if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
+	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
+	if err != nil || got.Status != StatusRejected {
+		t.Errorf("after a reconcile = %s, %v; want still rejected", got.Status, err)
 	}
 }
 

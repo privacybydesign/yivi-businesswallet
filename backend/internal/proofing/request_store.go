@@ -46,7 +46,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
 	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END,
-	r.employment, r.employment_ciphertext, r.employment_added_at, ` + purgeAtColumn
+	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''), ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -243,7 +243,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -1330,8 +1330,20 @@ func scanMember(row pgx.Row) (Member, error) {
 // sealed and kept until proofedNameRetention has passed; it is never audited. A
 // decision (approved, rejected) drops the expected birth date: the match is
 // made. It is a no-op when the row already holds that outcome or moved to another
-// session, so concurrent pollers record a decision once.
+// session, so concurrent pollers record a decision once, and for a request the
+// wallet put in review itself (Request.ReviewReason): the engine's outcome no
+// longer decides it, RecordWalletOutcome does.
 func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	return s.recordOutcome(ctx, req, sessionID, status, res, false)
+}
+
+// RecordWalletOutcome is RecordOutcome for the decision on a review the
+// wallet opened: the reviewer's, or its lapse.
+func (s *RequestStore) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	return s.recordOutcome(ctx, req, sessionID, status, res, true)
+}
+
+func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, wallet bool) error {
 	action, ok := outcomeActions[status]
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
@@ -1349,9 +1361,10 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 				expected_birth_date_ciphertext = CASE WHEN $3 IN ('approved', 'rejected') THEN NULL
 					ELSE expected_birth_date_ciphertext END
 			WHERE id = $1 AND ips_session_id = $2 AND purged_at IS NULL
-				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3`
+				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
+				AND (review_reason IS NOT NULL) = $11`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method))
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), wallet)
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
 		}

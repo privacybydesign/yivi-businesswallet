@@ -36,7 +36,7 @@ func syntheticStatement() []string {
 		"Werkgever/Instantie VOORBEELD B.V.\nLoonheffingennummer 123456789L01\nVerzekerde wetten WW, ZW en WIA\n" +
 			"Contractvorm schriftelijke arbeidsovereenkomst voor bepaalde\ntijd, geen oproepovereenkomst\n" +
 			"Periode Aantal uur Sv-loon\n01-07-2026 t/m 31-07-2026 160 € 3.000,00\n" +
-			"Werkgever/Instantie UWV\nLoonheffingennummer 987654321L01\nVerzekerde wetten\nContractvorm\n" +
+			"Werkgever/Instantie WW-Uitkering van UWV\nLoonheffingennummer 810220350L02\nVerzekerde wetten\nContractvorm\n" +
 			"Periode Aantal uur Sv-loon\n01-01-2026 t/m 31-01-2026 0 € 900,00 VZB-006\n" + statementFooter(3, 4),
 		"Werkgever/Instantie LEEG B.V.\nLoonheffingennummer 111111111L01\nContractvorm\nPeriode Aantal uur Sv-loon\n" +
 			"Disclaimer: Dit document bevat gegevens die op de datum van de aanmaak van het document bij UWV bekend zijn.\n" +
@@ -67,9 +67,12 @@ func TestParseStatement(t *testing.T) {
 		{
 			Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01",
 			ContractForm: "schriftelijke arbeidsovereenkomst voor bepaalde tijd, geen oproepovereenkomst",
-			From:         date("01-07-2026"), To: date("30-09-2026"),
+			From:         date("01-07-2026"), To: date("30-09-2026"), Worked: date("30-09-2026"), Kind: KindEmployment,
 		},
-		{Employer: "UWV", PayrollTaxNumber: "987654321L01", From: date("01-01-2026"), To: date("31-01-2026")},
+		{
+			Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02",
+			From: date("01-01-2026"), To: date("31-01-2026"), Kind: KindBenefit,
+		},
 	}
 	if len(st.Relations) != len(want) {
 		t.Fatalf("relations = %+v, want %+v", st.Relations, want)
@@ -81,30 +84,81 @@ func TestParseStatement(t *testing.T) {
 	}
 }
 
+func TestClassify(t *testing.T) {
+	for _, tc := range []struct {
+		employer, number string
+		want             Kind
+	}{
+		{"WW-Uitkering van UWV", "810220350L02", KindBenefit},
+		{"WIA (WGA)-Uitkering van UWV", "810220350L26", KindBenefit},
+		{"Toeslag bij Uitkering (TW) van UWV", "810220350L04", KindBenefit},
+		// The description alone is not enough, as in IBL: the number must match too.
+		{"WW-Uitkering van UWV", "123456789L01", KindEmployment},
+		{"UWV", "810220350L02", KindEmployment},
+		{"Ziektewet- of WAZO-Uitkering van VOORBEELD B.V.", "123456789L01", KindSickViaEmployer},
+		{"VOORBEELD B.V.", "123456789L01", KindEmployment},
+	} {
+		if got := classify(tc.employer, tc.number); got != tc.want {
+			t.Errorf("classify(%q, %q) = %q, want %q", tc.employer, tc.number, got, tc.want)
+		}
+	}
+}
+
 func TestCurrent(t *testing.T) {
+	job := func(employer, to, worked string) Relation {
+		r := Relation{Employer: employer, To: date(to), Kind: KindEmployment}
+		if worked != "" {
+			r.Worked = date(worked)
+		}
+		return r
+	}
 	st := &Statement{Date: date("22-10-2026"), Relations: []Relation{
-		{Employer: "SEPTEMBER", From: date("01-09-2026"), To: date("30-09-2026")},
-		{Employer: "AUGUST", From: date("01-01-2025"), To: date("31-08-2026")},
-		{Employer: "JULY", From: date("01-02-2026"), To: date("31-07-2026")},
-		{Employer: "LONG AGO", From: date("01-02-2025"), To: date("30-06-2025")},
+		job("SEPTEMBER", "30-09-2026", "30-09-2026"),
+		job("AUGUST", "31-08-2026", "31-08-2026"),
+		job("ON CALL, NO SHIFTS IN SEPTEMBER", "30-09-2026", "31-08-2026"),
+		job("PAID WITHOUT HOURS", "30-09-2026", ""),
+		job("JULY", "31-07-2026", "31-07-2026"),
+		{Employer: "WW-Uitkering van UWV", To: date("30-09-2026"), Kind: KindBenefit},
+		{Employer: "OLD BENEFIT", To: date("31-05-2026"), Kind: KindBenefit},
 	}}
 	var got []string
 	for _, r := range st.Current() {
 		got = append(got, r.Employer)
 	}
-	if strings.Join(got, ",") != "SEPTEMBER,AUGUST" {
-		t.Errorf("Current = %v, want the relations reporting August or later", got)
+	want := "SEPTEMBER,AUGUST,ON CALL, NO SHIFTS IN SEPTEMBER,WW-Uitkering van UWV"
+	if strings.Join(got, ",") != want {
+		t.Errorf("Current = %v, want %s", got, want)
 	}
 
 	january := &Statement{Date: date("05-01-2027"), Relations: []Relation{
-		{Employer: "NOVEMBER", To: date("30-11-2026")},
-		{Employer: "OCTOBER", To: date("31-10-2026")},
+		job("NOVEMBER", "30-11-2026", "30-11-2026"),
+		job("OCTOBER", "31-10-2026", "31-10-2026"),
 	}}
 	if cur := january.Current(); len(cur) != 1 || cur[0].Employer != "NOVEMBER" {
 		t.Errorf("Current across a year = %+v, want November only", cur)
 	}
 	if cur := (&Statement{Date: date("22-10-2026")}).Current(); cur == nil || len(cur) != 0 {
 		t.Errorf("Current without relations = %#v, want an empty list", cur)
+	}
+}
+
+func TestEmployed(t *testing.T) {
+	date22 := date("22-10-2026")
+	for name, tc := range map[string]struct {
+		relations []Relation
+		want      bool
+	}{
+		"a job":                    {[]Relation{{Kind: KindEmployment, To: date("30-09-2026"), Worked: date("30-09-2026")}}, true},
+		"sick via the employer":    {[]Relation{{Kind: KindSickViaEmployer, To: date("30-09-2026")}}, true},
+		"only a benefit":           {[]Relation{{Kind: KindBenefit, To: date("30-09-2026")}}, false},
+		"a past job":               {[]Relation{{Kind: KindEmployment, To: date("31-05-2026"), Worked: date("31-05-2026")}}, false},
+		"paid but no hours":        {[]Relation{{Kind: KindEmployment, To: date("30-09-2026")}}, false},
+		"a benefit and a job":      {[]Relation{{Kind: KindBenefit, To: date("30-09-2026")}, {Kind: KindEmployment, To: date("30-09-2026"), Worked: date("31-08-2026")}}, true},
+		"nothing on the statement": {nil, false},
+	} {
+		if got := (&Statement{Date: date22, Relations: tc.relations}).Employed(); got != tc.want {
+			t.Errorf("%s: Employed = %v, want %v", name, got, tc.want)
+		}
 	}
 }
 

@@ -105,17 +105,27 @@ func ownReview(req Request, reviewer uuid.UUID) bool {
 		(req.SubjectUserID != nil && *req.SubjectUserID == reviewer)
 }
 
-func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
-	in.Reason, in.ErrorCode = strings.TrimSpace(in.Reason), strings.TrimSpace(in.ErrorCode)
+// validate checks a trimmed in: a reason within maxReviewReasonLength, and an
+// error code only on a rejection, of reviewErrorCodePattern and, from a
+// reviewer, one of reviewerRejectCodes.
+func (in ReviewInput) validate() error {
 	switch {
 	case in.Reason == "" || utf8.RuneCountInString(in.Reason) > maxReviewReasonLength:
-		return Request{}, fmt.Errorf("%w: give a reason of at most %d characters", ErrInvalidInput, maxReviewReasonLength)
+		return fmt.Errorf("%w: give a reason of at most %d characters", ErrInvalidInput, maxReviewReasonLength)
 	case in.Approve && in.ErrorCode != "":
-		return Request{}, fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
+		return fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
 	case in.ErrorCode != "" && !reviewErrorCodePattern.MatchString(in.ErrorCode):
-		return Request{}, fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
+		return fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
 	case in.ReviewerID != uuid.Nil && in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode):
-		return Request{}, fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
+		return fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
+	}
+	return nil
+}
+
+func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
+	in.Reason, in.ErrorCode = strings.TrimSpace(in.Reason), strings.TrimSpace(in.ErrorCode)
+	if err := in.validate(); err != nil {
+		return Request{}, err
 	}
 	// Two reviewers deciding at once: the second waits, then reads it decided.
 	release, err := s.requests.LockReview(ctx, id)
@@ -130,18 +140,28 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if !in.Scope.reaches(req) {
 		return Request{}, ErrRequestNotFound
 	}
-	if req.Status != StatusNeedsReview || req.session == nil || req.session.EndedAt != nil || req.PurgedAt != nil {
+	if req.Status != StatusNeedsReview || req.session == nil || req.PurgedAt != nil {
 		return Request{}, ErrNotUnderReview
 	}
 	if ownReview(req, in.ReviewerID) {
 		return Request{}, ErrOwnReview
 	}
-	if req.FlowKind.dataRequest() && s.dataRequests != nil {
+	switch {
+	case req.ReviewReason != "":
+		return s.decideWalletReview(ctx, req, in)
+	case req.session.EndedAt != nil:
+		return Request{}, ErrNotUnderReview
+	case req.FlowKind.dataRequest() && s.dataRequests != nil:
 		return s.decideDataRequest(ctx, req, reviewer, in)
-	}
-	if in.RequestIDs != nil {
+	case in.RequestIDs != nil:
 		return Request{}, fmt.Errorf("%w: sessions are chosen only on a data request", ErrInvalidInput)
 	}
+	return s.decideEngineReview(ctx, req, reviewer, in)
+}
+
+// decideEngineReview sends in to the engine, which holds req's review, and
+// records who decided and why.
+func (s *Service) decideEngineReview(ctx context.Context, req Request, reviewer string, in ReviewInput) (Request, error) {
 	tenant := requestTenant(req)
 	decision := proofingprovider.ReviewDecision{
 		Approve: in.Approve, ErrorCode: in.ErrorCode, Reason: in.Reason, Reviewer: reviewer,
@@ -170,4 +190,32 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	// A failed read is logged; the engine's notice or the next read records the outcome.
 	req, _ = s.tryReconcile(ctx, tenant, req)
 	return req, nil
+}
+
+// decideWalletReview decides a review the wallet opened (Request.ReviewReason)
+// in the wallet alone: the engine approved the session before, and holds no
+// review to decide. A rejection without a code is ErrorReviewRejected.
+func (s *Service) decideWalletReview(ctx context.Context, req Request, in ReviewInput) (Request, error) {
+	if in.RequestIDs != nil {
+		return Request{}, fmt.Errorf("%w: sessions are chosen only on a data request", ErrInvalidInput)
+	}
+	decided, code := StatusApproved, ""
+	if !in.Approve {
+		decided, code = StatusRejected, in.ErrorCode
+		if code == "" {
+			code = ErrorReviewRejected
+		}
+	}
+	// Who decided and why is recorded even if the caller has gone.
+	ctx = context.WithoutCancel(ctx)
+	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code); err != nil {
+		return Request{}, err
+	}
+	if err := s.requests.RecordWalletOutcome(ctx, req, req.session.ID, decided, proofingprovider.Result{
+		Method: req.Method, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: code,
+		Name: req.ProofedName,
+	}); err != nil {
+		return Request{}, err
+	}
+	return s.requests.Get(ctx, req.OrganizationID, req.ID)
 }

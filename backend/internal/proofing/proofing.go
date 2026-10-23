@@ -419,6 +419,10 @@ type Request struct {
 	Employment        EmploymentMode
 	SubjectEmployment *Employment
 	EmploymentAddedAt *time.Time
+	// ReviewReason is why the wallet itself put the request in review after
+	// the engine approved it (Employment.reviewReason); "" for a review the
+	// engine opened, and for none. Such a review is decided in the wallet.
+	ReviewReason string
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool

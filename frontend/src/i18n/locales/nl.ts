@@ -536,6 +536,8 @@ export const nl: Translation<typeof en> = {
         "de organisatie moet deze gegevens volgens de wet bewaren",
       orgPaused:
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
+      employmentNotProvided:
+        "er is na de identiteitscontrole niet op tijd een Verzekeringsbericht toegevoegd",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
       addressMismatch:
@@ -705,6 +707,11 @@ export const nl: Translation<typeof en> = {
         "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
       noRelations: "Er staat geen huidig dienstverband in.",
       since: "sinds {{from}}",
+      benefit: "(uitkering)",
+      review:
+        "Er staat geen huidige baan in. De organisatie beoordeelt je controle voordat er een besluit is.",
+      reviewBenefit:
+        "Er staat een lopende uitkering in. De organisatie beoordeelt je controle voordat er een besluit is.",
       reasons: {
         notAStatement:
           "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
@@ -1051,6 +1058,10 @@ export const nl: Translation<typeof en> = {
         missing: "Geen arbeidsverleden",
         statementDate: "Verzekeringsbericht van {{date}}",
         noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
+        employed: "Heeft nu werk: ja",
+        notEmployed: "Heeft nu werk: nee",
+        benefit: "Uitkering",
+        sickViaEmployer: "Ziek, betaald via werkgever",
         payrollTaxNumber: "Loonheffingennummer {{number}}",
         since: "sinds {{from}}",
         source:
@@ -1268,6 +1279,10 @@ export const nl: Translation<typeof en> = {
           "Een beoordelaar keurt elk verzoek om gegevens in te zien goed",
         data_erasure:
           "Een beoordelaar keurt elk verzoek om gegevens te verwijderen goed",
+        no_current_employment:
+          "In het Verzekeringsbericht staat geen huidige baan",
+        current_benefit:
+          "In het Verzekeringsbericht staat een lopende uitkering van UWV",
       },
       answerBy: "Antwoord voor {{date}}",
       outcome: {
@@ -1290,6 +1305,10 @@ export const nl: Translation<typeof en> = {
         why: {
           title: "Waarom dit op jou wacht",
           body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
+          no_current_employment:
+            "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder.",
+          current_benefit:
+            "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat een lopende uitkering van UWV. Bekijk het dienstverband hieronder.",
         },
         auto: {
           title: "Automatisch gecontroleerd",

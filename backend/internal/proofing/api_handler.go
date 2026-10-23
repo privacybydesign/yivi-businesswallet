@@ -457,15 +457,18 @@ func apiSessionID(r *http.Request) (uuid.UUID, error) {
 // evidence. identity is set only for an approved session; never the document
 // number or an image.
 type apiResultResponse struct {
-	ID             string             `json:"id"`
-	Status         Status             `json:"status"`
-	Method         string             `json:"method,omitempty"`
-	AssuranceLevel string             `json:"assuranceLevel,omitempty"`
-	EIDASLevel     string             `json:"eidasLevel,omitempty"`
-	ErrorCode      string             `json:"errorCode,omitempty"`
-	VerifiedAt     *time.Time         `json:"verifiedAt,omitempty"`
-	Identity       *apiIdentity       `json:"identity,omitempty"`
-	Evidence       []apiEvidenceEntry `json:"evidence"`
+	ID             string `json:"id"`
+	Status         Status `json:"status"`
+	Method         string `json:"method,omitempty"`
+	AssuranceLevel string `json:"assuranceLevel,omitempty"`
+	EIDASLevel     string `json:"eidasLevel,omitempty"`
+	ErrorCode      string `json:"errorCode,omitempty"`
+	// ReviewReason is why the session went to review after its identity was
+	// approved (no_current_employment, current_benefit); absent otherwise.
+	ReviewReason string             `json:"reviewReason,omitempty"`
+	VerifiedAt   *time.Time         `json:"verifiedAt,omitempty"`
+	Identity     *apiIdentity       `json:"identity,omitempty"`
+	Evidence     []apiEvidenceEntry `json:"evidence"`
 	// Diplomas are the DUO diploma extracts the subject added, each checked
 	// against DUO's signature and the proofed identity.
 	Diplomas []diplomaResponse `json:"diplomas"`
@@ -613,7 +616,8 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	out := apiResultResponse{
 		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
-		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, Address: req.SubjectAddress,
+		ReviewReason: req.ReviewReason,
+		Evidence:     []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, Address: req.SubjectAddress,
 		Employment: req.SubjectEmployment,
 	}
 	if identity.Status == proofingprovider.StatusApproved {

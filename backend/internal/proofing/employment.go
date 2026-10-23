@@ -60,6 +60,10 @@ var (
 type Employment struct {
 	// StatementDate is the day UWV made the statement (YYYY-MM-DD).
 	StatementDate string `json:"statementDate"`
+	// Employed is a current relation that is not a benefit
+	// (employment.Statement.Employed). Without one the request goes to review
+	// (reviewReason).
+	Employed bool `json:"employed"`
 	// Relations are the current ones; empty when none is.
 	Relations []EmploymentRelation `json:"relations"`
 }
@@ -68,6 +72,8 @@ type Employment struct {
 // contract: From is the first day of its first month on the statement (since
 // when), To the last day of its newest month reported (YYYY-MM-DD).
 type EmploymentRelation struct {
+	// Kind is employment, benefit (paid by UWV) or sick_via_employer.
+	Kind             string `json:"kind"`
 	Employer         string `json:"employer"`
 	PayrollTaxNumber string `json:"payrollTaxNumber"`
 	ContractForm     string `json:"contractForm"`
@@ -77,15 +83,44 @@ type EmploymentRelation struct {
 
 func newEmployment(st *employment.Statement) Employment {
 	current := st.Current()
-	out := Employment{StatementDate: st.Date.Format(time.DateOnly), Relations: make([]EmploymentRelation, 0, len(current))}
+	out := Employment{
+		StatementDate: st.Date.Format(time.DateOnly), Employed: st.Employed(),
+		Relations: make([]EmploymentRelation, 0, len(current)),
+	}
 	for _, r := range current {
 		out.Relations = append(out.Relations, EmploymentRelation{
-			Employer: r.Employer, PayrollTaxNumber: r.PayrollTaxNumber, ContractForm: r.ContractForm,
+			Kind: string(r.Kind), Employer: r.Employer, PayrollTaxNumber: r.PayrollTaxNumber, ContractForm: r.ContractForm,
 			From: r.From.Format(time.DateOnly), To: r.To.Format(time.DateOnly),
 		})
 	}
 	return out
 }
+
+// Why the wallet puts an approved request in review itself, from its kept
+// Verzekeringsbericht: it lists no current job, or a current UWV benefit.
+const (
+	ReviewNoCurrentEmployment = "no_current_employment"
+	ReviewCurrentBenefit      = "current_benefit"
+)
+
+// reviewReason is why emp sends an approved request to review; "" for none.
+// No current job weighs more than a benefit beside one.
+func (e Employment) reviewReason() string {
+	if !e.Employed {
+		return ReviewNoCurrentEmployment
+	}
+	for _, r := range e.Relations {
+		if r.Kind == string(employment.KindBenefit) {
+			return ReviewCurrentBenefit
+		}
+	}
+	return ""
+}
+
+// ErrorEmploymentNotProvided is the error code of an approved request whose
+// subject kept no Verzekeringsbericht within EmploymentWindow: a flow that
+// requires one is not passed without it (RejectMissingEmployment).
+const ErrorEmploymentNotProvided = "EMPLOYMENT_NOT_PROVIDED"
 
 // webhookEmploymentKey is where a session.employment_added delivery carries
 // the employment; Purge drops it from the request's deliveries.
@@ -195,9 +230,12 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 }
 
 // AddEmployment seals emp on req, audited identity_proofing.employment_added
-// (without the relations), and sends session.employment_added. It is false,
-// and changes nothing, when the request holds a statement already or was
-// erased.
+// (without the relations), and sends session.employment_added. A statement
+// without a current job, or with a current benefit, also moves the approved
+// request to needs_review (reviewReason), audited identity_proofing.needs_review, and sends
+// session.review_opened: the identity is proven, the rest is for a reviewer.
+// It is false, and changes nothing, when the request holds a statement already
+// or was erased.
 func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error) {
 	if s.cipher == nil {
 		return false, ErrNoEncryptionKey
@@ -233,12 +271,138 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 
 		data := sessionEventData(req, req.Status)
 		data[webhookEmploymentKey] = emp
-		return enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data)
+		if err := enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data); err != nil {
+			return err
+		}
+		reason := emp.reviewReason()
+		if reason == "" {
+			return nil
+		}
+		return openWalletReview(ctx, q, s.audit, req, reason)
 	})
 	if err != nil {
 		return false, err
 	}
 	return added, nil
+}
+
+// openWalletReview moves an approved req to needs_review for reason, which the
+// engine never sees: its session stays decided, and a reviewer decides the
+// request in the wallet (decideWalletReview).
+func openWalletReview(ctx context.Context, q database.Querier, recorder audit.Recorder, req Request, reason string) error {
+	tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
+		SET status = 'needs_review', review_reason = $2, updated_at = now()
+		WHERE id = $1 AND status = 'approved' AND purged_at IS NULL`, req.ID, reason)
+	if err != nil {
+		return fmt.Errorf("proofing: open review request %s: %w", req.ID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
+		return err
+	}
+	if err := recorder.Record(ctx, q, audit.IdentityProofingNeedsReview,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+		audit.Updated(req.auditFields(map[string]any{"status": string(StatusApproved)}),
+			req.auditFields(map[string]any{"status": string(StatusNeedsReview), "reviewReason": reason}))); err != nil {
+		return err
+	}
+	inReview := req
+	inReview.ReviewReason = reason
+	return enqueueRequestWebhook(ctx, q, req, EventSessionReviewOpened, sessionEventData(inReview, StatusNeedsReview))
+}
+
+// missingEmploymentWhere is an approved request r that asks for a
+// Verzekeringsbericht and holds none, not erased or cancelled; it is due
+// EmploymentWindow after its approval ($2, in seconds).
+const missingEmploymentWhere = `r.employment = 'required' AND r.status = 'approved'
+	AND r.employment_ciphertext IS NULL AND r.purged_at IS NULL AND r.cancelled_at IS NULL
+	AND r.completed_at IS NOT NULL`
+
+// RejectMissingEmployment rejects up to limit approved requests whose subject
+// kept no Verzekeringsbericht within EmploymentWindow, with
+// ErrorEmploymentNotProvided: audited identity_proofing.rejected, webhook
+// session.failed. The engine approved the identity and keeps saying so; the
+// rejection is the wallet's, and reconcile leaves it (tryReconcile). It
+// returns how many it rejected.
+func (s *RequestStore) RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error) {
+	rejected := 0
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
+		reqs, err := s.rejectDueWithoutEmployment(ctx, q, now, limit)
+		if err != nil {
+			return err
+		}
+		for _, req := range reqs {
+			if err := s.recordEmploymentNotProvided(ctx, q, req); err != nil {
+				return err
+			}
+		}
+		rejected = len(reqs)
+		return nil
+	})
+	return rejected, err
+}
+
+// rejectDueWithoutEmployment marks up to limit due requests without a
+// Verzekeringsbericht rejected, and returns them as they now are.
+func (s *RequestStore) rejectDueWithoutEmployment(ctx context.Context, q database.Querier, now time.Time, limit int) ([]Request, error) {
+	idRows, err := q.Query(ctx, `WITH due AS (
+			SELECT r.id FROM identity_proofing_requests r
+			WHERE `+missingEmploymentWhere+` AND r.completed_at + make_interval(secs => $2) <= $1
+			ORDER BY r.completed_at LIMIT $3 FOR UPDATE SKIP LOCKED
+		)
+		UPDATE identity_proofing_requests e SET status = 'rejected', error_code = $4, updated_at = now()
+		FROM due WHERE e.id = due.id RETURNING e.id`, now, EmploymentWindow.Seconds(), limit, ErrorEmploymentNotProvided)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
+	}
+	ids, err := pgx.CollectRows(idRows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if err := refreshPurgeAt(ctx, q, ids...); err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, `SELECT `+requestColumns+requestFrom+` WHERE r.id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
+	}
+	reqs, err := s.collectRequests(rows)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
+	}
+	return reqs, nil
+}
+
+// recordEmploymentNotProvided audits and sends the rejection of req for
+// ErrorEmploymentNotProvided.
+func (s *RequestStore) recordEmploymentNotProvided(ctx context.Context, q database.Querier, req Request) error {
+	if err := s.audit.Record(ctx, q, audit.IdentityProofingRejected,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+		audit.Updated(req.auditFields(map[string]any{"status": string(StatusApproved)}),
+			req.auditFields(map[string]any{"status": string(StatusRejected), "errorCode": ErrorEmploymentNotProvided}))); err != nil {
+		return err
+	}
+	return enqueueRequestWebhook(ctx, q, req, EventSessionFailed, sessionEventData(req, StatusRejected))
+}
+
+// NextMissingEmployment is when the next approved request without a
+// Verzekeringsbericht is due for RejectMissingEmployment; zero for none.
+func (s *RequestStore) NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error) {
+	var next *time.Time
+	if err := s.db.QueryRow(ctx, `SELECT min(r.completed_at + make_interval(secs => $2))
+		FROM identity_proofing_requests r WHERE `+missingEmploymentWhere+`
+			AND r.completed_at + make_interval(secs => $2) > $1`, now, EmploymentWindow.Seconds()).Scan(&next); err != nil {
+		return time.Time{}, fmt.Errorf("proofing: next missing employment: %w", err)
+	}
+	if next == nil {
+		return time.Time{}, nil
+	}
+	return *next, nil
 }
 
 // RecordEmploymentRejected audits identity_proofing.employment_rejected: why

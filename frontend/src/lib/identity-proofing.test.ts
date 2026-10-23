@@ -43,6 +43,7 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   employmentRejectionReason,
+  employmentReview,
   employmentStepDone,
   OUTCOME_ONLY,
   MAX_ATTRIBUTE_REASON_CHARS,
@@ -1852,6 +1853,7 @@ describe("rejection codes mirror the backend", () => {
     "service.go",
     "data_request.go",
     "review.go",
+    "employment.go",
   ].flatMap((file) => codes(read(`proofing/${file}`), walletCodes));
   const reviewer = codes(read("proofing/review.go"), walletCodes);
   const backend = [...new Set([...engine, ...wallet])];
@@ -2167,10 +2169,38 @@ describe("employment step", () => {
   });
 
   it("ends the step once a statement is kept or the time is up", () => {
-    const kept = { statementDate: "2026-10-15", relations: [] };
+    const kept = {
+      statementDate: "2026-10-15",
+      employed: true,
+      relations: [],
+    };
     expect(employmentStepDone(undefined, 60)).toBe(false);
     expect(employmentStepDone(kept, 60)).toBe(true);
     expect(employmentStepDone(undefined, 0)).toBe(true);
+  });
+
+  it("sends a statement without a job or with a benefit to review", () => {
+    const relation = (kind: string) => ({
+      kind,
+      employer: "",
+      payrollTaxNumber: "",
+      contractForm: "",
+      from: "",
+      to: "",
+    });
+    const statement = (employed: boolean, kinds: string[]) => ({
+      statementDate: "2026-10-15",
+      employed,
+      relations: kinds.map(relation),
+    });
+    expect(employmentReview(statement(true, ["employment"]))).toBeUndefined();
+    expect(
+      employmentReview(statement(true, ["sick_via_employer"])),
+    ).toBeUndefined();
+    expect(employmentReview(statement(true, ["employment", "benefit"]))).toBe(
+      "benefit",
+    );
+    expect(employmentReview(statement(false, ["benefit"]))).toBe("noJob");
   });
 
   it("mails only a flow that asks for no Verzekeringsbericht", () => {

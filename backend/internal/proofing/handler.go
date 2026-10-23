@@ -368,6 +368,9 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// ReviewReason is why the wallet put the request in review after the
+	// identity was approved (no_current_employment, current_benefit); absent otherwise.
+	ReviewReason string `json:"reviewReason,omitempty"`
 	// FlowKind is what the session is for; a data request goes to review once
 	// the person is proven. DataExportUntil is until when an approved "see my
 	// data" request's data downloads.
@@ -393,7 +396,8 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
-		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ReviewReason: req.ReviewReason,
+		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
