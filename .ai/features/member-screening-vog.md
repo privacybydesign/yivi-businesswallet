@@ -135,8 +135,10 @@ about Justis' document, not about members or orgs.
   multipart part's `Content-Type` is set explicitly to `application/pdf` -
   go-vog-issuer's confirmed gotcha: Go's default `application/octet-stream`
   makes GAAV answer code 2 (unknown document) for a genuine VOG.
-  `Ping` GETs the same URL and accepts a `405` as healthy (the service has no
-  health endpoint; a `405` on `GET` proves the route exists and answered).
+  `Ping` GETs the same URL and accepts any answer but a `404` as healthy (the
+  service has no health endpoint, and answers a non-upload with a `405` or, from
+  the prod cluster, a `500` while real uploads work), so only an unreachable
+  service or a wrong URL fails the boot.
 - **`parser.go`** is a port of go-vog-issuer's parser, the one confirmed
   against real Justis documents: PDFium in a WebAssembly sandbox
   (`klippa-app/go-pdfium` + wazero, pure Go, no cgo) opens the PDF and yields
