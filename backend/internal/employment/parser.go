@@ -93,6 +93,7 @@ func parseStatement(pages []string) (*Statement, error) {
 				pageLines[i] = strings.TrimSpace(reFormCode.ReplaceAllString(l, ""))
 			}
 		}
+
 		pageFoot, err := pageFooter(pageLines)
 		if err != nil {
 			return nil, err
@@ -100,6 +101,7 @@ func parseStatement(pages []string) (*Statement, error) {
 		if foot != nil && *foot != pageFoot {
 			return nil, fmt.Errorf("%w: pages name different holders", ErrNotAStatement)
 		}
+
 		foot = &pageFoot
 		for _, l := range pageLines {
 			if l != "" && l != foot.holder && l != foot.dates && l != footerTitle && !rePageNumber.MatchString(l) {
@@ -208,7 +210,7 @@ func parseRelations(lines []string) ([]Relation, error) {
 			current.ContractForm, inContract = strings.TrimSpace(strings.TrimPrefix(l, labelContractForm)), true
 		case l == headingPeriods:
 			inContract = false
-		case inContract:
+		case inContract && !rePeriod.MatchString(l):
 			current.ContractForm = strings.TrimSpace(current.ContractForm + " " + l)
 		default:
 			if err := addPeriod(current, l); err != nil {

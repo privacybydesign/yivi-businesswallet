@@ -586,7 +586,7 @@ function SessionEmployment({
             <ul className="border-line divide-y rounded-lg border">
               {e.relations.map((r) => (
                 <li
-                  key={`${r.payrollTaxNumber}-${r.from}`}
+                  key={`${r.employer}-${r.payrollTaxNumber}-${r.contractForm}-${r.from}`}
                   className="flex flex-col gap-0.5 px-3 py-2"
                 >
                   <span className="text-ink text-[13px] font-semibold">

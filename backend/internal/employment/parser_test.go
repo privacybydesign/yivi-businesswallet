@@ -129,6 +129,20 @@ func TestParseStatementRefuses(t *testing.T) {
 	}
 }
 
+// A month line straight after Contractvorm, without the Periode heading, is
+// still a month and no part of the contract form.
+func TestMonthsWithoutHeading(t *testing.T) {
+	page := "Werkgever/Instantie VOORBEELD B.V.\nLoonheffingennummer 123456789L01\nContractvorm oproepovereenkomst\n" +
+		"01-09-2026 t/m 30-09-2026 160 € 3.000,00\nVZB-006\n" + statementFooter(1, 1)
+	st, err := parseStatement([]string{page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Relations) != 1 || st.Relations[0].ContractForm != "oproepovereenkomst" || !st.Relations[0].To.Equal(date("30-09-2026")) {
+		t.Errorf("relations = %+v, want one oproepovereenkomst reporting September", st.Relations)
+	}
+}
+
 type fakeText struct {
 	pages []string
 	err   error

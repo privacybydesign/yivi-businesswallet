@@ -380,7 +380,7 @@ func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
 }
 
 // The real UWV seal check is the default, as the DUO one is.
-func TestLoadEmploymentDefaultsToUWV(t *testing.T) {
+func TestLoadEmploymentDefaultUWV(t *testing.T) {
 	cfg, err := loadWith(t, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)

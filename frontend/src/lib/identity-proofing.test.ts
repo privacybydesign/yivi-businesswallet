@@ -1239,9 +1239,10 @@ describe("employment step", () => {
   });
 
   it("ends the step once a statement is kept or the time is up", () => {
-    expect(employmentStepDone(false, 60)).toBe(false);
-    expect(employmentStepDone(true, 60)).toBe(true);
-    expect(employmentStepDone(false, 0)).toBe(true);
+    const kept = { statementDate: "2026-10-15", relations: [] };
+    expect(employmentStepDone(undefined, 60)).toBe(false);
+    expect(employmentStepDone(kept, 60)).toBe(true);
+    expect(employmentStepDone(undefined, 0)).toBe(true);
   });
 
   it("mails only a flow that asks for no Verzekeringsbericht", () => {

@@ -11,7 +11,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-func TestFlowEmploymentSavesAndAudits(t *testing.T) {
+func TestFlowEmploymentSaveAudit(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	store := NewFlowEmploymentStore(pool, audit.NewDBRecorder())
 	orgID := makeOrg(t, pool, "acme")
@@ -34,7 +34,7 @@ func TestFlowEmploymentSavesAndAudits(t *testing.T) {
 	}
 }
 
-func TestEmploymentSealedUntilPurge(t *testing.T) {
+func TestEmploymentSealedTillPurge(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	customers := NewCustomerStore(pool, audit.NopRecorder{})
