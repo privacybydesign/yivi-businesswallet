@@ -137,7 +137,10 @@ function StepsSection({
   onAddress,
   addressError,
   error,
-}: Omit<AdvancedSettingsProps, "requiresIdentity">): React.JSX.Element {
+}: Omit<
+  AdvancedSettingsProps,
+  "requiresIdentity" | "locales"
+>): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   const orgTtl = settings?.sessionTtlSeconds;
@@ -449,10 +452,9 @@ function ReceiveSection({
                 <MinimumAge draft={draft} update={update} error={error} />
               )}
               {ticked && (
-                <div
-                  role="group"
+                <fieldset
                   aria-label={t(`identityProofingFlows.attributes.${value}`)}
-                  className={`grid grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3 ${UNDER_OPTION}`}
+                  className={`grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3 ${UNDER_OPTION}`}
                 >
                   {/* Every language, so a reason can be written before the
                       Hosted page tab offers it; only the offered ones are
@@ -473,7 +475,7 @@ function ReceiveSection({
                       onChange={(text) => setReason(value, locale, text)}
                     />
                   ))}
-                </div>
+                </fieldset>
               )}
             </div>
           );

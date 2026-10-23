@@ -33,19 +33,9 @@ var ErrReasonsMissing = errors.New("proofing: the flow gives no reason in a lang
 func withReasons(in proofingprovider.FlowSpec, offered FlowHosted) (proofingprovider.FlowSpec, error) {
 	reasons := make(map[string]map[string]string, len(in.AttributeReasons))
 	for attribute, byLocale := range in.AttributeReasons {
-		tidy := make(map[string]string, len(byLocale))
-		for tag, reason := range byLocale {
-			if _, ok := email.ParseLocale(tag); !ok {
-				return in, fmt.Errorf("%w: unsupported language %q for the reason of %s", ErrInvalidInput, tag, attribute)
-			}
-			reason = strings.TrimSpace(reason)
-			if utf8.RuneCountInString(reason) > maxAttributeReasonLength {
-				return in, fmt.Errorf("%w: the reason of %s in %s is longer than %d characters",
-					ErrInvalidInput, attribute, tag, maxAttributeReasonLength)
-			}
-			if reason != "" {
-				tidy[tag] = reason
-			}
+		tidy, err := tidyReasons(attribute, byLocale)
+		if err != nil {
+			return in, err
 		}
 		if len(tidy) > 0 {
 			reasons[attribute] = tidy
@@ -60,6 +50,27 @@ func withReasons(in proofingprovider.FlowSpec, offered FlowHosted) (proofingprov
 		return in, fmt.Errorf("%w: give %s a reason in %s", ErrInvalidInput, attribute, locale)
 	}
 	return in, nil
+}
+
+// tidyReasons checks the reasons given for attribute, by language, and
+// returns them trimmed, without the empty ones: a language that is not
+// supported or a reason past maxAttributeReasonLength is refused.
+func tidyReasons(attribute string, byLocale map[string]string) (map[string]string, error) {
+	tidy := make(map[string]string, len(byLocale))
+	for tag, reason := range byLocale {
+		if _, ok := email.ParseLocale(tag); !ok {
+			return nil, fmt.Errorf("%w: unsupported language %q for the reason of %s", ErrInvalidInput, tag, attribute)
+		}
+		reason = strings.TrimSpace(reason)
+		if utf8.RuneCountInString(reason) > maxAttributeReasonLength {
+			return nil, fmt.Errorf("%w: the reason of %s in %s is longer than %d characters",
+				ErrInvalidInput, attribute, tag, maxAttributeReasonLength)
+		}
+		if reason != "" {
+			tidy[tag] = reason
+		}
+	}
+	return tidy, nil
 }
 
 // offeredLocales are the languages a hosted page offers: every supported one
