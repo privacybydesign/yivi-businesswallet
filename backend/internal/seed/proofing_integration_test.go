@@ -232,12 +232,19 @@ func TestSeededFlowsGiveReasons(t *testing.T) {
 			t.Fatalf("%s flows: %v", o.slug, err)
 		}
 		for _, f := range flows {
-			for _, attribute := range f.RequestedAttributes {
-				for _, locale := range email.Locales() {
-					if f.AttributeReasons[attribute][string(locale)] == "" {
-						t.Errorf("%s %q gives %s no reason in %s", o.slug, f.Name, attribute, locale)
-					}
-				}
+			assertFlowReasons(t, o.slug, f)
+		}
+	}
+}
+
+// assertFlowReasons checks that flow f of the org slug gives each item it
+// collects a reason in every language.
+func assertFlowReasons(t *testing.T, slug string, f proofingprovider.Flow) {
+	t.Helper()
+	for _, attribute := range f.RequestedAttributes {
+		for _, locale := range email.Locales() {
+			if f.AttributeReasons[attribute][string(locale)] == "" {
+				t.Errorf("%s %q gives %s no reason in %s", slug, f.Name, attribute, locale)
 			}
 		}
 	}

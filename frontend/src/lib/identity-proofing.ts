@@ -720,19 +720,7 @@ function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
 // The request body for a draft, as the service's editor builds it. Call only
 // on a draft flowDraftError accepts.
 export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
-  const requiredChecks: string[] = [];
-  if (draft.documentAndChip) {
-    requiredChecks.push(CHECK_PASSIVE_AUTH);
-    if (draft.chipAuthentication) {
-      requiredChecks.push(CHECK_CHIP_AUTH);
-    }
-  }
-  if (draft.faceVerification) {
-    requiredChecks.push(CHECK_FACE_MATCH);
-    if (draft.liveness) {
-      requiredChecks.push(CHECK_LIVENESS);
-    }
-  }
+  const requiredChecks = draftRequiredChecks(draft);
   const requestedAttributes = collectedAttributes(draft);
   const spec: ProofingFlowSpec = {
     ...draft.carried,
@@ -775,6 +763,26 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     spec.ageOver = Number(draft.ageOver);
   }
   return spec;
+}
+
+// The checks a draft requires: the chip's passive authentication, and chip
+// authentication on top, with the document and chip; the face match, and
+// liveness on top, with the face check.
+function draftRequiredChecks(draft: ProofingFlowDraft): string[] {
+  const requiredChecks: string[] = [];
+  if (draft.documentAndChip) {
+    requiredChecks.push(CHECK_PASSIVE_AUTH);
+    if (draft.chipAuthentication) {
+      requiredChecks.push(CHECK_CHIP_AUTH);
+    }
+  }
+  if (draft.faceVerification) {
+    requiredChecks.push(CHECK_FACE_MATCH);
+    if (draft.liveness) {
+      requiredChecks.push(CHECK_LIVENESS);
+    }
+  }
+  return requiredChecks;
 }
 
 // Whether the draft releases the name and date of birth (readsIdentity): the

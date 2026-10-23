@@ -96,6 +96,8 @@ function HostedForm({
   const unexplained = localesWithoutReasons(flow, draft.locales);
   const reasonsRefused =
     save.isError && errorCode(save.error) === REASONS_MISSING;
+  // Languages are picked, but a reason is missing in one of them.
+  const reasonsWanted = !noLocale && (unexplained.length > 0 || reasonsRefused);
   const dirty = hostedDraftDirty(draft, saved);
 
   function toggleLocale(locale: string, on: boolean): void {
@@ -173,11 +175,12 @@ function HostedForm({
                 </span>
               </label>
             ))}
-            {noLocale ? (
+            {noLocale && (
               <p role="alert" className={ERROR}>
                 {t("identityProofingFlows.hosted.localesRequired")}
               </p>
-            ) : unexplained.length > 0 || reasonsRefused ? (
+            )}
+            {reasonsWanted && (
               <div role="alert" className="flex flex-col items-start gap-1.5">
                 <p className={ERROR}>
                   {unexplained.length > 0
@@ -200,7 +203,8 @@ function HostedForm({
                   {t("identityProofingFlows.hosted.openCheck")}
                 </button>
               </div>
-            ) : (
+            )}
+            {!noLocale && !reasonsWanted && (
               <p className={HINT}>
                 {t("identityProofingFlows.hosted.localesHint")}
               </p>
