@@ -2184,15 +2184,20 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     - the same date of birth. Else `holder_mismatch`.
   - The printed date at most `statementMaxAge` (30 days) old, else `stale`.
 - **What a relation is** (`classify`), as HDN's Rekenregels Inkomensbepaling
-  Loondienst 8.0 (Appendix 5) reads the same PDF:
+  Loondienst 8.1.1 and 9.0.0 (Appendix 5) read the same PDF:
   - `benefit`: a benefit UWV pays, printed under "Werkgever/Instantie" as one
-    of nine exact descriptions ("WW-Uitkering van UWV", "WIA (WGA)-Uitkering
-    van UWV", …) together with one of the loonheffingennummers
-    `810220350L02/L04/L20/L23/L26`. Both must match, as in IBL.
+    of ten descriptions ("WW-Uitkering van UWV", "UWV; Loondoorbetaling bij
+    faillissement", …, compared without case) together with one of the
+    loonheffingennummers in HDN's "Bijlage Loonheffingennummers voor
+    Uitkering via het UWV" (`810220350L02/L04/L20/L23/L26/L53`). Both must
+    match, as in IBL. HDN updates that list: check it on a new IBL release.
   - `sick_via_employer`: "Ziektewet- of WAZO-Uitkering van <werkgever>": the
     holder still has the job.
   - `employment` otherwise. AOW (SVB), social assistance and pensions are not
-    in IBL's appendix and are not recognised.
+    in IBL's appendix and their printed names are not known.
+  - `other_income` (`Statement.Current`): a current `employment` relation paid
+    in the last two months without hours worked in them. That is how a
+    pension, AOW or social assistance reads, but also a job's final payment.
 - **Kept**: the statement date and only the relations current on it
   (`Statement.Current`), as IBL §3.1 decides "works as an employee now": a job
   with hours worked (more than 0) in a month at most two months before the
@@ -2203,12 +2208,14 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   would have their June job read as current.
   - `employed` (`Statement.Employed`): a current relation that is not a
     benefit.
-- **No current job, or a current benefit, goes to review.** A kept statement
+- **No current job, a current benefit, or other income goes to review.** A kept statement
   moves the approved request to `needs_review` in the same transaction
   (`openWalletReview`), audited `identity_proofing.needs_review` and webhook
   `session.review_opened`, with `review_reason` (`Employment.reviewReason`):
   - `no_current_employment`: `employed: false`;
-  - `current_benefit`: a job, and a current `benefit` relation beside it.
+  - `current_benefit`: a job, and a current `benefit` relation beside it;
+  - `current_other_income`: a job, and a current `other_income` relation
+    beside it (no `benefit`).
   - A `sick_via_employer` relation is no benefit here: the holder keeps the job.
   - The engine approved and still reports the approval, so the review is the
     wallet's alone: `tryReconcile` skips such a request, `RecordOutcome`

@@ -167,11 +167,13 @@ export type RejectReasonKey = (typeof REJECT_REASONS)[number]["key"];
 export const DEFAULT_REJECT_REASON: RejectReasonKey = "someoneElse";
 
 // Why the wallet itself held an approved check for review
-// (proofing.ReviewNoCurrentEmployment, ReviewCurrentBenefit): the
-// Verzekeringsbericht lists no current job, or a current UWV benefit.
+// (proofing.ReviewNoCurrentEmployment, ReviewCurrentBenefit,
+// ReviewCurrentOtherIncome): the Verzekeringsbericht lists no current job, or
+// a current UWV benefit or other income beside one.
 export const WALLET_REVIEW_REASONS = [
   "no_current_employment",
   "current_benefit",
+  "current_other_income",
 ] as const;
 export type WalletReviewReason = (typeof WALLET_REVIEW_REASONS)[number];
 

@@ -2200,6 +2200,14 @@ describe("employment step", () => {
     expect(employmentReview(statement(true, ["employment", "benefit"]))).toBe(
       "benefit",
     );
+    expect(
+      employmentReview(statement(true, ["employment", "other_income"])),
+    ).toBe("otherIncome");
+    expect(
+      employmentReview(
+        statement(true, ["employment", "other_income", "benefit"]),
+      ),
+    ).toBe("benefit");
     expect(employmentReview(statement(false, ["benefit"]))).toBe("noJob");
   });
 

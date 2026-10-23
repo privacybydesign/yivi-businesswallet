@@ -262,22 +262,30 @@ func checkStatuses(t *testing.T, requests *RequestStore, want map[*Request]Statu
 	}
 }
 
-// A current benefit beside a job also puts the approved request in review.
-func TestCurrentBenefitOpensReview(t *testing.T) {
-	f := newSealedFixture(t, EventSessionReviewOpened)
-	ctx := context.Background()
-	f.in.Employment = EmploymentRequired
-	approved := approvedRequest(t, f.requests, f.in, "s1")
+// A current benefit, or other income, beside a job also puts the approved
+// request in review.
+func TestIncomeBesideJobOpensReview(t *testing.T) {
+	for _, tc := range []struct {
+		kind, employer, number, want string
+	}{
+		{"benefit", "WW-Uitkering van UWV", "810220350L02", ReviewCurrentBenefit},
+		{"other_income", "PENSIOENFONDS", "111111111L01", ReviewCurrentOtherIncome},
+	} {
+		f := newSealedFixture(t, EventSessionReviewOpened)
+		ctx := context.Background()
+		f.in.Employment = EmploymentRequired
+		approved := approvedRequest(t, f.requests, f.in, "s1")
 
-	emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
-		{Kind: "employment", Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
-		{Kind: "benefit", Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02", From: "2026-06-01", To: "2026-09-30"},
-	}}
-	if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
-		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
-	}
-	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-	if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != ReviewCurrentBenefit {
-		t.Fatalf("Get = %s (%q), %v; want needs_review for a current benefit", got.Status, got.ReviewReason, err)
+		emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
+			{Kind: "employment", Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
+			{Kind: tc.kind, Employer: tc.employer, PayrollTaxNumber: tc.number, From: "2026-06-01", To: "2026-09-30"},
+		}}
+		if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
+			t.Fatalf("%s: AddEmployment = %v, %v; want added", tc.kind, added, err)
+		}
+		got, err := f.requests.Get(ctx, f.orgID, approved.ID)
+		if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != tc.want {
+			t.Fatalf("%s: Get = %s (%q), %v; want needs_review for %s", tc.kind, got.Status, got.ReviewReason, err, tc.want)
+		}
 	}
 }

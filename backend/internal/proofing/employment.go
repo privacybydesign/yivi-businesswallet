@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,7 +73,8 @@ type Employment struct {
 // contract: From is the first day of its first month on the statement (since
 // when), To the last day of its newest month reported (YYYY-MM-DD).
 type EmploymentRelation struct {
-	// Kind is employment, benefit (paid by UWV) or sick_via_employer.
+	// Kind is employment, benefit (paid by UWV), sick_via_employer or
+	// other_income (paid without hours worked).
 	Kind             string `json:"kind"`
 	Employer         string `json:"employer"`
 	PayrollTaxNumber string `json:"payrollTaxNumber"`
@@ -97,24 +99,31 @@ func newEmployment(st *employment.Statement) Employment {
 }
 
 // Why the wallet puts an approved request in review itself, from its kept
-// Verzekeringsbericht: it lists no current job, or a current UWV benefit.
+// Verzekeringsbericht: it lists no current job, a current UWV benefit, or
+// other current income without hours worked.
 const (
 	ReviewNoCurrentEmployment = "no_current_employment"
 	ReviewCurrentBenefit      = "current_benefit"
+	ReviewCurrentOtherIncome  = "current_other_income"
 )
 
 // reviewReason is why emp sends an approved request to review; "" for none.
-// No current job weighs more than a benefit beside one.
+// No current job weighs most, then a UWV benefit, then other income.
 func (e Employment) reviewReason() string {
 	if !e.Employed {
 		return ReviewNoCurrentEmployment
 	}
-	for _, r := range e.Relations {
-		if r.Kind == string(employment.KindBenefit) {
-			return ReviewCurrentBenefit
-		}
+	if e.hasKind(employment.KindBenefit) {
+		return ReviewCurrentBenefit
+	}
+	if e.hasKind(employment.KindOtherIncome) {
+		return ReviewCurrentOtherIncome
 	}
 	return ""
+}
+
+func (e Employment) hasKind(kind employment.Kind) bool {
+	return slices.ContainsFunc(e.Relations, func(r EmploymentRelation) bool { return r.Kind == string(kind) })
 }
 
 // ErrorEmploymentNotProvided is the error code of an approved request whose
@@ -231,7 +240,7 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 
 // AddEmployment seals emp on req, audited identity_proofing.employment_added
 // (without the relations), and sends session.employment_added. A statement
-// without a current job, or with a current benefit, also moves the approved
+// without a current job, or with a current benefit or other income, also moves the approved
 // request to needs_review (reviewReason), audited identity_proofing.needs_review, and sends
 // session.review_opened: the identity is proven, the rest is for a reviewer.
 // It is false, and changes nothing, when the request holds a statement already

@@ -464,7 +464,7 @@ type apiResultResponse struct {
 	EIDASLevel     string `json:"eidasLevel,omitempty"`
 	ErrorCode      string `json:"errorCode,omitempty"`
 	// ReviewReason is why the session went to review after its identity was
-	// approved (no_current_employment, current_benefit); absent otherwise.
+	// approved (no_current_employment, current_benefit, current_other_income); absent otherwise.
 	ReviewReason string             `json:"reviewReason,omitempty"`
 	VerifiedAt   *time.Time         `json:"verifiedAt,omitempty"`
 	Identity     *apiIdentity       `json:"identity,omitempty"`

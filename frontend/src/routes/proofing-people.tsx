@@ -810,6 +810,11 @@ export function SessionEmployment({
                         {t("identityProofing.sessions.employment.benefit")}
                       </StatusText>
                     )}
+                    {r.kind === "other_income" && (
+                      <StatusText tone="amber">
+                        {t("identityProofing.sessions.employment.otherIncome")}
+                      </StatusText>
+                    )}
                     {r.kind === "sick_via_employer" && (
                       <StatusText>
                         {t(
@@ -820,8 +825,9 @@ export function SessionEmployment({
                   </span>
                   <span className={HINT}>
                     {[
-                      t("identityProofing.sessions.employment.since", {
+                      t("identityProofing.sessions.employment.period", {
                         from: formatMonth(r.from),
+                        to: formatMonth(r.to),
                       }),
                       r.contractForm,
                     ]

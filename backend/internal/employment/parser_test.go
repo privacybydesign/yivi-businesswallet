@@ -92,6 +92,10 @@ func TestClassify(t *testing.T) {
 		{"WW-Uitkering van UWV", "810220350L02", KindBenefit},
 		{"WIA (WGA)-Uitkering van UWV", "810220350L26", KindBenefit},
 		{"Toeslag bij Uitkering (TW) van UWV", "810220350L04", KindBenefit},
+		{"UWV; Loondoorbetaling bij faillissement", "810220350L53", KindBenefit},
+		// IBL 9.0.0 writes the descriptions in lower case.
+		{"WW-uitkering van UWV", "810220350L02", KindBenefit},
+		{"Ziektewet- of WAZO-uitkering van UWV", "810220350L20", KindBenefit},
 		// The description alone is not enough, as in IBL: the number must match too.
 		{"WW-Uitkering van UWV", "123456789L01", KindEmployment},
 		{"UWV", "810220350L02", KindEmployment},
@@ -123,9 +127,10 @@ func TestCurrent(t *testing.T) {
 	}}
 	var got []string
 	for _, r := range st.Current() {
-		got = append(got, r.Employer)
+		got = append(got, r.Employer+"/"+string(r.Kind))
 	}
-	want := "SEPTEMBER,AUGUST,ON CALL, NO SHIFTS IN SEPTEMBER,WW-Uitkering van UWV"
+	want := "SEPTEMBER/employment,AUGUST/employment,ON CALL, NO SHIFTS IN SEPTEMBER/employment," +
+		"PAID WITHOUT HOURS/other_income,WW-Uitkering van UWV/benefit"
 	if strings.Join(got, ",") != want {
 		t.Errorf("Current = %v, want %s", got, want)
 	}
@@ -153,6 +158,7 @@ func TestEmployed(t *testing.T) {
 		"only a benefit":           {[]Relation{{Kind: KindBenefit, To: date("30-09-2026")}}, false},
 		"a past job":               {[]Relation{{Kind: KindEmployment, To: date("31-05-2026"), Worked: date("31-05-2026")}}, false},
 		"paid but no hours":        {[]Relation{{Kind: KindEmployment, To: date("30-09-2026")}}, false},
+		"a job and other income":   {[]Relation{{Kind: KindEmployment, To: date("30-09-2026")}, {Kind: KindEmployment, To: date("30-09-2026"), Worked: date("30-09-2026")}}, true},
 		"a benefit and a job":      {[]Relation{{Kind: KindBenefit, To: date("30-09-2026")}, {Kind: KindEmployment, To: date("30-09-2026"), Worked: date("31-08-2026")}}, true},
 		"nothing on the statement": {nil, false},
 	} {

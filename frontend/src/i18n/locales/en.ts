@@ -685,12 +685,15 @@ export const en = {
       keptChecks:
         "UWV's seal is valid, the file is unchanged, and it is in your name.",
       noRelations: "It lists no current employment.",
-      since: "since {{from}}",
+      period: "since {{from}}, last reported {{to}}",
       benefit: "(benefit)",
+      otherIncome: "(other income)",
       review:
         "It lists no current job. The organisation reviews your check before a decision.",
       reviewBenefit:
         "It lists a current benefit. The organisation reviews your check before a decision.",
+      reviewOtherIncome:
+        "It lists other current income, paid without hours worked. The organisation reviews your check before a decision.",
       reasons: {
         notAStatement:
           "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
@@ -1033,9 +1036,10 @@ export const en = {
         employed: "Currently employed: yes",
         notEmployed: "Currently employed: no",
         benefit: "Benefit",
+        otherIncome: "Other income",
         sickViaEmployer: "Sick, paid via employer",
         payrollTaxNumber: "Payroll tax number {{number}}",
-        since: "since {{from}}",
+        period: "since {{from}}, last reported {{to}}",
         source:
           "From UWV's Verzekeringsbericht, checked against UWV's seal and the verified name and date of birth. Only the employment current on the statement's date is kept.",
       },
@@ -1248,6 +1252,8 @@ export const en = {
         data_erasure: "A reviewer approves every request to delete data",
         no_current_employment: "The Verzekeringsbericht lists no current job",
         current_benefit: "The Verzekeringsbericht lists a current UWV benefit",
+        current_other_income:
+          "The Verzekeringsbericht lists other current income without hours worked",
       },
       answerBy: "Answer by {{date}}",
       outcome: {
@@ -1273,6 +1279,8 @@ export const en = {
             "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below.",
           current_benefit:
             "The identity is verified, but the Verzekeringsbericht lists a current UWV benefit. Check the employment below.",
+          current_other_income:
+            "The identity is verified, but the Verzekeringsbericht lists other current income paid without hours worked: a pension, AOW, social assistance, or a final payment. Check the employment below.",
         },
         auto: {
           title: "Checked automatically",
