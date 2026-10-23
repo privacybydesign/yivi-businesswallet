@@ -143,12 +143,23 @@ func TestPingAcceptsMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestPingFailsOnServerError(t *testing.T) {
+// validatie.nl answers a GET from the prod cluster with a 500 while its real
+// uploads succeed, so a 500 must not fail the boot.
+func TestPingAcceptsServerError(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
+	if err := c.Ping(context.Background()); err != nil {
+		t.Errorf("Ping: %v, want nil (validatie.nl answered)", err)
+	}
+}
+
+func TestPingFailsOnNotFound(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
 	if err := c.Ping(context.Background()); err == nil {
-		t.Error("Ping: want an error on a 500")
+		t.Error("Ping: want an error on a 404 (wrong URL)")
 	}
 }
 
