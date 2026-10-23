@@ -132,6 +132,17 @@ function FlowView({
     ? listedCount(people.data.length, requestListCapped(people.data), t)
     : undefined;
 
+  // On the focused tab, as the tablist itself takes no focus.
+  function onTabKeyDown(e: React.KeyboardEvent): void {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = TABS.indexOf(activeTab);
+    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const next = TABS[(i + delta + TABS.length) % TABS.length];
+    setTab(next);
+    document.getElementById(tabId(next))?.focus();
+  }
+
   function setTab(tab: TabKey): void {
     setSearchParams(
       (prev) => {
@@ -184,15 +195,6 @@ function FlowView({
             role="tablist"
             aria-label={t("identityProofingFlows.page.tabsLabel")}
             className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-              e.preventDefault();
-              const i = TABS.indexOf(activeTab);
-              const delta = e.key === "ArrowRight" ? 1 : -1;
-              const next = TABS[(i + delta + TABS.length) % TABS.length];
-              setTab(next);
-              document.getElementById(tabId(next))?.focus();
-            }}
           >
             {TABS.map((tab) => {
               const active = activeTab === tab;
@@ -206,6 +208,7 @@ function FlowView({
                   aria-controls={TABPANEL_ID}
                   tabIndex={active ? 0 : -1}
                   onClick={() => setTab(tab)}
+                  onKeyDown={onTabKeyDown}
                   className={[
                     "flex h-11 items-center gap-2 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                     active
