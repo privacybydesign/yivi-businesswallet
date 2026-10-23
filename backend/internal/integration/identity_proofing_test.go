@@ -1114,7 +1114,10 @@ func TestProofingAPIKeyScopesFlow(t *testing.T) {
 
 // hostedBranding is the org's branding as a hosted page carries it.
 type hostedBranding struct {
-	DisplayName string `json:"displayName"`
+	DisplayName    string `json:"displayName"`
+	PrimaryColor   string `json:"primaryColor"`
+	SupportContact string `json:"supportContact"`
+	LogoURI        string `json:"logoUri"`
 }
 
 // hostedView is the public hosted page of a session, as its subject reads it.

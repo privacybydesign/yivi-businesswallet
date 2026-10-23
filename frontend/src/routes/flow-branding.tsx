@@ -46,6 +46,18 @@ const PREVIEW_KINDS: readonly PreviewKind[] = ["mail", "app"];
 
 type Mode = "org" | "custom";
 
+// Where the logo the branding fields show comes from: the flow's own, else
+// the org's it inherits, else none.
+function logoSource(
+  ownUri: string,
+  orgUri: string,
+): "own" | "inherited" | "none" {
+  if (ownUri) {
+    return "own";
+  }
+  return orgUri ? "inherited" : "none";
+}
+
 function modeOf(saved: ProofingFlowBranding): Mode {
   return saved.custom ? "custom" : "org";
 }
@@ -267,11 +279,7 @@ function BrandingForm({
               onChange={change}
               logo={{
                 uri: ownLogoUri || orgBranding.logoUri,
-                source: ownLogoUri
-                  ? "own"
-                  : orgBranding.logoUri
-                    ? "inherited"
-                    : "none",
+                source: logoSource(ownLogoUri, orgBranding.logoUri),
               }}
               fallbackName={orgLabel}
               fallbackColor={
@@ -365,8 +373,7 @@ function BrandingPreview({
         <h3 id={headingId} className={CAPTION}>
           {t("identityProofingFlows.branding.preview.caption")}
         </h3>
-        <div
-          role="group"
+        <fieldset
           aria-labelledby={headingId}
           className="bg-surface-3 rounded-yivi inline-flex gap-1 p-[3px]"
         >
@@ -386,7 +393,7 @@ function BrandingPreview({
               {t(`identityProofingFlows.branding.preview.${option}`)}
             </button>
           ))}
-        </div>
+        </fieldset>
       </div>
       {kind === "mail" ? mail : app}
     </section>

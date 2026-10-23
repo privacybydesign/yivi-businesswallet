@@ -200,7 +200,7 @@ function FlowView({
               hidden={editTab !== tab}
               className="p-4 sm:p-8"
             >
-              {tab === "check" ? (
+              {tab === "check" && (
                 <FlowEditor
                   // A fresh editor per version, seeded from it.
                   key={`${flow.id}@${flow.version}`}
@@ -208,9 +208,11 @@ function FlowView({
                   mode={{ kind: "edit", flow }}
                   onDone={() => setEditing(false)}
                 />
-              ) : tab === "branding" ? (
+              )}
+              {tab === "branding" && (
                 <FlowBrandingSettings slug={slug} flowId={flow.id} />
-              ) : (
+              )}
+              {tab === "hosted" && (
                 <FlowHostedSettings slug={slug} flow={flow} />
               )}
             </FlowTabPanel>

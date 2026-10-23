@@ -42,6 +42,13 @@ export interface BrandingDraft {
 // falls back to, or none.
 type LogoSource = "own" | "inherited" | "none";
 
+// What the logo row says when no new file is picked, per logo source.
+const LOGO_STATE_KEYS = {
+  own: "identityProofing.branding.logoSet",
+  inherited: "identityProofingFlows.branding.logoInherited",
+  none: "identityProofing.branding.noLogo",
+} as const satisfies Record<LogoSource, string>;
+
 // The branding fields shared by the org's and a flow's form: display name,
 // logo, colour, support contact and privacy statement. children are further
 // controls for the contact grid.
@@ -110,12 +117,7 @@ export function BrandingFields({
           )}
           <div className="min-w-0 flex-1">
             <div className="text-ink text-[13px] font-semibold wrap-anywhere">
-              {draft.logo?.name ??
-                (logo.source === "own"
-                  ? t("identityProofing.branding.logoSet")
-                  : logo.source === "inherited"
-                    ? t("identityProofingFlows.branding.logoInherited")
-                    : t("identityProofing.branding.noLogo"))}
+              {draft.logo?.name ?? t(LOGO_STATE_KEYS[logo.source])}
             </div>
             <div className={HINT}>
               {t("identityProofing.branding.logoHint")}
@@ -222,10 +224,9 @@ export function ColorField({
       <span id={`${id}-label`} className={LABEL}>
         {label}
       </span>
-      <div
-        role="group"
+      <fieldset
         aria-labelledby={`${id}-label`}
-        className="flex flex-wrap items-center gap-2"
+        className="flex min-w-0 flex-wrap items-center gap-2"
       >
         {PRESET_COLORS.map(({ color, nameKey }) => {
           const active = value.toLowerCase() === color.toLowerCase();
@@ -256,7 +257,7 @@ export function ColorField({
             onChange={(e) => onChange(e.target.value.trim())}
           />
         </div>
-      </div>
+      </fieldset>
       {invalid ? (
         <p className={ERROR}>{t("identityProofing.branding.colorInvalid")}</p>
       ) : (

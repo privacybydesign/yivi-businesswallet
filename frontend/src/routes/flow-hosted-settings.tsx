@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -73,6 +73,9 @@ function HostedForm({
   const { t } = useTranslation();
   const save = useSaveFlowHostedMutation(slug, flow.id);
   const [draft, setDraft] = useState(() => hostedDraft(saved));
+  // The switch and each ending are labelled by their title and described by
+  // their hint.
+  const idBase = useId();
   const noLocale = draft.locales.length === 0;
   const dirty = hostedDraftDirty(draft, saved);
 
@@ -111,15 +114,23 @@ function HostedForm({
               type="checkbox"
               className={CONTROL}
               checked={draft.enabled}
+              aria-labelledby={`${idBase}-enabled`}
+              aria-describedby={`${idBase}-enabled-hint`}
               onChange={(event) =>
                 setDraft({ ...draft, enabled: event.target.checked })
               }
             />
             <span className="flex flex-col gap-0.5">
-              <span className="text-[14px] font-semibold">
+              <span
+                id={`${idBase}-enabled`}
+                className="text-[14px] font-semibold"
+              >
                 {t("identityProofingFlows.hosted.enabled")}
               </span>
-              <span className="text-ink-soft text-[13px]">
+              <span
+                id={`${idBase}-enabled-hint`}
+                className="text-ink-soft text-[13px]"
+              >
                 {t("identityProofingFlows.hosted.enabledHint")}
               </span>
             </span>
@@ -164,15 +175,23 @@ function HostedForm({
                   name={`hosted-completion-${flow.id}`}
                   className={CONTROL}
                   checked={draft.completion === completion}
+                  aria-labelledby={`${idBase}-${completion}`}
+                  aria-describedby={`${idBase}-${completion}-hint`}
                   onChange={() => setDraft({ ...draft, completion })}
                 />
                 <span className="flex flex-col gap-0.5">
-                  <span className="text-[14px] font-semibold">
+                  <span
+                    id={`${idBase}-${completion}`}
+                    className="text-[14px] font-semibold"
+                  >
                     {t(
                       `identityProofingFlows.hosted.completions.${completion}.title`,
                     )}
                   </span>
-                  <span className="text-ink-soft text-[13px]">
+                  <span
+                    id={`${idBase}-${completion}-hint`}
+                    className="text-ink-soft text-[13px]"
+                  >
                     {t(
                       `identityProofingFlows.hosted.completions.${completion}.hint`,
                     )}

@@ -21,20 +21,22 @@ export function FlowTabs<T extends string>({
   onSelect: (tab: T) => void;
   panelId: (tab: T) => string;
 }): React.JSX.Element {
+  // On the focused tab, as the tablist itself takes no focus.
+  function onKeyDown(e: React.KeyboardEvent): void {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = tabs.findIndex((tab) => tab.key === active);
+    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const next = tabs[(i + delta + tabs.length) % tabs.length].key;
+    onSelect(next);
+    document.getElementById(flowTabId(idPrefix, next))?.focus();
+  }
+
   return (
     <div
       role="tablist"
       aria-label={label}
       className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
-      onKeyDown={(e) => {
-        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-        e.preventDefault();
-        const i = tabs.findIndex((tab) => tab.key === active);
-        const delta = e.key === "ArrowRight" ? 1 : -1;
-        const next = tabs[(i + delta + tabs.length) % tabs.length].key;
-        onSelect(next);
-        document.getElementById(flowTabId(idPrefix, next))?.focus();
-      }}
     >
       {tabs.map((tab) => {
         const selected = active === tab.key;
@@ -48,6 +50,7 @@ export function FlowTabs<T extends string>({
             aria-controls={panelId(tab.key)}
             tabIndex={selected ? 0 : -1}
             onClick={() => onSelect(tab.key)}
+            onKeyDown={onKeyDown}
             className={[
               "flex h-11 items-center gap-2 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
               selected

@@ -8,9 +8,23 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
+
+// flowBrandingAudits counts the flow-1 branding changes audited.
+func flowBrandingAudits(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_events WHERE action = $1 AND target_id = 'flow-1'`,
+		audit.IdentityProofingFlowBrandingConfigured).Scan(&n); err != nil {
+		t.Fatalf("count audit events: %v", err)
+	}
+	return n
+}
 
 func TestFlowBrandingStore(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
@@ -19,12 +33,7 @@ func TestFlowBrandingStore(t *testing.T) {
 	ctx := context.Background()
 	audited := func() int {
 		t.Helper()
-		var n int
-		if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = $1 AND target_id = 'flow-1'`,
-			audit.IdentityProofingFlowBrandingConfigured).Scan(&n); err != nil {
-			t.Fatalf("count audit events: %v", err)
-		}
-		return n
+		return flowBrandingAudits(t, pool)
 	}
 
 	if got, err := store.Get(ctx, orgID, "flow-1"); err != nil || got.Custom || got.HasLogo {
@@ -55,10 +64,20 @@ func TestFlowBrandingStore(t *testing.T) {
 		t.Errorf("audited %d times, want 2 (a new logo is a change)", n)
 	}
 
+	assertFlowBrandingChanges(t, pool, store, orgID, want)
+}
+
+// assertFlowBrandingChanges checks how flow-1, saved custom as want with a
+// logo, changes: a save that leaves the logo keeps it and audits nothing, one
+// that replaces it with nothing removes it, and going back to the org's
+// branding drops its fields, audited once.
+func assertFlowBrandingChanges(t *testing.T, pool *pgxpool.Pool, store *FlowBrandingStore, orgID uuid.UUID, want FlowBranding) {
+	t.Helper()
+	ctx := context.Background()
 	if _, err := store.Save(ctx, orgID, "flow-1", want, LogoChange{}); err != nil {
 		t.Fatalf("Save without a logo change: %v", err)
 	}
-	if n := audited(); n != 2 {
+	if n := flowBrandingAudits(t, pool); n != 2 {
 		t.Errorf("audited %d times, want 2 (the same fields change nothing)", n)
 	}
 	if kept, err := store.Get(ctx, orgID, "flow-1"); err != nil || !kept.HasLogo {
@@ -86,7 +105,7 @@ func TestFlowBrandingStore(t *testing.T) {
 	if _, err := store.Save(ctx, orgID, "flow-1", FlowBranding{}, LogoChange{}); err != nil {
 		t.Fatalf("Save not custom again: %v", err)
 	}
-	if n := audited(); n != 4 {
+	if n := flowBrandingAudits(t, pool); n != 4 {
 		t.Errorf("audited %d times, want 4 (going back is one change, repeating it none)", n)
 	}
 }

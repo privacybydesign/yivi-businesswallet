@@ -89,38 +89,9 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 		HostedURL string `json:"hostedUrl"`
 	}](t, resp).HostedURL, "/p/")
 	hostedPath := "/api/v1/proof/" + token
-	type hostedPage struct {
-		Organization struct {
-			Name     string `json:"name"`
-			Branding struct {
-				DisplayName    string `json:"displayName"`
-				PrimaryColor   string `json:"primaryColor"`
-				SupportContact string `json:"supportContact"`
-				LogoURI        string `json:"logoUri"`
-			} `json:"branding"`
-		} `json:"organization"`
-		Theme *struct {
-			PrimaryColor   string `json:"primaryColor"`
-			SecondaryColor string `json:"secondaryColor"`
-		} `json:"theme"`
-	}
-	// wantPage checks the hosted page wears name, colour and the logo bytes.
 	wantPage := func(when, name, color string, logo []byte) {
 		t.Helper()
-		page := decodeJSON[hostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
-		b := page.Organization.Branding
-		if page.Organization.Name != name || b.DisplayName != name || b.PrimaryColor != color ||
-			b.SupportContact != "help@acme.example" || !strings.HasPrefix(b.LogoURI, hostedPath+"/logo") {
-			t.Errorf("%s: hosted page = %+v; want %s in %s with a logo, over the org's contact", when, page, name, color)
-		}
-		if page.Theme == nil || page.Theme.PrimaryColor != color || page.Theme.SecondaryColor != "#112233" {
-			t.Errorf("%s: hosted theme = %+v; want %s over the org's second colour", when, page.Theme, color)
-		}
-		served := env.apiCall(http.MethodGet, hostedPath+"/logo", "", nil)
-		if body, _ := io.ReadAll(served.Body); served.StatusCode != http.StatusOK || !bytes.Equal(body, logo) {
-			t.Errorf("%s: hosted logo = %d, want 200 with the right logo", when, served.StatusCode)
-		}
-		_ = served.Body.Close()
+		wantHostedPageBranding(t, env, hostedPath, when, name, color, logo)
 	}
 	wantPage("custom", "Acme Reizen", "#22337A", logo)
 
@@ -132,4 +103,37 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 	}
 	wantPage("the org's", "Acme Identity", "#1F5B4A", orgLogo.Bytes())
 	wantProofingError(t, "the logo of a flow without one", env.do(http.MethodGet, path+"/logo", nil), http.StatusNotFound, "not_found")
+}
+
+// flowHostedPage is the hosted page of a session as it wears a branding: the
+// org's name and branding, and the theme it takes from them.
+type flowHostedPage struct {
+	Organization struct {
+		Name     string         `json:"name"`
+		Branding hostedBranding `json:"branding"`
+	} `json:"organization"`
+	Theme *struct {
+		PrimaryColor   string `json:"primaryColor"`
+		SecondaryColor string `json:"secondaryColor"`
+	} `json:"theme"`
+}
+
+// wantHostedPageBranding checks that the hosted page at hostedPath wears name,
+// color and the logo bytes, over the org's contact and second colour.
+func wantHostedPageBranding(t *testing.T, env *testEnv, hostedPath, when, name, color string, logo []byte) {
+	t.Helper()
+	page := decodeJSON[flowHostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
+	b := page.Organization.Branding
+	if page.Organization.Name != name || b.DisplayName != name || b.PrimaryColor != color ||
+		b.SupportContact != "help@acme.example" || !strings.HasPrefix(b.LogoURI, hostedPath+"/logo") {
+		t.Errorf("%s: hosted page = %+v; want %s in %s with a logo, over the org's contact", when, page, name, color)
+	}
+	if page.Theme == nil || page.Theme.PrimaryColor != color || page.Theme.SecondaryColor != "#112233" {
+		t.Errorf("%s: hosted theme = %+v; want %s over the org's second colour", when, page.Theme, color)
+	}
+	served := env.apiCall(http.MethodGet, hostedPath+"/logo", "", nil)
+	if body, _ := io.ReadAll(served.Body); served.StatusCode != http.StatusOK || !bytes.Equal(body, logo) {
+		t.Errorf("%s: hosted logo = %d, want 200 with the right logo", when, served.StatusCode)
+	}
+	_ = served.Body.Close()
 }
