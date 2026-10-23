@@ -20,11 +20,19 @@ import {
   useVerificationTemplatesQuery,
 } from "../api/verifications.queries";
 import { accessMessage } from "../lib/access-message";
-import { control } from "../lib/attestation-form";
 import { useWhenFormatter } from "../lib/format-when";
 import { toast } from "../lib/toast";
 import { statusTone, verdictTone } from "../lib/verification";
-import { Button, Card, ConfirmDialog, Icon, Table, Tag, TopBar } from "../ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Icon,
+  Select,
+  Table,
+  Tag,
+  TopBar,
+} from "../ui";
 import { Field } from "./attestations-fields";
 import { VerificationTemplateForm } from "./verification-template-form";
 
@@ -163,7 +171,9 @@ export default function Verifications(): React.JSX.Element {
   );
 }
 
-function ErrorCard({ message }: { message: string }): React.JSX.Element {
+function ErrorCard({
+  message,
+}: Readonly<{ message: string }>): React.JSX.Element {
   return (
     <Card className="p-6">
       <p className="text-error text-[14px]">{message}</p>
@@ -177,13 +187,13 @@ function StartCard({
   pending,
   isAdmin,
   onStarted,
-}: {
+}: Readonly<{
   slug: string;
   templates: VerificationTemplate[];
   pending: boolean;
   isAdmin: boolean;
   onStarted: (session: Verification) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const start = useStartVerificationMutation(slug);
   const [templateId, setTemplateId] = useState("");
@@ -222,9 +232,8 @@ function StartCard({
             id="verification-template"
             label={t("verifications.start.template")}
           >
-            <select
+            <Select
               id="verification-template"
-              className={`${control(false)} h-9`}
               value={selectedId}
               onChange={(event) => setTemplateId(event.target.value)}
             >
@@ -233,7 +242,7 @@ function StartCard({
                   {template.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           {selected && (
             <dl className="grid grid-cols-[96px_1fr] gap-y-1 text-[13px]">
@@ -271,11 +280,11 @@ function ActiveCheck({
   slug,
   id,
   onReset,
-}: {
+}: Readonly<{
   slug: string;
   id: string;
   onReset: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const session = useVerificationQuery(slug, id);
 
@@ -330,9 +339,9 @@ function ActiveCheck({
 
 function PendingRequest({
   session,
-}: {
+}: Readonly<{
   session: Verification;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [qrDataUrl, setQrDataUrl] = useState("");
   const browserLink = session.browserLink ?? "";
@@ -415,7 +424,9 @@ function PendingRequest({
   );
 }
 
-function ResultCard({ session }: { session: Verification }): React.JSX.Element {
+function ResultCard({
+  session,
+}: Readonly<{ session: Verification }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const checks = session.checks ?? [];
@@ -481,7 +492,9 @@ function ResultCard({ session }: { session: Verification }): React.JSX.Element {
   );
 }
 
-function CheckRow({ check }: { check: VerificationCheck }): React.JSX.Element {
+function CheckRow({
+  check,
+}: Readonly<{ check: VerificationCheck }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <li className="flex items-center justify-between gap-3 text-[13.5px]">
@@ -507,12 +520,12 @@ function HistoryTable({
   pending,
   error,
   onView,
-}: {
+}: Readonly<{
   rows: Verification[];
   pending: boolean;
   error: Error | null;
   onView: (id: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
 
@@ -601,11 +614,11 @@ function TemplatesSection({
   slug,
   templates,
   pending,
-}: {
+}: Readonly<{
   slug: string;
   templates: VerificationTemplate[];
   pending: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteVerificationTemplateMutation(slug);
   const [pendingDelete, setPendingDelete] =

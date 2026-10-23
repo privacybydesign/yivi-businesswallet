@@ -23,7 +23,7 @@ export function VerificationTemplateForm({
   slug,
   schemas,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const create = useCreateVerificationTemplateMutation(slug);
 
