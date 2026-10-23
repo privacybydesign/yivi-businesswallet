@@ -620,7 +620,9 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	out.DeepLink, out.DeepLinkExpiresAt = sess.Claim.DeepLink, sess.Claim.ExpiresAt
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, settings, subject, by, sess.Claim.DeepLink, ttl, in.Language))
+		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, settings, mailSend{
+			subject: subject, by: by, deepLink: sess.Claim.DeepLink, ttl: ttl, locale: in.Language,
+		}))
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -839,15 +841,25 @@ func releasesIdentity(attrs []string) bool {
 	return slices.Contains(attrs, attributeDocument) && !slices.Contains(attrs, attributeAgeOver)
 }
 
+// mailSend is what one proofing mail is about: the request's subject and
+// sender, the session's deep link and how long it is valid, and the language
+// the mail is in.
+type mailSend struct {
+	subject  Subject
+	by       Requester
+	deepLink string
+	ttl      time.Duration
+	locale   email.Locale
+}
+
 // proofingMail is the mail a request sends. A member's is the org's; an
 // external person's is signed with and styled as the org's branding, with its
 // support contact and privacy statement. A logo that cannot be read is left
 // out (the wordmark shows): a cosmetic loss must not block the send.
-func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, subject Subject, by Requester,
-	deepLink string, ttl time.Duration, locale email.Locale,
-) email.ProofingMail {
+func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) email.ProofingMail {
 	m := email.ProofingMail{
-		To: subject.Email, OrgName: org.Name, RequesterName: by.Name, DeepLink: deepLink, ValidFor: ttl, Locale: locale,
+		To: send.subject.Email, OrgName: org.Name, RequesterName: send.by.Name, DeepLink: send.deepLink,
+		ValidFor: send.ttl, Locale: send.locale,
 	}
 	if settings == nil {
 		return m

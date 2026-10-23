@@ -83,6 +83,18 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 		t.Fatalf("migrate up: %v", err)
 	}
 
+	assertSettingsFolded(t, ctx, conn, orgs)
+	assertKeysAndWebhookFolded(t, ctx, conn, orgs)
+	assertFlowsAndRequestsFolded(t, ctx, conn, orgs)
+	assertPausesFolded(t, ctx, conn, orgs)
+	assertCustomersRebuilt(t, ctx, conn, dsn, orgs)
+}
+
+// assertSettingsFolded checks that the org holds its customers' settings: where
+// they differ the shortest lifetime and retention, review for erasure, every
+// origin and the older one's look; where they agree what they agree on.
+func assertSettingsFolded(t *testing.T, ctx context.Context, conn *pgx.Conn, orgs customerOrgs) {
+	t.Helper()
 	// Where the customers differ the org takes the shortest lifetime and
 	// retention, review for erasure and every origin; the look is the older
 	// one's.
@@ -108,7 +120,13 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 		`SELECT count(*) FROM identity_proofing_settings WHERE organization_id = $1 AND erasure_handling = 'automatic'`, orgs.halted)
 	assertCount(t, ctx, conn, "settings of orgs without customers", 0,
 		`SELECT count(*) FROM identity_proofing_settings WHERE organization_id IN ($1, $2)`, orgs.self, orgs.other)
+}
 
+// assertKeysAndWebhookFolded checks that the org holds its customers' keys, a
+// paused customer's revoked, and one webhook endpoint with what still waits for
+// it.
+func assertKeysAndWebhookFolded(t *testing.T, ctx context.Context, conn *pgx.Conn, orgs customerOrgs) {
+	t.Helper()
 	// A paused customer's keys are revoked; the others' keep working.
 	assertCount(t, ctx, conn, "api keys of the org", 2,
 		`SELECT count(*) FROM identity_proofing_api_keys WHERE organization_id = $1`, orgs.acme)
@@ -132,7 +150,12 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 		`SELECT count(*) FROM identity_proofing_webhook_deliveries WHERE status = 'pending' AND endpoint_url = 'https://old.example/hook'`)
 	assertCount(t, ctx, conn, "deliveries waiting", 1,
 		`SELECT count(*) FROM identity_proofing_webhook_deliveries WHERE status = 'pending'`)
+}
 
+// assertFlowsAndRequestsFolded checks the org's one default flow, and that
+// every request stays where it was, with its matches.
+func assertFlowsAndRequestsFolded(t *testing.T, ctx context.Context, conn *pgx.Conn, orgs customerOrgs) {
+	t.Helper()
 	// The customer's default wins over the members' one: that of the customer
 	// whose key still works, though it is the newer one. A data request flow
 	// is passed over.
@@ -155,7 +178,12 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 	assertCount(t, ctx, conn, "matches", 1, `SELECT count(*) FROM identity_proofing_request_matches`)
 	assertCount(t, ctx, conn, "match checks", 1, `SELECT count(*) FROM identity_proofing_request_match_checks`)
 	assertCount(t, ctx, conn, "identity match keys", 0, `SELECT count(*) FROM identity_proofing_requests WHERE identity_match_key IS NOT NULL`)
+}
 
+// assertPausesFolded checks that what was paused stays paused, as the
+// platform's, and that the customers' tables are gone.
+func assertPausesFolded(t *testing.T, ctx context.Context, conn *pgx.Conn, orgs customerOrgs) {
+	t.Helper()
 	// What was paused stays paused, as the platform's: an org that paused
 	// itself since it did, one whose every customer was paused since the last
 	// was. One paused customer of several pauses nothing. A platform admin's
@@ -181,7 +209,12 @@ func TestUpFoldsCustomersIntoOrg(t *testing.T) {
 		assertCount(t, ctx, conn, table+" tables left", 0,
 			`SELECT count(*) FROM information_schema.tables WHERE table_name = $1`, table)
 	}
+}
 
+// assertCustomersRebuilt checks that the down migrations rebuild a customer for
+// the org, with what the org held, and that up again folds it once more.
+func assertCustomersRebuilt(t *testing.T, ctx context.Context, conn *pgx.Conn, dsn string, orgs customerOrgs) {
+	t.Helper()
 	// Back to the last customer version, whatever was added after it since.
 	for {
 		version, err := migrate.Version(ctx, dsn)

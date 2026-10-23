@@ -155,37 +155,13 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
-	r.NameRetention = proofedNameRetention
-	if r.External() {
-		days := defaultDataRetentionDays
-		if retentionDays != nil {
-			days = *retentionDays
-		}
-		r.NameRetention = SessionSettings{DataRetentionDays: days}.DataRetention()
+	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
+	var err error
+	if r.ProofedName, err = s.openSealed(r.ID, "proofed name", nameCT); err != nil {
+		return Request{}, err
 	}
-	if overrideSeconds != nil {
-		r.RetentionOverride = time.Duration(*overrideSeconds) * time.Second
-		r.NameRetention = r.RetentionOverride
-	}
-	if nameCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		name, err := s.cipher.Decrypt(nameCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt proofed name request %s: %w", r.ID, err)}
-		}
-		r.ProofedName = string(name)
-	}
-	if birthDateCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		birthDate, err := s.cipher.Decrypt(birthDateCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)}
-		}
-		r.expectedBirthDate = string(birthDate)
+	if r.expectedBirthDate, err = s.openSealed(r.ID, "expected birth date", birthDateCT); err != nil {
+		return Request{}, err
 	}
 	if addressCT != nil {
 		addr, err := s.decryptAddress(r.ID, addressCT)
@@ -208,6 +184,43 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+// nameRetention is how long a request's proofed name is kept, and the flow's
+// override of the retention, zero when the flow sets none: the wallet's own
+// retention for a member's request, the org's for an external person's
+// (retentionDays, the default for an org without settings), and the override
+// (overrideSeconds) over either.
+func nameRetention(external bool, retentionDays, overrideSeconds *int) (keep, override time.Duration) {
+	keep = proofedNameRetention
+	if external {
+		days := defaultDataRetentionDays
+		if retentionDays != nil {
+			days = *retentionDays
+		}
+		keep = SessionSettings{DataRetentionDays: days}.DataRetention()
+	}
+	if overrideSeconds != nil {
+		override = time.Duration(*overrideSeconds) * time.Second
+		keep = override
+	}
+	return keep, override
+}
+
+// openSealed opens what, a sealed field of request id; a field not set opens
+// to "".
+func (s *RequestStore) openSealed(id uuid.UUID, what string, ciphertext []byte) (string, error) {
+	if ciphertext == nil {
+		return "", nil
+	}
+	if s.cipher == nil {
+		return "", ErrNoEncryptionKey
+	}
+	plain, err := s.cipher.Decrypt(ciphertext)
+	if err != nil {
+		return "", &unreadableRequestError{id: id, err: fmt.Errorf("proofing: decrypt %s request %s: %w", what, id, err)}
+	}
+	return string(plain), nil
 }
 
 // unreadableRequestError is a request row whose sealed fields do not open: a

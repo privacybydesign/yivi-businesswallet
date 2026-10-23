@@ -55,6 +55,17 @@ export default function Developers(): React.JSX.Element {
   const notice = org.isPending
     ? t("common.loading")
     : t("identityProofing.developers.adminOnly");
+  // On the focused tab, as the tablist itself takes no focus.
+  function onTabKeyDown(e: React.KeyboardEvent): void {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = TABS.findIndex((tab) => tab.key === activeTab);
+    const delta = e.key === "ArrowRight" ? 1 : -1;
+    const next = TABS[(i + delta + TABS.length) % TABS.length];
+    setTab(next.key);
+    document.getElementById(`developers-tab-${next.key}`)?.focus();
+  }
+  const showsSettings = activeTab === "branding" || activeTab === "settings";
 
   return (
     <>
@@ -68,15 +79,6 @@ export default function Developers(): React.JSX.Element {
             role="tablist"
             aria-label={t("identityProofing.developers.title")}
             className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-              e.preventDefault();
-              const i = TABS.findIndex((tab) => tab.key === activeTab);
-              const delta = e.key === "ArrowRight" ? 1 : -1;
-              const next = TABS[(i + delta + TABS.length) % TABS.length];
-              setTab(next.key);
-              document.getElementById(`developers-tab-${next.key}`)?.focus();
-            }}
           >
             {TABS.map((tab) => {
               const active = activeTab === tab.key;
@@ -90,6 +92,7 @@ export default function Developers(): React.JSX.Element {
                   aria-controls="developers-tabpanel"
                   tabIndex={active ? 0 : -1}
                   onClick={() => setTab(tab.key)}
+                  onKeyDown={onTabKeyDown}
                   className={[
                     "h-11 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                     active
@@ -110,24 +113,24 @@ export default function Developers(): React.JSX.Element {
           >
             {activeTab === "apiKeys" && <ApiKeysTab slug={slug} />}
             {activeTab === "webhook" && <WebhooksTab slug={slug} />}
-            {(activeTab === "branding" || activeTab === "settings") &&
-              (settings.isPending ? (
-                <p className="text-ink-soft text-[14px]">
-                  {t("common.loading")}
-                </p>
-              ) : settings.isError ? (
-                <p className="text-error text-[12.5px]">
-                  {proofingErrorMessage(settings.error, t)}
-                </p>
-              ) : activeTab === "branding" ? (
-                <BrandingTab
-                  slug={slug}
-                  orgName={org.data?.name ?? ""}
-                  settings={settings.data}
-                />
-              ) : (
-                <SettingsTab slug={slug} settings={settings.data} />
-              ))}
+            {showsSettings && settings.isPending && (
+              <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+            )}
+            {showsSettings && settings.isError && (
+              <p className="text-error text-[12.5px]">
+                {proofingErrorMessage(settings.error, t)}
+              </p>
+            )}
+            {activeTab === "branding" && settings.isSuccess && (
+              <BrandingTab
+                slug={slug}
+                orgName={org.data?.name ?? ""}
+                settings={settings.data}
+              />
+            )}
+            {activeTab === "settings" && settings.isSuccess && (
+              <SettingsTab slug={slug} settings={settings.data} />
+            )}
           </div>
         </>
       ) : (

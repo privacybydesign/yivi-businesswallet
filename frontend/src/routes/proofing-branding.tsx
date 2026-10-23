@@ -415,10 +415,9 @@ function ColorField({
       <span id={`${id}-label`} className={LABEL}>
         {label}
       </span>
-      <div
-        role="group"
+      <fieldset
         aria-labelledby={`${id}-label`}
-        className="flex flex-wrap items-center gap-2"
+        className="flex min-w-0 flex-wrap items-center gap-2"
       >
         {PRESET_COLORS.map((color) => {
           const active = value.toLowerCase() === color.toLowerCase();
@@ -456,7 +455,7 @@ function ColorField({
             onChange={(e) => onChange(e.target.value.trim())}
           />
         </div>
-      </div>
+      </fieldset>
       {invalid ? (
         <p className={ERROR}>{t("identityProofing.branding.colorInvalid")}</p>
       ) : (

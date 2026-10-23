@@ -334,19 +334,22 @@ function FlowsCard({
           </Link>
         )}
       </div>
-      {flows.isPending ? (
+      {flows.isPending && (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {t("common.loading")}
         </p>
-      ) : flows.isError ? (
+      )}
+      {flows.isError && (
         <p className={`${ERROR} px-5 py-4`}>
           {proofingErrorMessage(flows.error, t)}
         </p>
-      ) : flows.data.length === 0 ? (
+      )}
+      {flows.isSuccess && flows.data.length === 0 && (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {t("identityProofing.overview.flows.empty")}
         </p>
-      ) : (
+      )}
+      {flows.isSuccess && flows.data.length > 0 && (
         <ul className="divide-line divide-y">
           {flows.data.map((flow) => (
             <FlowRow

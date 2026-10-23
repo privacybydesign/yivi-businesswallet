@@ -106,10 +106,9 @@ function SessionsList({
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
+        <fieldset
           aria-label={t("identityProofing.sessions.filterLabel")}
-          className="flex flex-wrap gap-2"
+          className="flex min-w-0 flex-wrap gap-2"
         >
           {SESSION_FILTERS.map((key) => {
             const active = filter === key;
@@ -132,7 +131,7 @@ function SessionsList({
               </button>
             );
           })}
-        </div>
+        </fieldset>
         {settings.data && (
           <p className="text-muted text-[12px]">
             {isAdmin
@@ -172,19 +171,22 @@ function SessionsList({
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
           <Table.Body>
-            {requests.isPending ? (
+            {requests.isPending && (
               <Table.State colSpan={SESSION_COLUMNS}>
                 {t("common.loading")}
               </Table.State>
-            ) : requests.isError ? (
+            )}
+            {requests.isError && (
               <Table.State colSpan={SESSION_COLUMNS}>
                 {proofingErrorMessage(requests.error, t)}
               </Table.State>
-            ) : shown.length === 0 ? (
+            )}
+            {requests.isSuccess && shown.length === 0 && (
               <Table.State colSpan={SESSION_COLUMNS}>
                 {t("identityProofing.requests.empty")}
               </Table.State>
-            ) : (
+            )}
+            {requests.isSuccess &&
               shown.map((request) => (
                 <SessionRow
                   key={request.id}
@@ -199,8 +201,7 @@ function SessionsList({
                   }
                   formatWhen={formatWhen}
                 />
-              ))
-            )}
+              ))}
           </Table.Body>
         </Table>
       </Card>
@@ -659,12 +660,14 @@ function IdentityRows({
   result: UseQueryResult<ProofingResult, Error>;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const check = (value: string | undefined): string =>
-    value === undefined || value === ""
-      ? "—"
-      : isCheckOutcome(value)
-        ? t(`identityProofing.sessions.identity.checks.${value}`)
-        : value;
+  const check = (value: string | undefined): string => {
+    if (value === undefined || value === "") {
+      return "—";
+    }
+    return isCheckOutcome(value)
+      ? t(`identityProofing.sessions.identity.checks.${value}`)
+      : value;
+  };
 
   if (result.isPending) {
     return (
@@ -870,15 +873,18 @@ function SessionTimeline({
       >
         {t("identityProofing.sessions.timeline")}
       </h3>
-      {events.isPending ? (
+      {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-      ) : events.isError ? (
+      )}
+      {events.isError && (
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
-      ) : events.data.length === 0 ? (
+      )}
+      {events.isSuccess && events.data.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("identityProofing.sessions.noEvents")}
         </p>
-      ) : (
+      )}
+      {events.isSuccess && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

@@ -88,11 +88,13 @@ function SendModal({
       closeLabel={t("common.close")}
       onClose={onClose}
     >
-      {flows.isPending ? (
+      {flows.isPending && (
         <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-      ) : flows.isError ? (
+      )}
+      {flows.isError && (
         <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
-      ) : (
+      )}
+      {flows.isSuccess && (
         <SendForm
           slug={slug}
           flows={flows.data}
@@ -117,6 +119,9 @@ const SEND_CHANNELS: {
   { value: "on_screen", key: "onScreen" },
   { value: "hosted", key: "link" },
 ];
+
+// The ids the channel radios are labelled and described by.
+const CHANNEL_ID = "proofing-channel";
 
 // The line above the form: what the delivery does.
 const HINT_KEYS = {
@@ -216,13 +221,7 @@ function SendForm({
         {t(`identityProofing.send.${HINT_KEYS[delivery]}`)}
       </p>
       {sendable.length === 0 ? (
-        <p className="text-ink-soft text-[13px]">
-          {photoOnly
-            ? t("identityProofing.send.referencePhotoFlows")
-            : isAdmin
-              ? t("identityProofing.send.noFlowsAdmin")
-              : t("identityProofing.send.noFlowsMember")}
-        </p>
+        <NoFlowsNote photoOnly={photoOnly} isAdmin={isAdmin} />
       ) : (
         <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
           {photoOnly && (
@@ -256,14 +255,22 @@ function SendForm({
                     value={option.value}
                     checked={checked}
                     disabled={disabled}
+                    aria-labelledby={`${CHANNEL_ID}-${option.key}`}
+                    aria-describedby={`${CHANNEL_ID}-${option.key}-hint`}
                     onChange={() => setChannel(option.value)}
                     className="mt-1"
                   />
                   <span className="flex flex-col gap-0.5">
-                    <span className="text-ink text-[13.5px] font-semibold">
+                    <span
+                      id={`${CHANNEL_ID}-${option.key}`}
+                      className="text-ink text-[13.5px] font-semibold"
+                    >
                       {t(`identityProofing.send.channels.${option.key}.title`)}
                     </span>
-                    <span className={HINT}>
+                    <span
+                      id={`${CHANNEL_ID}-${option.key}-hint`}
+                      className={HINT}
+                    >
                       {t(`identityProofing.send.channels.${option.key}.hint`)}
                     </span>
                   </span>
@@ -357,22 +364,60 @@ function SendForm({
             <Button type="button" variant="secondary" onClick={onCancel}>
               {t("identityProofing.send.cancel")}
             </Button>
-            {onScreen ? (
-              <Button type="submit" icon="scan_qrcode">
-                {t("identityProofing.send.submitOnScreen")}
-              </Button>
-            ) : delivery === "hosted" ? (
-              <Button type="submit" loading={create.isPending}>
-                {t("identityProofing.send.submitLink")}
-              </Button>
-            ) : (
-              <Button type="submit" icon="email" loading={create.isPending}>
-                {t("identityProofing.send.submit")}
-              </Button>
-            )}
+            <SubmitButton delivery={delivery} busy={create.isPending} />
           </div>
         </form>
       )}
     </div>
+  );
+}
+
+// Why the form has nothing to send: only flows matched against the sender's
+// own photo, or none the sender may use.
+function NoFlowsNote({
+  photoOnly,
+  isAdmin,
+}: {
+  photoOnly: boolean;
+  isAdmin: boolean;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  let reason: string = t("identityProofing.send.noFlowsMember");
+  if (photoOnly) {
+    reason = t("identityProofing.send.referencePhotoFlows");
+  } else if (isAdmin) {
+    reason = t("identityProofing.send.noFlowsAdmin");
+  }
+  return <p className="text-ink-soft text-[13px]">{reason}</p>;
+}
+
+// The form's submit button, as the delivery has it: the on-screen session
+// starts on the next page, so only a mail or a link waits on the send.
+function SubmitButton({
+  delivery,
+  busy,
+}: {
+  delivery: ProofingChannel;
+  busy: boolean;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  if (delivery === "on_screen") {
+    return (
+      <Button type="submit" icon="scan_qrcode">
+        {t("identityProofing.send.submitOnScreen")}
+      </Button>
+    );
+  }
+  if (delivery === "hosted") {
+    return (
+      <Button type="submit" loading={busy}>
+        {t("identityProofing.send.submitLink")}
+      </Button>
+    );
+  }
+  return (
+    <Button type="submit" icon="email" loading={busy}>
+      {t("identityProofing.send.submit")}
+    </Button>
   );
 }
