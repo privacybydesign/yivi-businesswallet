@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -37,22 +38,9 @@ func TestFlowAddressSavesAndAudits(t *testing.T) {
 }
 
 func TestAddressSealedUntilPurge(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
-	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newSealedFixture(t, "Gemeente", EventSessionAddressAdded)
+	pool, requests, webhooks, orgID, customer, in := f.pool, f.requests, f.webhooks, f.orgID, f.customer, f.in
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Gemeente")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionAddressAdded}); err != nil {
-		t.Fatalf("Save webhook: %v", err)
-	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
 	in.Address = AddressRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Address != AddressRequired {
@@ -106,5 +94,42 @@ func assertAddressPurged(t *testing.T, pool *pgxpool.Pool, requests *RequestStor
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM identity_proofing_webhook_deliveries
 		WHERE request_id = $1 AND payload ? 'address'`, req.ID).Scan(&left); err != nil || left != 0 {
 		t.Errorf("deliveries still carrying the address = %d (%v), want none", left, err)
+	}
+}
+
+// sealedFixture is an org with a customer whose webhook listens for one
+// event, and a request for that customer still to be created.
+type sealedFixture struct {
+	pool     *pgxpool.Pool
+	requests *RequestStore
+	webhooks *WebhookStore
+	orgID    uuid.UUID
+	customer Customer
+	in       NewStoredRequest
+}
+
+func newSealedFixture(t *testing.T, customerName, event string) sealedFixture {
+	t.Helper()
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	customers := NewCustomerStore(pool, audit.NopRecorder{})
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	customer, err := customers.Create(ctx, orgID, sam, customerName)
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{event}); err != nil {
+		t.Fatalf("Save webhook: %v", err)
+	}
+	return sealedFixture{
+		pool:     pool,
+		requests: NewRequestStore(pool, audit.NewDBRecorder(), cipher),
+		webhooks: webhooks,
+		orgID:    orgID,
+		customer: customer,
+		in:       newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"}),
 	}
 }

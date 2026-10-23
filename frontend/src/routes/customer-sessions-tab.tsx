@@ -159,27 +159,9 @@ export function SessionsTab({
       <Card>
         <Table>
           <Table.Head>
-            <Table.HeaderCell>
-              {t("customers.sessions.session")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("identityProofing.requests.subject")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("identityProofing.requests.flow")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.method")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.result")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.started")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.duration")}
-            </Table.HeaderCell>
+            {SESSION_HEADINGS.map((key) => (
+              <Table.HeaderCell key={key}>{t(key)}</Table.HeaderCell>
+            ))}
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
           <Table.Body>{sessionRows()}</Table.Body>
@@ -188,6 +170,16 @@ export function SessionsTab({
     </>
   );
 }
+
+const SESSION_HEADINGS = [
+  "customers.sessions.session",
+  "identityProofing.requests.subject",
+  "identityProofing.requests.flow",
+  "customers.sessions.method",
+  "customers.sessions.result",
+  "customers.sessions.started",
+  "customers.sessions.duration",
+] as const;
 
 function SessionRow({
   slug,

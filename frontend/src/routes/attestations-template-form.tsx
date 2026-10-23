@@ -22,7 +22,7 @@ const DEFAULT_STATUS = "active";
 const DECIMAL_RADIX = 10;
 
 // sourceLabel maps a subject-source token to its i18n label. A literal-key switch
-// (not a dynamic key) keeps the typed-i18n guarantee, mirroring lib/audit-event.ts.
+// (not a dynamic key) keeps the typed-i18n guarantee.
 function sourceLabel(t: TFunction, token: string): string {
   switch (token) {
     case "member.givenNames":
@@ -106,7 +106,7 @@ export function AttestationTemplateForm({
   schemas,
   keys,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const isEdit = template !== undefined;
   const create = useCreateAttestationTemplateMutation(slug);
@@ -157,7 +157,7 @@ export function AttestationTemplateForm({
   const nameError = attempted && trimmedName === "";
   const schemaError = attempted && !isEdit && schemaId === "";
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+  function handleSubmit(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
     if (pending) {

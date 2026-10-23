@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/pdftext"
 )
 
 // ErrNotADiploma is returned when the PDF does not look like a DUO diploma
@@ -29,13 +30,7 @@ type Parser interface {
 // Word is a positioned piece of text on a page. Coordinates are PDF user
 // space points: X grows to the right, Y grows upwards, so Top is larger than
 // Bottom and the first line of the page has the largest Top.
-type Word struct {
-	Text   string
-	Left   float64
-	Top    float64
-	Right  float64
-	Bottom float64
-}
+type Word = pdftext.Word
 
 const (
 	// pdfiumInstanceTimeout bounds how long a parse waits for a free instance.
@@ -217,53 +212,6 @@ func readPages(instance pdfium.Pdfium, pdf []byte) (*Pages, error) {
 	return pages, nil
 }
 
-// line is a group of words that share (approximately) the same baseline.
-type line struct {
-	top   float64
-	words []Word
-}
-
-func (l line) text() string {
-	parts := make([]string, len(l.words))
-	for i, w := range l.words {
-		parts[i] = w.Text
-	}
-	return strings.Join(parts, " ")
-}
-
-// lineTolerance is the maximum vertical distance (points) between two words on
-// the same line.
-const lineTolerance = 4.0
-
-func groupLines(words []Word) []line {
-	sorted := make([]Word, len(words))
-	copy(sorted, words)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Top != sorted[j].Top {
-			return sorted[i].Top > sorted[j].Top
-		}
-		return sorted[i].Left < sorted[j].Left
-	})
-
-	var lines []line
-	for _, w := range sorted {
-		if len(lines) > 0 {
-			current := &lines[len(lines)-1]
-			if current.top-w.Top <= lineTolerance {
-				current.words = append(current.words, w)
-				continue
-			}
-		}
-		lines = append(lines, line{top: w.Top, words: []Word{w}})
-	}
-	for i := range lines {
-		sort.Slice(lines[i].words, func(a, b int) bool {
-			return lines[i].words[a].Left < lines[i].words[b].Left
-		})
-	}
-	return lines
-}
-
 // Headings printed on the extract, in the order they appear.
 const (
 	headingRegister  = "Uit het register onderwijsdeelnemers"
@@ -292,7 +240,7 @@ var (
 // based: the extract is a sequence of headings ("DIPLOMA", "BEHAALD DOOR",
 // "UITGEGEVEN DOOR") each followed by the lines that belong to it.
 func extractDocument(pages *Pages) (*Document, error) {
-	lines := groupLines(pages.First)
+	lines := pdftext.GroupLines(pages.First)
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("%w: no text found", ErrNotADiploma)
 	}
@@ -324,10 +272,10 @@ type section struct {
 	lines   []string
 }
 
-func nonEmptyTexts(lines []line) []string {
+func nonEmptyTexts(lines []pdftext.Line) []string {
 	texts := make([]string, 0, len(lines))
 	for _, l := range lines {
-		if t := strings.TrimSpace(l.text()); t != "" {
+		if t := strings.TrimSpace(l.Text()); t != "" {
 			texts = append(texts, t)
 		}
 	}
@@ -475,46 +423,8 @@ func containsLine(lines []string, want string) bool {
 	return false
 }
 
-var dutchMonths = map[string]time.Month{
-	"januari": time.January, "februari": time.February, "maart": time.March,
-	"april": time.April, "mei": time.May, "juni": time.June, "juli": time.July,
-	"augustus": time.August, "september": time.September, "oktober": time.October,
-	"november": time.November, "december": time.December,
-	"jan": time.January, "feb": time.February, "mrt": time.March, "apr": time.April,
-	"jun": time.June, "jul": time.July, "aug": time.August, "sep": time.September,
-	"okt": time.October, "nov": time.November, "dec": time.December,
-}
-
-// parseDutchDate parses dates as printed on the extract ("3 februari 1980"); the
-// numeric forms "03-02-1980" and "1980-02-03" are accepted as well.
+// parseDutchDate parses dates as printed on the extract ("3 februari 1980"),
+// which may end in a full stop.
 func parseDutchDate(s string) (time.Time, error) {
-	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "."))
-	if s == "" {
-		return time.Time{}, errors.New("empty date")
-	}
-	for _, layout := range []string{"02-01-2006", "2006-01-02", "2-1-2006"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	parts := strings.Fields(s)
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("unrecognised date %q", s)
-	}
-	var day, year int
-	if _, err := fmt.Sscanf(parts[0], "%d", &day); err != nil {
-		return time.Time{}, fmt.Errorf("unrecognised day in %q", s)
-	}
-	month, ok := dutchMonths[strings.ToLower(parts[1])]
-	if !ok {
-		return time.Time{}, fmt.Errorf("unrecognised month in %q", s)
-	}
-	if _, err := fmt.Sscanf(parts[2], "%d", &year); err != nil {
-		return time.Time{}, fmt.Errorf("unrecognised year in %q", s)
-	}
-	t := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
-	if t.Day() != day {
-		return time.Time{}, fmt.Errorf("invalid day in %q", s)
-	}
-	return t, nil
+	return pdftext.ParseDutchDate(strings.TrimSuffix(strings.TrimSpace(s), "."))
 }

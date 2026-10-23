@@ -360,18 +360,28 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
 	}
+	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
+		return "", err
+	}
+	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
+}
+
+// checkFlowIdentity is ErrFlowNotFound for a flow that is not one of the
+// org's, and ErrFlowNoIdentity when the setting is asked for but the flow does
+// not read the name and date of birth.
+func (s *Service) checkFlowIdentity(ctx context.Context, org Org, flowID string, asked bool) error {
 	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
 	if err != nil {
-		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+		return fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
 	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
 	if i < 0 {
-		return "", ErrFlowNotFound
+		return ErrFlowNotFound
 	}
-	if mode.asked() && !readsIdentity(flows[i]) {
-		return "", ErrFlowNoIdentity
+	if asked && !readsIdentity(flows[i]) {
+		return ErrFlowNoIdentity
 	}
-	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
+	return nil
 }
 
 // RequestDiplomas returns the extracts each request holds.

@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import type { AuditEvent } from "../api/organization";
+import type { en } from "../i18n/locales/en";
 import type { IconName } from "../ui";
 import {
   proofingMethodLabel,
@@ -17,160 +18,188 @@ export const AUDIT_TONE_CLASSES: Record<AuditTone, string> = {
   slate: "bg-[#E4E2DF] text-ink",
 };
 
-const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
-  "organization.created": { icon: "add", tone: "green" },
-  "organization.updated": { icon: "edit", tone: "blue" },
-  "membership.invited": { icon: "email", tone: "amber" },
-  "membership.invite_resent": { icon: "email", tone: "amber" },
-  "membership.invite_revoked": { icon: "close", tone: "red" },
-  "membership.invite_updated": { icon: "edit", tone: "blue" },
-  "membership.accepted": { icon: "valid", tone: "green" },
-  "membership.accept_rejected": { icon: "warning", tone: "amber" },
-  "membership.declined": { icon: "close", tone: "slate" },
-  "membership.revoked": { icon: "close", tone: "red" },
-  "membership.role_changed": { icon: "settings", tone: "blue" },
-  "membership.expired": { icon: "time", tone: "slate" },
-  "membership.type_changed": { icon: "edit", tone: "blue" },
-  "membership.identity_requested": { icon: "personal", tone: "amber" },
-  "membership.identity_reverified": { icon: "valid", tone: "green" },
-  "membership.identity_reverify_rejected": { icon: "warning", tone: "amber" },
-  "membership.identity_reminder_sent": { icon: "email", tone: "amber" },
-  "membership.identity_overdue": { icon: "warning", tone: "red" },
-  "identity.settings_updated": { icon: "settings", tone: "blue" },
-  "membership.vog_requested": { icon: "personal", tone: "amber" },
-  "membership.vog_checked": { icon: "valid", tone: "green" },
-  "membership.vog_rejected": { icon: "warning", tone: "amber" },
-  "membership.vog_mismatch": { icon: "warning", tone: "amber" },
-  "membership.vog_insufficient_scope": { icon: "warning", tone: "amber" },
-  "membership.vog_reminder_sent": { icon: "email", tone: "amber" },
-  "membership.vog_expired": { icon: "warning", tone: "red" },
-  "screening.settings_updated": { icon: "settings", tone: "blue" },
-  "mandate.granted": { icon: "valid", tone: "violet" },
-  "mandate.revoked": { icon: "close", tone: "red" },
-  "department.created": { icon: "add", tone: "green" },
-  "department.updated": { icon: "edit", tone: "blue" },
-  "department.deleted": { icon: "delete", tone: "red" },
-  "user.identity_changed": { icon: "personal", tone: "blue" },
-  "user.identity_review_required": { icon: "warning", tone: "amber" },
-  "user.identity_review_approved": { icon: "valid", tone: "green" },
-  "user.identity_review_rejected": { icon: "close", tone: "red" },
-  "user.purged": { icon: "delete", tone: "red" },
-  "attestation.schema_created": { icon: "add", tone: "green" },
-  "attestation.held_received": { icon: "add", tone: "green" },
-  "attestation.held_status_changed": { icon: "warning", tone: "amber" },
-  "attestation.schema_updated": { icon: "edit", tone: "blue" },
-  "attestation.schema_deleted": { icon: "delete", tone: "red" },
-  "attestation.template_created": { icon: "add", tone: "green" },
-  "attestation.template_updated": { icon: "edit", tone: "blue" },
-  "attestation.template_deleted": { icon: "delete", tone: "red" },
-  "attestation.issued": { icon: "valid", tone: "violet" },
-  "attestation.claimed": { icon: "valid", tone: "green" },
-  "attestation.revoked": { icon: "close", tone: "red" },
-  "attestation.offer_cancelled": { icon: "close", tone: "amber" },
-  "attestation.key_added": { icon: "add", tone: "green" },
-  "attestation.key_suspended": { icon: "warning", tone: "amber" },
-  "attestation.key_revoked": { icon: "close", tone: "red" },
-  "attestation.offer_accepted": { icon: "valid", tone: "green" },
-  "attestation.offer_declined": { icon: "close", tone: "slate" },
-  "email.settings_updated": { icon: "settings", tone: "blue" },
-  "email.template_updated": { icon: "email", tone: "blue" },
-  "email.template_reset": { icon: "email", tone: "amber" },
-  "notification.settings_updated": { icon: "settings", tone: "blue" },
-  "slack.settings_updated": { icon: "settings", tone: "blue" },
-  "msteams.settings_updated": { icon: "settings", tone: "blue" },
-  "provisioning.settings_updated": { icon: "settings", tone: "blue" },
-  "provisioning.run_completed": { icon: "valid", tone: "green" },
-  "provisioning.run_failed": { icon: "warning", tone: "red" },
-  "csc.settings_updated": { icon: "settings", tone: "blue" },
-  "signing.credential_linked": { icon: "settings", tone: "blue" },
-  "signing.requested": { icon: "settings", tone: "blue" },
-  "signing.signed": { icon: "edit", tone: "blue" },
-  "signing.completed": { icon: "valid", tone: "green" },
-  "signing.delivered": { icon: "email", tone: "green" },
-  "signing.failed": { icon: "warning", tone: "red" },
-  "signing.declined": { icon: "close", tone: "slate" },
-  "presentation.requested": { icon: "scan_qrcode", tone: "amber" },
-  "presentation.org_selected": { icon: "personal", tone: "blue" },
-  "presentation.completed": { icon: "valid", tone: "green" },
-  "presentation.denied": { icon: "close", tone: "red" },
-  "presentation.expired": { icon: "time", tone: "slate" },
-  "presentation.request_received": { icon: "scan_qrcode", tone: "amber" },
-  "presentation.request_sent": { icon: "email", tone: "blue" },
-  "presentation.response_received": { icon: "valid", tone: "green" },
-  "presentation.request_failed": { icon: "warning", tone: "red" },
-  "identity_proofing.flow_created": { icon: "add", tone: "green" },
-  "identity_proofing.flows_configured": { icon: "settings", tone: "blue" },
-  "identity_proofing.flow_version_created": { icon: "edit", tone: "blue" },
-  "identity_proofing.flow_version_activated": { icon: "valid", tone: "blue" },
-  "identity_proofing.requested": { icon: "email", tone: "amber" },
-  "identity_proofing.session_created": { icon: "time", tone: "blue" },
-  "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
-  "identity_proofing.session_handover": { icon: "scan_qrcode", tone: "slate" },
-  "identity_proofing.session_ended": { icon: "time", tone: "amber" },
-  "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
-  "identity_proofing.session_purged": { icon: "delete", tone: "red" },
-  "identity_proofing.result_read": { icon: "view", tone: "slate" },
-  "identity_proofing.device_claimed": { icon: "scan_qrcode", tone: "blue" },
-  "identity_proofing.device_handed_over": {
-    icon: "scan_qrcode",
-    tone: "slate",
+type AuditVisual = { icon: IconName; tone: AuditTone };
+
+// An action's entry sits under its prefix, then its name:
+// "identity_proofing.approved" is ACTION_VISUAL.identity_proofing.approved.
+type ByAction<T> = Record<string, Record<string, T>>;
+
+function lookupAction<T>(table: ByAction<T>, action: string): T | undefined {
+  const dot = action.indexOf(".");
+  const prefix = action.slice(0, dot);
+  const name = action.slice(dot + 1);
+  if (dot < 0 || !Object.hasOwn(table, prefix)) return undefined;
+  const names = table[prefix];
+  return Object.hasOwn(names, name) ? names[name] : undefined;
+}
+
+const ACTION_VISUAL: ByAction<AuditVisual> = {
+  organization: {
+    created: { icon: "add", tone: "green" },
+    updated: { icon: "edit", tone: "blue" },
   },
-  "identity_proofing.handover_issued": { icon: "scan_qrcode", tone: "slate" },
-  "identity_proofing.handover_claim_failed": { icon: "warning", tone: "amber" },
-  "identity_proofing.access_denied": { icon: "warning", tone: "red" },
-  "identity_proofing.approved": { icon: "valid", tone: "green" },
-  "identity_proofing.rejected": { icon: "close", tone: "red" },
-  "identity_proofing.needs_review": { icon: "warning", tone: "amber" },
-  "identity_proofing.review_decided": { icon: "valid", tone: "blue" },
-  "identity_proofing.data_exported": { icon: "view", tone: "slate" },
-  "identity_proofing.flow_kind_configured": { icon: "edit", tone: "blue" },
-  "identity_proofing.customer_created": { icon: "add", tone: "green" },
-  "identity_proofing.customer_updated": { icon: "edit", tone: "blue" },
-  "identity_proofing.customer_flows_configured": {
-    icon: "settings",
-    tone: "blue",
+  membership: {
+    invited: { icon: "email", tone: "amber" },
+    invite_resent: { icon: "email", tone: "amber" },
+    invite_revoked: { icon: "close", tone: "red" },
+    invite_updated: { icon: "edit", tone: "blue" },
+    accepted: { icon: "valid", tone: "green" },
+    accept_rejected: { icon: "warning", tone: "amber" },
+    declined: { icon: "close", tone: "slate" },
+    revoked: { icon: "close", tone: "red" },
+    role_changed: { icon: "settings", tone: "blue" },
+    expired: { icon: "time", tone: "slate" },
+    type_changed: { icon: "edit", tone: "blue" },
+    identity_requested: { icon: "personal", tone: "amber" },
+    identity_reverified: { icon: "valid", tone: "green" },
+    identity_reverify_rejected: { icon: "warning", tone: "amber" },
+    identity_reminder_sent: { icon: "email", tone: "amber" },
+    identity_overdue: { icon: "warning", tone: "red" },
+    vog_requested: { icon: "personal", tone: "amber" },
+    vog_checked: { icon: "valid", tone: "green" },
+    vog_rejected: { icon: "warning", tone: "amber" },
+    vog_mismatch: { icon: "warning", tone: "amber" },
+    vog_insufficient_scope: { icon: "warning", tone: "amber" },
+    vog_reminder_sent: { icon: "email", tone: "amber" },
+    vog_expired: { icon: "warning", tone: "red" },
   },
-  "identity_proofing.customer_removed": { icon: "delete", tone: "red" },
-  "identity_proofing.api_key_created": { icon: "add", tone: "green" },
-  "identity_proofing.api_key_revoked": { icon: "close", tone: "red" },
-  "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
-  "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
-  "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
-  "identity_proofing.paused": { icon: "warning", tone: "amber" },
-  "identity_proofing.flow_hosted_configured": {
-    icon: "settings",
-    tone: "blue",
+  identity: {
+    settings_updated: { icon: "settings", tone: "blue" },
   },
-  "identity_proofing.flow_diplomas_configured": {
-    icon: "settings",
-    tone: "blue",
+  screening: {
+    settings_updated: { icon: "settings", tone: "blue" },
   },
-  "identity_proofing.diploma_added": { icon: "add", tone: "green" },
-  "identity_proofing.diploma_rejected": { icon: "close", tone: "red" },
-  "identity_proofing.flow_address_configured": {
-    icon: "settings",
-    tone: "blue",
+  mandate: {
+    granted: { icon: "valid", tone: "violet" },
+    revoked: { icon: "close", tone: "red" },
   },
-  "identity_proofing.address_added": { icon: "add", tone: "green" },
-  "identity_proofing.flow_employment_configured": {
-    icon: "settings",
-    tone: "blue",
+  department: {
+    created: { icon: "add", tone: "green" },
+    updated: { icon: "edit", tone: "blue" },
+    deleted: { icon: "delete", tone: "red" },
   },
-  "identity_proofing.employment_added": { icon: "add", tone: "green" },
-  "identity_proofing.employment_rejected": { icon: "close", tone: "red" },
-  "identity_proofing.resumed": { icon: "valid", tone: "green" },
+  user: {
+    identity_changed: { icon: "personal", tone: "blue" },
+    identity_review_required: { icon: "warning", tone: "amber" },
+    identity_review_approved: { icon: "valid", tone: "green" },
+    identity_review_rejected: { icon: "close", tone: "red" },
+    purged: { icon: "delete", tone: "red" },
+  },
+  attestation: {
+    schema_created: { icon: "add", tone: "green" },
+    held_received: { icon: "add", tone: "green" },
+    held_status_changed: { icon: "warning", tone: "amber" },
+    schema_updated: { icon: "edit", tone: "blue" },
+    schema_deleted: { icon: "delete", tone: "red" },
+    template_created: { icon: "add", tone: "green" },
+    template_updated: { icon: "edit", tone: "blue" },
+    template_deleted: { icon: "delete", tone: "red" },
+    issued: { icon: "valid", tone: "violet" },
+    claimed: { icon: "valid", tone: "green" },
+    revoked: { icon: "close", tone: "red" },
+    offer_cancelled: { icon: "close", tone: "amber" },
+    key_added: { icon: "add", tone: "green" },
+    key_suspended: { icon: "warning", tone: "amber" },
+    key_revoked: { icon: "close", tone: "red" },
+    offer_accepted: { icon: "valid", tone: "green" },
+    offer_declined: { icon: "close", tone: "slate" },
+  },
+  email: {
+    settings_updated: { icon: "settings", tone: "blue" },
+    template_updated: { icon: "email", tone: "blue" },
+    template_reset: { icon: "email", tone: "amber" },
+  },
+  notification: {
+    settings_updated: { icon: "settings", tone: "blue" },
+  },
+  slack: {
+    settings_updated: { icon: "settings", tone: "blue" },
+  },
+  msteams: {
+    settings_updated: { icon: "settings", tone: "blue" },
+  },
+  provisioning: {
+    settings_updated: { icon: "settings", tone: "blue" },
+    run_completed: { icon: "valid", tone: "green" },
+    run_failed: { icon: "warning", tone: "red" },
+  },
+  csc: {
+    settings_updated: { icon: "settings", tone: "blue" },
+  },
+  signing: {
+    credential_linked: { icon: "settings", tone: "blue" },
+    requested: { icon: "settings", tone: "blue" },
+    signed: { icon: "edit", tone: "blue" },
+    completed: { icon: "valid", tone: "green" },
+    delivered: { icon: "email", tone: "green" },
+    failed: { icon: "warning", tone: "red" },
+    declined: { icon: "close", tone: "slate" },
+  },
+  presentation: {
+    requested: { icon: "scan_qrcode", tone: "amber" },
+    org_selected: { icon: "personal", tone: "blue" },
+    completed: { icon: "valid", tone: "green" },
+    denied: { icon: "close", tone: "red" },
+    expired: { icon: "time", tone: "slate" },
+    request_received: { icon: "scan_qrcode", tone: "amber" },
+    request_sent: { icon: "email", tone: "blue" },
+    response_received: { icon: "valid", tone: "green" },
+    request_failed: { icon: "warning", tone: "red" },
+  },
+  identity_proofing: {
+    flow_created: { icon: "add", tone: "green" },
+    flows_configured: { icon: "settings", tone: "blue" },
+    flow_version_created: { icon: "edit", tone: "blue" },
+    flow_version_activated: { icon: "valid", tone: "blue" },
+    requested: { icon: "email", tone: "amber" },
+    session_created: { icon: "time", tone: "blue" },
+    session_started: { icon: "scan_qrcode", tone: "blue" },
+    session_handover: { icon: "scan_qrcode", tone: "slate" },
+    session_ended: { icon: "time", tone: "amber" },
+    session_cancelled: { icon: "close", tone: "slate" },
+    session_purged: { icon: "delete", tone: "red" },
+    result_read: { icon: "view", tone: "slate" },
+    device_claimed: { icon: "scan_qrcode", tone: "blue" },
+    device_handed_over: { icon: "scan_qrcode", tone: "slate" },
+    handover_issued: { icon: "scan_qrcode", tone: "slate" },
+    handover_claim_failed: { icon: "warning", tone: "amber" },
+    access_denied: { icon: "warning", tone: "red" },
+    approved: { icon: "valid", tone: "green" },
+    rejected: { icon: "close", tone: "red" },
+    needs_review: { icon: "warning", tone: "amber" },
+    review_decided: { icon: "valid", tone: "blue" },
+    data_exported: { icon: "view", tone: "slate" },
+    flow_kind_configured: { icon: "edit", tone: "blue" },
+    customer_created: { icon: "add", tone: "green" },
+    customer_updated: { icon: "edit", tone: "blue" },
+    customer_flows_configured: { icon: "settings", tone: "blue" },
+    customer_removed: { icon: "delete", tone: "red" },
+    api_key_created: { icon: "add", tone: "green" },
+    api_key_revoked: { icon: "close", tone: "red" },
+    webhook_configured: { icon: "settings", tone: "blue" },
+    webhook_secret_rotated: { icon: "lock", tone: "amber" },
+    webhook_removed: { icon: "delete", tone: "red" },
+    paused: { icon: "warning", tone: "amber" },
+    flow_hosted_configured: { icon: "settings", tone: "blue" },
+    flow_diplomas_configured: { icon: "settings", tone: "blue" },
+    diploma_added: { icon: "add", tone: "green" },
+    diploma_rejected: { icon: "close", tone: "red" },
+    flow_address_configured: { icon: "settings", tone: "blue" },
+    address_added: { icon: "add", tone: "green" },
+    flow_employment_configured: { icon: "settings", tone: "blue" },
+    employment_added: { icon: "add", tone: "green" },
+    employment_rejected: { icon: "close", tone: "red" },
+    resumed: { icon: "valid", tone: "green" },
+  },
 };
 
-const DEFAULT_VISUAL: { icon: IconName; tone: AuditTone } = {
+const DEFAULT_VISUAL: AuditVisual = {
   icon: "info",
   tone: "slate",
 };
 
-export function auditVisual(action: string): {
-  icon: IconName;
-  tone: AuditTone;
-} {
-  return ACTION_VISUAL[action] ?? DEFAULT_VISUAL;
+export function auditVisual(action: string): AuditVisual {
+  return lookupAction(ACTION_VISUAL, action) ?? DEFAULT_VISUAL;
 }
 
 const API_KEY_ACTOR_PREFIX = "api_key:";
@@ -209,398 +238,262 @@ export function auditActorLabel(
   return label;
 }
 
+type ActionLabelKey = keyof (typeof en)["auditLog"]["actions"];
+type TargetLabelKey = keyof (typeof en)["auditLog"]["targets"];
+
+const ACTION_LABEL: ByAction<ActionLabelKey> = {
+  organization: {
+    created: "orgCreated",
+    updated: "orgUpdated",
+    deleted: "orgDeleted",
+  },
+  membership: {
+    invited: "memberInvited",
+    invite_resent: "inviteResent",
+    invite_revoked: "inviteRevoked",
+    invite_updated: "inviteUpdated",
+    accepted: "inviteAccepted",
+    accept_rejected: "acceptRejected",
+    declined: "inviteDeclined",
+    revoked: "memberRevoked",
+    role_changed: "roleChanged",
+    expired: "inviteExpired",
+    type_changed: "memberTypeChanged",
+    identity_requested: "identityRequested",
+    identity_reverified: "identityReverified",
+    identity_reverify_rejected: "identityReverifyRejected",
+    identity_reminder_sent: "identityReminderSent",
+    identity_overdue: "identityOverdue",
+    vog_requested: "vogRequested",
+    vog_checked: "vogChecked",
+    vog_rejected: "vogRejected",
+    vog_mismatch: "vogMismatch",
+    vog_insufficient_scope: "vogInsufficientScope",
+    vog_reminder_sent: "vogReminderSent",
+    vog_expired: "vogExpired",
+  },
+  identity: {
+    settings_updated: "identitySettingsUpdated",
+  },
+  screening: {
+    settings_updated: "screeningSettingsUpdated",
+  },
+  mandate: {
+    granted: "mandateGranted",
+    revoked: "mandateRevoked",
+  },
+  department: {
+    created: "deptCreated",
+    updated: "deptUpdated",
+    deleted: "deptDeleted",
+  },
+  user: {
+    identity_changed: "identityChanged",
+    identity_review_required: "identityReviewRequired",
+    identity_review_approved: "identityReviewApproved",
+    identity_review_rejected: "identityReviewRejected",
+    purged: "userPurged",
+  },
+  qerds: {
+    message_sent: "qerdsMessageSent",
+    message_received: "qerdsMessageReceived",
+    address_provisioned: "qerdsAddressProvisioned",
+    address_default_changed: "qerdsAddressDefaultChanged",
+    address_deleted: "qerdsAddressDeleted",
+    contact_added: "qerdsContactAdded",
+    contact_deleted: "qerdsContactDeleted",
+  },
+  postguard: {
+    key_set: "postguardKeySet",
+    key_removed: "postguardKeyRemoved",
+    encryption_key_set: "postguardEncryptionKeySet",
+    encryption_key_removed: "postguardEncryptionKeyRemoved",
+    file_sent: "postguardFileSent",
+    notification_delivery_set: "postguardNotificationDeliverySet",
+  },
+  wallet: {
+    opened: "walletOpened",
+    bootstrapped: "walletBootstrapped",
+    suspended: "walletSuspended",
+    revoked: "walletRevoked",
+    representation_claimed: "representationClaimed",
+    representation_revoked: "representationRevoked",
+  },
+  kvk: {
+    registration_validated: "kvkRegistrationValidated",
+    registration_not_validated: "kvkRegistrationNotValidated",
+  },
+  attestation: {
+    schema_created: "attestationSchemaCreated",
+    schema_updated: "attestationSchemaUpdated",
+    schema_deleted: "attestationSchemaDeleted",
+    template_created: "attestationTemplateCreated",
+    template_updated: "attestationTemplateUpdated",
+    template_deleted: "attestationTemplateDeleted",
+    issued: "attestationIssued",
+    claimed: "attestationClaimed",
+    revoked: "attestationRevoked",
+    offer_cancelled: "attestationOfferCancelled",
+    key_added: "attestationKeyAdded",
+    key_suspended: "attestationKeySuspended",
+    key_revoked: "attestationKeyRevoked",
+    held_received: "attestationHeldReceived",
+    held_status_changed: "attestationHeldStatusChanged",
+    held_deleted: "attestationHeldDeleted",
+    offer_accepted: "attestationOfferAccepted",
+    offer_declined: "attestationOfferDeclined",
+  },
+  email: {
+    settings_updated: "emailSettingsUpdated",
+    template_updated: "emailTemplateUpdated",
+    template_reset: "emailTemplateReset",
+  },
+  issuer: {
+    settings_updated: "issuerSettingsUpdated",
+  },
+  theme: {
+    settings_updated: "themeSettingsUpdated",
+  },
+  onboarding: {
+    settings_updated: "onboardingSettingsUpdated",
+  },
+  notification: {
+    settings_updated: "notificationSettingsUpdated",
+  },
+  slack: {
+    settings_updated: "slackSettingsUpdated",
+  },
+  msteams: {
+    settings_updated: "teamsSettingsUpdated",
+  },
+  provisioning: {
+    settings_updated: "provisioningSettingsUpdated",
+    run_completed: "provisioningRunCompleted",
+    run_failed: "provisioningRunFailed",
+  },
+  csc: {
+    settings_updated: "cscSettingsUpdated",
+  },
+  signing: {
+    credential_linked: "signingCredentialLinked",
+    requested: "signingRequested",
+    signed: "signingSigned",
+    completed: "signingCompleted",
+    delivered: "signingDelivered",
+    failed: "signingFailed",
+    declined: "signingDeclined",
+  },
+  presentation: {
+    requested: "presentationRequested",
+    org_selected: "presentationOrgSelected",
+    completed: "presentationCompleted",
+    denied: "presentationDenied",
+    expired: "presentationExpired",
+    request_received: "presentationRequestReceived",
+    request_sent: "presentationRequestSent",
+    response_received: "presentationResponseReceived",
+    request_failed: "presentationRequestFailed",
+  },
+  identity_proofing: {
+    flow_created: "identityProofingFlowCreated",
+    flows_configured: "identityProofingFlowsConfigured",
+    flow_version_created: "identityProofingFlowVersionCreated",
+    flow_version_activated: "identityProofingFlowVersionActivated",
+    requested: "identityProofingRequested",
+    session_created: "identityProofingSessionCreated",
+    session_started: "identityProofingSessionStarted",
+    session_handover: "identityProofingSessionHandover",
+    session_ended: "identityProofingSessionEnded",
+    session_cancelled: "identityProofingSessionCancelled",
+    session_purged: "identityProofingSessionPurged",
+    result_read: "identityProofingResultRead",
+    device_claimed: "identityProofingDeviceClaimed",
+    device_handed_over: "identityProofingDeviceHandedOver",
+    handover_issued: "identityProofingHandoverIssued",
+    handover_claim_failed: "identityProofingHandoverClaimFailed",
+    access_denied: "identityProofingAccessDenied",
+    approved: "identityProofingApproved",
+    rejected: "identityProofingRejected",
+    needs_review: "identityProofingNeedsReview",
+    review_decided: "identityProofingReviewDecided",
+    data_exported: "identityProofingDataExported",
+    flow_kind_configured: "identityProofingFlowKindConfigured",
+    customer_created: "identityProofingCustomerCreated",
+    customer_updated: "identityProofingCustomerUpdated",
+    customer_flows_configured: "identityProofingCustomerFlowsConfigured",
+    customer_removed: "identityProofingCustomerRemoved",
+    api_key_created: "identityProofingApiKeyCreated",
+    api_key_revoked: "identityProofingApiKeyRevoked",
+    webhook_configured: "identityProofingWebhookConfigured",
+    webhook_secret_rotated: "identityProofingWebhookSecretRotated",
+    webhook_removed: "identityProofingWebhookRemoved",
+    flow_hosted_configured: "identityProofingFlowHostedConfigured",
+    flow_diplomas_configured: "identityProofingFlowDiplomasConfigured",
+    diploma_added: "identityProofingDiplomaAdded",
+    diploma_rejected: "identityProofingDiplomaRejected",
+    flow_address_configured: "identityProofingFlowAddressConfigured",
+    address_added: "identityProofingAddressAdded",
+    flow_employment_configured: "identityProofingFlowEmploymentConfigured",
+    employment_added: "identityProofingEmploymentAdded",
+    employment_rejected: "identityProofingEmploymentRejected",
+    paused: "identityProofingPaused",
+    resumed: "identityProofingResumed",
+  },
+};
+
+const TARGET_LABEL: Record<string, TargetLabelKey> = {
+  organization: "organization",
+  membership: "member",
+  department: "department",
+  mandate: "mandate",
+  user: "user",
+  qerds_message: "qerdsMessage",
+  qerds_address: "qerdsAddress",
+  qerds_contact: "qerdsContact",
+  wallet_instance: "walletInstance",
+  wallet_representation: "walletRepresentation",
+  kvk_registration: "kvkRegistration",
+  postguard_key: "postguardKey",
+  postguard_encryption_key: "postguardEncryptionKey",
+  postguard_file: "postguardFile",
+  postguard_settings: "postguardSettings",
+  attestation_schema: "attestationSchema",
+  attestation_template: "attestationTemplate",
+  issued_attestation: "issuedAttestation",
+  attestation_key: "attestationKey",
+  held_attestation: "heldAttestation",
+  credential_offer: "credentialOffer",
+  org_email_settings: "orgEmailSettings",
+  org_email_template: "orgEmailTemplate",
+  org_issuer_settings: "orgIssuerSettings",
+  org_theme_settings: "orgThemeSettings",
+  org_onboarding_attestations: "orgOnboardingAttestations",
+  org_notification_settings: "orgNotificationSettings",
+  org_identity_settings: "orgIdentitySettings",
+  org_screening_settings: "orgScreeningSettings",
+  org_slack_settings: "orgSlackSettings",
+  org_teams_settings: "orgTeamsSettings",
+  org_provisioning_settings: "orgProvisioningSettings",
+  org_csc_settings: "orgCscSettings",
+  signing_credentials: "signingCredentials",
+  signing_requests: "signingRequests",
+  presentation_transaction: "presentationTransaction",
+  outbound_presentation_request: "outboundPresentationRequest",
+  org_identity_proofing_settings: "orgIdentityProofingSettings",
+  identity_proofing_flow: "identityProofingFlow",
+  identity_proofing_request: "identityProofingRequest",
+  identity_proofing_customer: "identityProofingCustomer",
+};
+
 export function auditActionLabel(action: string, t: TFunction): string {
-  switch (action) {
-    case "organization.created":
-      return t("auditLog.actions.orgCreated");
-    case "organization.updated":
-      return t("auditLog.actions.orgUpdated");
-    case "organization.deleted":
-      return t("auditLog.actions.orgDeleted");
-    case "membership.invited":
-      return t("auditLog.actions.memberInvited");
-    case "membership.invite_resent":
-      return t("auditLog.actions.inviteResent");
-    case "membership.invite_revoked":
-      return t("auditLog.actions.inviteRevoked");
-    case "membership.invite_updated":
-      return t("auditLog.actions.inviteUpdated");
-    case "membership.accepted":
-      return t("auditLog.actions.inviteAccepted");
-    case "membership.accept_rejected":
-      return t("auditLog.actions.acceptRejected");
-    case "membership.declined":
-      return t("auditLog.actions.inviteDeclined");
-    case "membership.revoked":
-      return t("auditLog.actions.memberRevoked");
-    case "membership.role_changed":
-      return t("auditLog.actions.roleChanged");
-    case "membership.expired":
-      return t("auditLog.actions.inviteExpired");
-    case "membership.type_changed":
-      return t("auditLog.actions.memberTypeChanged");
-    case "membership.identity_requested":
-      return t("auditLog.actions.identityRequested");
-    case "membership.identity_reverified":
-      return t("auditLog.actions.identityReverified");
-    case "membership.identity_reverify_rejected":
-      return t("auditLog.actions.identityReverifyRejected");
-    case "membership.identity_reminder_sent":
-      return t("auditLog.actions.identityReminderSent");
-    case "membership.identity_overdue":
-      return t("auditLog.actions.identityOverdue");
-    case "identity.settings_updated":
-      return t("auditLog.actions.identitySettingsUpdated");
-    case "membership.vog_requested":
-      return t("auditLog.actions.vogRequested");
-    case "membership.vog_checked":
-      return t("auditLog.actions.vogChecked");
-    case "membership.vog_rejected":
-      return t("auditLog.actions.vogRejected");
-    case "membership.vog_mismatch":
-      return t("auditLog.actions.vogMismatch");
-    case "membership.vog_insufficient_scope":
-      return t("auditLog.actions.vogInsufficientScope");
-    case "membership.vog_reminder_sent":
-      return t("auditLog.actions.vogReminderSent");
-    case "membership.vog_expired":
-      return t("auditLog.actions.vogExpired");
-    case "screening.settings_updated":
-      return t("auditLog.actions.screeningSettingsUpdated");
-    case "mandate.granted":
-      return t("auditLog.actions.mandateGranted");
-    case "mandate.revoked":
-      return t("auditLog.actions.mandateRevoked");
-    case "department.created":
-      return t("auditLog.actions.deptCreated");
-    case "department.updated":
-      return t("auditLog.actions.deptUpdated");
-    case "department.deleted":
-      return t("auditLog.actions.deptDeleted");
-    case "user.identity_changed":
-      return t("auditLog.actions.identityChanged");
-    case "user.identity_review_required":
-      return t("auditLog.actions.identityReviewRequired");
-    case "user.identity_review_approved":
-      return t("auditLog.actions.identityReviewApproved");
-    case "user.identity_review_rejected":
-      return t("auditLog.actions.identityReviewRejected");
-    case "user.purged":
-      return t("auditLog.actions.userPurged");
-    case "qerds.message_sent":
-      return t("auditLog.actions.qerdsMessageSent");
-    case "qerds.message_received":
-      return t("auditLog.actions.qerdsMessageReceived");
-    case "qerds.address_provisioned":
-      return t("auditLog.actions.qerdsAddressProvisioned");
-    case "qerds.address_default_changed":
-      return t("auditLog.actions.qerdsAddressDefaultChanged");
-    case "qerds.address_deleted":
-      return t("auditLog.actions.qerdsAddressDeleted");
-    case "qerds.contact_added":
-      return t("auditLog.actions.qerdsContactAdded");
-    case "qerds.contact_deleted":
-      return t("auditLog.actions.qerdsContactDeleted");
-    case "postguard.key_set":
-      return t("auditLog.actions.postguardKeySet");
-    case "postguard.key_removed":
-      return t("auditLog.actions.postguardKeyRemoved");
-    case "postguard.encryption_key_set":
-      return t("auditLog.actions.postguardEncryptionKeySet");
-    case "postguard.encryption_key_removed":
-      return t("auditLog.actions.postguardEncryptionKeyRemoved");
-    case "postguard.file_sent":
-      return t("auditLog.actions.postguardFileSent");
-    case "postguard.notification_delivery_set":
-      return t("auditLog.actions.postguardNotificationDeliverySet");
-    case "wallet.opened":
-      return t("auditLog.actions.walletOpened");
-    case "wallet.bootstrapped":
-      return t("auditLog.actions.walletBootstrapped");
-    case "wallet.suspended":
-      return t("auditLog.actions.walletSuspended");
-    case "wallet.revoked":
-      return t("auditLog.actions.walletRevoked");
-    case "wallet.representation_claimed":
-      return t("auditLog.actions.representationClaimed");
-    case "wallet.representation_revoked":
-      return t("auditLog.actions.representationRevoked");
-    case "kvk.registration_validated":
-      return t("auditLog.actions.kvkRegistrationValidated");
-    case "kvk.registration_not_validated":
-      return t("auditLog.actions.kvkRegistrationNotValidated");
-    case "attestation.schema_created":
-      return t("auditLog.actions.attestationSchemaCreated");
-    case "attestation.schema_updated":
-      return t("auditLog.actions.attestationSchemaUpdated");
-    case "attestation.schema_deleted":
-      return t("auditLog.actions.attestationSchemaDeleted");
-    case "attestation.template_created":
-      return t("auditLog.actions.attestationTemplateCreated");
-    case "attestation.template_updated":
-      return t("auditLog.actions.attestationTemplateUpdated");
-    case "attestation.template_deleted":
-      return t("auditLog.actions.attestationTemplateDeleted");
-    case "attestation.issued":
-      return t("auditLog.actions.attestationIssued");
-    case "attestation.claimed":
-      return t("auditLog.actions.attestationClaimed");
-    case "attestation.revoked":
-      return t("auditLog.actions.attestationRevoked");
-    case "attestation.offer_cancelled":
-      return t("auditLog.actions.attestationOfferCancelled");
-    case "attestation.key_added":
-      return t("auditLog.actions.attestationKeyAdded");
-    case "attestation.key_suspended":
-      return t("auditLog.actions.attestationKeySuspended");
-    case "attestation.key_revoked":
-      return t("auditLog.actions.attestationKeyRevoked");
-    case "attestation.held_received":
-      return t("auditLog.actions.attestationHeldReceived");
-    case "attestation.held_status_changed":
-      return t("auditLog.actions.attestationHeldStatusChanged");
-    case "attestation.held_deleted":
-      return t("auditLog.actions.attestationHeldDeleted");
-    case "attestation.offer_accepted":
-      return t("auditLog.actions.attestationOfferAccepted");
-    case "attestation.offer_declined":
-      return t("auditLog.actions.attestationOfferDeclined");
-    case "email.settings_updated":
-      return t("auditLog.actions.emailSettingsUpdated");
-    case "email.template_updated":
-      return t("auditLog.actions.emailTemplateUpdated");
-    case "email.template_reset":
-      return t("auditLog.actions.emailTemplateReset");
-    case "issuer.settings_updated":
-      return t("auditLog.actions.issuerSettingsUpdated");
-    case "theme.settings_updated":
-      return t("auditLog.actions.themeSettingsUpdated");
-    case "onboarding.settings_updated":
-      return t("auditLog.actions.onboardingSettingsUpdated");
-    case "notification.settings_updated":
-      return t("auditLog.actions.notificationSettingsUpdated");
-    case "slack.settings_updated":
-      return t("auditLog.actions.slackSettingsUpdated");
-    case "msteams.settings_updated":
-      return t("auditLog.actions.teamsSettingsUpdated");
-    case "provisioning.settings_updated":
-      return t("auditLog.actions.provisioningSettingsUpdated");
-    case "provisioning.run_completed":
-      return t("auditLog.actions.provisioningRunCompleted");
-    case "provisioning.run_failed":
-      return t("auditLog.actions.provisioningRunFailed");
-    case "csc.settings_updated":
-      return t("auditLog.actions.cscSettingsUpdated");
-    case "signing.credential_linked":
-      return t("auditLog.actions.signingCredentialLinked");
-    case "signing.requested":
-      return t("auditLog.actions.signingRequested");
-    case "signing.signed":
-      return t("auditLog.actions.signingSigned");
-    case "signing.completed":
-      return t("auditLog.actions.signingCompleted");
-    case "signing.delivered":
-      return t("auditLog.actions.signingDelivered");
-    case "signing.failed":
-      return t("auditLog.actions.signingFailed");
-    case "signing.declined":
-      return t("auditLog.actions.signingDeclined");
-    case "presentation.requested":
-      return t("auditLog.actions.presentationRequested");
-    case "presentation.org_selected":
-      return t("auditLog.actions.presentationOrgSelected");
-    case "presentation.completed":
-      return t("auditLog.actions.presentationCompleted");
-    case "presentation.denied":
-      return t("auditLog.actions.presentationDenied");
-    case "presentation.expired":
-      return t("auditLog.actions.presentationExpired");
-    case "presentation.request_received":
-      return t("auditLog.actions.presentationRequestReceived");
-    case "presentation.request_sent":
-      return t("auditLog.actions.presentationRequestSent");
-    case "presentation.response_received":
-      return t("auditLog.actions.presentationResponseReceived");
-    case "presentation.request_failed":
-      return t("auditLog.actions.presentationRequestFailed");
-    case "identity_proofing.flow_created":
-      return t("auditLog.actions.identityProofingFlowCreated");
-    case "identity_proofing.flows_configured":
-      return t("auditLog.actions.identityProofingFlowsConfigured");
-    case "identity_proofing.flow_version_created":
-      return t("auditLog.actions.identityProofingFlowVersionCreated");
-    case "identity_proofing.flow_version_activated":
-      return t("auditLog.actions.identityProofingFlowVersionActivated");
-    case "identity_proofing.requested":
-      return t("auditLog.actions.identityProofingRequested");
-    case "identity_proofing.session_created":
-      return t("auditLog.actions.identityProofingSessionCreated");
-    case "identity_proofing.session_started":
-      return t("auditLog.actions.identityProofingSessionStarted");
-    case "identity_proofing.session_handover":
-      return t("auditLog.actions.identityProofingSessionHandover");
-    case "identity_proofing.session_ended":
-      return t("auditLog.actions.identityProofingSessionEnded");
-    case "identity_proofing.session_cancelled":
-      return t("auditLog.actions.identityProofingSessionCancelled");
-    case "identity_proofing.session_purged":
-      return t("auditLog.actions.identityProofingSessionPurged");
-    case "identity_proofing.result_read":
-      return t("auditLog.actions.identityProofingResultRead");
-    case "identity_proofing.device_claimed":
-      return t("auditLog.actions.identityProofingDeviceClaimed");
-    case "identity_proofing.device_handed_over":
-      return t("auditLog.actions.identityProofingDeviceHandedOver");
-    case "identity_proofing.handover_issued":
-      return t("auditLog.actions.identityProofingHandoverIssued");
-    case "identity_proofing.handover_claim_failed":
-      return t("auditLog.actions.identityProofingHandoverClaimFailed");
-    case "identity_proofing.access_denied":
-      return t("auditLog.actions.identityProofingAccessDenied");
-    case "identity_proofing.approved":
-      return t("auditLog.actions.identityProofingApproved");
-    case "identity_proofing.rejected":
-      return t("auditLog.actions.identityProofingRejected");
-    case "identity_proofing.needs_review":
-      return t("auditLog.actions.identityProofingNeedsReview");
-    case "identity_proofing.review_decided":
-      return t("auditLog.actions.identityProofingReviewDecided");
-    case "identity_proofing.data_exported":
-      return t("auditLog.actions.identityProofingDataExported");
-    case "identity_proofing.flow_kind_configured":
-      return t("auditLog.actions.identityProofingFlowKindConfigured");
-    case "identity_proofing.customer_created":
-      return t("auditLog.actions.identityProofingCustomerCreated");
-    case "identity_proofing.customer_updated":
-      return t("auditLog.actions.identityProofingCustomerUpdated");
-    case "identity_proofing.customer_flows_configured":
-      return t("auditLog.actions.identityProofingCustomerFlowsConfigured");
-    case "identity_proofing.customer_removed":
-      return t("auditLog.actions.identityProofingCustomerRemoved");
-    case "identity_proofing.api_key_created":
-      return t("auditLog.actions.identityProofingApiKeyCreated");
-    case "identity_proofing.api_key_revoked":
-      return t("auditLog.actions.identityProofingApiKeyRevoked");
-    case "identity_proofing.webhook_configured":
-      return t("auditLog.actions.identityProofingWebhookConfigured");
-    case "identity_proofing.webhook_secret_rotated":
-      return t("auditLog.actions.identityProofingWebhookSecretRotated");
-    case "identity_proofing.webhook_removed":
-      return t("auditLog.actions.identityProofingWebhookRemoved");
-    case "identity_proofing.flow_hosted_configured":
-      return t("auditLog.actions.identityProofingFlowHostedConfigured");
-    case "identity_proofing.flow_diplomas_configured":
-      return t("auditLog.actions.identityProofingFlowDiplomasConfigured");
-    case "identity_proofing.diploma_added":
-      return t("auditLog.actions.identityProofingDiplomaAdded");
-    case "identity_proofing.diploma_rejected":
-      return t("auditLog.actions.identityProofingDiplomaRejected");
-    case "identity_proofing.flow_address_configured":
-      return t("auditLog.actions.identityProofingFlowAddressConfigured");
-    case "identity_proofing.address_added":
-      return t("auditLog.actions.identityProofingAddressAdded");
-    case "identity_proofing.flow_employment_configured":
-      return t("auditLog.actions.identityProofingFlowEmploymentConfigured");
-    case "identity_proofing.employment_added":
-      return t("auditLog.actions.identityProofingEmploymentAdded");
-    case "identity_proofing.employment_rejected":
-      return t("auditLog.actions.identityProofingEmploymentRejected");
-    case "identity_proofing.paused":
-      return t("auditLog.actions.identityProofingPaused");
-    case "identity_proofing.resumed":
-      return t("auditLog.actions.identityProofingResumed");
-    default:
-      return action;
-  }
+  const key = lookupAction(ACTION_LABEL, action);
+  return key ? t(`auditLog.actions.${key}`) : action;
 }
 
 export function auditTargetLabel(targetType: string, t: TFunction): string {
-  switch (targetType) {
-    case "organization":
-      return t("auditLog.targets.organization");
-    case "membership":
-      return t("auditLog.targets.member");
-    case "department":
-      return t("auditLog.targets.department");
-    case "mandate":
-      return t("auditLog.targets.mandate");
-    case "user":
-      return t("auditLog.targets.user");
-    case "qerds_message":
-      return t("auditLog.targets.qerdsMessage");
-    case "qerds_address":
-      return t("auditLog.targets.qerdsAddress");
-    case "qerds_contact":
-      return t("auditLog.targets.qerdsContact");
-    case "wallet_instance":
-      return t("auditLog.targets.walletInstance");
-    case "wallet_representation":
-      return t("auditLog.targets.walletRepresentation");
-    case "kvk_registration":
-      return t("auditLog.targets.kvkRegistration");
-    case "postguard_key":
-      return t("auditLog.targets.postguardKey");
-    case "postguard_encryption_key":
-      return t("auditLog.targets.postguardEncryptionKey");
-    case "postguard_file":
-      return t("auditLog.targets.postguardFile");
-    case "postguard_settings":
-      return t("auditLog.targets.postguardSettings");
-    case "attestation_schema":
-      return t("auditLog.targets.attestationSchema");
-    case "attestation_template":
-      return t("auditLog.targets.attestationTemplate");
-    case "issued_attestation":
-      return t("auditLog.targets.issuedAttestation");
-    case "attestation_key":
-      return t("auditLog.targets.attestationKey");
-    case "held_attestation":
-      return t("auditLog.targets.heldAttestation");
-    case "credential_offer":
-      return t("auditLog.targets.credentialOffer");
-    case "org_email_settings":
-      return t("auditLog.targets.orgEmailSettings");
-    case "org_email_template":
-      return t("auditLog.targets.orgEmailTemplate");
-    case "org_issuer_settings":
-      return t("auditLog.targets.orgIssuerSettings");
-    case "org_theme_settings":
-      return t("auditLog.targets.orgThemeSettings");
-    case "org_onboarding_attestations":
-      return t("auditLog.targets.orgOnboardingAttestations");
-    case "org_notification_settings":
-      return t("auditLog.targets.orgNotificationSettings");
-    case "org_identity_settings":
-      return t("auditLog.targets.orgIdentitySettings");
-    case "org_screening_settings":
-      return t("auditLog.targets.orgScreeningSettings");
-    case "org_slack_settings":
-      return t("auditLog.targets.orgSlackSettings");
-    case "org_teams_settings":
-      return t("auditLog.targets.orgTeamsSettings");
-    case "org_provisioning_settings":
-      return t("auditLog.targets.orgProvisioningSettings");
-    case "org_csc_settings":
-      return t("auditLog.targets.orgCscSettings");
-    case "signing_credentials":
-      return t("auditLog.targets.signingCredentials");
-    case "signing_requests":
-      return t("auditLog.targets.signingRequests");
-    case "presentation_transaction":
-      return t("auditLog.targets.presentationTransaction");
-    case "outbound_presentation_request":
-      return t("auditLog.targets.outboundPresentationRequest");
-    case "org_identity_proofing_settings":
-      return t("auditLog.targets.orgIdentityProofingSettings");
-    case "identity_proofing_flow":
-      return t("auditLog.targets.identityProofingFlow");
-    case "identity_proofing_request":
-      return t("auditLog.targets.identityProofingRequest");
-    case "identity_proofing_customer":
-      return t("auditLog.targets.identityProofingCustomer");
-    default:
-      return targetType;
-  }
+  return Object.hasOwn(TARGET_LABEL, targetType)
+    ? t(`auditLog.targets.${TARGET_LABEL[targetType]}`)
+    : targetType;
 }
 
 function fieldValue(
@@ -645,6 +538,21 @@ function addedFieldLabel(key: string, t: TFunction): string | null {
   }
 }
 
+function changedValue(
+  key: string,
+  value: unknown,
+  dateFormatter: Intl.DateTimeFormat,
+  t: TFunction,
+): string {
+  if (key === "errorCode" && typeof value === "string") {
+    return proofingRejectionReason(value, t);
+  }
+  if (key === "method" && typeof value === "string") {
+    return proofingMethodLabel(value, t);
+  }
+  return fieldValue(value, dateFormatter);
+}
+
 // The human-readable detail for an event, derived from the uniform
 // {before, after} metadata: an update diffs changed fields ("old → new"),
 // led by whom it is about; a create/delete shows the snapshot's identifying
@@ -669,12 +577,7 @@ export function auditSubject(
       )
       .map((key) => {
         const label = isEmpty(before[key]) ? addedFieldLabel(key, t) : null;
-        const value =
-          key === "errorCode" && typeof after[key] === "string"
-            ? proofingRejectionReason(after[key], t)
-            : key === "method" && typeof after[key] === "string"
-              ? proofingMethodLabel(after[key], t)
-              : fieldValue(after[key], dateFormatter);
+        const value = changedValue(key, after[key], dateFormatter, t);
         return label
           ? `${label}: ${value}`
           : `${fieldValue(before[key], dateFormatter)} → ${value}`;

@@ -37,22 +37,9 @@ func TestFlowEmploymentSaveAudit(t *testing.T) {
 }
 
 func TestEmploymentSealedTillPurge(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
-	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newSealedFixture(t, "Casino", EventSessionEmploymentAdded)
+	pool, requests, webhooks, orgID, in := f.pool, f.requests, f.webhooks, f.orgID, f.in
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Casino")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionEmploymentAdded}); err != nil {
-		t.Fatalf("Save webhook: %v", err)
-	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
 	in.Employment = EmploymentRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Employment != EmploymentRequired {
