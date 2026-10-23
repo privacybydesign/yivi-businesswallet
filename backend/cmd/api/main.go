@@ -177,6 +177,7 @@ func newSealValidators(ctx context.Context, cfg config.Config) (sealValidators, 
 		store = loaded
 		return store, nil
 	}
+
 	revocation := diploma.RevocationOffline
 	if cfg.DiplomaOCSP {
 		revocation = diploma.RevocationOCSP
@@ -195,6 +196,7 @@ func newSealValidators(ctx context.Context, cfg config.Config) (sealValidators, 
 	default:
 		return sealValidators{}, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
 	}
+
 	switch cfg.EmploymentValidatorProvider {
 	case config.ProviderStub:
 		out.employment = diploma.StubValidator{}
@@ -1199,6 +1201,7 @@ func (w *wiring) setDocumentCheckers(ctx context.Context, proofingService *proof
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
+
 	employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
 	if err := employmentChecker.Ping(ctx); err != nil {
 		return fmt.Errorf("employment validator ping: %w", err)

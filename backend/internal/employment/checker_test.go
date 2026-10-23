@@ -21,7 +21,6 @@ func (f fakeValidator) Validate(context.Context, []byte) (*diploma.Verification,
 	return f.verification, f.err
 }
 
-// sealed is a verification that passed.
 var sealed = &diploma.Verification{Valid: true, Checks: []verify.Check{}}
 
 type fakeParser struct {

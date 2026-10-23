@@ -38,6 +38,7 @@ func uwvPDF(t *testing.T, p *pki, ocspURL string) ([]byte, *x509.Certificate) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	tmpl := sealTemplate(t, ocspURL)
 	tmpl.Subject = pkix.Name{
 		CommonName:   "UWV",
@@ -46,6 +47,7 @@ func uwvPDF(t *testing.T, p *pki, ocspURL string) ([]byte, *x509.Certificate) {
 	}
 	tmpl.SerialNumber = big.NewInt(time.Now().UnixNano())
 	tmpl.NotBefore, tmpl.NotAfter = time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+
 	rootKey := p.responder.issuers[p.seal.SerialNumber.String()].key
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.root, &key.PublicKey, rootKey)
 	if err != nil {

@@ -156,12 +156,13 @@ func splitLines(page string) []string {
 // holder line above it; a page without them is no page of a statement.
 func pageFooter(lines []string) (footer, error) {
 	for i, l := range lines {
-		if reHolderDates.MatchString(l) && i > 0 && lines[i-1] != "" {
-			if !slices.Contains(lines, footerTitle) {
-				break
-			}
-			return footer{holder: lines[i-1], dates: l}, nil
+		if !reHolderDates.MatchString(l) || i == 0 || lines[i-1] == "" {
+			continue
 		}
+		if !slices.Contains(lines, footerTitle) {
+			break
+		}
+		return footer{holder: lines[i-1], dates: l}, nil
 	}
 	return footer{}, fmt.Errorf("%w: a page without the holder footer", ErrNotAStatement)
 }
@@ -292,6 +293,7 @@ func mergeRelations(blocks []Relation) []Relation {
 			merged[i].Worked = b.Worked
 		}
 	}
+
 	for i := range merged {
 		merged[i].Kind = classify(merged[i].Employer, merged[i].PayrollTaxNumber)
 	}
