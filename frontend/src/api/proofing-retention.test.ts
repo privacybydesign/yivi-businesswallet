@@ -30,6 +30,8 @@ const hostedPage = {
   linkExpiresAt: "2026-10-05T09:30:00Z",
   started: false,
   addressGiven: false,
+  employmentGiven: false,
+  employmentGiven: false,
   sessionId: "ps_b7k2mq4xz6rt3vnw5hc2jd7fae",
   embedOrigins: [],
   locales: [],
@@ -62,6 +64,7 @@ const hostedPage = {
     yiviAvailable: true,
     diplomaMode: "off",
     addressMode: "off",
+    employmentMode: "off",
     kind: "identity",
     retentionDays: RETENTION_DAYS,
   },
@@ -118,10 +121,15 @@ describe("a value the backend adds", () => {
     const flow = {
       ...hostedPage.flow,
       diplomaMode: "optional",
+      employmentMode: "optional",
       kind: "data_portability",
     };
     expect(schema.parse({ ...hostedPage, flow })).toMatchObject({
-      flow: { diplomaMode: "required", kind: "identity" },
+      flow: {
+        diplomaMode: "required",
+        employmentMode: "required",
+        kind: "identity",
+      },
     });
   });
 });
@@ -151,6 +159,7 @@ describe("the session lifetime a subject is told", () => {
       linkExpiresAt: hostedPage.linkExpiresAt,
       started: true,
       addressGiven: false,
+      employmentGiven: false,
       sessionTtlSeconds: SESSION_TTL_SECONDS,
     };
     expect(lastSchema().parse(status)).toMatchObject({
@@ -198,6 +207,7 @@ describe("the legal retention", () => {
       linkExpiresAt: "2026-10-19T12:00:00Z",
       started: true,
       addressGiven: false,
+      employmentGiven: false,
     };
     const notice = {
       sessions: 2,
@@ -218,6 +228,7 @@ describe("the legal retention", () => {
       linkExpiresAt: "2026-10-19T12:00:00Z",
       started: true,
       addressGiven: false,
+      employmentGiven: false,
       dataMatchesKept: 3,
       legalRetention: {
         sessions: 1,

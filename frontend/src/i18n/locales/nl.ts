@@ -594,6 +594,12 @@ export const nl: Translation<typeof en> = {
       addressNotAsked: "Deze controle vraagt niet om een adres.",
       addressNotFound:
         "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
+      employmentNeedsPage:
+        "Deze flow vraagt om het Verzekeringsbericht van UWV, dat wordt geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      employmentClosed:
+        "Het Verzekeringsbericht kan maar één keer worden geüpload, kort na een geslaagde identiteitscontrole.",
+      employmentNotAsked:
+        "Deze controle vraagt niet om een Verzekeringsbericht.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
@@ -671,6 +677,45 @@ export const nl: Translation<typeof en> = {
         duplicate: "Dit diploma is al toegevoegd.",
       },
     },
+    employment: {
+      overview: {
+        label: "Arbeidsverleden",
+        detail:
+          "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
+      },
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je Verzekeringsbericht toe",
+      intro:
+        "Upload het Verzekeringsbericht van UWV. Daarin staat je arbeidsverleden. We controleren of UWV het heeft uitgegeven en of het op jouw naam staat.",
+      how: {
+        login: "Log in bij Mijn UWV met DigiD.",
+        openUwv: "Open Mijn UWV",
+        download:
+          "Open bij ‘Persoonlijke gegevens’ je ‘Arbeidsverleden’ en download het als pdf.",
+        upload:
+          "Upload die pdf hier, precies zoals je hem downloadde. Druk hem niet af naar pdf en geef hem geen andere naam, want dan verdwijnt het zegel van UWV.",
+      },
+      choose: "Pdf kiezen",
+      chooseAgain: "Een andere pdf kiezen",
+      checking: "Bezig met controleren…",
+      closed: "De tijd om je Verzekeringsbericht toe te voegen is voorbij.",
+      continue: "Verder",
+      kept: "Verzekeringsbericht van {{date}} geaccepteerd",
+      keptChecks:
+        "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
+      noRelations: "Er staat geen huidig dienstverband in.",
+      since: "sinds {{from}}",
+      reasons: {
+        notAStatement:
+          "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
+        signatureInvalid:
+          "Het zegel van UWV klopt niet: het bestand is gewijzigd of niet door UWV gemaakt. Download het opnieuw en upload het originele bestand.",
+        holderMismatch:
+          "Dit Verzekeringsbericht staat op naam van iemand anders.",
+        stale:
+          "Dit Verzekeringsbericht is ouder dan 30 dagen. Download een nieuw exemplaar.",
+      },
+    },
     flows: {
       eidas: "eIDAS {{level}}",
       noAssurance: "Geen minimumniveau",
@@ -726,7 +771,7 @@ export const nl: Translation<typeof en> = {
       emailPlaceholder: "naam@example.nl",
       emailRequired: "Vul een geldig e-mailadres in.",
       diplomasOnScreen:
-        "Deze flow vraagt om een adres of diploma's, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
+        "Deze flow vraagt om een adres, diploma's of een Verzekeringsbericht, die worden opgegeven op de pagina waar de controle loopt, dus hij loopt op dit scherm of als link.",
       notLinkable:
         "Deze flow wordt niet per e-mail of als link verstuurd, dus de persoon doorloopt hem op dit scherm.",
       addName: {
@@ -762,6 +807,7 @@ export const nl: Translation<typeof en> = {
         session: "Scan de QR-code",
         address: "Adres",
         diplomas: "Diploma",
+        employment: "Arbeidsverleden",
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
@@ -998,6 +1044,17 @@ export const nl: Translation<typeof en> = {
         tag_other: "{{count}} diploma's",
         missing: "Geen diploma",
         number: "DUO-nummer {{number}}",
+      },
+      employment: {
+        title: "Huidig dienstverband",
+        none: "Geen Verzekeringsbericht geüpload.",
+        missing: "Geen arbeidsverleden",
+        statementDate: "Verzekeringsbericht van {{date}}",
+        noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
+        payrollTaxNumber: "Loonheffingennummer {{number}}",
+        since: "sinds {{from}}",
+        source:
+          "Uit het Verzekeringsbericht van UWV, gecontroleerd op het zegel van UWV en op de geverifieerde naam en geboortedatum. Alleen het dienstverband dat op de datum van het bericht loopt wordt bewaard.",
       },
       purged: "Persoonsgegevens gewist",
       purgedSubject: "Gewist",
@@ -1537,6 +1594,7 @@ export const nl: Translation<typeof en> = {
       face_verification: "Gezichtscontrole",
       address: "Adres invullen",
       diploma_upload: "Diploma's uploaden (DUO)",
+      employment_upload: "Verzekeringsbericht uploaden (UWV)",
     },
     bsnPolicies: {
       retrieve: "Het volledige BSN bewaren",
@@ -1660,6 +1718,8 @@ export const nl: Translation<typeof en> = {
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
         diplomaHint:
           "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
+        employmentHint:
+          "Na de identiteitscontrole, in de browser: de persoon uploadt het Verzekeringsbericht uit Mijn UWV, gecontroleerd op het zegel van UWV en op naam en geboortedatum. Alleen op het scherm of als link, nooit per e-mail.",
         faceWithoutChip:
           "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
         lifetime: "Geldigheid QR-code",
@@ -1690,7 +1750,7 @@ export const nl: Translation<typeof en> = {
         title: "Wat je ontvangt",
         hint: "Zonder vinkjes krijg je alleen de uitkomst. Elk onderdeel dat je aanvinkt heeft een reden nodig in elke taal van de gehoste pagina; de persoon leest die voor ze beginnen.",
         identityLocked:
-          "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma wordt daarmee vergeleken.",
+          "Naam en documentgegevens blijft aan: een gegevensverzoek vindt de sessies van de persoon op naam en geboortedatum, en een diploma of Verzekeringsbericht wordt daarmee vergeleken.",
         ageOver: "Minimumleeftijd",
         ageOverOption: "{{age}} jaar of ouder",
         ageOverHint:
@@ -2348,6 +2408,10 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om het adres vraagt",
       identityProofingAddressAdded: "Adres ingevuld",
       identityProofingAddressReviewed: "Adres beoordeeld",
+      identityProofingFlowEmploymentConfigured:
+        "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
+      identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",
+      identityProofingEmploymentRejected: "Verzekeringsbericht geweigerd",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",

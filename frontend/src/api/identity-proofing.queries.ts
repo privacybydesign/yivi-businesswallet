@@ -47,6 +47,7 @@ import {
   saveProofingFlowHosted,
   saveProofingFlowDiplomas,
   saveProofingFlowAddress,
+  saveProofingFlowEmployment,
   getProofingPause,
   listProofingPauses,
   setPlatformProofingPause,
@@ -57,6 +58,7 @@ import {
   uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
+  uploadProofingEmployment,
 } from "./identity-proofing";
 import type {
   ProofingSettings,
@@ -94,6 +96,8 @@ import type {
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
+  EmploymentMode,
+  EmploymentVerdict,
   ProofingDataMatch,
   ListedStatus,
 } from "./identity-proofing";
@@ -319,6 +323,23 @@ export function useSaveFlowAddressMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowAddress(slug, flowId, mode),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => invalidateFlow(queryClient, slug),
+  });
+}
+
+// The flow lists carry each flow's employment mode, so they are refetched.
+export function useSaveFlowEmploymentMutation(
+  slug: string,
+): UseMutationResult<
+  EmploymentMode,
+  Error,
+  { flowId: string; mode: EmploymentMode }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ flowId, mode }) =>
+      saveProofingFlowEmployment(slug, flowId, mode),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });
@@ -1026,6 +1047,17 @@ export function useSubmitAddressMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: verifyQueryKey(target) }),
+  });
+}
+
+// Checks an uploaded Verzekeringsbericht. The step shows what was kept until
+// the subject continues, as the diploma step does.
+export function useUploadEmploymentMutation(
+  target: VerifyTarget,
+): UseMutationResult<EmploymentVerdict, Error, File> {
+  return useMutation({
+    mutationFn: (file) => uploadProofingEmployment(target, file),
+    meta: { suppressErrorToast: true },
   });
 }
 

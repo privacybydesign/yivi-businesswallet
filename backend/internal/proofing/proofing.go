@@ -412,6 +412,13 @@ type Request struct {
 	AddressAddedAt *time.Time
 	// AddressReview is a self-declared address's review; empty for none.
 	AddressReview AddressReview
+	// Employment is whether the request asks for the subject's UWV
+	// Verzekeringsbericht once the identity is approved: its flow's
+	// EmploymentMode when it was sent. SubjectEmployment is what was kept of
+	// it, decrypted, at EmploymentAddedAt; nil before, and once purged.
+	Employment        EmploymentMode
+	SubjectEmployment *Employment
+	EmploymentAddedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -479,8 +486,8 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 }
 
 // linkLive reports whether a hosted link still has its subject at work:
-// waiting to start, its session running or in review, or an address, diploma
-// or data export window open. A link past all of that only shows its outcome.
+// waiting to start, its session running or in review, or an address,
+// diploma, employment or data export window open. A link past all of that only shows its outcome.
 func (r Request) linkLive(now time.Time) bool {
 	if r.PurgedAt != nil || r.CancelledAt != nil {
 		return false
@@ -489,6 +496,9 @@ func (r Request) linkLive(now time.Time) bool {
 		return true
 	}
 	if until := addressUntil(r); until != nil && now.Before(*until) {
+		return true
+	}
+	if until := employmentUntil(r); until != nil && now.Before(*until) {
 		return true
 	}
 	if until := diplomasUntil(r); until != nil && now.Before(*until) {
@@ -552,6 +562,8 @@ type OrgFlow struct {
 	Diplomas DiplomaMode
 	// Address is whether the flow asks for the subject's postal address.
 	Address AddressMode
+	// Employment is whether the flow asks for the UWV Verzekeringsbericht.
+	Employment EmploymentMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
 	// HostedEnabled is the flow's "Allow sending this flow as a link" switch

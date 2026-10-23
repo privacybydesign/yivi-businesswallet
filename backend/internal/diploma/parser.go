@@ -19,6 +19,9 @@ import (
 // extract at all.
 var ErrNotADiploma = errors.New("document is not a DUO diploma extract")
 
+// ErrUnreadable is a PDF that PDFium cannot open or that has no pages.
+var ErrUnreadable = errors.New("pdf cannot be read")
+
 // Parser extracts the printed data from a diploma extract PDF.
 type Parser interface {
 	Parse(ctx context.Context, pdf []byte) (*Document, error)
@@ -69,56 +72,96 @@ type Pages struct {
 
 // Parse extracts the diploma data from the PDF bytes.
 func (p *PDFiumParser) Parse(ctx context.Context, pdf []byte) (*Document, error) {
-	pages, err := p.extract(ctx, pdf)
+	pages, err := onInstance(ctx, p, pdf, readPages)
 	if err != nil {
 		return nil, err
 	}
 	return extractDocument(pages)
 }
 
-// extract reads the pages on a pooled instance, killing the instance when the
+// Text returns the plain text of every page, on the same pool and limits as
+// Parse: for another sealed document whose layout needs no positions.
+func (p *PDFiumParser) Text(ctx context.Context, pdf []byte) ([]string, error) {
+	return onInstance(ctx, p, pdf, readText)
+}
+
+// onInstance runs read on a pooled instance, killing the instance when the
 // parse outlives pdfiumParseTimeout or ctx. Kill interrupts the WebAssembly
 // call in flight only when the pool's runtime closes on context done.
-func (p *PDFiumParser) extract(ctx context.Context, pdf []byte) (*Pages, error) {
+func onInstance[T any](ctx context.Context, p *PDFiumParser, pdf []byte, read func(pdfium.Pdfium, []byte) (T, error)) (T, error) {
+	var none T
 	wait := time.NewTimer(pdfiumInstanceTimeout)
 	defer wait.Stop()
 	select {
 	case p.parses <- struct{}{}:
 		defer func() { <-p.parses }()
 	case <-wait.C:
-		return nil, errors.New("diploma: get pdfium instance: too many parses in flight")
+		return none, errors.New("diploma: get pdfium instance: too many parses in flight")
 	case <-ctx.Done():
-		return nil, fmt.Errorf("diploma: get pdfium instance: %w", ctx.Err())
+		return none, fmt.Errorf("diploma: get pdfium instance: %w", ctx.Err())
 	}
 
 	instance, err := p.pool.GetInstance(pdfiumInstanceTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("diploma: get pdfium instance: %w", err)
+		return none, fmt.Errorf("diploma: get pdfium instance: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, pdfiumParseTimeout)
 	defer cancel()
 
 	type result struct {
-		pages *Pages
+		value T
 		err   error
 	}
 	done := make(chan result, 1)
 	go func() {
-		pages, err := readPages(instance, pdf)
-		done <- result{pages, err}
+		value, err := read(instance, pdf)
+		done <- result{value, err}
 	}()
 	select {
 	case r := <-done:
 		if err := instance.Close(); err != nil {
 			slog.Warn("diploma: return pdfium instance to pool", slog.String("error", err.Error()))
 		}
-		return r.pages, r.err
+		return r.value, r.err
 	case <-ctx.Done():
 		if err := instance.Kill(); err != nil {
 			slog.Warn("diploma: kill pdfium instance", slog.String("error", err.Error()))
 		}
-		return nil, fmt.Errorf("diploma: parse pdf: %w", ctx.Err())
+		return none, fmt.Errorf("diploma: parse pdf: %w", ctx.Err())
 	}
+}
+
+// readText reads the plain text of every page.
+func readText(instance pdfium.Pdfium, pdf []byte) ([]string, error) {
+	doc, err := instance.OpenDocument(&requests.OpenDocument{File: &pdf})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreadable, err)
+	}
+	defer func() {
+		_, err := instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
+		if err != nil {
+			slog.Warn("diploma: close pdf document", slog.String("error", err.Error()))
+		}
+	}()
+
+	pageCount, err := instance.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
+	if err != nil {
+		return nil, fmt.Errorf("diploma: count pages: %w", err)
+	}
+	if pageCount.PageCount < 1 {
+		return nil, fmt.Errorf("%w: pdf has no pages", ErrUnreadable)
+	}
+	pages := make([]string, 0, pageCount.PageCount)
+	for i := range pageCount.PageCount {
+		pageText, err := instance.GetPageText(&requests.GetPageText{
+			Page: requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("diploma: extract text of page %d: %w", i+1, err)
+		}
+		pages = append(pages, pageText.Text)
+	}
+	return pages, nil
 }
 
 func readPages(instance pdfium.Pdfium, pdf []byte) (*Pages, error) {

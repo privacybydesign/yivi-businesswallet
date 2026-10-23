@@ -99,7 +99,9 @@ tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `internal/diploma` + `routes/flow-editor.tsx` (the flow's diploma
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
 `matchSubject` in `service.go` (one known person, §13), `address*.go` +
-`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16).
+`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16),
+`employment*.go` + `internal/employment` + `EmploymentStep` (the UWV
+Verzekeringsbericht, §17).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -1697,6 +1699,12 @@ only: the engine knows nothing of it.
   shows the step after an approval and hands back (`onSettled`, the hosted
   redirect) only once the subject is done: at least one extract held, or the
   window closed.
+- **The signature check is per issuer** (`trust.Issuer.Lacks`): DUO's
+  requires everything below; UWV's seal (§17) lacks the certification, the
+  timestamp, the signed attributes and embedded revocation, so those checks are
+  left out for it, not passed. `verify.PDF` also reads a SignerInfo digest
+  written as an RSA signature OID (`sha256WithRSAEncryption`, UWV's) as its
+  hash.
 - **The check** (`internal/diploma`, as in `privacybydesign/go-diploma-issuer`,
   which has the detail): DUO's PAdES signature is verified first, on the raw
   bytes: it must cover the whole file, carry a qualified timestamp (the
@@ -2108,3 +2116,95 @@ and on a Yivi app request against the registered (BRP) address too.
     access export (strong match only), and the Sessions page.
   - `Purge` clears it and strips `address` from the request's webhook
     deliveries.
+
+## 17. Employment (UWV Verzekeringsbericht)
+
+For onboarding that needs the person's occupational status (AMLR customer due
+diligence). Wallet-side only, like the address (§16): the engine knows nothing
+of it. The subject uploads the Verzekeringsbericht they download from Mijn UWV
+with DigiD; the wallet checks UWV's seal and keeps the employment relations.
+
+- **AMLR basis** (checked 2026-10-22):
+  - AMLR Art. 22(1)(a), the identification data, does not list occupation.
+  - AMLA's final draft RTS under Art. 28(1) (30 September 2026, not adopted)
+    covers it in Art. 16, the purpose and intended nature (AMLR Art. 20(1)(c)
+    and 25). The information "may include" the employment status, gathered and
+    verified as far as the risk warrants.
+  - So verifying it against UWV is the operator's risk-based choice. The
+    strictness below (holder match, freshness) is a product default.
+- **The document** (checked on a real one):
+  - One `adbe.pkcs7.detached` signature over the whole file. No DocMDP, no
+    signed attributes, no timestamp, no embedded revocation information.
+  - The signer is `O=Uitvoeringsinstituut werknemersverzekeringen`,
+    `NTRNL-34360247`: a qualified e-seal certificate (QcCompliance, eseal,
+    QCP-l, no QSCD) from QuoVadis EU Issuing CA G4, granted on the NL Trusted
+    List. That CA is the anchor itself.
+  - Every page ends with the holder ("De heer J. Lin": salutation, initials,
+    surname), "Geboortedatum: dd-mm-yyyy Datum: <dag maand jaar>", the form
+    code `VZB-006` and "Printversie verzekeringsbericht". No BSN.
+  - "Loongegevens" has one block per employer and contract (`Werkgever/
+    Instantie`, `Loonheffingennummer`, `Verzekerde wetten`, `Contractvorm`),
+    then one line per month with hours and Sv-loon. The newest month lags the
+    payroll filing by about a month.
+  - Self-employed people, students and retirees do not appear: an empty list
+    does not tell them apart.
+- **Per flow** (`identity_proofing_flow_settings.employment`,
+  `FlowEmploymentStore`, `PUT .../flows/{id}/employment`, admin): `off` (the
+  default) or `required`, audited `flow_employment_configured`.
+  - `required` needs a flow that reads `dg1` (`flow_no_identity`), and keeps
+    an edit or older version from dropping it (`identityRequired`).
+  - The flow list carries it as `employmentMode`. A data request flow asks for
+    none. A request snapshots it at send (`identity_proofing_requests.employment`).
+- **A page, never a mail**: `employment_needs_page` (422), as §16.
+- **Upload** (`POST .../requests/{id}/employment`, `POST /proof/{token}/employment`,
+  one multipart `file`, 5 MiB, read as one diploma extract):
+  - Within `EmploymentWindow` (1 h) of the approval (`employmentUntil`; the
+    hosted progress says `employmentGiven`). The hosted route checks the link
+    before it reads the body.
+  - **Kept once**: the first accepted statement closes the step
+    (`employment_closed`). A refused one is only audited, so the subject can
+    try another within the window.
+- **The check** (`internal/employment.Checker`), in this order:
+  - UWV's seal (`diploma.NewPadesValidator(store, trust.UWV, …)`) on the raw
+    bytes, on the diploma trust store. Revocation is always online (OCSP),
+    whatever `DIPLOMA_OCSP` says, since nothing is embedded; an unreachable
+    responder fails it. `signature_invalid`, or `not_a_statement` unsigned.
+  - Only then the text (`TextParser` on `diploma.PDFiumParser.Text`, the
+    diploma PDFium pool and limits). Every page must name the same holder;
+    otherwise `not_a_statement`.
+  - The holder (`diploma.MatchInitials`) against `sessionHolder`:
+    - each printed initial begins the chip's given name in its place, one per
+      given name ("Th." for Theodorus, "IJ." for IJsbrand);
+    - the surname is the chip's, plain or ICAO, or a married name joined to it
+      with a hyphen in either order ("Jansen-de Vries" for "de Vries"). The
+      partner's name alone is refused;
+    - the same date of birth. Else `holder_mismatch`.
+  - The printed date at most `StatementMaxAge` (30 days) old, else `stale`.
+- **Kept**: the statement date and only the relations current on it
+  (`Statement.Current`): ones that report a month at most two months before the
+  statement's month, as employers file a month's payroll by the end of the
+  next. Not "the newest month on the statement": someone who stopped in June
+  would have their June job read as current.
+  - Per current relation the employer, payroll tax number, contract form, since
+    when (its first month) and its newest month, blocks of one relation across
+    pages merged. None current: "no current employment or benefit in UWV's
+    records".
+  - Never past relations, the PDF, the holder, the hours or the wages: the
+    purpose is the occupational status now.
+  - Sealed in `employment_ciphertext` (the proofing cipher), with
+    `employment_added_at`. Audited `employment_added` with the statement date
+    only, `employment_rejected` with the reason and failed check. The webhook
+    `session.employment_added` carries it.
+  - Shown in the request responses, the customer API's `result`, a data
+    access export (strong match only), and the Sessions tab.
+  - `Purge` clears it (and the purged check holds it to that) and strips
+    `employment` from the request's webhook deliveries.
+- **Config:** `EMPLOYMENT_VALIDATOR_PROVIDER=uwv` is the default; `stub`
+  (`DEV_MODE` only, the dev stack's default) accepts every seal but still
+  parses and matches for real. `cmd/api` builds both seal validators on one
+  trust store (`newSealValidators`).
+- **The page** runs the steps after the approval as address, diplomas, then
+  employment. An accepted statement stays on screen (date, seal valid, each
+  employer and its months) until the subject continues, as the diploma step does;
+  the upload does not refetch the progress, which would skip past it. It hands
+  back then, or once the window closed.

@@ -64,6 +64,8 @@ type fakeRequests struct {
 	methods  []proofingprovider.Method
 	// handovers counts the new codes recorded.
 	handovers int
+	// employmentRejections are the reasons of the statements refused.
+	employmentRejections []string
 	// actors is the audit actor label of each start and outcome recorded, ""
 	// for the system.
 	actors []string
@@ -99,7 +101,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method,
 		Hosted:                 in.LinkTokenHash != nil,
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
-		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address,
+		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address, Employment: in.Employment,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
 		FlowKind: in.FlowKind,
 	}
@@ -247,6 +249,19 @@ func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uui
 	}
 	f.stored.AddressReview = decided
 	return true, nil
+}
+
+func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectEmployment != nil {
+		return false, nil
+	}
+	f.stored.SubjectEmployment = &emp
+	return true, nil
+}
+
+func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {
+	f.employmentRejections = append(f.employmentRejections, reason)
+	return nil
 }
 
 func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr Address) error {

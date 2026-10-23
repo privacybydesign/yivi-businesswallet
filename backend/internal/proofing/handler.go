@@ -102,6 +102,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.getFlowAddress)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.saveFlowAddress)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/employment", admin(respond.HandlerFunc(h.getFlowEmployment)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/employment", admin(respond.HandlerFunc(h.saveFlowEmployment)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
@@ -117,6 +119,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address/review", reviewer(respond.HandlerFunc(h.decideAddressReview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
@@ -162,6 +165,9 @@ type flowResponse struct {
 	// AddressMode is whether the flow asks for the subject's postal address
 	// after the identity check; absent on a single version, as DiplomaMode.
 	AddressMode AddressMode `json:"addressMode,omitempty"`
+	// EmploymentMode is whether the flow asks for the UWV Verzekeringsbericht
+	// after the identity check; absent on a single version, as DiplomaMode.
+	EmploymentMode EmploymentMode `json:"employmentMode,omitempty"`
 	// flowNeedsReferencePhoto is a flow that matches the face without reading the
 	// chip: only the API can send it, with the sender's own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
@@ -187,7 +193,8 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 	return flowResponse{
 		Flow: f.Flow, Completable: flowCompletable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		AddressMode: f.Address, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
+		AddressMode: f.Address, EmploymentMode: f.Employment, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
+		RetentionDays: f.RetentionDays,
 	}
 }
 
@@ -351,6 +358,13 @@ type requestResponse struct {
 	// AddressReview is a self-declared address's review: pending, confirmed
 	// or rejected.
 	AddressReview AddressReview `json:"addressReview,omitempty"`
+	// EmploymentMode is whether the request asks for the UWV
+	// Verzekeringsbericht; Employment what was kept of it, and EmploymentUntil
+	// when the subject can last upload it (absent until the identity is
+	// approved, and once kept).
+	EmploymentMode  EmploymentMode `json:"employmentMode"`
+	Employment      *Employment    `json:"employment,omitempty"`
+	EmploymentUntil *time.Time     `json:"employmentUntil,omitempty"`
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
@@ -371,6 +385,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
+		EmploymentMode: employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -909,6 +924,10 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}
 	case errors.Is(err, ErrAddressClosed):
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity is approved: " + AddressWindow.String()}
+	case errors.Is(err, ErrEmploymentNotAsked):
+		return &respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}
+	case errors.Is(err, ErrEmploymentClosed):
+		return &respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity is approved: " + EmploymentWindow.String()}
 	case errors.Is(err, ErrAddressNotFound):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}
 	case errors.Is(err, ErrAddressLookupUnavailable):
@@ -919,6 +938,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrAddressNeedsPage):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}
+	case errors.Is(err, ErrEmploymentNeedsPage):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrHostedDisabled):
 		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
 	case errors.Is(err, ErrProofingPaused):
@@ -926,7 +947,7 @@ func mapError(err error) error {
 	case errors.Is(err, ErrOrgNotFound):
 		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
 	case errors.Is(err, ErrFlowNoIdentity):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's holder is matched against them"}
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's or Verzekeringsbericht's holder is matched against them"}
 	case errors.Is(err, ErrDataRequestFlow):
 		return &respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}
 	case errors.Is(err, ErrDataFlowForMember):

@@ -96,6 +96,8 @@ type requestStore interface {
 	SetRegisteredAddress(ctx context.Context, req Request, addr Address) error
 	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview) (bool, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
+	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
+	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -176,10 +178,13 @@ type Service struct {
 	diplomaChecker      diplomaChecker
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
 	flowAddressSettings flowAddressStore
-	ips                 Provider
-	verifier            verifier
-	mailer              Mailer
-	now                 func() time.Time
+	// flowEmploymentSettings is each flow's EmploymentMode; nil asks for none.
+	flowEmploymentSettings flowEmploymentStore
+	employmentChecker      employmentChecker
+	ips                    Provider
+	verifier               verifier
+	mailer                 Mailer
+	now                    func() time.Time
 	// readChecks throttles the engine re-check of a single-request read.
 	readChecks *readThrottle
 	// hostedBaseURL is the public page a hosted link's token is appended to.
@@ -212,6 +217,8 @@ type Stores struct {
 	Diplomas     diplomaStore
 	// FlowAddresses holds each flow's AddressMode; nil asks for none.
 	FlowAddresses flowAddressStore
+	// FlowEmployment holds each flow's EmploymentMode; nil asks for none.
+	FlowEmployment flowEmploymentStore
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
@@ -224,8 +231,8 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		flowAddressSettings: stores.FlowAddresses,
-		ips:                 ips, verifier: verifier, mailer: mailer, now: time.Now,
+		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
+		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
@@ -387,6 +394,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	employment, err := s.allFlowEmployment(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	kinds, err := s.allFlowKinds(ctx, org.ID)
 	if err != nil {
 		return nil, err
@@ -407,8 +418,8 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
-			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity, HostedEnabled: !slices.Contains(unhosted, f.ID),
-			HostedReturnURL: returnURLs[f.ID],
+			Diplomas: DiplomasOff, Address: AddressOff, Employment: EmploymentOff, Kind: FlowIdentity,
+			HostedEnabled: !slices.Contains(unhosted, f.ID), HostedReturnURL: returnURLs[f.ID],
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
@@ -419,6 +430,9 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 		}
 		if mode, ok := addresses[f.ID]; ok {
 			of.Address = mode
+		}
+		if mode, ok := employment[f.ID]; ok {
+			of.Employment = mode
 		}
 		if view == FlowsAll || of.Allowed {
 			out = append(out, of)
@@ -743,17 +757,21 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
+	employment, err := s.flowEmployment(ctx, org.ID, flow.ID)
+	if err != nil {
+		return Sent{}, err
+	}
 	kind, err := s.flowKind(ctx, org.ID, flow.ID)
 	if err != nil {
 		return Sent{}, err
 	}
 	// A data request is an external person asking for their data; it
-	// collects no diplomas and no address.
+	// collects no diplomas, address or employment.
 	if kind.dataRequest() {
 		if settings == nil {
 			return Sent{}, ErrDataFlowForMember
 		}
-		diplomas, address = DiplomasOff, AddressOff
+		diplomas, address, employment = DiplomasOff, AddressOff, EmploymentOff
 	}
 	if diplomas.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
 		return Sent{}, ErrDiplomasNeedPage
@@ -761,8 +779,11 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if address.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
 		return Sent{}, ErrAddressNeedsPage
 	}
+	if employment.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
+		return Sent{}, ErrEmploymentNeedsPage
+	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *settings, flow, diplomas, address, kind, photo)
+		return s.createHosted(ctx, org, by, in, subject, *settings, flow, diplomas, address, employment, kind, photo)
 	}
 
 	id := uuid.New()
@@ -784,7 +805,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
-		Diplomas: diplomas, Address: address, FlowKind: kind,
+		Diplomas: diplomas, Address: address, Employment: employment, FlowKind: kind,
 	})
 	if err != nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess, err)
@@ -845,7 +866,8 @@ func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Te
 // redirect, else the flow's return page unless NoRedirect, must be on one of
 // the org's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	settings Settings, flow proofingprovider.Flow, diplomas DiplomaMode, address AddressMode, kind FlowKind, photo *proofingprovider.Image,
+	settings Settings, flow proofingprovider.Flow, diplomas DiplomaMode, address AddressMode, employment EmploymentMode, kind FlowKind,
+	photo *proofingprovider.Image,
 ) (Sent, error) {
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
@@ -880,7 +902,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
 		LinkTokenHash: hash, RedirectURL: redirect, Language: in.Language,
-		Diplomas: diplomas, Address: address, FlowKind: kind, ReferencePhoto: photo,
+		Diplomas: diplomas, Address: address, Employment: employment, FlowKind: kind, ReferencePhoto: photo,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -1015,14 +1037,19 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 }
 
 // identityRequired reports whether flow flowID must read the name and date of
-// birth: a required diploma's holder is checked against them. (A data
-// request flow must too, but it is the wallet's and never edited.)
+// birth: a required diploma's or Verzekeringsbericht's holder is checked
+// against them. (A data request flow must too, but it is the wallet's and
+// never edited.)
 func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID string) (bool, error) {
 	mode, err := s.flowDiplomas(ctx, orgID, flowID)
 	if err != nil {
 		return false, err
 	}
-	return mode.asked(), nil
+	employment, err := s.flowEmployment(ctx, orgID, flowID)
+	if err != nil {
+		return false, err
+	}
+	return mode.asked() || employment.asked(), nil
 }
 
 // readsIdentity reports whether flow f's result carries the holder's name and

@@ -8,10 +8,12 @@ import {
   useProofingSettingsQuery,
   useSaveFlowAddressMutation,
   useSaveFlowDiplomasMutation,
+  useSaveFlowEmploymentMutation,
 } from "../api/identity-proofing.queries";
 import type {
   AddressMode,
   DiplomaMode,
+  EmploymentMode,
   ProofingFlow,
 } from "../api/identity-proofing";
 import {
@@ -84,8 +86,9 @@ export function FlowEditor({
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
-  // a follow-up save (diplomas, address) fails, a retry must not save
-  // the flow again: a create would make a second flow, an edit another version.
+  // a follow-up save (diplomas, address, employment) fails, a retry must not
+  // save the flow again: a create would make a second flow, an edit another
+  // version.
   const [saved, setSaved] = useState<{
     flow: ProofingFlow;
     spec: string;
@@ -114,6 +117,10 @@ export function FlowEditor({
   const saveAddress = useSaveFlowAddressMutation(slug);
   const savedAddress: AddressMode = editing?.addressMode ?? "off";
   const [addressMode, setAddressMode] = useState<AddressMode>(savedAddress);
+  const saveEmployment = useSaveFlowEmploymentMutation(slug);
+  const savedEmployment: EmploymentMode = editing?.employmentMode ?? "off";
+  const [employmentMode, setEmploymentMode] =
+    useState<EmploymentMode>(savedEmployment);
   const [draft, setDraft] = useState<ProofingFlowDraft>(() =>
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
@@ -121,7 +128,8 @@ export function FlowEditor({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const address = addressMode;
   const diplomas = diplomaMode;
-  const requiresIdentity = identityRequired(diplomas);
+  const employment = employmentMode;
+  const requiresIdentity = identityRequired(diplomas, employment);
   const invalid = flowDraftError(draft, requiresIdentity, locales);
   const shown = touched ? invalid : null;
   const version = (editing?.version ?? 0) + 1;
@@ -130,12 +138,16 @@ export function FlowEditor({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  // Choosing required diplomas ticks Document data, which then stays ticked
-  // (identityRequired), and unticks the age check, which withholds the date
-  // of birth they need.
-  function chooseDiplomas(mode: DiplomaMode): void {
+  // Choosing required diplomas or required employment ticks Document data,
+  // which then stays ticked (identityRequired), and unticks the age check,
+  // which withholds the date of birth they need.
+  function chooseUploads(
+    mode: DiplomaMode,
+    employmentChoice: EmploymentMode = employmentMode,
+  ): void {
     setDiplomaMode(mode);
-    if (identityRequired(mode)) {
+    setEmploymentMode(employmentChoice);
+    if (identityRequired(mode, employmentChoice)) {
       setDraft(withIdentity);
     }
   }
@@ -155,14 +167,28 @@ export function FlowEditor({
       onSaved?.(flow);
       onDone();
     };
-    // The diploma mode, then the address, each only when it changed.
+    // The diploma mode, the address, then the employment, each only when it
+    // changed.
     const saveSettings = (flowId: string, then: () => void): void => {
-      const addressThen = (): void => {
-        if (address === savedAddress) {
+      const employmentThen = (): void => {
+        if (employment === savedEmployment) {
           then();
           return;
         }
-        saveAddress.mutate({ flowId, mode: address }, { onSuccess: then });
+        saveEmployment.mutate(
+          { flowId, mode: employment },
+          { onSuccess: then },
+        );
+      };
+      const addressThen = (): void => {
+        if (address === savedAddress) {
+          employmentThen();
+          return;
+        }
+        saveAddress.mutate(
+          { flowId, mode: address },
+          { onSuccess: employmentThen },
+        );
       };
       if (diplomas === savedDiplomas) {
         addressThen();
@@ -185,8 +211,8 @@ export function FlowEditor({
         },
       });
     };
-    // The service holds a required-diplomas flow to reading the name and date
-    // of birth, in each version and setting. Settings that
+    // The service holds a required-diplomas or required-employment flow to
+    // reading the name and date of birth, in each version and setting. Settings that
     // lift that go before a version that may drop it; otherwise the version
     // goes first, and the settings that need it check the version that reads
     // it.
@@ -300,7 +326,7 @@ export function FlowEditor({
                 settings={settings.data}
                 locales={locales}
                 diplomaMode={diplomaMode}
-                onDiploma={chooseDiplomas}
+                onDiploma={(mode) => chooseUploads(mode)}
                 diplomaError={
                   saveDiplomas.isError
                     ? proofingErrorMessage(saveDiplomas.error, t)
@@ -311,6 +337,13 @@ export function FlowEditor({
                 addressError={
                   saveAddress.isError
                     ? proofingErrorMessage(saveAddress.error, t)
+                    : null
+                }
+                employmentMode={employmentMode}
+                onEmployment={(mode) => chooseUploads(diplomaMode, mode)}
+                employmentError={
+                  saveEmployment.isError
+                    ? proofingErrorMessage(saveEmployment.error, t)
                     : null
                 }
                 requiresIdentity={requiresIdentity}

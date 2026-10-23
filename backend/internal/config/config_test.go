@@ -379,6 +379,20 @@ func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
 	}
 }
 
+// The real UWV seal check is the default, as the DUO one is.
+func TestLoadEmploymentDefaultsToUWV(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EmploymentValidatorProvider != ProviderUWV {
+		t.Errorf("employment validator = %q, want %q", cfg.EmploymentValidatorProvider, ProviderUWV)
+	}
+	if _, err := loadWith(t, map[string]string{envEmploymentValidatorProvider: "duo"}); err == nil {
+		t.Error("an unknown employment validator loaded, want an error")
+	}
+}
+
 // The online revocation check is on unless switched off: off, only the
 // revocation information embedded in an extract counts.
 func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
@@ -476,7 +490,8 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 			envIdentityProofingProvider:    ProviderStub,
 			envIdentityProofingStubOutcome: "approved",
 		},
-		envDiplomaValidatorProvider: {envDiplomaValidatorProvider: ProviderStub},
+		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
+		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
 	} {
 		t.Run(name+" without", func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {

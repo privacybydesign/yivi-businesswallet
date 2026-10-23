@@ -10,6 +10,7 @@ import type {
   AttributeReasons,
   DataRequestKind,
   DiplomaMode,
+  EmploymentMode,
   FlowKind,
   ProofingBranding,
   ProofingChannel,
@@ -1093,21 +1094,24 @@ export function dataRequestRefusal(
 }
 
 // The stages a verify page's stepper shows: what is collected, the app, its
-// session, then the address and the diploma upload (when the flow has those
-// steps).
+// session, then the address, the diploma upload and the Verzekeringsbericht
+// (when the flow has those steps).
 export type VerifyStage =
   | "overview"
   | "method"
   | "session"
   | "address"
-  | "diplomas";
+  | "diplomas"
+  | "employment";
 
 export function verifyStages({
   address = false,
   diplomas,
+  employment = false,
 }: {
   address?: boolean;
   diplomas: boolean;
+  employment?: boolean;
 }): VerifyStage[] {
   return [
     "overview",
@@ -1115,6 +1119,7 @@ export function verifyStages({
     "session",
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
+    ...(employment ? (["employment"] as const) : []),
   ];
 }
 
@@ -1126,16 +1131,18 @@ export function methodChoices(yiviAvailable: boolean): ProofingMethod[] {
   return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
 }
 
-// The stage a verify page is at: the address or diploma step while it is
-// open, else the page's own step.
+// The stage a verify page is at: the address, diploma or employment step
+// while it is open, else the page's own step.
 export function currentStage({
   step,
   inAddress,
   inDiplomas,
+  inEmployment,
 }: {
   step: "overview" | "method" | "session";
   inAddress: boolean;
   inDiplomas: boolean;
+  inEmployment: boolean;
 }): VerifyStage {
   if (inAddress) {
     return "address";
@@ -1143,16 +1150,20 @@ export function currentStage({
   if (inDiplomas) {
     return "diplomas";
   }
+  if (inEmployment) {
+    return "employment";
+  }
   return step;
 }
 
 // What a verify page's running session shows: once an approved session asks
-// for them, the address step and then the diploma step until the subject is
-// done with each, else the outcome once settled, the expiry once an unstarted
-// session's link ran out, or the session itself.
+// for them, the address step, the diploma step and then the employment step
+// until the subject is done with each, else the outcome once settled, the
+// expiry once an unstarted session's link ran out, or the session itself.
 export type SessionView =
   | "address"
   | "diplomas"
+  | "employment"
   | "outcome"
   | "expired"
   | "running";
@@ -1165,6 +1176,9 @@ export function sessionView({
   diplomaMode,
   diplomasUntil,
   diplomasDone,
+  employmentMode,
+  employmentUntil,
+  employmentDone,
   secondsLeft,
 }: {
   status: string;
@@ -1174,28 +1188,44 @@ export function sessionView({
   diplomaMode: DiplomaMode;
   diplomasUntil: string | undefined;
   diplomasDone: boolean;
+  employmentMode: EmploymentMode;
+  employmentUntil: string | undefined;
+  employmentDone: boolean;
   secondsLeft: number;
 }): SessionView {
   if (!isProofingLive(status)) {
     if (addressMode !== "off" && addressUntil !== undefined && !addressDone) {
       return "address";
     }
-    return diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone
-      ? "diplomas"
+    if (diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone) {
+      return "diplomas";
+    }
+    return employmentMode !== "off" &&
+      employmentUntil !== undefined &&
+      !employmentDone
+      ? "employment"
       : "outcome";
   }
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
 // Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,
-// ErrAddressNeedsPage): a flow that asks for diplomas or the address has them
-// given on the page that runs the session. No flow picked yet is mailable.
+// ErrAddressNeedsPage, ErrEmploymentNeedsPage): a flow that asks for
+// diplomas, the address or the Verzekeringsbericht has them given on the page
+// that runs the session. No flow picked yet is mailable.
 export function sendableByMail(
-  flow: { diplomaMode?: DiplomaMode; addressMode?: AddressMode } | undefined,
+  flow:
+    | {
+        diplomaMode?: DiplomaMode;
+        addressMode?: AddressMode;
+        employmentMode?: EmploymentMode;
+      }
+    | undefined,
 ): boolean {
   return (
     (flow?.diplomaMode ?? "off") === "off" &&
-    (flow?.addressMode ?? "off") === "off"
+    (flow?.addressMode ?? "off") === "off" &&
+    (flow?.employmentMode ?? "off") === "off"
   );
 }
 
@@ -1257,11 +1287,14 @@ export function readsIdentity(
   );
 }
 
-// Whether a flow with diplomas must read the name and date of birth
-// (proofing.identityRequired): a required diploma's holder is checked against
-// them.
-export function identityRequired(diplomas: DiplomaMode): boolean {
-  return diplomas !== "off";
+// Whether a flow with diplomas or employment must read the name and date of
+// birth (proofing.identityRequired): a required diploma's or
+// Verzekeringsbericht's holder is checked against them.
+export function identityRequired(
+  diplomas: DiplomaMode,
+  employment: EmploymentMode = "off",
+): boolean {
+  return diplomas !== "off" || employment !== "off";
 }
 
 // What the Verify a person form sends: an identity check on a flow, or one of
@@ -1382,6 +1415,35 @@ export function diplomaStepDone(held: number, secondsLeft: number): boolean {
   return held > 0 || secondsLeft === 0;
 }
 
+// Why an uploaded Verzekeringsbericht was not kept, from its verdict's
+// reason. An unknown reason is shown as is.
+export function employmentRejectionReason(
+  reason: string,
+  t: TFunction,
+): string {
+  switch (reason) {
+    case "not_a_statement":
+      return t("identityProofing.employment.reasons.notAStatement");
+    case "signature_invalid":
+      return t("identityProofing.employment.reasons.signatureInvalid");
+    case "holder_mismatch":
+      return t("identityProofing.employment.reasons.holderMismatch");
+    case "stale":
+      return t("identityProofing.employment.reasons.stale");
+    default:
+      return reason;
+  }
+}
+
+// Whether the employment step can end: once a statement is kept, or the time
+// to upload one is up.
+export function employmentStepDone(
+  kept: boolean,
+  secondsLeft: number,
+): boolean {
+  return kept || secondsLeft === 0;
+}
+
 // The copy an identity proofing API error shows, keyed on its stable code.
 export function proofingErrorMessage(error: unknown, t: TFunction): string {
   switch (errorCode(error)) {
@@ -1443,6 +1505,12 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.addressNotAsked");
     case "address_not_found":
       return t("identityProofing.errors.addressNotFound");
+    case "employment_needs_page":
+      return t("identityProofing.errors.employmentNeedsPage");
+    case "employment_closed":
+      return t("identityProofing.errors.employmentClosed");
+    case "employment_not_asked":
+      return t("identityProofing.errors.employmentNotAsked");
     case "flow_no_identity":
       return t("identityProofing.errors.flowNoIdentity");
     case "data_flow_for_member":
@@ -1457,7 +1525,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.mandateWithdrawn");
     case "legal_retention":
       return t("identityProofing.errors.legalRetention");
-    // too_large is a diploma upload's, payload_too_large a branding logo's.
+    // too_large is a diploma or Verzekeringsbericht upload's,
+    // payload_too_large a branding logo's.
     case "too_large":
     case "payload_too_large":
       return t("identityProofing.errors.tooLarge");
@@ -1481,6 +1550,7 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "link_started":
     case "device_active":
     case "diplomas_closed":
+    case "employment_closed":
     case "export_unavailable":
     case "too_large":
     case "payload_too_large":
@@ -2106,7 +2176,7 @@ export function sessionEventDetail(
 
 // What the send form does with the flow and channel it is given: the flow it
 // sends (a pick no longer sendable falls back to the default), how (a flow that
-// asks for diplomas or the address cannot be mailed, so it runs on screen; one
+// asks for diplomas, the address or employment cannot be mailed, so it runs on screen; one
 // whose "Allow sending this flow as a link" switch is off is neither mailed nor
 // a link, so it runs on screen too) and whether it can check for one person (a
 // flow reading name and date of birth). sendRequestFields has what the fields
@@ -2116,6 +2186,7 @@ export function sendFormDecision<
     id: string;
     diplomaMode?: DiplomaMode;
     addressMode?: AddressMode;
+    employmentMode?: EmploymentMode;
     requestedAttributes?: string[];
     hostedEnabled?: boolean;
   },

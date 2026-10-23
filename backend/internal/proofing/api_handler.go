@@ -472,6 +472,10 @@ type apiResultResponse struct {
 	// Address is the postal address the subject entered after their identity
 	// was approved; as they declared it, not read off a document.
 	Address *Address `json:"address,omitempty"`
+	// Employment is what was kept of the subject's UWV Verzekeringsbericht
+	// after their identity was approved, checked against UWV's seal and the
+	// proofed identity.
+	Employment *Employment `json:"employment,omitempty"`
 }
 
 type apiIdentity struct {
@@ -610,6 +614,7 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
 		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, Address: req.SubjectAddress,
+		Employment: req.SubjectEmployment,
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt

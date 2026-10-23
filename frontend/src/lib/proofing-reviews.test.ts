@@ -42,6 +42,7 @@ function request(over: Partial<ProofingRequest> = {}): ProofingRequest {
     diplomaMode: "off",
     diplomas: [],
     addressMode: "off",
+    employmentMode: "off",
     expectedSubject: false,
     flowKind: "identity",
     ...over,

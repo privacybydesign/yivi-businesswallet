@@ -45,7 +45,8 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END, ` + purgeAtColumn
+	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END,
+	r.employment, r.employment_ciphertext, r.employment_added_at, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -231,7 +232,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
 	var sessionTTLSeconds int
-	var nameCT, birthDateCT, addressCT []byte
+	var nameCT, birthDateCT, addressCT, employmentCT []byte
 	var retentionDays, legalMonths, overrideSeconds, heldSessions *int
 	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
@@ -242,7 +243,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -267,6 +268,13 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 			return Request{}, err
 		}
 		r.SubjectAddress = addr
+	}
+	if employmentCT != nil {
+		emp, err := s.decryptEmployment(r.ID, employmentCT)
+		if err != nil {
+			return Request{}, err
+		}
+		r.SubjectEmployment = emp
 	}
 	if sessionID != nil {
 		if s.cipher == nil {
@@ -359,6 +367,8 @@ type NewStoredRequest struct {
 	Diplomas DiplomaMode
 	// Address is the flow's AddressMode at send; empty is off.
 	Address AddressMode
+	// Employment is the flow's EmploymentMode at send; empty is off.
+	Employment EmploymentMode
 	// ReferencePhoto is a hosted request's reference photo, held sealed until
 	// its subject starts the session (ReferencePhoto); nil for none.
 	ReferencePhoto *proofingprovider.Image
@@ -408,15 +418,17 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			(id, organization_id, requested_by, subject_user_id, subject_kind, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
-			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address)
+			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address, employment)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
-				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'))`
+				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'),
+				COALESCE(NULLIF($26, ''), 'off'))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, string(in.Subject.Kind),
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
-			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address)); err != nil {
+			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address),
+			string(in.Employment)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 
@@ -433,6 +445,9 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		}
 		if in.Address.asked() {
 			fields["address"] = string(in.Address)
+		}
+		if in.Employment.asked() {
+			fields["employment"] = string(in.Employment)
 		}
 		if birthDateCT != nil {
 			fields["expectsSubject"] = true
@@ -1148,7 +1163,7 @@ func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error 
 
 // Purge erases every personal detail the wallet holds of a request (the
 // subject's name and e-mail address, the proofed name, the redirect and Yivi
-// transaction that pointed at the subject, its diplomas and address, a data request's own
+// transaction that pointed at the subject, its diplomas, address and employment, a data request's own
 // matches, the stored Idempotency-Key answers that name it, and the subject in
 // its audit events) and marks it purged; its outcome stays. A match naming it
 // from another data request stays: that review shows it purged. Audited
@@ -1172,6 +1187,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, expected_birth_date_ciphertext = NULL,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
 				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL, address_ciphertext = NULL,
+				employment_ciphertext = NULL,
 				registered_address_ciphertext = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
@@ -1212,8 +1228,8 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 			return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
 		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
-			WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, []string{webhookDiplomaKey, webhookAddressKey}); err != nil {
-			return fmt.Errorf("proofing: purge webhook diplomas and address request %s: %w", req.ID, err)
+			WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, webhookPersonalKeys); err != nil {
+			return fmt.Errorf("proofing: purge webhook diplomas, address and employment request %s: %w", req.ID, err)
 		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
