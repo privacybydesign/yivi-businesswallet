@@ -721,6 +721,14 @@ func TestLegalRetentionHTTPFlow(t *testing.T) {
 	if settings.DataRetentionDays != defaultRetentionDays {
 		t.Errorf("retention = %d days; want the org's own kept", settings.DataRetentionDays)
 	}
+	assertLegalRetentionApplied(t, env, orgID, base, update)
+}
+
+// assertLegalRetentionApplied checks that the legal retention saved by update,
+// five years, is told on the org's flow, is kept through a change of another
+// setting and a save of the same, and is removed by null.
+func assertLegalRetentionApplied(t *testing.T, env *testEnv, orgID uuid.UUID, base, update string) {
+	t.Helper()
 	// Five years are 1826 or 1827 days, and the engine's grace adds one.
 	flows := decodeJSON[[]proofingFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
 	if len(flows) != 1 || flows[0].RetentionDays < 1827 || flows[0].RetentionDays > 1828 {

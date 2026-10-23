@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine"
@@ -282,6 +283,13 @@ func TestSaveLegalRetention(t *testing.T) {
 		t.Fatalf("removing it = %+v, %v", removed.LegalRetention, err)
 	}
 
+	assertLegalRetentionAudits(t, pool, orgID, legal)
+}
+
+// assertLegalRetentionAudits checks the org's three settings audits: legal set,
+// the session settings, and legal removed; a repeat audits nothing.
+func assertLegalRetentionAudits(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID, legal LegalRetention) {
+	t.Helper()
 	audits := settingsAudits(t, pool, orgID)
 	if len(audits) != 3 {
 		t.Fatalf("settings_updated audits = %d, want 3 (set, session settings, removed; a repeat changes nothing)", len(audits))

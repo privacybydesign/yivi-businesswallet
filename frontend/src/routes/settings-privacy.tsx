@@ -23,6 +23,7 @@ import {
   legalPeriodLabel,
   legalRetentionLoss,
 } from "../lib/legal-retention";
+import type { ErasureHandling } from "../api/identity-proofing";
 import type {
   LegalRetentionDraft,
   LegalRetentionLoss,
@@ -41,6 +42,16 @@ const TEXTAREA =
 const AMOUNT_ID = "legal-amount";
 const AMOUNT_HINT_ID = "legal-amount-hint";
 const REASON_ERROR_ID = "legal-reason-error";
+const LEGAL_SWITCH_ID = "legal-switch";
+const LEGAL_SWITCH_HINT_ID = "legal-switch-hint";
+
+// The ids of an erasure handling option's title and hint.
+function erasureTitleId(handling: ErasureHandling): string {
+  return `erasure-${handling}`;
+}
+function erasureHintId(handling: ErasureHandling): string {
+  return `erasure-${handling}-hint`;
+}
 
 // Settings › Data and privacy: the GDPR data requests every org offers and who
 // decides an erasure, the legal retention, and where a hosted page may hand
@@ -137,15 +148,17 @@ function DataRequestsCard({
                 name="erasure-handling"
                 className="mt-0.5 h-4 w-4 shrink-0"
                 checked={settings.erasureHandling === handling}
+                aria-labelledby={erasureTitleId(handling)}
+                aria-describedby={erasureHintId(handling)}
                 onChange={() => update.mutate({ erasureHandling: handling })}
               />
               <span className="flex min-w-0 flex-col gap-0.5">
-                <span className={LABEL}>
+                <span id={erasureTitleId(handling)} className={LABEL}>
                   {t(
                     `identityProofing.dataRequests.whoDecides.${handling}.label`,
                   )}
                 </span>
-                <span className={HINT}>
+                <span id={erasureHintId(handling)} className={HINT}>
                   {t(
                     `identityProofing.dataRequests.whoDecides.${handling}.hint`,
                   )}
@@ -242,13 +255,15 @@ function LegalRetentionCard({
               type="checkbox"
               className="mt-0.5 h-4 w-4"
               checked={draft.enabled}
+              aria-labelledby={LEGAL_SWITCH_ID}
+              aria-describedby={LEGAL_SWITCH_HINT_ID}
               onChange={(e) => set("enabled", e.target.checked)}
             />
             <span className="flex flex-col gap-0.5">
-              <span className={LABEL}>
+              <span id={LEGAL_SWITCH_ID} className={LABEL}>
                 {t("identityProofing.legalRetention.switch")}
               </span>
-              <span className={HINT}>
+              <span id={LEGAL_SWITCH_HINT_ID} className={HINT}>
                 {t("identityProofing.legalRetention.switchHint")}
               </span>
             </span>

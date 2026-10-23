@@ -344,30 +344,30 @@ function DataRequestOutcome({
       if (kind === "data_erasure") {
         const { unsure, held } = erasureLeft(kept, legal);
         return (
-          <div role="status" className="flex flex-col items-center gap-2">
-            <p className={HINT}>
+          <output className="flex flex-col items-center gap-2">
+            <span className={HINT}>
               {unsure > 0
                 ? t("proofLink.dataRequest.erasedPartly", {
                     count: unsure,
                     organization,
                   })
                 : t("proofLink.dataRequest.erased")}
-            </p>
+            </span>
             {held && (
               <>
-                <p className={HINT}>
+                <span className={HINT}>
                   {t("proofLink.dataRequest.keptByLaw", {
                     count: held.sessions,
                     organization,
                     date: formatDate(held.until),
                   })}
-                </p>
-                <p className={HINT}>
+                </span>
+                <span className={HINT}>
                   {legalReasonIn(held.reason, i18n.language)}
-                </p>
+                </span>
               </>
             )}
-          </div>
+          </output>
         );
       }
       return exportUntil ? (

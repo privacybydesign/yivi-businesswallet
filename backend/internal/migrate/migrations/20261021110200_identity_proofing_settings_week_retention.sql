@@ -8,7 +8,7 @@ INSERT INTO identity_proofing_settings (organization_id, data_retention_days)
 SELECT DISTINCT r.organization_id, 30
 FROM identity_proofing_requests r
 WHERE r.subject_kind = 'external'
-  AND NOT EXISTS (SELECT 1 FROM identity_proofing_settings st WHERE st.organization_id = r.organization_id);
+ON CONFLICT (organization_id) DO NOTHING;
 
 ALTER TABLE identity_proofing_settings
     ALTER COLUMN data_retention_days SET DEFAULT 7;

@@ -577,14 +577,15 @@ func TestHostedProgressLegalRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	type legalReason struct {
+		EN string `json:"en"`
+		NL string `json:"nl"`
+	}
 	var got struct {
 		LegalRetention *struct {
-			Sessions int       `json:"sessions"`
-			Until    time.Time `json:"until"`
-			Reason   struct {
-				EN string `json:"en"`
-				NL string `json:"nl"`
-			} `json:"reason"`
+			Sessions int         `json:"sessions"`
+			Until    time.Time   `json:"until"`
+			Reason   legalReason `json:"reason"`
 		} `json:"legalRetention"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {

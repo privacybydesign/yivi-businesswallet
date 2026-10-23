@@ -172,15 +172,9 @@ func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change Ses
 			maps.Copy(auditAfter, legal.auditFields())
 		}
 		if origins != nil && !slices.Equal(before.RedirectOrigins, *origins) {
-			after := *origins
-			if after == nil {
-				after = []string{}
-			}
-			if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings (organization_id, allowed_redirect_origins)
-				VALUES ($1, $2)
-				ON CONFLICT (organization_id) DO UPDATE SET allowed_redirect_origins = EXCLUDED.allowed_redirect_origins,
-					updated_at = now()`, orgID, after); err != nil {
-				return fmt.Errorf("proofing: save redirect origins org %s: %w", orgID, err)
+			after, err := saveRedirectOrigins(ctx, q, orgID, *origins)
+			if err != nil {
+				return err
 			}
 			auditBefore["allowedRedirectOrigins"] = before.RedirectOrigins
 			auditAfter["allowedRedirectOrigins"] = after
@@ -194,6 +188,21 @@ func (s *OrgSettingsStore) Save(ctx context.Context, orgID uuid.UUID, change Ses
 		return Settings{}, err
 	}
 	return s.Get(ctx, orgID)
+}
+
+// saveRedirectOrigins stores the org's redirect origins, none as an empty
+// list, and returns the list it stored.
+func saveRedirectOrigins(ctx context.Context, q database.Querier, orgID uuid.UUID, origins []string) ([]string, error) {
+	if origins == nil {
+		origins = []string{}
+	}
+	if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_settings (organization_id, allowed_redirect_origins)
+		VALUES ($1, $2)
+		ON CONFLICT (organization_id) DO UPDATE SET allowed_redirect_origins = EXCLUDED.allowed_redirect_origins,
+			updated_at = now()`, orgID, origins); err != nil {
+		return nil, fmt.Errorf("proofing: save redirect origins org %s: %w", orgID, err)
+	}
+	return origins, nil
 }
 
 // saveSession stores the org's session settings, changed from before to

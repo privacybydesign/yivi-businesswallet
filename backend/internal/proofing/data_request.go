@@ -648,11 +648,7 @@ func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind, n
 	erasable := func(m DataMatch) bool { return kind != FlowDataErasure || !m.held(now) }
 	out := []uuid.UUID{}
 	if approved == nil {
-		for _, m := range matches {
-			if (m.Level == MatchStrong || (kind == FlowDataErasure && sureMatch(m.Level))) && erasable(m) {
-				out = append(out, m.RequestID)
-			}
-		}
+		out = untickedMatches(matches, kind, erasable)
 	}
 	for _, id := range approved {
 		i := slices.IndexFunc(matches, func(m DataMatch) bool { return m.RequestID == id })
@@ -667,13 +663,33 @@ func approvedMatches(matches []DataMatch, approved []uuid.UUID, kind FlowKind, n
 		}
 	}
 	if kind == FlowDataErasure {
-		for _, m := range matches {
-			if m.PurgedAt != nil && !slices.Contains(out, m.RequestID) {
-				out = append(out, m.RequestID)
-			}
-		}
+		out = withPurgedMatches(out, matches)
 	}
 	return out, nil
+}
+
+// untickedMatches are the matches a decision without a list approves: the
+// ones proven with the same document, and for an erasure the sure ones too,
+// each only when erasable.
+func untickedMatches(matches []DataMatch, kind FlowKind, erasable func(DataMatch) bool) []uuid.UUID {
+	out := []uuid.UUID{}
+	for _, m := range matches {
+		if (m.Level == MatchStrong || (kind == FlowDataErasure && sureMatch(m.Level))) && erasable(m) {
+			out = append(out, m.RequestID)
+		}
+	}
+	return out
+}
+
+// withPurgedMatches adds to approved each match purged already, which an
+// erasure has erased whatever the list says.
+func withPurgedMatches(approved []uuid.UUID, matches []DataMatch) []uuid.UUID {
+	for _, m := range matches {
+		if m.PurgedAt != nil && !slices.Contains(approved, m.RequestID) {
+			approved = append(approved, m.RequestID)
+		}
+	}
+	return approved
 }
 
 // sureMatch reports a match level that is the requester's for certain: the
