@@ -39,6 +39,7 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   employmentRejectionReason,
+  employmentReview,
   employmentStepDone,
   formatDuration,
   isRequestedAttribute,
@@ -95,6 +96,12 @@ export interface VerifyFlowInfo {
 const MIJN_DUO_URL = "https://mijn.duo.nl";
 // Where a subject logs in with DigiD to download their Verzekeringsbericht.
 const MIJN_UWV_URL = "https://mijn.uwv.nl";
+
+// What the player reads when their kept statement sends the check to review.
+const EMPLOYMENT_REVIEW_KEYS = {
+  noJob: "identityProofing.employment.review",
+  benefit: "identityProofing.employment.reviewBenefit",
+} as const;
 // How long typing a postal code or house number pauses before the address is
 // looked up.
 const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
@@ -411,6 +418,11 @@ export function Session({
   const [addressDone, setAddressDone] = useState(false);
   const [diplomasDone, setDiplomasDone] = useState(false);
   const [employmentDone, setEmploymentDone] = useState(false);
+  // The window of a statement just kept: the progress drops employmentUntil
+  // once one is held, and a poll would otherwise leave the step before the
+  // subject has seen what was accepted.
+  const [keptUntil, setKeptUntil] = useState<string>();
+  const employmentUntil = current.employmentUntil ?? keptUntil;
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const view = sessionView({
     status: current.status,
@@ -421,7 +433,7 @@ export function Session({
     diplomasUntil: current.diplomasUntil,
     diplomasDone,
     employmentMode,
-    employmentUntil: current.employmentUntil,
+    employmentUntil,
     employmentDone,
     secondsLeft,
   });
@@ -490,11 +502,12 @@ export function Session({
       />
     );
   }
-  if (askEmployment && current.employmentUntil !== undefined) {
+  if (askEmployment && employmentUntil !== undefined) {
     return (
       <EmploymentStep
         target={target}
-        until={current.employmentUntil}
+        until={employmentUntil}
+        onKept={() => setKeptUntil(employmentUntil)}
         onDone={() => setEmploymentDone(true)}
       />
     );
@@ -793,10 +806,12 @@ function DiplomaStep({
 function EmploymentStep({
   target,
   until,
+  onKept,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
+  onKept: () => void;
   onDone: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -806,6 +821,7 @@ function EmploymentStep({
   const fileInput = useRef<HTMLInputElement>(null);
   const [refused, setRefused] = useState<EmploymentVerdict>();
   const [kept, setKept] = useState<ProofingEmployment>();
+  const keptReview = kept === undefined ? undefined : employmentReview(kept);
   const secondsLeft = useSecondsLeft(until);
   const done = employmentStepDone(kept, secondsLeft);
 
@@ -816,6 +832,7 @@ function EmploymentStep({
         if (verdict.accepted && verdict.employment !== undefined) {
           setKept(verdict.employment);
           setRefused(undefined);
+          onKept();
           return;
         }
         setRefused(verdict);
@@ -858,6 +875,11 @@ function EmploymentStep({
             <span className="text-ink-soft text-[12.5px]">
               {t("identityProofing.employment.keptChecks")}
             </span>
+            {keptReview !== undefined && (
+              <span className="text-ink text-[12.5px] font-semibold">
+                {t(EMPLOYMENT_REVIEW_KEYS[keptReview])}
+              </span>
+            )}
             {kept.relations.length === 0 ? (
               <span className="text-ink-soft text-[12.5px]">
                 {t("identityProofing.employment.noRelations")}
@@ -870,6 +892,11 @@ function EmploymentStep({
                     className="text-ink text-[12.5px]"
                   >
                     <span className="font-semibold">{r.employer}</span>{" "}
+                    {r.kind === "benefit" && (
+                      <span className="text-ink-soft">
+                        {t("identityProofing.employment.benefit")}{" "}
+                      </span>
+                    )}
                     <span className="text-ink-soft">
                       {t("identityProofing.employment.since", {
                         from: formatMonth(r.from),

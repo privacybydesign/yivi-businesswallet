@@ -112,7 +112,7 @@ tags:
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
       sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
-      `ORG_PAUSED` and `LEGAL_RETENTION`; the session itself is rejected for `FACE_NO_MATCH`,
+      `ORG_PAUSED`, `LEGAL_RETENTION` and `EMPLOYMENT_NOT_PROVIDED`; the session itself is rejected for `FACE_NO_MATCH`,
       `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
       `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
       `FACE_STEP_NOT_COMPLETED`, `AGE_NOT_DISCLOSED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
@@ -6803,7 +6803,11 @@ paths:
         when and the newest month, sealed. Never past relations, the PDF, the holder, the
         hours or the wages.
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
-        refused one `identity_proofing.employment_rejected`.
+        refused one `identity_proofing.employment_rejected`. A kept statement with no current
+        job (`employed: false`) moves the approved session to `needs_review` with
+        `reviewReason` `no_current_employment`, and one with a current UWV benefit beside a job
+        with `current_benefit` (webhook `session.review_opened`), decided by an
+        administrator through the review endpoint.
       requestBody:
         required: true
         content:
@@ -6825,8 +6829,10 @@ paths:
                     accepted: true
                     employment:
                       statementDate: "2026-10-15"
+                      employed: true
                       relations:
-                        - employer: VOORBEELD B.V.
+                        - kind: employment
+                          employer: VOORBEELD B.V.
                           payrollTaxNumber: 123456789L01
                           contractForm: schriftelijke arbeidsovereenkomst voor onbepaalde tijd
                           from: "2025-01-01"
@@ -8486,7 +8492,11 @@ paths:
         when and the newest month, sealed. Never past relations, the PDF, the holder, the
         hours or the wages.
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
-        refused one `identity_proofing.employment_rejected`.
+        refused one `identity_proofing.employment_rejected`. A kept statement with no current
+        job (`employed: false`) moves the approved session to `needs_review` with
+        `reviewReason` `no_current_employment`, and one with a current UWV benefit beside a job
+        with `current_benefit` (webhook `session.review_opened`), decided by an
+        administrator through the review endpoint.
       requestBody:
         required: true
         content:
@@ -8508,8 +8518,10 @@ paths:
                     accepted: true
                     employment:
                       statementDate: "2026-10-15"
+                      employed: true
                       relations:
-                        - employer: VOORBEELD B.V.
+                        - kind: employment
+                          employer: VOORBEELD B.V.
                           payrollTaxNumber: 123456789L01
                           contractForm: schriftelijke arbeidsovereenkomst voor onbepaalde tijd
                           from: "2025-01-01"
@@ -8790,8 +8802,10 @@ paths:
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         in 30 days, an identity check within the data retention), `LEGAL_RETENTION` (an
-        erasure refused because the customer is bound by law to keep the data) and
-        `ORG_PAUSED` (a review left open when the organisation paused proofing). The
+        erasure refused because the customer is bound by law to keep the data),
+        `ORG_PAUSED` (a review left open when the organisation paused proofing) and
+        `EMPLOYMENT_NOT_PROVIDED` (an approved session on a flow that requires the
+        Verzekeringsbericht, without one kept within an hour of the approval). The
         session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
         achieved eIDAS level below the flow's (`ASSURANCE_NOT_MET`); a face that failed liveness
@@ -11156,8 +11170,10 @@ components:
           description: >-
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
-            short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time) and
-            `LEGAL_RETENTION` (an erasure the customer must refuse by law); others come from
+            short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time),
+            `LEGAL_RETENTION` (an erasure the customer must refuse by law) and
+            `EMPLOYMENT_NOT_PROVIDED` (no Verzekeringsbericht kept in time on a flow that
+            requires one); others come from
             the session itself
             (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
             `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
@@ -11241,6 +11257,10 @@ components:
         errorCode:
           type: string
           description: Why the session was rejected; see `ProofingApiSession.errorCode`.
+        reviewReason:
+          type: string
+          enum: [no_current_employment, current_benefit]
+          description: Why the session went to review after its identity was approved. `no_current_employment` is a Verzekeringsbericht that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job; a reviewer decides it in the wallet. Absent otherwise.
         verifiedAt:
           type: string
           format: date-time
@@ -11524,12 +11544,19 @@ components:
           type: string
           format: date
           description: The day UWV made the statement.
+        employed:
+          type: boolean
+          description: A current relation that is not a benefit (a job with hours worked in one of the last two months, or a sickness benefit paid via the employer). Without one the session goes to review (`reviewReason` `no_current_employment`).
         relations:
           type: array
           description: The employment and benefit relations current on the statement's date (reporting a month at most two months before its month, as payroll is filed a month late), one per employer and contract; empty when none is.
           items:
             type: object
             properties:
+              kind:
+                type: string
+                enum: [employment, benefit, sick_via_employer]
+                description: '`benefit` is a benefit UWV pays, recognised as HDN''s Inkomensbepaling Loondienst does (Appendix 5) by its exact description and loonheffingennummer. `sick_via_employer` is a sickness or WAZO benefit paid through the employer.'
               employer:
                 type: string
                 description: The employer or paying body (`Werkgever/Instantie`).
@@ -11547,8 +11574,8 @@ components:
                 type: string
                 format: date
                 description: The last day of the newest month the statement reports for it.
-            required: [employer, payrollTaxNumber, contractForm, from, to]
-      required: [statementDate, relations]
+            required: [kind, employer, payrollTaxNumber, contractForm, from, to]
+      required: [statementDate, employed, relations]
     ProofingEmploymentVerdict:
       type: object
       properties:
@@ -12110,6 +12137,10 @@ components:
           type: string
           format: date-time
           description: When the person can last upload their Verzekeringsbericht; absent until the identity is approved, and once one was kept.
+        reviewReason:
+          type: string
+          enum: [no_current_employment, current_benefit]
+          description: Why the wallet put the session in review after the identity was approved (no current job, or a current UWV benefit, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
         expectedSubject:
           type: boolean
         flowKind:

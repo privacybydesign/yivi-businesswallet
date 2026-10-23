@@ -1490,11 +1490,49 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
       partner's name alone is refused;
     - the same date of birth. Else `holder_mismatch`.
   - The printed date at most `statementMaxAge` (30 days) old, else `stale`.
+- **What a relation is** (`classify`), as HDN's Rekenregels Inkomensbepaling
+  Loondienst 8.0 (Appendix 5) reads the same PDF:
+  - `benefit`: a benefit UWV pays, printed under "Werkgever/Instantie" as one
+    of nine exact descriptions ("WW-Uitkering van UWV", "WIA (WGA)-Uitkering
+    van UWV", …) together with one of the loonheffingennummers
+    `810220350L02/L04/L20/L23/L26`. Both must match, as in IBL.
+  - `sick_via_employer`: "Ziektewet- of WAZO-Uitkering van <werkgever>": the
+    holder still has the job.
+  - `employment` otherwise. AOW (SVB), social assistance and pensions are not
+    in IBL's appendix and are not recognised.
 - **Kept**: the statement date and only the relations current on it
-  (`Statement.Current`): ones that report a month at most two months before the
+  (`Statement.Current`), as IBL §3.1 decides "works as an employee now": a job
+  with hours worked (more than 0) in a month at most two months before the
   statement's month, as employers file a month's payroll by the end of the
-  next. Not "the newest month on the statement": someone who stopped in June
+  next; a benefit or sickness benefit paid in one. A month paid without hours
+  (a final payment, an allowance, an on-call contract without shifts) is no
+  work. Not "the newest month on the statement": someone who stopped in June
   would have their June job read as current.
+  - `employed` (`Statement.Employed`): a current relation that is not a
+    benefit.
+- **No current job, or a current benefit, goes to review.** A kept statement
+  moves the approved request to `needs_review` in the same transaction
+  (`openWalletReview`), audited `identity_proofing.needs_review` and webhook
+  `session.review_opened`, with `review_reason` (`Employment.reviewReason`):
+  - `no_current_employment`: `employed: false`;
+  - `current_benefit`: a job, and a current `benefit` relation beside it.
+  - A `sick_via_employer` relation is no benefit here: the holder keeps the job.
+  - The engine approved and still reports the approval, so the review is the
+    wallet's alone: `tryReconcile` skips such a request, `RecordOutcome`
+    refuses it (`review_reason IS NOT NULL`), and `DecideReview` decides it
+    in the wallet (`decideWalletReview`, `RecordWalletOutcome`) without the
+    engine. A rejection without a code is `MANUAL_REVIEW_REJECTED`.
+    `lapseReview` rejects an undecided one the same way.
+  - The customer gets `session.verified`, then `session.review_opened`, then
+    the decision. `reviewReason` is in the request responses and the
+    customer API result; the review panel names it.
+- **No statement in time is a rejection.** An approved request on a flow that
+  requires the step, with no statement kept within `EmploymentWindow`, is
+  rejected `EMPLOYMENT_NOT_PROVIDED` (`RejectMissingEmployment`, run by
+  `ReconcileDue`, which wakes at `NextMissingEmployment`), audited
+  `identity_proofing.rejected`, webhook `session.failed`. A refused upload does
+  not count. Reconcile leaves the rejection: the engine still reports the
+  approval.
   - Per current relation the employer, payroll tax number, contract form, since
     when (its first month) and its newest month, blocks of one relation across
     pages merged. None current: "no current employment or benefit in UWV's

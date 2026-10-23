@@ -239,7 +239,24 @@ func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employm
 		return false, nil
 	}
 	f.stored.SubjectEmployment = &emp
+	if reason := emp.reviewReason(); reason != "" && f.stored.Status == StatusApproved {
+		f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+	}
 	return true, nil
+}
+
+func (f *fakeRequests) RejectMissingEmployment(_ context.Context, now time.Time, _ int) (int, error) {
+	r := f.stored
+	if r == nil || r.Employment != EmploymentRequired || r.Status != StatusApproved || r.SubjectEmployment != nil ||
+		r.CompletedAt == nil || now.Before(r.CompletedAt.Add(EmploymentWindow)) {
+		return 0, nil
+	}
+	r.Status, r.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
+	return 1, nil
+}
+
+func (f *fakeRequests) NextMissingEmployment(context.Context, time.Time) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {
@@ -298,6 +315,10 @@ func (f *fakeRequests) GetForCustomer(_ context.Context, scope CustomerScope, id
 		return Request{}, ErrRequestNotFound
 	}
 	return *f.stored, nil
+}
+
+func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	return f.RecordOutcome(ctx, req, sessionID, status, res)
 }
 
 func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {

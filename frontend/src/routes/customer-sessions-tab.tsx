@@ -401,7 +401,11 @@ function SessionRow({
               <DataRequestPanel slug={slug} request={request} />
             )}
             {isAdmin && !dataRequest && request.status === "needs_review" && (
-              <ReviewDecision slug={slug} requestId={request.id} />
+              <ReviewDecision
+                slug={slug}
+                requestId={request.id}
+                reviewReason={request.reviewReason}
+              />
             )}
           </td>
         </tr>
@@ -576,6 +580,11 @@ function SessionEmployment({
               date: formatDate(e.statementDate),
             })}
           </p>
+          <p className="text-ink text-[13px] font-semibold">
+            {e.employed
+              ? t("customers.sessions.employment.employed")
+              : t("customers.sessions.employment.notEmployed")}
+          </p>
           {e.relations.length === 0 ? (
             <p className={HINT}>
               {t("customers.sessions.employment.noRelations")}
@@ -587,8 +596,18 @@ function SessionEmployment({
                   key={`${r.employer}-${r.payrollTaxNumber}-${r.contractForm}-${r.from}`}
                   className="flex flex-col gap-0.5 px-3 py-2"
                 >
-                  <span className="text-ink text-[13px] font-semibold">
+                  <span className="text-ink flex items-center gap-2 text-[13px] font-semibold">
                     {r.employer}
+                    {r.kind === "benefit" && (
+                      <Tag tone="amber">
+                        {t("customers.sessions.employment.benefit")}
+                      </Tag>
+                    )}
+                    {r.kind === "sick_via_employer" && (
+                      <Tag tone="blue">
+                        {t("customers.sessions.employment.sickViaEmployer")}
+                      </Tag>
+                    )}
                   </span>
                   <span className={HINT}>
                     {[
@@ -616,14 +635,28 @@ function SessionEmployment({
   );
 }
 
+// The hint for a review the wallet opened itself, by its reviewReason.
+const REVIEW_REASON_HINT: Partial<
+  Record<
+    string,
+    | "customers.sessions.review.noCurrentEmployment"
+    | "customers.sessions.review.currentBenefit"
+  >
+> = {
+  no_current_employment: "customers.sessions.review.noCurrentEmployment",
+  current_benefit: "customers.sessions.review.currentBenefit",
+};
+
 // An administrator's decision on a session under review: approve or reject,
 // always with a reason, which the audit log keeps.
 function ReviewDecision({
   slug,
   requestId,
+  reviewReason,
 }: Readonly<{
   slug: string;
   requestId: string;
+  reviewReason?: string;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const decide = useDecideReviewMutation(slug, requestId);
@@ -645,7 +678,10 @@ function ReviewDecision({
         {t("customers.sessions.review.title")}
       </h3>
       <p className="text-ink-soft text-[13px]">
-        {t("customers.sessions.review.hint")}
+        {t(
+          REVIEW_REASON_HINT[reviewReason ?? ""] ??
+            "customers.sessions.review.hint",
+        )}
       </p>
       <label
         htmlFor={fieldId}

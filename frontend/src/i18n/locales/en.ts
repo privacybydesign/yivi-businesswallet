@@ -532,6 +532,8 @@ export const en = {
       legalRetention: "the customer is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused while the session waited for review; try again later",
+      employmentNotProvided:
+        "no Verzekeringsbericht was added in time after the identity check",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
       unknown: "the check did not pass ({{code}})",
@@ -693,6 +695,11 @@ export const en = {
         "UWV's seal is valid, the file is unchanged, and it is in your name.",
       noRelations: "It lists no current employment.",
       since: "since {{from}}",
+      benefit: "(benefit)",
+      review:
+        "It lists no current job. The organisation reviews your check before a decision.",
+      reviewBenefit:
+        "It lists a current benefit. The organisation reviews your check before a decision.",
       reasons: {
         notAStatement:
           "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
@@ -976,6 +983,10 @@ export const en = {
         reasonTooLong: "Keep the reason to {{max}} characters or fewer.",
         approve: "Approve",
         reject: "Reject",
+        noCurrentEmployment:
+          "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below. Your decision settles the session and is sent to the customer.",
+        currentBenefit:
+          "The identity is verified, but the Verzekeringsbericht lists a current UWV benefit. Check the employment below. Your decision settles the session and is sent to the customer.",
       },
       dataRequest: {
         data_access: {
@@ -1114,6 +1125,10 @@ export const en = {
         missing: "No employment history",
         statementDate: "Verzekeringsbericht of {{date}}",
         noRelations: "No current employment or benefit in UWV's records",
+        employed: "Currently employed: yes",
+        notEmployed: "Currently employed: no",
+        benefit: "Benefit",
+        sickViaEmployer: "Sick, paid via employer",
         payrollTaxNumber: "Payroll tax number {{number}}",
         since: "since {{from}}",
         source:

@@ -156,7 +156,7 @@ func sessionEventData(req Request, status Status) map[string]any {
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,
-		"method": string(req.Method),
+		"method": string(req.Method), "reviewReason": req.ReviewReason,
 	} {
 		if value != "" {
 			data[key] = value

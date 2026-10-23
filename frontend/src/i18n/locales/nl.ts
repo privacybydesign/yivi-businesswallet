@@ -550,6 +550,8 @@ export const nl: Translation<typeof en> = {
       legalRetention: "de klant moet deze gegevens volgens de wet bewaren",
       orgPaused:
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
+      employmentNotProvided:
+        "er is na de identiteitscontrole niet op tijd een Verzekeringsbericht toegevoegd",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
       unknown: "de controle is niet geslaagd ({{code}})",
@@ -711,6 +713,11 @@ export const nl: Translation<typeof en> = {
         "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
       noRelations: "Er staat geen huidig dienstverband in.",
       since: "sinds {{from}}",
+      benefit: "(uitkering)",
+      review:
+        "Er staat geen huidige baan in. De organisatie beoordeelt je controle voordat er een besluit is.",
+      reviewBenefit:
+        "Er staat een lopende uitkering in. De organisatie beoordeelt je controle voordat er een besluit is.",
       reasons: {
         notAStatement:
           "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
@@ -999,6 +1006,10 @@ export const nl: Translation<typeof en> = {
         reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
         approve: "Goedkeuren",
         reject: "Afwijzen",
+        noCurrentEmployment:
+          "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder. Jouw besluit rondt de sessie af en gaat naar de klant.",
+        currentBenefit:
+          "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat een lopende uitkering van UWV. Bekijk het dienstverband hieronder. Jouw besluit rondt de sessie af en gaat naar de klant.",
       },
       dataRequest: {
         data_access: {
@@ -1140,6 +1151,10 @@ export const nl: Translation<typeof en> = {
         missing: "Geen arbeidsverleden",
         statementDate: "Verzekeringsbericht van {{date}}",
         noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
+        employed: "Heeft nu werk: ja",
+        notEmployed: "Heeft nu werk: nee",
+        benefit: "Uitkering",
+        sickViaEmployer: "Ziek, betaald via werkgever",
         payrollTaxNumber: "Loonheffingennummer {{number}}",
         since: "sinds {{from}}",
         source:

@@ -80,8 +80,13 @@ export type EmploymentMode = z.infer<typeof employmentModeSchema>;
 // UWV made it; relations is empty when it lists none.
 const proofingEmploymentSchema = z.object({
   statementDate: z.string(),
+  // A current relation that is not a benefit; without one the session goes
+  // to review.
+  employed: z.boolean(),
   relations: z.array(
     z.object({
+      // employment, benefit (paid by UWV) or sick_via_employer.
+      kind: z.string(),
       employer: z.string(),
       payrollTaxNumber: z.string(),
       // "" when the statement gives none.
@@ -231,6 +236,9 @@ const proofingRequestSchema = z.object({
   employmentMode: employmentModeSchema,
   employment: proofingEmploymentSchema.optional(),
   employmentUntil: z.string().optional(),
+  // Why the wallet put the session in review after the identity was
+  // approved (no_current_employment); absent otherwise.
+  reviewReason: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
