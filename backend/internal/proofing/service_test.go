@@ -1135,7 +1135,7 @@ func TestFlowSessionTTLAllowed(t *testing.T) {
 		f := newFixture()
 		spec.SessionTTLSeconds = seconds
 		_, err := f.svc.CreateFlow(context.Background(), testOrg, spec)
-		if got := err == nil; got != want {
+		if (err == nil) != want {
 			t.Errorf("CreateFlow(sessionTtlSeconds %d) = %v, want accepted %v", seconds, err, want)
 		}
 		if err != nil && !errors.Is(err, ErrInvalidInput) {

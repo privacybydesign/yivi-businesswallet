@@ -50,15 +50,11 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 
 	exec := func(sql string, args ...any) {
 		t.Helper()
-		if _, err := conn.Exec(ctx, sql, args...); err != nil {
-			t.Fatalf("seed: %v\n%s", err, sql)
-		}
+		seedExec(t, conn, sql, args...)
 	}
 	scan := func(dst any, sql string, args ...any) {
 		t.Helper()
-		if err := conn.QueryRow(ctx, sql, args...).Scan(dst); err != nil {
-			t.Fatalf("seed: %v\n%s", err, sql)
-		}
+		seedScan(t, conn, dst, sql, args...)
 	}
 	org := func(slug string) string {
 		t.Helper()
@@ -123,14 +119,7 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 	store := flow.NewPostgresStore(conn)
 	wantFlow := func(orgID, flowID string, wantVersion int, retention, ttl time.Duration) {
 		t.Helper()
-		fd, err := store.Get(ctx, orgID, flowID, 0)
-		if err != nil {
-			t.Fatalf("read %s's active version: %v", flowID, err)
-		}
-		if fd.Version != wantVersion || !fd.Active || fd.RetentionOverride != retention || fd.SessionTTL != ttl {
-			t.Errorf("%s active = v%d (active %v), retention %v, lifetime %v; want v%d, %v, %v",
-				flowID, fd.Version, fd.Active, fd.RetentionOverride, fd.SessionTTL, wantVersion, retention, ttl)
-		}
+		wantActiveFlow(t, store, orgID, flowID, wantVersion, retention, ttl)
 	}
 	wantFlow(own, "plain", 4, 90*day, 5*time.Minute)
 	wantFlow(own, "set", 1, day, 2*time.Minute)
@@ -189,4 +178,35 @@ func TestUpCopiesOrgDefaultsIntoFlows(t *testing.T) {
 	wantFlow(own, "plain", 4, 90*day, 5*time.Minute)
 	wantFlow(unsaved, "plain", 1, 0, 0)
 	wantRetention("a request following its org's, after up again", ownFollows, &ninety)
+}
+
+// seedExec runs a statement that fills the schema, failing the test on an
+// error.
+func seedExec(t *testing.T, conn *pgx.Conn, sql string, args ...any) {
+	t.Helper()
+	if _, err := conn.Exec(context.Background(), sql, args...); err != nil {
+		t.Fatalf("seed: %v\n%s", err, sql)
+	}
+}
+
+// seedScan reads one value into dst, failing the test on an error.
+func seedScan(t *testing.T, conn *pgx.Conn, dst any, sql string, args ...any) {
+	t.Helper()
+	if err := conn.QueryRow(context.Background(), sql, args...).Scan(dst); err != nil {
+		t.Fatalf("seed: %v\n%s", err, sql)
+	}
+}
+
+// wantActiveFlow checks flowID's active version at orgID: wantVersion, with
+// the retention and QR lifetime given.
+func wantActiveFlow(t *testing.T, store *flow.PostgresStore, orgID, flowID string, wantVersion int, retention, ttl time.Duration) {
+	t.Helper()
+	fd, err := store.Get(context.Background(), orgID, flowID, 0)
+	if err != nil {
+		t.Fatalf("read %s's active version: %v", flowID, err)
+	}
+	if fd.Version != wantVersion || !fd.Active || fd.RetentionOverride != retention || fd.SessionTTL != ttl {
+		t.Errorf("%s active = v%d (active %v), retention %v, lifetime %v; want v%d, %v, %v",
+			flowID, fd.Version, fd.Active, fd.RetentionOverride, fd.SessionTTL, wantVersion, retention, ttl)
+	}
 }

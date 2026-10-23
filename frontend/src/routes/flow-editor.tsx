@@ -46,13 +46,13 @@ const INFO_SIZE = 16;
 
 // The fields of the draft that sit under Advanced settings: an error in one of
 // them opens it.
-const ADVANCED_ERRORS: readonly FlowDraftError[] = [
+const ADVANCED_ERRORS: ReadonlySet<FlowDraftError> = new Set([
   "steps",
   "identity",
   "documentTypes",
   "issuingCountries",
   "ageOver",
-];
+]);
 
 // The levels the editor offers, as the draft holds them: "" is none.
 const LEVEL_CHOICES = ["none", ...ASSURANCE_LEVELS] as const;
@@ -138,7 +138,7 @@ export function FlowEditor({
     event.preventDefault();
     setTouched(true);
     if (invalid !== null) {
-      if (ADVANCED_ERRORS.includes(invalid)) {
+      if (ADVANCED_ERRORS.has(invalid)) {
         setAdvancedOpen(true);
       }
       return;
@@ -223,7 +223,11 @@ export function FlowEditor({
               placeholder={t("identityProofingFlows.new.namePlaceholder")}
               value={draft.name}
               aria-invalid={shown === "name" || undefined}
-              aria-describedby={`${NAME_HINT_ID}${shown === "name" ? ` ${NAME_ERROR_ID}` : ""}`}
+              aria-describedby={
+                shown === "name"
+                  ? `${NAME_HINT_ID} ${NAME_ERROR_ID}`
+                  : NAME_HINT_ID
+              }
               onChange={(event) => update({ name: event.target.value })}
             />
             <span id={NAME_HINT_ID} className={HINT}>

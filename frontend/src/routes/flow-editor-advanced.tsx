@@ -134,7 +134,7 @@ function StepsSection({
   onAddress,
   addressError,
   error,
-}: AdvancedSettingsProps): React.JSX.Element {
+}: Omit<AdvancedSettingsProps, "requiresIdentity">): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   const dataRequest = isDataRequest(kind);
