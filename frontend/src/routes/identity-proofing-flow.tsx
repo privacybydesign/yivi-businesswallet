@@ -71,32 +71,35 @@ export default function IdentityProofingFlow(): React.JSX.Element {
     return <FlowView slug={slug} flow={flow} />;
   }
 
+  let body: React.JSX.Element;
+  if (org.isPending || (isAdmin && flows.isPending)) {
+    body = <p className="text-ink-soft">{t("common.loading")}</p>;
+  } else if (!isAdmin) {
+    body = (
+      <p className="text-ink-soft">{t("identityProofingFlows.adminOnly")}</p>
+    );
+  } else if (flows.isError) {
+    body = <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>;
+  } else {
+    body = (
+      <>
+        <p className="text-ink-soft">
+          {t("identityProofingFlows.page.notFound")}
+        </p>
+        <Link
+          to={`/${slug}/identity-proofing/flows`}
+          className="text-link font-semibold underline"
+        >
+          {t("identityProofingFlows.page.backToFlows")}
+        </Link>
+      </>
+    );
+  }
+
   return (
     <>
       <TopBar title={t("identityProofingFlows.title")} />
-      <div className="flex flex-col gap-3 p-4 text-[14px] sm:p-8">
-        {org.isPending || (isAdmin && flows.isPending) ? (
-          <p className="text-ink-soft">{t("common.loading")}</p>
-        ) : !isAdmin ? (
-          <p className="text-ink-soft">
-            {t("identityProofingFlows.adminOnly")}
-          </p>
-        ) : flows.isError ? (
-          <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
-        ) : (
-          <>
-            <p className="text-ink-soft">
-              {t("identityProofingFlows.page.notFound")}
-            </p>
-            <Link
-              to={`/${slug}/identity-proofing/flows`}
-              className="text-link font-semibold underline"
-            >
-              {t("identityProofingFlows.page.backToFlows")}
-            </Link>
-          </>
-        )}
-      </div>
+      <div className="flex flex-col gap-3 p-4 text-[14px] sm:p-8">{body}</div>
     </>
   );
 }

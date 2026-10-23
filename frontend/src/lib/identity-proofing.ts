@@ -1181,8 +1181,8 @@ export function isProofingStep(value: string): value is ProofingStep {
 export function flowStepLabels(
   flow: {
     steps: readonly string[];
-    diplomaMode?: DiplomaMode | undefined;
-    addressMode?: AddressMode | undefined;
+    diplomaMode?: DiplomaMode;
+    addressMode?: AddressMode;
   },
   t: TFunction,
 ): string[] {
@@ -1304,7 +1304,7 @@ const SECONDS_PER_DAY = 86_400;
 // How many days after a check ends a flow's personal data is purged: the flow's
 // own retention when it sets one, else the org's.
 export function flowPurgeDays(
-  flow: { retentionOverrideSeconds?: number | undefined },
+  flow: { retentionOverrideSeconds?: number },
   settings: { dataRetentionDays: number },
 ): number {
   const override = flow.retentionOverrideSeconds ?? 0;

@@ -273,17 +273,20 @@ export function PeopleList({
             </Table.HeaderCell>
           </Table.Head>
           <Table.Body>
-            {requests.isPending ? (
+            {requests.isPending && (
               <Table.State colSpan={columns}>{t("common.loading")}</Table.State>
-            ) : requests.isError ? (
+            )}
+            {requests.isError && (
               <Table.State colSpan={columns}>
                 {proofingErrorMessage(requests.error, t)}
               </Table.State>
-            ) : shown.length === 0 ? (
+            )}
+            {requests.isSuccess && shown.length === 0 && (
               <Table.State colSpan={columns}>
                 {t("identityProofing.requests.empty")}
               </Table.State>
-            ) : (
+            )}
+            {requests.isSuccess &&
               shown.map((request) => (
                 <SessionRow
                   key={request.id}
@@ -300,8 +303,7 @@ export function PeopleList({
                   }
                   formatWhen={formatWhen}
                 />
-              ))
-            )}
+              ))}
           </Table.Body>
         </Table>
       </Card>
@@ -773,12 +775,14 @@ function IdentityRows({
   result: UseQueryResult<ProofingResult, Error>;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const check = (value: string | undefined): string =>
-    value === undefined || value === ""
-      ? "—"
-      : isCheckOutcome(value)
-        ? t(`identityProofing.sessions.identity.checks.${value}`)
-        : value;
+  const check = (value: string | undefined): string => {
+    if (value === undefined || value === "") {
+      return "—";
+    }
+    return isCheckOutcome(value)
+      ? t(`identityProofing.sessions.identity.checks.${value}`)
+      : value;
+  };
 
   if (result.isPending) {
     return (
@@ -984,15 +988,18 @@ function SessionTimeline({
       >
         {t("identityProofing.sessions.timeline")}
       </h3>
-      {events.isPending ? (
+      {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-      ) : events.isError ? (
+      )}
+      {events.isError && (
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
-      ) : events.data.length === 0 ? (
+      )}
+      {events.isSuccess && events.data.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("identityProofing.sessions.noEvents")}
         </p>
-      ) : (
+      )}
+      {events.isSuccess && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"
