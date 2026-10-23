@@ -45,7 +45,7 @@ export function isProofingLive(status: string): boolean {
 
 // Statuses a poll never recovers from: the caller may not read this session
 // (403), or it is gone (404). Polling on would only repeat the refusal.
-const FINAL_POLL_STATUSES: readonly number[] = [403, 404];
+const FINAL_POLL_STATUSES: ReadonlySet<number> = new Set([403, 404]);
 
 // Whether a verify page keeps polling its progress: until the first read, and
 // while the session is live, unless a read was refused for good.
@@ -70,9 +70,7 @@ export function reviewPollContinues(
 }
 
 function refusedForGood(error: Error | null): boolean {
-  return (
-    error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)
-  );
+  return error instanceof ApiError && FINAL_POLL_STATUSES.has(error.status);
 }
 
 export function proofingStatusTone(status: string): ProofingStatusTone {
@@ -175,7 +173,12 @@ export const FACE_PROVIDERS = ["regula"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
 
 // The service's steps that capture the face (proofing.faceSteps).
-const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
+const FACE_STEPS = new Set([
+  "face_verification",
+  "selfie",
+  "liveness",
+  "face_match",
+]);
 // The selfie location that takes the face in the browser
 // (proofing.selfieLocationBrowser).
 const SELFIE_LOCATION_BROWSER = "browser";
@@ -192,13 +195,13 @@ const YIVI_EIDAS_LEVEL = "low";
 // carry no claim for (AGE_OVER_CHOICES).
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
-  selfieLocation?: string | undefined;
-  requiredAssuranceLevel?: string | undefined;
+  selfieLocation?: string;
+  requiredAssuranceLevel?: string;
   requestedAttributes?: readonly string[];
   ageOver?: number;
 }): boolean {
   const needsReferencePhoto =
-    flow.steps.some((step) => FACE_STEPS.includes(step)) &&
+    flow.steps.some((step) => FACE_STEPS.has(step)) &&
     !flow.steps.includes(STEP_NFC_READ) &&
     flow.selfieLocation !== SELFIE_LOCATION_BROWSER;
   const levelMet =
@@ -357,7 +360,8 @@ function oneOf<T extends string>(
 }
 
 function tristate(value: boolean | undefined): Tristate {
-  return value === undefined ? "" : value ? "true" : "false";
+  if (value === undefined) return "";
+  return value ? "true" : "false";
 }
 
 // A flow as any list returns it (the org's, or a customer's), without the
@@ -481,19 +485,7 @@ function ageOverInvalid(draft: ProofingFlowDraft): boolean {
 // The request body for a draft, as the service's editor builds it. Call only
 // on a draft flowDraftError accepts.
 export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
-  const requiredChecks: string[] = [];
-  if (draft.documentAndChip) {
-    requiredChecks.push(CHECK_PASSIVE_AUTH);
-    if (draft.chipAuthentication) {
-      requiredChecks.push(CHECK_CHIP_AUTH);
-    }
-  }
-  if (draft.faceVerification) {
-    requiredChecks.push(CHECK_FACE_MATCH);
-    if (draft.liveness) {
-      requiredChecks.push(CHECK_LIVENESS);
-    }
-  }
+  const requiredChecks = draftRequiredChecks(draft);
   const requestedAttributes: string[] = REQUESTED_ATTRIBUTES.map(
     (a) => a.value,
   ).filter(
@@ -516,6 +508,31 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
       (country) => country.toUpperCase(),
     ),
   };
+  applyDraftOverrides(spec, draft);
+  return spec;
+}
+
+function draftRequiredChecks(draft: ProofingFlowDraft): string[] {
+  const requiredChecks: string[] = [];
+  if (draft.documentAndChip) {
+    requiredChecks.push(CHECK_PASSIVE_AUTH);
+    if (draft.chipAuthentication) {
+      requiredChecks.push(CHECK_CHIP_AUTH);
+    }
+  }
+  if (draft.faceVerification) {
+    requiredChecks.push(CHECK_FACE_MATCH);
+    if (draft.liveness) {
+      requiredChecks.push(CHECK_LIVENESS);
+    }
+  }
+  return requiredChecks;
+}
+
+function applyDraftOverrides(
+  spec: ProofingFlowSpec,
+  draft: ProofingFlowDraft,
+): void {
   if (draft.faceVerification) {
     spec.faceProvider = draft.faceProvider;
   }
@@ -543,7 +560,6 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
   if (asksAge(draft)) {
     spec.ageOver = Number(draft.ageOver);
   }
-  return spec;
 }
 
 // Whether the draft releases the age check, which needs an age.
@@ -596,7 +612,7 @@ export function editedFlowSelection(
 export function requestSubject(request: {
   subjectName: string;
   subjectEmail: string;
-  proofedName?: string | undefined;
+  proofedName?: string;
 }): { name: string; verifiedAs: string | undefined } {
   const given = request.subjectName.trim();
   const proofed = request.proofedName?.trim() ?? "";
@@ -1015,96 +1031,67 @@ export function employmentStepDone(
 }
 
 // The copy an identity proofing API error shows, keyed on its stable code.
+const PROOFING_ERROR_KEYS = {
+  no_encryption_key: "identityProofing.errors.noEncryptionKey",
+  flow_not_found: "identityProofing.errors.flowNotFound",
+  flow_not_completable: "identityProofing.errors.flowNotCompletable",
+  flow_not_allowed: "identityProofing.errors.flowNotAllowed",
+  member_not_found: "identityProofing.errors.memberNotFound",
+  customer_not_found: "identityProofing.errors.customerNotFound",
+  customer_exists: "identityProofing.errors.customerExists",
+  flow_not_assigned: "identityProofing.errors.flowNotAssigned",
+  customer_paused: "identityProofing.errors.customerPaused",
+  customer_has_open_reviews: "identityProofing.errors.customerHasOpenReviews",
+  customer_sessions_left: "identityProofing.errors.customerSessionsLeft",
+  proofing_paused: "identityProofing.errors.proofingPaused",
+  customer_no_api_key: "identityProofing.errors.customerNoApiKey",
+  api_key_not_found: "identityProofing.errors.apiKeyNotFound",
+  session_not_found: "identityProofing.errors.sessionNotFound",
+  not_under_review: "identityProofing.errors.notUnderReview",
+  reference_photo_required: "identityProofing.errors.referencePhotoRequired",
+  organization_not_found: "identityProofing.errors.organizationNotFound",
+  webhook_not_found: "identityProofing.errors.webhookNotFound",
+  link_started: "identityProofing.errors.linkStarted",
+  session_over: "identityProofing.errors.sessionOver",
+  device_active: "identityProofing.errors.deviceActive",
+  diplomas_need_page: "identityProofing.errors.diplomasNeedPage",
+  hosted_disabled: "identityProofing.errors.hostedDisabled",
+  diplomas_closed: "identityProofing.errors.diplomasClosed",
+  diplomas_not_asked: "identityProofing.errors.diplomasNotAsked",
+  address_needs_page: "identityProofing.errors.addressNeedsPage",
+  address_closed: "identityProofing.errors.addressClosed",
+  address_not_asked: "identityProofing.errors.addressNotAsked",
+  address_not_found: "identityProofing.errors.addressNotFound",
+  employment_needs_page: "identityProofing.errors.employmentNeedsPage",
+  employment_closed: "identityProofing.errors.employmentClosed",
+  employment_not_asked: "identityProofing.errors.employmentNotAsked",
+  flow_no_identity: "identityProofing.errors.flowNoIdentity",
+  data_flow_for_member: "identityProofing.errors.dataFlowForMember",
+  export_unavailable: "identityProofing.errors.exportUnavailable",
+  // An admin by role whose mandate was withdrawn: the backend refuses every
+  // admin call, though the role still shows the admin's tabs.
+  mandate_withdrawn: "identityProofing.errors.mandateWithdrawn",
+  // too_large is a diploma or Verzekeringsbericht upload's,
+  // payload_too_large a branding logo's.
+  too_large: "identityProofing.errors.tooLarge",
+  payload_too_large: "identityProofing.errors.tooLarge",
+} as const;
+
+const SERVER_MESSAGE_CODES = new Set([
+  "too_many_files",
+  "invalid_input",
+  "rejected_by_provider",
+]);
+
 export function proofingErrorMessage(error: unknown, t: TFunction): string {
-  switch (errorCode(error)) {
-    case "no_encryption_key":
-      return t("identityProofing.errors.noEncryptionKey");
-    case "flow_not_found":
-      return t("identityProofing.errors.flowNotFound");
-    case "flow_not_completable":
-      return t("identityProofing.errors.flowNotCompletable");
-    case "flow_not_allowed":
-      return t("identityProofing.errors.flowNotAllowed");
-    case "member_not_found":
-      return t("identityProofing.errors.memberNotFound");
-    case "customer_not_found":
-      return t("identityProofing.errors.customerNotFound");
-    case "customer_exists":
-      return t("identityProofing.errors.customerExists");
-    case "flow_not_assigned":
-      return t("identityProofing.errors.flowNotAssigned");
-    case "customer_paused":
-      return t("identityProofing.errors.customerPaused");
-    case "customer_has_open_reviews":
-      return t("identityProofing.errors.customerHasOpenReviews");
-    case "customer_sessions_left":
-      return t("identityProofing.errors.customerSessionsLeft");
-    case "proofing_paused":
-      return t("identityProofing.errors.proofingPaused");
-    case "customer_no_api_key":
-      return t("identityProofing.errors.customerNoApiKey");
-    case "api_key_not_found":
-      return t("identityProofing.errors.apiKeyNotFound");
-    case "session_not_found":
-      return t("identityProofing.errors.sessionNotFound");
-    case "not_under_review":
-      return t("identityProofing.errors.notUnderReview");
-    case "reference_photo_required":
-      return t("identityProofing.errors.referencePhotoRequired");
-    case "organization_not_found":
-      return t("identityProofing.errors.organizationNotFound");
-    case "webhook_not_found":
-      return t("identityProofing.errors.webhookNotFound");
-    case "link_started":
-      return t("identityProofing.errors.linkStarted");
-    case "session_over":
-      return t("identityProofing.errors.sessionOver");
-    case "device_active":
-      return t("identityProofing.errors.deviceActive");
-    case "diplomas_need_page":
-      return t("identityProofing.errors.diplomasNeedPage");
-    case "hosted_disabled":
-      return t("identityProofing.errors.hostedDisabled");
-    case "diplomas_closed":
-      return t("identityProofing.errors.diplomasClosed");
-    case "diplomas_not_asked":
-      return t("identityProofing.errors.diplomasNotAsked");
-    case "address_needs_page":
-      return t("identityProofing.errors.addressNeedsPage");
-    case "address_closed":
-      return t("identityProofing.errors.addressClosed");
-    case "address_not_asked":
-      return t("identityProofing.errors.addressNotAsked");
-    case "address_not_found":
-      return t("identityProofing.errors.addressNotFound");
-    case "employment_needs_page":
-      return t("identityProofing.errors.employmentNeedsPage");
-    case "employment_closed":
-      return t("identityProofing.errors.employmentClosed");
-    case "employment_not_asked":
-      return t("identityProofing.errors.employmentNotAsked");
-    case "flow_no_identity":
-      return t("identityProofing.errors.flowNoIdentity");
-    case "data_flow_for_member":
-      return t("identityProofing.errors.dataFlowForMember");
-    case "export_unavailable":
-      return t("identityProofing.errors.exportUnavailable");
-    // An admin by role whose mandate was withdrawn: the backend refuses every
-    // admin call, though the role still shows the admin's tabs.
-    case "mandate_withdrawn":
-      return t("identityProofing.errors.mandateWithdrawn");
-    // too_large is a diploma or Verzekeringsbericht upload's,
-    // payload_too_large a branding logo's.
-    case "too_large":
-    case "payload_too_large":
-      return t("identityProofing.errors.tooLarge");
-    case "too_many_files":
-    case "invalid_input":
-    case "rejected_by_provider":
-      return serverMessage(error) ?? t("identityProofing.errors.generic");
-    default:
-      return t("identityProofing.errors.generic");
+  const code = errorCode(error);
+  if (code !== null && Object.hasOwn(PROOFING_ERROR_KEYS, code)) {
+    return t(PROOFING_ERROR_KEYS[code as keyof typeof PROOFING_ERROR_KEYS]);
   }
+  if (code !== null && SERVER_MESSAGE_CODES.has(code)) {
+    return serverMessage(error) ?? t("identityProofing.errors.generic");
+  }
+  return t("identityProofing.errors.generic");
 }
 
 // What a hosted link's subject is told when a call fails. The wallet's copy
@@ -1250,15 +1237,15 @@ export type ProofingStep =
   | typeof STEP_DOCUMENT_PHOTO
   | typeof STEP_FACE_VERIFICATION;
 
-const PROOFING_STEPS: readonly string[] = [
+const PROOFING_STEPS: ReadonlySet<string> = new Set([
   STEP_DOCUMENT_CAPTURE,
   STEP_NFC_READ,
   STEP_DOCUMENT_PHOTO,
   STEP_FACE_VERIFICATION,
-];
+]);
 
 export function isProofingStep(value: string): value is ProofingStep {
-  return PROOFING_STEPS.includes(value);
+  return PROOFING_STEPS.has(value);
 }
 
 // The Sessions tab's filters: every session, or one outcome; "review" is the
@@ -1309,7 +1296,7 @@ const SECONDS_PAD = 2;
 export function sessionDurationSeconds(request: {
   status: string;
   createdAt: string;
-  completedAt?: string | undefined;
+  completedAt?: string;
   linkExpiresAt: string;
 }): number | undefined {
   const end =
@@ -1414,7 +1401,8 @@ export function readableTextOn(hex: string): "#ffffff" | "#000000" {
   const luminance = LUMINANCE_WEIGHTS.reduce((sum, weight, i) => {
     const start = 1 + i * HEX_PAIR;
     const c =
-      parseInt(hex.slice(start, start + HEX_PAIR), HEX_RADIX) / CHANNEL_MAX;
+      Number.parseInt(hex.slice(start, start + HEX_PAIR), HEX_RADIX) /
+      CHANNEL_MAX;
     const linear =
       c <= SRGB_LINEAR_LIMIT
         ? c / SRGB_LINEAR_DIVISOR

@@ -66,11 +66,11 @@ export function SessionsTab({
   slug,
   customer,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   customer: ProofingCustomer;
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useProofingRequestsQuery(slug, customer.id);
   const formatWhen = useWhenFormatter();
@@ -80,13 +80,49 @@ export function SessionsTab({
   const counts = sessionFilterCounts(all);
   const shown = all.filter((r) => matchesSessionFilter(r.status, filter));
 
+  const sessionRows = (): React.ReactNode => {
+    if (requests.isPending) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {t("common.loading")}
+        </Table.State>
+      );
+    }
+    if (requests.isError) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {proofingErrorMessage(requests.error, t)}
+        </Table.State>
+      );
+    }
+    if (shown.length === 0) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {t("identityProofing.requests.empty")}
+        </Table.State>
+      );
+    }
+    return shown.map((request) => (
+      <SessionRow
+        key={request.id}
+        slug={slug}
+        request={request}
+        isAdmin={isAdmin}
+        expanded={open === request.id}
+        onToggle={() =>
+          setOpen((current) => (current === request.id ? null : request.id))
+        }
+        formatWhen={formatWhen}
+      />
+    ));
+  };
+
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
+        <fieldset
           aria-label={t("customers.sessions.filterLabel")}
-          className="flex flex-wrap gap-2"
+          className="flex min-w-0 flex-wrap gap-2"
         >
           {SESSION_FILTERS.map((key) => {
             const active = filter === key;
@@ -109,7 +145,7 @@ export function SessionsTab({
               </button>
             );
           })}
-        </div>
+        </fieldset>
         <p className="text-muted text-[12px]">
           {isAdmin
             ? t("customers.sessions.retention", {
@@ -146,37 +182,7 @@ export function SessionsTab({
             </Table.HeaderCell>
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
-          <Table.Body>
-            {requests.isPending ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {t("common.loading")}
-              </Table.State>
-            ) : requests.isError ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {proofingErrorMessage(requests.error, t)}
-              </Table.State>
-            ) : shown.length === 0 ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {t("identityProofing.requests.empty")}
-              </Table.State>
-            ) : (
-              shown.map((request) => (
-                <SessionRow
-                  key={request.id}
-                  slug={slug}
-                  request={request}
-                  isAdmin={isAdmin}
-                  expanded={open === request.id}
-                  onToggle={() =>
-                    setOpen((current) =>
-                      current === request.id ? null : request.id,
-                    )
-                  }
-                  formatWhen={formatWhen}
-                />
-              ))
-            )}
-          </Table.Body>
+          <Table.Body>{sessionRows()}</Table.Body>
         </Table>
       </Card>
     </>
@@ -190,14 +196,14 @@ function SessionRow({
   expanded,
   onToggle,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
   isAdmin: boolean;
   expanded: boolean;
   onToggle: () => void;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
@@ -463,9 +469,9 @@ function SessionAddress({
 // approved one that requires them, that none came.
 function DiplomaTag({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (request.diplomas.length > 0) {
     return (
@@ -486,9 +492,9 @@ function DiplomaTag({
 // number duo.nl/diplomacontrole checks.
 function SessionDiplomas({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
@@ -623,10 +629,10 @@ function SessionEmployment({
 function ReviewDecision({
   slug,
   requestId,
-}: {
+}: Readonly<{
   slug: string;
   requestId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const decide = useDecideReviewMutation(slug, requestId);
   const [reason, setReason] = useState("");
@@ -710,16 +716,16 @@ function ReviewDecision({
 // from the engine when an admin opens the row, audited each time.
 function IdentityRows({
   result,
-}: {
+}: Readonly<{
   result: UseQueryResult<ProofingResult, Error>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
-  const check = (value: string | undefined): string =>
-    value === undefined || value === ""
-      ? "—"
-      : isCheckOutcome(value)
-        ? t(`customers.sessions.identity.checks.${value}`)
-        : value;
+  const check = (value: string | undefined): string => {
+    if (value === undefined || value === "") return "—";
+    return isCheckOutcome(value)
+      ? t(`customers.sessions.identity.checks.${value}`)
+      : value;
+  };
 
   if (result.isPending) {
     return (
@@ -820,9 +826,9 @@ function IdentityRows({
 // is blurred until a member reveals it.
 function IdentityPhotos({
   result,
-}: {
+}: Readonly<{
   result: ProofingResult;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const photos = [
     { key: "photo", image: result.photo },
@@ -856,10 +862,10 @@ const REVEAL_ICON_SIZE = 16;
 function RevealablePhoto({
   image,
   label,
-}: {
+}: Readonly<{
   image: ProofingImage;
   label: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
@@ -907,10 +913,10 @@ function RevealablePhoto({
 function SessionTimeline({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
   const formatWhen = useWhenFormatter();
@@ -923,15 +929,18 @@ function SessionTimeline({
       >
         {t("customers.sessions.timeline")}
       </h3>
-      {events.isPending ? (
+      {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-      ) : events.isError ? (
+      )}
+      {events.isError && (
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
-      ) : events.data.length === 0 ? (
+      )}
+      {events.isSuccess && events.data.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("customers.sessions.noEvents")}
         </p>
-      ) : (
+      )}
+      {events.isSuccess && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

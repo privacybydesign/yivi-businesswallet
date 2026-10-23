@@ -90,39 +90,23 @@ func TestPDFUWV(t *testing.T) {
 	p := newPKI(t, pkiOptions{})
 	pdf, seal := uwvPDF(t, p, p.seal.OCSPServer[0])
 
-	t.Run("verifies under its issuer", func(t *testing.T) {
-		res := verifyPDF(t, pdf, Options{Issuer: &testUWV, Trust: p.trust})
-		if !res.Valid {
-			t.Fatalf("a UWV-shaped seal did not verify: %+v", res.FirstFailure())
-		}
-		if res.TimestampTrusted || !res.Signer.Equal(seal) {
-			t.Errorf("TimestampTrusted = %v, Signer = %v; want no timestamp and the seal", res.TimestampTrusted, res.Signer.Subject)
-		}
-		for _, c := range res.Checks {
-			switch c.ID {
-			case CheckCertification, CheckSigningCertificate, CheckTimestampToken, CheckTimestampAuthority:
-				t.Errorf("check %s ran for an issuer that lacks it", c.ID)
-			}
-		}
-	})
-
-	t.Run("fails under an issuer that requires everything", func(t *testing.T) {
-		strict := testUWV
-		strict.Lacks = trust.Lacks{}
-		res := verifyPDF(t, pdf, Options{Issuer: &strict, Trust: p.trust, OCSP: true})
-		for _, id := range []string{CheckCertification, CheckSigningCertificate, CheckTimestampToken} {
-			if checkOK(t, res, id) {
-				t.Errorf("check %s passed on a signature without it", id)
-			}
-		}
-		if res.Valid {
-			t.Error("a bare signature verified under an issuer that requires a long-term one")
-		}
-	})
+	t.Run("verifies under its issuer", func(t *testing.T) { testUWVVerifies(t, p, pdf, seal) })
+	t.Run("fails under an issuer that requires everything", func(t *testing.T) { testUWVStrictIssuer(t, p, pdf) })
 
 	t.Run("fails under DUO", func(t *testing.T) {
 		if res := verifyPDF(t, pdf, Options{Issuer: &trust.DUO, Trust: p.trust}); res.Valid {
 			t.Error("a UWV-shaped seal verified as DUO's")
+		}
+	})
+
+	t.Run("changed after signing", func(t *testing.T) {
+		// Without signed attributes only the RSA signature over the content
+		// guards it, so one changed byte must fail that check.
+		tampered := append([]byte{}, pdf...)
+		tampered[len("%PDF-1.")] = '4'
+		res := verifyPDF(t, tampered, Options{Issuer: &testUWV, Trust: p.trust})
+		if res.Valid || res.FirstFailure() == nil || res.FirstFailure().ID != CheckCmsSignature {
+			t.Errorf("FirstFailure = %+v, want %s", res.FirstFailure(), CheckCmsSignature)
 		}
 	})
 
@@ -147,4 +131,36 @@ func TestPDFUWV(t *testing.T) {
 			t.Errorf("a seal whose responder cannot answer verified: %+v", res.Checks)
 		}
 	})
+}
+
+func testUWVVerifies(t *testing.T, p *pki, pdf []byte, seal *x509.Certificate) {
+	t.Helper()
+	res := verifyPDF(t, pdf, Options{Issuer: &testUWV, Trust: p.trust})
+	if !res.Valid {
+		t.Fatalf("a UWV-shaped seal did not verify: %+v", res.FirstFailure())
+	}
+	if res.TimestampTrusted || !res.Signer.Equal(seal) {
+		t.Errorf("TimestampTrusted = %v, Signer = %v; want no timestamp and the seal", res.TimestampTrusted, res.Signer.Subject)
+	}
+	for _, c := range res.Checks {
+		switch c.ID {
+		case CheckCertification, CheckSigningCertificate, CheckTimestampToken, CheckTimestampAuthority:
+			t.Errorf("check %s ran for an issuer that lacks it", c.ID)
+		}
+	}
+}
+
+func testUWVStrictIssuer(t *testing.T, p *pki, pdf []byte) {
+	t.Helper()
+	strict := testUWV
+	strict.Lacks = trust.Lacks{}
+	res := verifyPDF(t, pdf, Options{Issuer: &strict, Trust: p.trust, OCSP: true})
+	for _, id := range []string{CheckCertification, CheckSigningCertificate, CheckTimestampToken} {
+		if checkOK(t, res, id) {
+			t.Errorf("check %s passed on a signature without it", id)
+		}
+	}
+	if res.Valid {
+		t.Error("a bare signature verified under an issuer that requires a long-term one")
+	}
 }

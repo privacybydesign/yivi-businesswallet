@@ -53,6 +53,27 @@ const SELECT_CLASS =
 
 export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 
+function offForDataRequest<T extends string>(
+  kind: FlowKind,
+  mode: T,
+): T | "off" {
+  return isDataRequest(kind) ? "off" : mode;
+}
+
+// Saves a setting that changed, then runs next; an unchanged one goes
+// straight to next.
+function saveIfChanged(
+  changed: boolean,
+  save: (onSuccess: () => void) => void,
+  next: () => void,
+): void {
+  if (!changed) {
+    next();
+    return;
+  }
+  save(next);
+}
+
 // The flow editor, here and on a customer's Flows tab: onDone closes it (after
 // a save or a cancel), onSaved gets the saved flow first.
 export function FlowEditor({
@@ -61,14 +82,14 @@ export function FlowEditor({
   onDone,
   onSaved,
   note,
-}: {
+}: Readonly<{
   slug: string;
   mode: EditorMode;
   onDone: () => void;
   onSaved?: (flow: ProofingFlow) => void;
   // Shown under the heading, e.g. that a shared flow changes for everyone.
   note?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
@@ -103,11 +124,12 @@ export function FlowEditor({
   );
   const [touched, setTouched] = useState(false);
   // A data request asks for no address, no diplomas and no employment.
-  const address: AddressMode = isDataRequest(flowKind) ? "off" : addressMode;
-  const diplomas: DiplomaMode = isDataRequest(flowKind) ? "off" : diplomaMode;
-  const employment: EmploymentMode = isDataRequest(flowKind)
-    ? "off"
-    : employmentMode;
+  const address: AddressMode = offForDataRequest(flowKind, addressMode);
+  const diplomas: DiplomaMode = offForDataRequest(flowKind, diplomaMode);
+  const employment: EmploymentMode = offForDataRequest(
+    flowKind,
+    employmentMode,
+  );
   const requiresIdentity = identityRequired(flowKind, diplomas, employment);
   const invalid = flowDraftError(draft, requiresIdentity);
   const steps = draftSteps(draft);
@@ -127,12 +149,11 @@ export function FlowEditor({
     setFlowKind(kind);
     setDiplomaMode(mode);
     setEmploymentMode(employmentChoice);
-    const data = isDataRequest(kind);
     if (
       identityRequired(
         kind,
-        data ? "off" : mode,
-        data ? "off" : employmentChoice,
+        offForDataRequest(kind, mode),
+        offForDataRequest(kind, employmentChoice),
       )
     ) {
       setDraft((current) => ({
@@ -157,7 +178,7 @@ export function FlowEditor({
     update({ requestedAttributes: next });
   }
 
-  function submit(event: React.FormEvent): void {
+  function submit(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setTouched(true);
     if (invalid !== null) {
@@ -172,40 +193,32 @@ export function FlowEditor({
     // The diploma mode, the address, the employment, then the kind, each only
     // when it changed.
     const saveSettings = (flowId: string, then: () => void): void => {
-      const kindThen = (): void => {
-        if (flowKind === savedKind) {
-          then();
-          return;
-        }
-        saveKind.mutate({ flowId, kind: flowKind }, { onSuccess: then });
-      };
-      const employmentThen = (): void => {
-        if (employment === savedEmployment) {
-          kindThen();
-          return;
-        }
-        saveEmployment.mutate(
-          { flowId, mode: employment },
-          { onSuccess: kindThen },
+      const kindThen = (): void =>
+        saveIfChanged(
+          flowKind !== savedKind,
+          (onSuccess) =>
+            saveKind.mutate({ flowId, kind: flowKind }, { onSuccess }),
+          then,
         );
-      };
-      const addressThen = (): void => {
-        if (address === savedAddress) {
-          employmentThen();
-          return;
-        }
-        saveAddress.mutate(
-          { flowId, mode: address },
-          { onSuccess: employmentThen },
+      const employmentThen = (): void =>
+        saveIfChanged(
+          employment !== savedEmployment,
+          (onSuccess) =>
+            saveEmployment.mutate({ flowId, mode: employment }, { onSuccess }),
+          kindThen,
         );
-      };
-      if (diplomas === savedDiplomas) {
-        addressThen();
-        return;
-      }
-      saveDiplomas.mutate(
-        { flowId, mode: diplomas },
-        { onSuccess: addressThen },
+      const addressThen = (): void =>
+        saveIfChanged(
+          address !== savedAddress,
+          (onSuccess) =>
+            saveAddress.mutate({ flowId, mode: address }, { onSuccess }),
+          employmentThen,
+        );
+      saveIfChanged(
+        diplomas !== savedDiplomas,
+        (onSuccess) =>
+          saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess }),
+        addressThen,
       );
     };
     const saveSpec = (then: (flow: ProofingFlow) => void): void => {
@@ -712,13 +725,13 @@ function Field({
   hint,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
   error?: string | null;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex max-w-md flex-col gap-1.5">
       <label htmlFor={id} className={LABEL}>
@@ -740,13 +753,13 @@ function TristateField({
   hint,
   value,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
   value: Tristate;
   onChange: (value: Tristate) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Field id={id} label={label} hint={hint}>
@@ -775,14 +788,14 @@ function Checkbox({
   label,
   hint,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   checked: boolean;
   disabled?: boolean;
   label: string;
   hint?: string;
   onChange: (checked: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-start gap-2.5">
       <input

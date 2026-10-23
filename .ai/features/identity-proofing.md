@@ -1170,6 +1170,9 @@ only: the engine knows nothing of it.
     fetch), and reloaded in the background once 24 h old; a failed reload keeps
     the anchors already loaded and is retried after 15 minutes. The pinned roots
     are only the boot fallback.
+    - `pinned` holds only the PKIoverheid and certSIGN roots, and UWV's seal
+      chains to QuoVadis: `pinned` with `EMPLOYMENT_VALIDATOR_PROVIDER=uwv` fails
+      the boot.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
@@ -1486,7 +1489,7 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
       with a hyphen in either order ("Jansen-de Vries" for "de Vries"). The
       partner's name alone is refused;
     - the same date of birth. Else `holder_mismatch`.
-  - The printed date at most `StatementMaxAge` (30 days) old, else `stale`.
+  - The printed date at most `statementMaxAge` (30 days) old, else `stale`.
 - **Kept**: the statement date and only the relations current on it
   (`Statement.Current`): ones that report a month at most two months before the
   statement's month, as employers file a month's payroll by the end of the

@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -78,6 +80,19 @@ func TestEmploymentSealedTillPurge(t *testing.T) {
 	if err != nil || got.SubjectEmployment == nil || got.SubjectEmployment.Relations[0] != emp.Relations[0] || got.EmploymentAddedAt == nil {
 		t.Fatalf("Get = %+v, %v; want the employment", got.SubjectEmployment, err)
 	}
+	checkEmploymentSealed(t, pool, webhooks, got)
+
+	if err := requests.Purge(ctx, got, nil); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	checkEmploymentPurged(t, pool, requests, got)
+}
+
+// checkEmploymentSealed checks req's employment is stored sealed, audited and
+// sent once.
+func checkEmploymentSealed(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookStore, req Request) {
+	t.Helper()
+	ctx := context.Background()
 	var plain bool
 	if err := pool.QueryRow(ctx, `SELECT position('VOORBEELD' in encode(employment_ciphertext, 'escape')) > 0
 		FROM identity_proofing_requests WHERE id = $1`, req.ID).Scan(&plain); err != nil || plain {
@@ -86,15 +101,17 @@ func TestEmploymentSealedTillPurge(t *testing.T) {
 	if auditCount(t, pool, audit.IdentityProofingEmploymentAdded) != 1 || auditCount(t, pool, audit.IdentityProofingEmploymentRejected) != 1 {
 		t.Error("want one employment_added and one employment_rejected event")
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, req.OrganizationID, *req.CustomerID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionEmploymentAdded {
 		t.Errorf("deliveries = %+v, %v; want one session.employment_added", deliveries, err)
 	}
+}
 
-	if err := requests.Purge(ctx, got, nil); err != nil {
-		t.Fatalf("Purge: %v", err)
-	}
-	purged, err := requests.Get(ctx, orgID, req.ID)
+// checkEmploymentPurged checks a purge left none of req's employment behind.
+func checkEmploymentPurged(t *testing.T, pool *pgxpool.Pool, requests *RequestStore, req Request) {
+	t.Helper()
+	ctx := context.Background()
+	purged, err := requests.Get(ctx, req.OrganizationID, req.ID)
 	if err != nil || purged.SubjectEmployment != nil {
 		t.Errorf("after purge employment = %+v, %v; want none", purged.SubjectEmployment, err)
 	}
