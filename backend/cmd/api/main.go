@@ -934,7 +934,7 @@ func run() error {
 
 	// Identity proofing: the wallet's own engine runs every org's sessions, the
 	// org being its tenant. The deployment key seals the sessions' evidence and
-	// the customer secrets; without it nothing can be sent
+	// the webhook secrets; without it nothing can be sent
 	// (proofing.ErrNoEncryptionKey).
 	proofingCipher, err := crypto.NewCipher(cfg.IdentityProofingEncryptionKey)
 	if err != nil {
@@ -944,7 +944,8 @@ func run() error {
 		slog.WarnContext(ctx, "identity proofing is off: IDENTITY_PROOFING_ENCRYPTION_KEY is not set, so no proofing request can be sent and no webhook is delivered")
 	}
 	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
-	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewCustomerStore(pool, recorder), themeSettingsStore, orgStore)
+	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewOrgSettingsStore(pool, recorder),
+		proofing.NewFlowBrandingStore(pool, recorder), themeSettingsStore)
 	branding := appBranding{brandingResolver}
 	// The proofing jobs outlive the HTTP drain, so the notices and webhook
 	// deliveries the last requests cause still go out; they stop when run
@@ -986,7 +987,7 @@ func run() error {
 		return fmt.Errorf("address lookup ping: %w", err)
 	}
 	proofingService.SetAddressLookup(addressLookup)
-	// A customer's session keeps its personal data for its customer's data retention.
+	// An external person's session keeps its personal data for the org's data retention.
 	startPruner(proofingJobs, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session
 	// nobody finishes is reconciled at its cap. Neither polls.
@@ -1003,9 +1004,9 @@ func run() error {
 		startPruner(proofingJobs, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
 	}
 	database.RunOnNotify(proofingJobs, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
-	// Customer webhooks go out as their change commits, retries at their due
-	// time, to the customer's endpoint (https, public addresses only). Without
-	// the key no secret opens, so the deliverer does not run at all.
+	// Webhooks go out as their change commits, retries at their due time, to
+	// the org's endpoint (https, public addresses only). Without the key no
+	// secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
 		database.RunOnNotify(proofingJobs, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
 			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)

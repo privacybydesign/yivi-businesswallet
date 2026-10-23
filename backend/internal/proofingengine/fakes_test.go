@@ -103,6 +103,20 @@ func (m *memSessions) Delete(_, id string) error {
 	return nil
 }
 
+func (m *memSessions) SetRetention(_ string, ids []string, retention time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range ids {
+		sess, ok := m.byID[id]
+		if !ok {
+			continue
+		}
+		sess.RetentionOverride = retention
+		m.byID[id] = sess
+	}
+	return nil
+}
+
 func (m *memSessions) Purge(time.Duration, time.Time) ([]session.Session, error) { return nil, nil }
 
 func (m *memSessions) SetOnExpire(func(session.Session)) {}

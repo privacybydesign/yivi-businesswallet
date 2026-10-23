@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/regula"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
@@ -102,5 +103,79 @@ func TestRegulaConfirmedLiveness(t *testing.T) {
 				t.Errorf("selfie = %q (%s); want the match's crop", out.Selfie, out.SelfieMime)
 			}
 		})
+	}
+}
+
+// A flow's own face match threshold decides the match, lower or higher than the
+// deployment's; without one the deployment's applies.
+func TestFlowFaceMatchThreshold(t *testing.T) {
+	const deployment = 0.75
+	crop := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nlive-face"))
+	ref := &faceReference{ImageBase64: "cG9ydHJhaXQ=", MimeType: "image/jpeg"}
+	sess := session.Session{TenantReference: "ref"}
+	for _, c := range []struct {
+		name       string
+		threshold  map[flow.Check]float64
+		similarity float64
+		matched    bool
+		reported   float64
+	}{
+		{"no flow threshold, under the deployment's", nil, 0.7, false, deployment},
+		{"no flow threshold, at the deployment's", nil, deployment, true, deployment},
+		{"flow threshold under the deployment's", map[flow.Check]float64{flow.CheckFaceMatch: 0.6}, 0.7, true, 0.6},
+		{"flow threshold over the deployment's", map[flow.Check]float64{flow.CheckFaceMatch: 0.9}, 0.8, false, 0.9},
+		{"another check's threshold", map[flow.Check]float64{flow.CheckNFCPassiveAuth: 0.5}, 0.7, false, deployment},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			client := &confirmedRegula{taggedRegula: &taggedRegula{tags: map[string]string{"tx": "ips-ref"}}, similarity: c.similarity, crop: crop}
+			s := &Server{cfg: Config{Regula: client, RegulaFaceMatchThreshold: deployment}}
+			v, ok := s.faceVerifier(flow.FaceProviderRegula, &flow.FlowDefinition{CheckThresholds: c.threshold})
+			if !ok {
+				t.Fatal("faceVerifier: Regula is configured, want a verifier")
+			}
+			out, err := v.Verify(context.Background(), sess, ref, liveCapture{TransactionID: "tx"})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if out.Matched == nil || out.Threshold == nil {
+				t.Fatalf("matched = %v, threshold = %v, want both set", out.Matched, out.Threshold)
+			}
+			if *out.Matched != c.matched {
+				t.Errorf("matched = %v at %v, want %v", *out.Matched, c.similarity, c.matched)
+			}
+			if *out.Threshold != c.reported {
+				t.Errorf("threshold = %v, want %v", *out.Threshold, c.reported)
+			}
+		})
+	}
+}
+
+// A flow requiring Substantial matches at its floor on a deployment whose
+// threshold is lower: a face under it fails the face step, rather than
+// matching there and failing the level (ASSURANCE_NOT_MET) at the end.
+func TestSubstantialMatchesAtItsFloor(t *testing.T) {
+	const lowDeployment = 0.6
+	crop := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nlive-face"))
+	ref := &faceReference{ImageBase64: "cG9ydHJhaXQ=", MimeType: "image/jpeg"}
+	client := &confirmedRegula{taggedRegula: &taggedRegula{tags: map[string]string{"tx": "ips-ref"}}, similarity: 0.7, crop: crop}
+	s := &Server{cfg: Config{Regula: client, RegulaFaceMatchThreshold: lowDeployment}}
+	v, ok := s.faceVerifier(flow.FaceProviderRegula, &flow.FlowDefinition{RequiredAssuranceLevel: flow.AssuranceLevelSubstantial})
+	if !ok {
+		t.Fatal("faceVerifier: Regula is configured, want a verifier")
+	}
+	out, err := v.Verify(context.Background(), session.Session{TenantReference: "ref"}, ref, liveCapture{TransactionID: "tx"})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if out.Matched == nil || *out.Matched || out.Threshold == nil || *out.Threshold != flow.SubstantialMinFaceMatch {
+		t.Errorf("matched = %v at threshold %v for a 0.7 face, want no match at %v", out.Matched, out.Threshold, flow.SubstantialMinFaceMatch)
+	}
+}
+
+// A Substantial flow with no threshold of its own gets the deployment's, and
+// Regula's default must not sit under the floor Substantial refuses.
+func TestRegulaDefaultMeetsFloor(t *testing.T) {
+	if regula.DefaultMatchThreshold < flow.SubstantialMinFaceMatch {
+		t.Errorf("regula.DefaultMatchThreshold = %v, under flow.SubstantialMinFaceMatch %v", regula.DefaultMatchThreshold, flow.SubstantialMinFaceMatch)
 	}
 }

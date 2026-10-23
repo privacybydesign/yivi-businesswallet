@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,11 +15,15 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
-// Each proofing org seeds its flows and customers once, however often the
-// seed runs, and only its own.
+// defaultOrgRetentionDays is the org's fixed data retention
+// (proofing.defaultDataRetentionDays).
+const defaultOrgRetentionDays = 7
+
+// Each proofing org seeds its flows, with its retention, and its default flow
+// once, however often the seed runs, and only its own. The org's own
+// retention stays the fixed default.
 func TestSeedProofingIsIdempotent(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
@@ -31,56 +36,45 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		}
 		orgsBySlug[o.slug] = org
 	}
-	admin, err := ensureUser(ctx, user.NewStore(pool), "admin@example.org", "Sam", "Admin", "")
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
 	for range 2 {
-		if err := seedProofing(ctx, pool, orgsBySlug, admin.ID); err != nil {
+		if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
 			t.Fatalf("seedProofing: %v", err)
 		}
 	}
 
 	data := proofing.NewDataRequestStore(pool, audit.NopRecorder{}, nil)
-	customerStore := proofing.NewCustomerStore(pool, audit.NopRecorder{})
+	selections := proofing.NewSettingsStore(pool, audit.NopRecorder{})
+	settings := proofing.NewOrgSettingsStore(pool, audit.NopRecorder{})
 	for _, o := range demoProofingOrgs {
 		orgID := orgsBySlug[o.slug].ID
 		flows, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
-		if err != nil || len(flows) != len(o.allFlows()) {
-			t.Fatalf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.allFlows()))
+		if err != nil || len(flows) != len(o.flows) {
+			t.Fatalf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.flows))
 		}
 		ids := map[string]string{}
 		for _, f := range flows {
 			ids[f.Name] = f.ID
 		}
-		for _, f := range o.allFlows() {
-			want := f.kind
-			if want == "" {
-				want = proofing.FlowIdentity
-			}
-			if kind, err := data.FlowKind(ctx, orgID, ids[f.def.Name]); err != nil || kind != want {
-				t.Errorf("%s %s kind = %q, %v; want %q", o.slug, f.def.Name, kind, err, want)
+		// See my data and Delete my data are the wallet's to create, not the
+		// seed's: every seeded flow is an identity check.
+		for _, f := range o.flows {
+			if kind, err := data.FlowKind(ctx, orgID, ids[f.def.Name]); err != nil || kind != proofing.FlowIdentity {
+				t.Errorf("%s %s kind = %q, %v; want identity", o.slug, f.def.Name, kind, err)
 			}
 		}
 
-		customers, err := customerStore.List(ctx, orgID)
-		if err != nil || len(customers) != len(o.customers) {
-			t.Fatalf("%s customers = %d, %v; want %d", o.slug, len(customers), err, len(o.customers))
+		sel, err := selections.FlowSelection(ctx, orgID)
+		if err != nil || sel.DefaultFlowID != ids[o.defaultFlow] {
+			t.Errorf("%s default flow = %q, %v; want %s", o.slug, sel.DefaultFlowID, err, o.defaultFlow)
 		}
-		for _, c := range customers {
-			// Its own flows plus the data request flows, its first flow the default.
-			var want demoProofingCustomer
-			for _, d := range o.customers {
-				if d.name == c.Name {
-					want = d
-				}
+		for _, f := range flows {
+			if want := time.Duration(o.retentionDays) * day; f.RetentionOverride != want {
+				t.Errorf("%s %s retention = %v, want %v", o.slug, f.Name, f.RetentionOverride, want)
 			}
-			if len(c.Flows.FlowIDs) != len(want.flowNames()) || c.Flows.DefaultFlowID != ids[want.flows[0]] {
-				t.Errorf("%s flows = %+v; want %d flows, default %s", c.Name, c.Flows, len(want.flowNames()), want.flows[0])
-			}
-			if c.Settings.DataRetentionDays != want.retentionDays {
-				t.Errorf("%s retention = %d; want %d", c.Name, c.Settings.DataRetentionDays, want.retentionDays)
-			}
+		}
+		got, err := settings.Get(ctx, orgID)
+		if err != nil || got.Session.DataRetentionDays != defaultOrgRetentionDays {
+			t.Errorf("%s org retention = %d, %v; want the fixed %d", o.slug, got.Session.DataRetentionDays, err, defaultOrgRetentionDays)
 		}
 	}
 
@@ -114,7 +108,7 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 }
 
 // The staging proofing demo seeds the demo proofing orgs with their flows and
-// customers and the Yivi team as their admins, once however often it runs.
+// the Yivi team as their admins, once however often it runs.
 func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
 	pool, dsn := testdb.Fresh(t)
 	ctx := context.Background()
@@ -124,7 +118,6 @@ func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
 		}
 	}
 
-	customerStore := proofing.NewCustomerStore(pool, audit.NopRecorder{})
 	for _, o := range demoProofingOrgs {
 		var orgID uuid.UUID
 		if err := pool.QueryRow(ctx, "SELECT id FROM organizations WHERE slug = $1", o.slug).Scan(&orgID); err != nil {
@@ -134,9 +127,9 @@ func TestEnsureProofingDemoIsIdempotent(t *testing.T) {
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM memberships WHERE organization_id = $1 AND role = 'admin'", orgID).Scan(&admins); err != nil || admins != len(yiviTeam) {
 			t.Errorf("%s admins = %d, %v; want %d", o.slug, admins, err, len(yiviTeam))
 		}
-		customers, err := customerStore.List(ctx, orgID)
-		if err != nil || len(customers) != len(o.customers) {
-			t.Errorf("%s customers = %d, %v; want %d", o.slug, len(customers), err, len(o.customers))
+		flows, err := flow.NewPostgresStore(pool).List(ctx, orgID.String())
+		if err != nil || len(flows) != len(o.flows) {
+			t.Errorf("%s flows = %d, %v; want %d", o.slug, len(flows), err, len(o.flows))
 		}
 	}
 }
@@ -163,9 +156,9 @@ func TestEnsureProofingDemoRefusesForeignOrg(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM qerds_addresses WHERE organization_id = $1", orgID).Scan(&addresses); err != nil || addresses != 0 {
 		t.Errorf("foreign org QERDS addresses = %d, %v; want 0", addresses, err)
 	}
-	customers, err := proofing.NewCustomerStore(pool, audit.NopRecorder{}).List(ctx, orgID)
-	if err != nil || len(customers) != 0 {
-		t.Errorf("foreign org customers = %d, %v; want 0", len(customers), err)
+	settings, err := proofing.NewOrgSettingsStore(pool, audit.NopRecorder{}).Get(ctx, orgID)
+	if err != nil || !settings.UpdatedAt.IsZero() {
+		t.Errorf("foreign org proofing settings = %+v, %v; want none saved", settings, err)
 	}
 }
 

@@ -11,13 +11,13 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// An admin reads a customer request's identity in the wallet, audited each
+// An admin reads an external request's identity in the wallet, audited each
 // time; a member's request has no identity to show.
 func TestAdminRequestResult(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
-	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{UserID: uuid.New()},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestAdminRequestResult(t *testing.T) {
 		t.Fatalf("AdminRequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
 	}
 
-	f.requests.stored.CustomerID = nil
+	f.requests.stored.SubjectKind = SubjectMember
 	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("AdminRequestResult on a member's request = %v, want %v", err, ErrRequestNotFound)
 	}

@@ -37,6 +37,7 @@ type Interface interface {
 	FindByHandover(tokenHash string) (Session, error)
 	Update(tenantID, id string, fn func(*Session) error) (Session, error)
 	Delete(tenantID, id string) error
+	SetRetention(tenantID string, ids []string, retention time.Duration) error
 	Purge(retention time.Duration, now time.Time) ([]Session, error)
 	// SetOnExpire installs the hook a lazy expiry (a read that finds the
 	// session past its deadline) reports through.
@@ -320,6 +321,24 @@ func (s *PostgresStore) Delete(tenantID, id string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// SetRetention sets the retention override of the tenant's sessions ids, as
+// Create stamps it. Purge reads the column; the sealed copy in data is the
+// stamp at creation and is not read. It leaves updated_at alone, which a
+// finished session's retention may count from.
+func (s *PostgresStore) SetRetention(tenantID string, ids []string, retention time.Duration) error {
+	c, cancel := ctx()
+	defer cancel()
+	seconds := int64(retention / time.Second)
+	_, err := s.db.Exec(c, `
+		UPDATE identity_proofing_sessions SET retention_override_seconds = $3
+		WHERE organization_id::text = $1 AND id = ANY($2) AND retention_override_seconds <> $3`,
+		tenantID, ids, seconds)
+	if err != nil {
+		return fmt.Errorf("session: set retention: %w", err)
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-// One decimal is enough to tell two customers' verified shares apart.
+// One decimal is enough to tell two flows' verified shares apart.
 const PERCENT_FRACTION_DIGITS = 1;
 
 // Formats a 0..1 share as a percentage in the UI language ("85.1%").

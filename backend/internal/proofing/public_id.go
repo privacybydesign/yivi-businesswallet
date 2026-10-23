@@ -7,13 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// sessionIDPrefix starts a request's id on the customer API and in webhooks:
+// sessionIDPrefix starts a request's id on the API and in webhooks:
 // an opaque ps_ id, never the database UUID, so its format can change later.
 const sessionIDPrefix = "ps_"
 
 var publicIDEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// publicSessionID is a request's customer-facing id.
+// publicSessionID is a request's API-facing id.
 func publicSessionID(id uuid.UUID) string {
 	return sessionIDPrefix + strings.ToLower(publicIDEncoding.EncodeToString(id[:]))
 }

@@ -56,6 +56,9 @@ type FlowSpec struct {
 	AssuranceTiers           []AssuranceTier `json:"assuranceTiers,omitempty"`
 	LegalBasis               string          `json:"legalBasis,omitempty"`
 	ProcessingPurpose        string          `json:"processingPurpose,omitempty"`
+	// SessionTTLSeconds is how long a session of this flow runs; 0 follows the
+	// org's session lifetime.
+	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
 }
 
 // AssuranceTier maps a minimum score percentage to an assurance tier name.

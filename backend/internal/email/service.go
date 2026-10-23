@@ -249,9 +249,10 @@ func (s *Service) SendVogRequested(ctx context.Context, orgID uuid.UUID, to, org
 
 // ProofingMail is one identity proofing request's mail: the vcmrtd deep link
 // of an IPS session, which runs for ValidFor from the send. OrgName is who asks
-// (the org, or the customer it proofs for); SupportContact and PrivacyURL are
-// the customer's, and their paragraphs are left out when empty. Brand, when
-// set, is the customer's own look in place of the org's theme.
+// (the org, or the display name its proofing branding signs with);
+// SupportContact and PrivacyURL are the branding's, and their paragraphs are
+// left out when empty. Brand, when set, is the proofing branding's look in
+// place of the org's theme.
 type ProofingMail struct {
 	To             string
 	OrgName        string
@@ -260,15 +261,15 @@ type ProofingMail struct {
 	ValidFor       time.Duration
 	SupportContact string
 	PrivacyURL     string
-	Brand          *CustomerBrand
+	Brand          *ProofingBrand
 	// Locale is the mail's language; empty is the deployment default.
 	Locale Locale
 }
 
-// CustomerBrand is a proofing customer's mail look: its primary colour ("" is
-// the org's) and its logo (none shows its name as the wordmark, never the
-// org's logo under the customer's name).
-type CustomerBrand struct {
+// ProofingBrand is the proofing mail's look: its primary colour ("" is the
+// org's) and its logo (none shows its name as the wordmark, never the org's
+// theme logo under another display name).
+type ProofingBrand struct {
 	PrimaryColor string
 	Logo         Logo
 }
@@ -417,9 +418,9 @@ func (s *Service) compose(ctx context.Context, orgID uuid.UUID, kind Kind, local
 	return s.composeBranded(ctx, orgID, kind, locale, vars, nil)
 }
 
-// composeBranded is compose with a proofing customer's look, when set, in place
-// of the org's theme.
-func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string, customer *CustomerBrand) (mailer.Config, mailer.Message, error) {
+// composeBranded is compose with the proofing branding's look, when set, in
+// place of the org's theme.
+func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind, locale Locale, vars map[string]string, proofing *ProofingBrand) (mailer.Config, mailer.Message, error) {
 	resolved, ok, err := s.settings.configFor(ctx, orgID)
 	if err != nil {
 		return mailer.Config{}, mailer.Message{}, err
@@ -438,8 +439,8 @@ func (s *Service) composeBranded(ctx context.Context, orgID uuid.UUID, kind Kind
 	}
 
 	brand := s.brandWithLogo(ctx, orgID, tpl)
-	if customer != nil {
-		brand = s.customerBrand(ctx, orgID, tpl, *customer)
+	if proofing != nil {
+		brand = s.proofingBrand(ctx, orgID, tpl, *proofing)
 	}
 	body, err := Render(kind, locale, tpl, brand, vars)
 	if err != nil {
@@ -505,9 +506,9 @@ func (s *Service) templateFor(ctx context.Context, orgID uuid.UUID, kind Kind, l
 	return tpl, nil
 }
 
-// customerBrand is the org's palette with the customer's primary colour, and
-// the customer's logo (or the wordmark) when the layout has a logo block.
-func (s *Service) customerBrand(ctx context.Context, orgID uuid.UUID, tpl Template, c CustomerBrand) Brand {
+// proofingBrand is the org's palette with the proofing branding's primary
+// colour, and its logo (or the wordmark) when the layout has a logo block.
+func (s *Service) proofingBrand(ctx context.Context, orgID uuid.UUID, tpl Template, c ProofingBrand) Brand {
 	seeds := s.seedsFor(ctx, orgID)
 	if c.PrimaryColor != "" {
 		seeds.PrimaryColor = c.PrimaryColor

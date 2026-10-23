@@ -20,7 +20,7 @@ type appSessionView struct {
 	ID           string         `json:"id"`
 	Method       session.Method `json:"method"`
 	RelyingParty string         `json:"relyingParty"`
-	// Branding is the look of the org or customer that requested the session;
+	// Branding is the look of the org that requested the session;
 	// absent, the app keeps its own.
 	Branding *Branding `json:"branding,omitempty"`
 	// Status lets the browser tell a finished session from a running one.
@@ -257,14 +257,7 @@ func (s *Server) handleAppSessionEvents(w http.ResponseWriter, r *http.Request) 
 	for s.appSessionChangeKey(sess, time.Now()) == baseline {
 		select {
 		case <-ctx.Done():
-			if r.Context().Err() != nil {
-				// The device hung up mid-wait - a killed app does exactly that.
-				if d := sess.Access.Slot(caller.role); d != nil {
-					s.markDisconnected(sess, caller.role, d.ID)
-				}
-				return
-			}
-			s.handleAppSession(w, r)
+			s.endSessionWait(w, r, sess, caller)
 			return
 		case <-s.draining:
 			s.handleAppSession(w, r)
@@ -285,6 +278,19 @@ func (s *Server) handleAppSessionEvents(w http.ResponseWriter, r *http.Request) 
 			}
 			sess, changedAt = updated, at
 		}
+	}
+	s.handleAppSession(w, r)
+}
+
+// endSessionWait ends a long poll whose wait ran out: a device that hung up
+// mid-wait (a killed app does exactly that) is marked disconnected, and one
+// still waiting is answered with the session as it is.
+func (s *Server) endSessionWait(w http.ResponseWriter, r *http.Request, sess session.Session, caller appCaller) {
+	if r.Context().Err() != nil {
+		if d := sess.Access.Slot(caller.role); d != nil {
+			s.markDisconnected(sess, caller.role, d.ID)
+		}
+		return
 	}
 	s.handleAppSession(w, r)
 }

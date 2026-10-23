@@ -10,18 +10,18 @@ import {
   useSendWebhookTestMutation,
 } from "../api/identity-proofing.queries";
 import type {
-  ProofingCustomer,
   ProofingWebhook,
   WebhookDelivery,
 } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   isSuccessStatus,
+  ownEndpointDeliveries,
   proofingErrorMessage,
   shortRequestId,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Input, Tag } from "../ui";
-import { SecretReveal, WebhookStateText } from "./proofing-customer-ui";
+import { SecretReveal, WebhookStateText } from "./proofing-ui";
 
 const ERROR = "text-error text-[12.5px]";
 const HINT = "text-muted text-[12px]";
@@ -30,17 +30,11 @@ const CAPTION =
 // The masked middle of a secret whose last four characters are shown.
 const SECRET_MASK = "••••••••••••••••";
 
-// Where the customer's session results go: the wallet's own endpoint by
-// default, or one the customer hosts, with the deliveries made to it.
-export function WebhooksTab({
-  slug,
-  customer,
-}: {
-  slug: string;
-  customer: ProofingCustomer;
-}): React.JSX.Element {
+// Where the org's session results go: one endpoint the org hosts, for all its
+// flows, with the deliveries made to it. Without one, no event reaches the org.
+export function WebhookSection({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const webhook = useProofingWebhookQuery(slug, customer.id);
+  const webhook = useProofingWebhookQuery(slug);
   const [editing, setEditing] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
 
@@ -53,12 +47,12 @@ export function WebhooksTab({
   const hook = webhook.data;
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-      {!hook.configured && !editing ? (
+      {!hook.configured && !editing && (
         <DefaultEndpointCard onCustomize={() => setEditing(true)} />
-      ) : editing ? (
+      )}
+      {editing && (
         <EndpointForm
           slug={slug}
-          customerId={customer.id}
           webhook={hook}
           onCancel={() => setEditing(false)}
           onSaved={(saved) => {
@@ -68,20 +62,20 @@ export function WebhooksTab({
             }
           }}
         />
-      ) : (
+      )}
+      {hook.configured && !editing && (
         <EndpointCard
           slug={slug}
-          customerId={customer.id}
           webhook={hook}
           onEdit={() => setEditing(true)}
           onRotated={setSecret}
         />
       )}
-      <DeliveriesCard slug={slug} customerId={customer.id} />
+      <DeliveriesCard slug={slug} />
       {secret && (
         <SecretReveal
-          title={t("customers.webhooks.secretTitle")}
-          hint={t("customers.webhooks.secretHint")}
+          title={t("identityProofing.webhooks.secretTitle")}
+          hint={t("identityProofing.webhooks.secretHint")}
           secret={secret}
           onClose={() => setSecret(null)}
         />
@@ -92,19 +86,17 @@ export function WebhooksTab({
 
 function EndpointForm({
   slug,
-  customerId,
   webhook,
   onCancel,
   onSaved,
 }: {
   slug: string;
-  customerId: string;
   webhook: ProofingWebhook;
   onCancel?: () => void;
   onSaved: (saved: ProofingWebhook) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const save = useSaveWebhookMutation(slug, customerId);
+  const save = useSaveWebhookMutation(slug);
   const [url, setUrl] = useState(webhook.url ?? "");
   const [events, setEvents] = useState<ReadonlySet<string>>(
     () =>
@@ -124,9 +116,11 @@ function EndpointForm({
       <form onSubmit={submit} noValidate>
         <div className="border-line border-b px-5 py-4">
           <h2 className="font-display text-[17px] font-bold">
-            {t("customers.webhooks.endpoint")}
+            {t("identityProofing.webhooks.endpoint")}
           </h2>
-          <p className={`${HINT} mt-1`}>{t("customers.webhooks.formHint")}</p>
+          <p className={`${HINT} mt-1`}>
+            {t("identityProofing.webhooks.formHint")}
+          </p>
         </div>
         <div className="flex flex-col gap-4 px-5 py-4">
           <div className="flex flex-col gap-1.5">
@@ -134,20 +128,20 @@ function EndpointForm({
               htmlFor="webhook-url"
               className="text-ink text-[13px] font-semibold"
             >
-              {t("customers.webhooks.url")}
+              {t("identityProofing.webhooks.url")}
             </label>
             <Input
               id="webhook-url"
               type="url"
               value={url}
               className="font-mono"
-              placeholder={t("customers.webhooks.urlPlaceholder")}
+              placeholder={t("identityProofing.webhooks.urlPlaceholder")}
               onChange={(e) => setUrl(e.target.value)}
             />
           </div>
           <fieldset className="flex flex-col gap-2">
             <legend className="text-ink mb-1 text-[13px] font-semibold">
-              {t("customers.webhooks.events")}
+              {t("identityProofing.webhooks.events")}
             </legend>
             {webhook.availableEvents.map((name) => (
               <label key={name} className="flex items-center gap-2">
@@ -177,11 +171,11 @@ function EndpointForm({
               loading={save.isPending}
               disabled={url.trim() === "" || events.size === 0}
             >
-              {t("customers.webhooks.save")}
+              {t("identityProofing.webhooks.save")}
             </Button>
             {onCancel && (
               <Button type="button" variant="secondary" onClick={onCancel}>
-                {t("customers.new.cancel")}
+                {t("common.cancel")}
               </Button>
             )}
           </div>
@@ -191,7 +185,7 @@ function EndpointForm({
   );
 }
 
-// Without its own endpoint a customer is sent no events; its results show in
+// Without its own endpoint the org is sent no events; its results show in
 // Sessions, through the API and in the audit log.
 function DefaultEndpointCard({
   onCustomize,
@@ -201,20 +195,19 @@ function DefaultEndpointCard({
   const { t } = useTranslation();
   return (
     <Card>
-      <div className="border-line flex items-center justify-between gap-3 border-b px-5 py-4">
-        <h2 className="font-display text-[17px] font-bold">
-          {t("customers.webhooks.endpoint")}
-        </h2>
-        <Tag>{t("customers.webhooks.noEndpointTag")}</Tag>
-      </div>
+      <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
+        {t("identityProofing.webhooks.endpoint")}
+      </h2>
       <div className="flex flex-col gap-3 px-5 py-4">
-        <p className="text-ink text-[13px]">
-          {t("customers.webhooks.defaultBody")}
+        <p className="text-ink text-[14px]">
+          {t("identityProofing.webhooks.defaultBody")}
         </p>
-        <p className={HINT}>{t("customers.webhooks.defaultHint")}</p>
+        <p className="text-ink-soft text-[13px]">
+          {t("identityProofing.webhooks.defaultHint")}
+        </p>
         <div>
           <Button size="sm" variant="secondary" onClick={onCustomize}>
-            {t("customers.webhooks.useOwn")}
+            {t("identityProofing.webhooks.useOwn")}
           </Button>
         </div>
       </div>
@@ -224,21 +217,19 @@ function DefaultEndpointCard({
 
 function EndpointCard({
   slug,
-  customerId,
   webhook,
   onEdit,
   onRotated,
 }: {
   slug: string;
-  customerId: string;
   webhook: ProofingWebhook;
   onEdit: () => void;
   onRotated: (secret: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const test = useSendWebhookTestMutation(slug, customerId);
-  const rotate = useNewWebhookSecretMutation(slug, customerId);
-  const remove = useRemoveWebhookMutation(slug, customerId);
+  const test = useSendWebhookTestMutation(slug);
+  const rotate = useNewWebhookSecretMutation(slug);
+  const remove = useRemoveWebhookMutation(slug);
   const [confirm, setConfirm] = useState<"rotate" | "remove" | null>(null);
   const failing = webhook.health.state === "failing";
 
@@ -246,27 +237,27 @@ function EndpointCard({
     <Card>
       <div className="border-line flex items-center justify-between gap-3 border-b px-5 py-4">
         <h2 className="font-display text-[17px] font-bold">
-          {t("customers.webhooks.endpoint")}
+          {t("identityProofing.webhooks.endpoint")}
         </h2>
         {failing ? (
           <Tag tone="red" dot>
-            {t("customers.webhooks.failing")}
+            {t("identityProofing.webhooks.failing")}
           </Tag>
         ) : (
           <Tag tone="green" dot>
-            {t("customers.webhooks.delivering")}
+            {t("identityProofing.webhooks.delivering")}
           </Tag>
         )}
       </div>
       <dl className="divide-line divide-y px-5">
         <div className="py-3">
-          <dt className={CAPTION}>{t("customers.webhooks.url")}</dt>
+          <dt className={CAPTION}>{t("identityProofing.webhooks.url")}</dt>
           <dd className="text-ink mt-1 font-mono text-[12.5px] break-all">
             {webhook.url}
           </dd>
         </div>
         <div className="py-3">
-          <dt className={CAPTION}>{t("customers.webhooks.events")}</dt>
+          <dt className={CAPTION}>{t("identityProofing.webhooks.events")}</dt>
           <dd className="mt-1.5 flex flex-wrap gap-1.5">
             {webhook.events.map((name) => (
               <span
@@ -279,15 +270,15 @@ function EndpointCard({
           </dd>
         </div>
         <div className="py-3">
-          <dt className={CAPTION}>{t("customers.webhooks.secret")}</dt>
+          <dt className={CAPTION}>{t("identityProofing.webhooks.secret")}</dt>
           <dd className="text-ink mt-1 font-mono text-[12.5px]">
             {`whsec_${SECRET_MASK}${webhook.secretLast4 ?? ""}`}
           </dd>
         </div>
         <div className="py-3">
-          <dt className={CAPTION}>{t("customers.webhooks.retries")}</dt>
+          <dt className={CAPTION}>{t("identityProofing.webhooks.retries")}</dt>
           <dd className="text-ink mt-1 text-[13px]">
-            {t("customers.webhooks.retriesValue", {
+            {t("identityProofing.webhooks.retriesValue", {
               count: webhook.maxAttempts,
             })}
           </dd>
@@ -295,7 +286,7 @@ function EndpointCard({
             <dd className="mt-1 text-[12.5px]">
               <WebhookStateText webhook={webhook.health} />
               {webhook.health.pendingRetries > 0 &&
-                ` · ${t("customers.webhooks.queued", {
+                ` · ${t("identityProofing.webhooks.queued", {
                   count: webhook.health.pendingRetries,
                 })}`}
             </dd>
@@ -312,23 +303,23 @@ function EndpointCard({
           loading={test.isPending}
           onClick={() => test.mutate()}
         >
-          {t("customers.webhooks.test")}
+          {t("identityProofing.webhooks.test")}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setConfirm("rotate")}>
-          {t("customers.webhooks.rotate")}
+          {t("identityProofing.webhooks.rotate")}
         </Button>
         <Button size="sm" variant="ghost" className="ml-auto" onClick={onEdit}>
-          {t("customers.webhooks.edit")}
+          {t("identityProofing.webhooks.edit")}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setConfirm("remove")}>
-          {t("customers.webhooks.remove")}
+          {t("identityProofing.webhooks.remove")}
         </Button>
       </div>
       {confirm === "rotate" && (
         <ConfirmDialog
-          title={t("customers.webhooks.rotateConfirm.title")}
-          message={t("customers.webhooks.rotateConfirm.message")}
-          confirmLabel={t("customers.webhooks.rotate")}
+          title={t("identityProofing.webhooks.rotateConfirm.title")}
+          message={t("identityProofing.webhooks.rotateConfirm.message")}
+          confirmLabel={t("identityProofing.webhooks.rotate")}
           confirmVariant="primary"
           busy={rotate.isPending}
           error={
@@ -352,9 +343,9 @@ function EndpointCard({
       )}
       {confirm === "remove" && (
         <ConfirmDialog
-          title={t("customers.webhooks.removeConfirm.title")}
-          message={t("customers.webhooks.removeConfirm.message")}
-          confirmLabel={t("customers.webhooks.remove")}
+          title={t("identityProofing.webhooks.removeConfirm.title")}
+          message={t("identityProofing.webhooks.removeConfirm.message")}
+          confirmLabel={t("identityProofing.webhooks.remove")}
           busy={remove.isPending}
           error={
             remove.isError ? proofingErrorMessage(remove.error, t) : undefined
@@ -372,34 +363,30 @@ function EndpointCard({
   );
 }
 
-function DeliveriesCard({
-  slug,
-  customerId,
-}: {
-  slug: string;
-  customerId: string;
-}): React.JSX.Element {
+function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const deliveries = useWebhookDeliveriesQuery(slug, customerId);
+  const deliveries = useWebhookDeliveriesQuery(slug);
   const formatWhen = useWhenFormatter();
-  const rows = deliveries.data ?? [];
+  const rows = ownEndpointDeliveries(deliveries.data ?? []);
 
   return (
     <Card>
       <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
-        {t("customers.webhooks.recent")}
+        {t("identityProofing.webhooks.recent")}
       </h2>
-      {deliveries.isError ? (
+      {deliveries.isError && (
         <p className={`${ERROR} px-5 py-4`}>
           {proofingErrorMessage(deliveries.error, t)}
         </p>
-      ) : rows.length === 0 ? (
+      )}
+      {!deliveries.isError && rows.length === 0 && (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {deliveries.isPending
             ? t("common.loading")
-            : t("customers.webhooks.noDeliveries")}
+            : t("identityProofing.webhooks.noDeliveries")}
         </p>
-      ) : (
+      )}
+      {!deliveries.isError && rows.length > 0 && (
         <ul className="divide-line divide-y">
           {rows.map((d) => (
             <li
@@ -434,10 +421,10 @@ function DeliveryTag({
   const { t } = useTranslation();
   const code = delivery.lastStatusCode;
   if (delivery.status === "pending" && delivery.attempts === 0) {
-    return <Tag tone="blue">{t("customers.webhooks.queuedTag")}</Tag>;
+    return <Tag tone="blue">{t("identityProofing.webhooks.queuedTag")}</Tag>;
   }
   const label =
-    code !== undefined ? String(code) : t("customers.webhooks.noAnswer");
+    code !== undefined ? String(code) : t("identityProofing.webhooks.noAnswer");
   const tone = code !== undefined && isSuccessStatus(code) ? "green" : "red";
   return (
     <span className="inline-flex items-center gap-2">
@@ -445,14 +432,18 @@ function DeliveryTag({
         tone={tone}
         title={
           delivery.status === "pending"
-            ? t("customers.webhooks.retrying", { count: delivery.attempts })
+            ? t("identityProofing.webhooks.retrying", {
+                count: delivery.attempts,
+              })
             : delivery.lastError
         }
       >
         {label}
       </Tag>
       {delivery.status === "failed" && (
-        <span className="text-error">{t("customers.webhooks.gaveUp")}</span>
+        <span className="text-error">
+          {t("identityProofing.webhooks.gaveUp")}
+        </span>
       )}
     </span>
   );

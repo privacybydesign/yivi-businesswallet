@@ -2,10 +2,25 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/http";
-import i18n from "../i18n";
-import type { ProofingFlow } from "../api/identity-proofing";
-import { DIPLOMA_MODES, ERASURE_HANDLINGS } from "../api/identity-proofing";
+import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
+import type {
+  ProofingBranding,
+  ProofingFlow,
+  ProofingFlowBranding,
+  ProofingFlowHosted,
+  WebhookDelivery,
+} from "../api/identity-proofing";
 import {
+  DATA_REQUEST_KINDS,
+  DIPLOMA_MODES,
+  ERASURE_HANDLINGS,
+  FLOW_KINDS,
+  MAX_LISTED_REQUESTS,
+} from "../api/identity-proofing";
+import {
+  ATTRIBUTE_AGE_OVER,
+  DOCUMENT_KINDS,
+  REQUESTED_ATTRIBUTES,
   PROOFING_REJECTION_CODES,
   addressLookup,
   addressVerificationNote,
@@ -16,25 +31,46 @@ import {
   hostedErrorMessage,
   identityRequired,
   proofingRejectionReason,
+  effectiveBranding,
+  appLook,
+  dropsOwnBranding,
+  hostedDraft,
+  hostedDraftDirty,
+  savedLocales,
+  selectedLocales,
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
+  mailLifetimeMinutes,
   readsIdentity,
   sendableByMail,
   sessionView,
+  sendRequestFields,
   verifyStages,
+  methodChoices,
   currentStage,
   progressPollContinues,
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
-  assignedFlows,
+  externalFlows,
+  flowPurgeDays,
+  flowStepLabels,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
+  lockedByLevel,
+  retentionChoices,
+  wholeDays,
+  withAssuranceLevel,
+  withIdentity,
   editedFlowSelection,
   emptyFlowDraft,
+  FACE_MATCH_RECOMMENDED,
+  faceMatchFloor,
+  faceMatchValue,
   flowDraftError,
+  formatFaceMatch,
   reachesAssuranceLevel,
   flowSpecFromDraft,
   formatDuration,
@@ -43,25 +79,29 @@ import {
   isProofingStep,
   isRequestedAttribute,
   proofingErrorMessage,
+  matchesSessionFilter,
   proofingStatsBy,
   proofingStatusLabel,
+  listedCount,
+  peopleRetentionOf,
+  requestFlows,
+  requestListCapped,
   requestSubject,
-  searchCustomers,
   sendableFlows,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
   sumProofingStats,
   verifiedShare,
-  customerDisplayStatus,
-  DATA_RETENTION_DAY_OPTIONS,
   isHexColor,
   isSuccessStatus,
+  ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
+  SUBSTANTIAL_FACE_MATCH_FLOOR,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
 
@@ -74,6 +114,14 @@ function apiError(status: number, code: string, message: string): ApiError {
 function draft(patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft {
   return { ...emptyFlowDraft(), name: "  Passport check ", ...patch };
 }
+
+// Every item What you receive offers, ticked, but the age check, which
+// withholds the date of birth from the document data next to it.
+const EVERY_ATTRIBUTE: ReadonlySet<string> = new Set(
+  REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+    (value) => value !== ATTRIBUTE_AGE_OVER,
+  ),
+);
 
 describe("flowSpecFromDraft", () => {
   it("sends the age check with its age instead of the document data", () => {
@@ -89,12 +137,14 @@ describe("flowSpecFromDraft", () => {
   });
 
   it("sends the document scan and chip scan as a pair with passive auth locked on", () => {
-    const spec = flowSpecFromDraft(draft({ faceVerification: false }));
+    const spec = flowSpecFromDraft(
+      draft({ faceVerification: false, requestedAttributes: EVERY_ATTRIBUTE }),
+    );
     expect(spec).toMatchObject({
       name: "Passport check",
       steps: ["document_capture", "nfc_read"],
       requiredChecks: ["nfc.passive_auth"],
-      requestedAttributes: ["dg1", "dg11", "dg2", "chip_checks"],
+      requestedAttributes: ["dg1", "chip_checks", "dg11", "dg2"],
     });
     expect(spec.checkThresholds).toBeUndefined();
   });
@@ -104,7 +154,7 @@ describe("flowSpecFromDraft", () => {
       draft({
         chipAuthentication: true,
         liveness: true,
-        faceMatchThreshold: "0.8",
+        faceMatchThreshold: 0.8,
       }),
     );
     expect(spec.steps).toEqual([
@@ -123,11 +173,15 @@ describe("flowSpecFromDraft", () => {
 
   it("drops data and checks whose step is not in the flow", () => {
     const spec = flowSpecFromDraft(
-      draft({ documentAndChip: false, chipAuthentication: true }),
+      draft({
+        documentAndChip: false,
+        chipAuthentication: true,
+        requestedAttributes: EVERY_ATTRIBUTE,
+      }),
     );
     expect(spec.steps).toEqual(["face_verification"]);
     expect(spec.requiredChecks).toEqual(["face.match"]);
-    expect(spec.requestedAttributes).toEqual(["selfie", "biometrics"]);
+    expect(spec.requestedAttributes).toEqual(["biometrics", "selfie"]);
   });
 
   it("lets optional data be deselected", () => {
@@ -137,30 +191,294 @@ describe("flowSpecFromDraft", () => {
     expect(spec.requestedAttributes).toEqual(["dg1", "biometrics"]);
   });
 
-  it("sends only the overrides the admin set", () => {
+  it("sends what the admin chose, the BSN and redaction always explicit", () => {
     const spec = flowSpecFromDraft(
       draft({
-        acceptedDocumentTypes: "P, I ,",
-        acceptedIssuingCountries: "nld, bel",
+        documentKinds: new Set(["passport"]),
+        countryScope: "only",
+        issuingCountries: ["NLD", "bel"],
         assuranceLevel: "substantial",
         bsnPolicy: "mask",
-        keepFacePhotos: "false",
-        retentionSeconds: "3600",
+        blackOutBsn: false,
+        keepFacePhotos: true,
+        retentionSeconds: 3600,
+        sessionTtlSeconds: 300,
       }),
     );
     expect(spec).toMatchObject({
-      acceptedDocumentTypes: ["P", "I"],
+      acceptedDocumentTypes: ["passport"],
       acceptedIssuingCountries: ["NLD", "BEL"],
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "mask",
-      keepFacePhotos: false,
+      blurBsn: false,
+      keepFacePhotos: true,
       retentionOverrideSeconds: 3600,
+      sessionTtlSeconds: 300,
     });
-    expect(spec.blurBsn).toBeUndefined();
+  });
+
+  it("follows the org where the admin chose nothing", () => {
+    const spec = flowSpecFromDraft(draft());
+    expect(spec.retentionOverrideSeconds).toBeUndefined();
+    expect(spec.sessionTtlSeconds).toBeUndefined();
+    expect(spec.requiredAssuranceLevel).toBeUndefined();
+    expect(spec.acceptedDocumentTypes).toEqual([]);
+    expect(spec.acceptedIssuingCountries).toEqual([]);
+  });
+
+  it("leaves the BSN out, blacks it out and keeps no face photos in a new flow", () => {
+    expect(flowSpecFromDraft(draft())).toMatchObject({
+      bsnPolicy: "omit",
+      blurBsn: true,
+      keepFacePhotos: false,
+    });
+  });
+
+  it("receives only the outcome in a new flow", () => {
+    expect(emptyFlowDraft().requestedAttributes.size).toBe(0);
+    expect(flowSpecFromDraft(draft()).requestedAttributes).toEqual([
+      OUTCOME_ONLY,
+    ]);
+  });
+});
+
+describe("accepted documents", () => {
+  const stored = {
+    id: "f",
+    version: 1,
+    active: true,
+    name: "F",
+    steps: ["document_capture", "nfc_read"],
+    createdAt: "2026-09-28T00:00:00Z",
+    completable: true,
+  };
+
+  it("accepts any document with every kind ticked, as a new flow does", () => {
+    expect(flowSpecFromDraft(draft()).acceptedDocumentTypes).toEqual([]);
+  });
+
+  it("names the kinds that are ticked, as the engine names them", () => {
+    for (const kind of DOCUMENT_KINDS) {
+      expect(
+        flowSpecFromDraft(draft({ documentKinds: new Set([kind]) }))
+          .acceptedDocumentTypes,
+      ).toEqual([kind]);
+    }
     expect(
-      flowSpecFromDraft(draft({ retentionSeconds: "0" }))
-        .retentionOverrideSeconds,
-    ).toBeUndefined();
+      flowSpecFromDraft(
+        draft({ documentKinds: new Set(["identity_card", "passport"]) }),
+      ).acceptedDocumentTypes,
+    ).toEqual(["passport", "identity_card"]);
+  });
+
+  it("refuses a flow that accepts no kind", () => {
+    expect(flowDraftError(draft({ documentKinds: new Set() }))).toBe(
+      "documentTypes",
+    );
+  });
+
+  it("reads a stored list back as kinds and keeps a code no kind covers", () => {
+    expect(draftFromFlow(stored).documentKinds).toEqual(
+      new Set(DOCUMENT_KINDS),
+    );
+    const codes = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "I", "ID"],
+    });
+    expect(codes.documentKinds).toEqual(new Set(["passport", "identity_card"]));
+    expect(codes.otherDocumentTypes).toEqual([]);
+    const mixed = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "IR"],
+    });
+    expect(mixed.documentKinds).toEqual(new Set(["passport"]));
+    expect(mixed.otherDocumentTypes).toEqual(["IR"]);
+    const uppercased = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["DRIVERS_LICENSE", "Residence_Permit"],
+    });
+    expect(uppercased.documentKinds).toEqual(
+      new Set(["drivers_license", "residence_permit"]),
+    );
+  });
+
+  it("sends a stored list unchanged while its kinds are ticked", () => {
+    for (const types of [
+      [],
+      ["P", "I"],
+      ["P", "ID", "IR"],
+      ["DRIVERS_LICENSE"],
+      [...DOCUMENT_KINDS],
+    ]) {
+      const unchanged = draftFromFlow({
+        ...stored,
+        acceptedDocumentTypes: types,
+      });
+      expect(flowSpecFromDraft(unchanged).acceptedDocumentTypes).toEqual(types);
+    }
+  });
+
+  it("sends kinds once the kinds ticked change, keeping a code no kind covers", () => {
+    const codes = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "I"],
+    });
+    const more = {
+      ...codes,
+      documentKinds: new Set([...codes.documentKinds, "residence_permit"]),
+    } satisfies ProofingFlowDraft;
+    expect(flowSpecFromDraft(more).acceptedDocumentTypes).toEqual([
+      "passport",
+      "identity_card",
+      "residence_permit",
+    ]);
+    const mixed = draftFromFlow({
+      ...stored,
+      acceptedDocumentTypes: ["P", "IR"],
+    });
+    const withCards = {
+      ...mixed,
+      documentKinds: new Set([...mixed.documentKinds, "identity_card"]),
+    } satisfies ProofingFlowDraft;
+    expect(flowSpecFromDraft(withCards).acceptedDocumentTypes).toEqual([
+      "passport",
+      "identity_card",
+      "IR",
+    ]);
+    // Every kind ticked is any document again.
+    const every = { ...codes, documentKinds: new Set(DOCUMENT_KINDS) };
+    expect(flowSpecFromDraft(every).acceptedDocumentTypes).toEqual([]);
+  });
+});
+
+// The kinds the editor saves are the ones the proofing engine reads.
+describe("document kinds mirror backend/internal/proofingengine", () => {
+  it("saves every kind the engine names and no other", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofingengine/flow/flow.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const constant = (name: string): string | undefined =>
+      new RegExp(`\\b${name}\\s*= "([a-z_]+)"`).exec(source)?.[1];
+    const engine = [
+      "DocumentKindPassport",
+      "DocumentKindIdentityCard",
+      "DocumentKindResidencePermit",
+      "DocumentTypeDrivingLicence",
+    ].map(constant);
+    expect(new Set(engine)).toEqual(new Set(DOCUMENT_KINDS));
+    expect(engine).toHaveLength(DOCUMENT_KINDS.length);
+  });
+});
+
+describe("issuing countries", () => {
+  it("sends none for any country, whatever was picked before", () => {
+    const picked = draft({ issuingCountries: ["NLD"], countryScope: "any" });
+    expect(flowSpecFromDraft(picked).acceptedIssuingCountries).toEqual([]);
+  });
+
+  it("needs a country once only some are accepted", () => {
+    expect(
+      flowDraftError(draft({ countryScope: "only", issuingCountries: [] })),
+    ).toBe("issuingCountries");
+    expect(
+      flowDraftError(
+        draft({ countryScope: "only", issuingCountries: ["NLD"] }),
+      ),
+    ).toBeNull();
+  });
+
+  it("reads a stored list as the chosen countries", () => {
+    const flow = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["nfc_read", "document_capture"],
+      createdAt: "2026-09-28T00:00:00Z",
+      completable: true,
+    };
+    expect(draftFromFlow(flow)).toMatchObject({
+      countryScope: "any",
+      issuingCountries: [],
+    });
+    expect(
+      draftFromFlow({ ...flow, acceptedIssuingCountries: ["NLD", "BEL"] }),
+    ).toMatchObject({
+      countryScope: "only",
+      issuingCountries: ["NLD", "BEL"],
+    });
+  });
+});
+
+describe("what a stored flow without a setting shows", () => {
+  const flow = {
+    id: "f",
+    version: 1,
+    active: true,
+    name: "F",
+    steps: ["nfc_read", "document_capture"],
+    createdAt: "2026-09-28T00:00:00Z",
+    completable: true,
+  };
+
+  it("shows what the engine does with it: the BSN left out, the face photos dropped, nothing blacked out", () => {
+    expect(draftFromFlow(flow)).toMatchObject({
+      bsnPolicy: "omit",
+      blackOutBsn: false,
+      keepFacePhotos: false,
+      retentionSeconds: 0,
+      sessionTtlSeconds: 0,
+    });
+  });
+
+  it("shows what it sets", () => {
+    expect(
+      draftFromFlow({
+        ...flow,
+        bsnPolicy: "mask",
+        blurBsn: true,
+        keepFacePhotos: true,
+        retentionOverrideSeconds: 86_400,
+        sessionTtlSeconds: 120,
+      }),
+    ).toMatchObject({
+      bsnPolicy: "mask",
+      blackOutBsn: true,
+      keepFacePhotos: true,
+      retentionSeconds: 86_400,
+      sessionTtlSeconds: 120,
+    });
+  });
+});
+
+describe("retentionChoices", () => {
+  const day = 86_400;
+
+  it("offers the org's retention and 1, 30 and 90 days", () => {
+    expect(retentionChoices(0)).toEqual([0, day, 30 * day, 90 * day]);
+    expect(retentionChoices(30 * day)).toEqual([0, day, 30 * day, 90 * day]);
+  });
+
+  it("keeps a retention of the flow's own as a choice, in order", () => {
+    expect(retentionChoices(7 * day)).toEqual([
+      0,
+      day,
+      7 * day,
+      30 * day,
+      90 * day,
+    ]);
+    expect(retentionChoices(3600)).toContain(3600);
+  });
+
+  it("counts whole days only", () => {
+    expect(wholeDays(7 * day)).toBe(7);
+    expect(wholeDays(3600)).toBeUndefined();
   });
 });
 
@@ -272,10 +590,10 @@ describe("draftFromFlow", () => {
       steps: ["document_capture", "nfc_read", "face_verification"],
       requestedAttributes: ["dg1", "selfie"],
       requiredChecks: ["nfc.passive_auth", "face.match"],
-      checkThresholds: { "face.match": 0.7 },
+      checkThresholds: { "face.match": 0.8 },
       requiredAssuranceLevel: "substantial",
       bsnPolicy: "omit",
-      keepFacePhotos: true,
+      keepFacePhotos: false,
       retentionOverrideSeconds: 86_400,
       assuranceTiers: [{ level: "low", minPercent: 0 }],
       legalBasis: "consent",
@@ -288,16 +606,15 @@ describe("draftFromFlow", () => {
     expect(edited).toMatchObject({
       documentAndChip: true,
       faceVerification: true,
-      // Kept as stored, though substantial needs them: the editor refuses to
-      // save it until they are turned on, rather than turning them on itself.
-      chipAuthentication: false,
-      liveness: false,
-      faceMatchThreshold: "0.7",
+      // Not stored, but substantial needs them: they are ticked, and locked.
+      chipAuthentication: true,
+      liveness: true,
+      faceMatchThreshold: 0.8,
       assuranceLevel: "substantial",
       bsnPolicy: "omit",
-      keepFacePhotos: "true",
-      blurBsn: "",
-      retentionSeconds: "86400",
+      keepFacePhotos: false,
+      blackOutBsn: false,
+      retentionSeconds: 86_400,
     });
     expect(flowSpecFromDraft(edited)).toMatchObject({
       requestedAttributes: ["dg1", "selfie"],
@@ -308,16 +625,73 @@ describe("draftFromFlow", () => {
 });
 
 describe("assurance level", () => {
-  it("turns nothing on: a draft that cannot reach its level is refused", () => {
-    const chipOnly = draft({ faceVerification: false });
-    expect(flowDraftError({ ...chipOnly, assuranceLevel: "low" })).toBeNull();
+  const chipOnly = draft({ faceVerification: false });
+
+  it("ticks what the level needs and leaves the rest as it was", () => {
+    const low = withAssuranceLevel(chipOnly, "low");
+    expect(low).toMatchObject({
+      assuranceLevel: "low",
+      documentAndChip: true,
+      faceVerification: false,
+      chipAuthentication: false,
+    });
+    const substantial = withAssuranceLevel(low, "substantial");
+    expect(substantial).toMatchObject({
+      assuranceLevel: "substantial",
+      documentAndChip: true,
+      chipAuthentication: true,
+      faceVerification: true,
+      liveness: true,
+      faceProvider: "regula",
+    });
+    expect(reachesAssuranceLevel(substantial)).toBe(true);
+    // Back down, what Substantial ticked stays ticked, now free to change.
+    const back = withAssuranceLevel(substantial, "low");
+    expect(back.faceVerification).toBe(true);
+    expect(lockedByLevel(back, "faceVerification")).toBe(false);
+  });
+
+  it("locks what the level needs: the chip read for Low, more for Substantial", () => {
+    const locked = (level: "" | "low" | "substantial") =>
+      (
+        [
+          "documentAndChip",
+          "chipAuthentication",
+          "faceVerification",
+          "liveness",
+        ] as const
+      ).filter((setting) =>
+        lockedByLevel(withAssuranceLevel(draft(), level), setting),
+      );
+    expect(locked("")).toEqual([]);
+    expect(locked("low")).toEqual(["documentAndChip"]);
+    expect(locked("substantial")).toEqual([
+      "documentAndChip",
+      "chipAuthentication",
+      "faceVerification",
+      "liveness",
+    ]);
+  });
+
+  it("sends the level with what it needs", () => {
+    expect(
+      flowSpecFromDraft(withAssuranceLevel(chipOnly, "substantial")),
+    ).toMatchObject({
+      steps: ["document_capture", "nfc_read", "face_verification"],
+      requiredChecks: [
+        "nfc.passive_auth",
+        "nfc.chip_auth",
+        "face.match",
+        "face.liveness",
+      ],
+      requiredAssuranceLevel: "substantial",
+    });
+  });
+
+  it("still refuses a draft that cannot reach its level", () => {
     const short = { ...chipOnly, assuranceLevel: "substantial" as const };
     expect(reachesAssuranceLevel(short)).toBe(false);
     expect(flowDraftError(short)).toBe("assuranceLevel");
-    expect(flowSpecFromDraft(short).steps).toEqual([
-      "document_capture",
-      "nfc_read",
-    ]);
     expect(
       flowDraftError(draft({ documentAndChip: false, assuranceLevel: "low" })),
     ).toBe("assuranceLevel");
@@ -333,34 +707,10 @@ describe("assurance level", () => {
     expect(
       flowDraftError({ ...full, assuranceLevel: "substantial" }),
     ).toBeNull();
-    expect(flowSpecFromDraft({ ...full, assuranceLevel: "low" })).toMatchObject(
-      {
-        requiredChecks: [
-          "nfc.passive_auth",
-          "nfc.chip_auth",
-          "face.match",
-          "face.liveness",
-        ],
-        requiredAssuranceLevel: "low",
-      },
-    );
   });
 
   it("needs nothing without a level", () => {
     expect(reachesAssuranceLevel(draft({ documentAndChip: false }))).toBe(true);
-  });
-});
-
-describe("accepted documents", () => {
-  it("sends document types and countries in capitals, as the engine compares them", () => {
-    const spec = flowSpecFromDraft(
-      draft({
-        acceptedDocumentTypes: "p, id",
-        acceptedIssuingCountries: "nld",
-      }),
-    );
-    expect(spec.acceptedDocumentTypes).toEqual(["P", "ID"]);
-    expect(spec.acceptedIssuingCountries).toEqual(["NLD"]);
   });
 });
 
@@ -395,43 +745,33 @@ describe("flowDraftError", () => {
   it("points at the field to fix", () => {
     expect(flowDraftError(draft())).toBeNull();
     expect(flowDraftError(draft({ name: " " }))).toBe("name");
-    // Countries are 3-letter codes; whether one exists is the engine's check.
     expect(
-      flowDraftError(draft({ acceptedIssuingCountries: "nld, DEU" })),
-    ).toBeNull();
-    expect(flowDraftError(draft({ acceptedIssuingCountries: "NL" }))).toBe(
-      "issuingCountries",
-    );
-    expect(
-      flowDraftError(draft({ acceptedIssuingCountries: "NLD, Nederland" })),
+      flowDraftError(draft({ countryScope: "only", issuingCountries: [] })),
     ).toBe("issuingCountries");
     expect(
       flowDraftError(
         draft({ documentAndChip: false, faceVerification: false }),
       ),
     ).toBe("steps");
-    expect(flowDraftError(draft({ faceMatchThreshold: "1.5" }))).toBe(
+    expect(flowDraftError(draft({ faceMatchThreshold: 1.5 }))).toBe(
       "faceMatchThreshold",
-    );
-    expect(flowDraftError(draft({ retentionSeconds: "-1" }))).toBe(
-      "retentionSeconds",
     );
   });
 });
 
-describe("identity for data requests and diplomas", () => {
-  it("is needed by a data request or required diplomas", () => {
-    expect(identityRequired("identity", "off")).toBe(false);
-    expect(identityRequired("identity", "required")).toBe(true);
-    expect(identityRequired("data_erasure", "off")).toBe(true);
-    expect(identityRequired("data_access", "off")).toBe(true);
+describe("identity for diplomas", () => {
+  it("is needed by required diplomas", () => {
+    expect(identityRequired("off")).toBe(false);
+    expect(identityRequired("required")).toBe(true);
   });
 
   it("refuses a draft that drops the name and date of birth when needed", () => {
     const noDocumentData = draft({ requestedAttributes: new Set(["dg2"]) });
     expect(flowDraftError(noDocumentData)).toBeNull();
     expect(flowDraftError(noDocumentData, true)).toBe("identity");
-    expect(flowDraftError(draft(), true)).toBeNull();
+    expect(
+      flowDraftError(draft({ requestedAttributes: new Set(["dg1"]) }), true),
+    ).toBeNull();
     // Without the document scan there is no document data to read.
     expect(
       flowDraftError(
@@ -439,6 +779,121 @@ describe("identity for data requests and diplomas", () => {
         true,
       ),
     ).toBe("identity");
+  });
+
+  it("does not count the document data next to the age check", () => {
+    const ageCheck = draft({
+      requestedAttributes: new Set(["dg1", "age_over"]),
+    });
+    expect(flowDraftError(ageCheck)).toBeNull();
+    expect(flowDraftError(ageCheck, true)).toBe("identity");
+  });
+
+  it("ticks the document data and unticks the age check when needed", () => {
+    const needed = withIdentity(
+      draft({ requestedAttributes: new Set(["age_over", "chip_checks"]) }),
+    );
+    expect([...needed.requestedAttributes].sort()).toEqual([
+      "chip_checks",
+      "dg1",
+    ]);
+    expect(flowDraftError(needed, true)).toBeNull();
+  });
+});
+
+describe("face match threshold", () => {
+  const withThreshold = (
+    level: "" | "low" | "substantial",
+    faceMatchThreshold: number | null,
+  ) => withAssuranceLevel(draft({ faceMatchThreshold }), level);
+
+  it("floors only Substantial", () => {
+    expect(faceMatchFloor("")).toBe(0);
+    expect(faceMatchFloor("low")).toBe(0);
+    expect(faceMatchFloor("substantial")).toBe(SUBSTANTIAL_FACE_MATCH_FLOOR);
+  });
+
+  it("shows the recommended minimum while the flow sets none", () => {
+    expect(faceMatchValue(draft())).toBe(FACE_MATCH_RECOMMENDED);
+    expect(faceMatchValue(draft({ faceMatchThreshold: 0.4 }))).toBe(0.4);
+    expect(faceMatchValue(draft({ faceMatchThreshold: 0 }))).toBe(0);
+  });
+
+  it("lifts a threshold under the floor when Substantial is picked", () => {
+    expect(withThreshold("substantial", 0.6).faceMatchThreshold).toBe(0.75);
+    expect(withThreshold("substantial", 0).faceMatchThreshold).toBe(0.75);
+  });
+
+  it("keeps a threshold the level allows, and none", () => {
+    expect(withThreshold("substantial", 0.9).faceMatchThreshold).toBe(0.9);
+    expect(withThreshold("substantial", 0.75).faceMatchThreshold).toBe(0.75);
+    expect(withThreshold("substantial", null).faceMatchThreshold).toBeNull();
+    expect(withThreshold("low", 0.6).faceMatchThreshold).toBe(0.6);
+    expect(withThreshold("", 0).faceMatchThreshold).toBe(0);
+  });
+
+  it("writes a threshold with two decimals in the reader's language", () => {
+    expect(formatFaceMatch(0.75, "en")).toBe("0.75");
+    expect(formatFaceMatch(0.5, "en")).toBe("0.50");
+    expect(formatFaceMatch(1, "en")).toBe("1.00");
+    expect(formatFaceMatch(0, "en")).toBe("0");
+    expect(formatFaceMatch(0.75, "nl")).toBe("0,75");
+  });
+
+  it("keeps a lifted threshold when the level drops", () => {
+    const substantial = withThreshold("substantial", 0.6);
+    expect(withAssuranceLevel(substantial, "low").faceMatchThreshold).toBe(
+      0.75,
+    );
+  });
+
+  it("refuses a threshold under the level's floor or off the scale", () => {
+    const substantial = (faceMatchThreshold: number) =>
+      flowDraftError({
+        ...withAssuranceLevel(draft(), "substantial"),
+        faceMatchThreshold,
+      });
+    expect(substantial(0.74)).toBe("faceMatchThreshold");
+    expect(substantial(0.75)).toBeNull();
+    expect(substantial(1)).toBeNull();
+    expect(substantial(1.01)).toBe("faceMatchThreshold");
+    expect(flowDraftError(draft({ faceMatchThreshold: 0 }))).toBeNull();
+    expect(flowDraftError(draft({ faceMatchThreshold: -0.1 }))).toBe(
+      "faceMatchThreshold",
+    );
+    expect(flowDraftError(draft({ faceMatchThreshold: NaN }))).toBe(
+      "faceMatchThreshold",
+    );
+  });
+
+  it("sends the threshold only for a flow that matches a face", () => {
+    const sent = (patch: Partial<ProofingFlowDraft>) =>
+      flowSpecFromDraft(draft(patch)).checkThresholds;
+    expect(sent({ faceMatchThreshold: 0.6 })).toEqual({ "face.match": 0.6 });
+    expect(sent({ faceMatchThreshold: 0 })).toEqual({ "face.match": 0 });
+    expect(sent({ faceMatchThreshold: null })).toBeUndefined();
+    expect(
+      sent({ faceMatchThreshold: 0.6, faceVerification: false }),
+    ).toBeUndefined();
+  });
+
+  it("starts from a stored threshold, lifted to what the level allows", () => {
+    const stored = (level: string, threshold: number) =>
+      draftFromFlow({
+        id: "f1",
+        version: 1,
+        active: true,
+        name: "Flow",
+        steps: ["document_capture", "nfc_read", "face_verification"],
+        requiredChecks: ["nfc.passive_auth", "face.match"],
+        requiredAssuranceLevel: level,
+        checkThresholds: { "face.match": threshold },
+        createdAt: "2026-09-24T10:00:00Z",
+        completable: true,
+      }).faceMatchThreshold;
+    expect(stored("", 0.6)).toBe(0.6);
+    expect(stored("substantial", 0.6)).toBe(0.75);
+    expect(stored("substantial", 0.85)).toBe(0.85);
   });
 });
 
@@ -467,15 +922,23 @@ describe("sendableFlows", () => {
   });
 });
 
-describe("assignedFlows", () => {
-  it("offers only a customer's assigned flows and starts on its default", () => {
-    const { sendable, initial } = assignedFlows([
-      { id: "a", assigned: false, default: false },
-      { id: "b", assigned: true, default: false },
-      { id: "c", assigned: true, default: true },
+describe("externalFlows", () => {
+  it("offers the flows that can be finished and starts on the org's default", () => {
+    const { sendable, initial } = externalFlows([
+      { id: "a", completable: false, default: false },
+      { id: "b", completable: true, default: false },
+      { id: "c", completable: true, default: true },
     ]);
     expect(sendable.map((f) => f.id)).toEqual(["b", "c"]);
     expect(initial?.id).toBe("c");
+  });
+
+  it("starts on the first flow when the default cannot be finished", () => {
+    const { initial } = externalFlows([
+      { id: "a", completable: true, default: false },
+      { id: "b", completable: false, default: true },
+    ]);
+    expect(initial?.id).toBe("a");
   });
 });
 
@@ -494,27 +957,32 @@ describe("editedFlowSelection", () => {
     expect(dirty).toBe(false);
   });
 
-  it("falls the default to the first ticked flow once it is unticked", () => {
+  it("keeps a default that members may not use", () => {
     const { selection, dirty } = editedFlowSelection(
       flows,
-      new Set(["b", "a"]),
-      "c",
+      new Set(["a", "c"]),
+      "b",
       saved,
     );
-    expect(selection).toEqual({ flowIds: ["a", "b"], defaultFlowId: "a" });
+    expect(selection).toEqual({ flowIds: ["a", "c"], defaultFlowId: "b" });
     expect(dirty).toBe(true);
   });
 
-  it("has no default when nothing is ticked", () => {
-    expect(editedFlowSelection(flows, new Set(), "c", saved).selection).toEqual(
-      { flowIds: [], defaultFlowId: "" },
+  it("has no default once the default is no longer a listed flow", () => {
+    const { selection, dirty } = editedFlowSelection(
+      flows,
+      new Set(["a"]),
+      "gone",
+      saved,
     );
+    expect(selection).toEqual({ flowIds: ["a"], defaultFlowId: "" });
+    expect(dirty).toBe(true);
   });
 
-  it("is dirty when only the default moved", () => {
-    expect(
-      editedFlowSelection(flows, new Set(["a", "c"]), "a", saved).dirty,
-    ).toBe(true);
+  it("has no flows when nothing is ticked", () => {
+    expect(editedFlowSelection(flows, new Set(), "c", saved).selection).toEqual(
+      { flowIds: [], defaultFlowId: "c" },
+    );
   });
 });
 
@@ -574,6 +1042,20 @@ describe("proofing status", () => {
   });
 });
 
+describe("proofingRejectionReason", () => {
+  it("says a declined erasure is kept by law", () => {
+    const reason = proofingRejectionReason("LEGAL_RETENTION", t);
+    expect(reason).toBe(t("identityProofing.rejectionReasons.legalRetention"));
+    expect(reason).not.toBe("LEGAL_RETENTION");
+  });
+
+  it("shows a code it does not know with its code", () => {
+    expect(proofingRejectionReason("SOMETHING_NEW", t)).toBe(
+      "the check did not pass (SOMETHING_NEW)",
+    );
+  });
+});
+
 describe("proofingErrorMessage", () => {
   it("shows the proofing service's own reason for a refused flow", () => {
     const err = apiError(
@@ -592,12 +1074,6 @@ describe("proofingErrorMessage", () => {
     ).toBe(t("identityProofing.errors.deviceActive"));
   });
 
-  it("says a paused customer takes no request", () => {
-    expect(
-      proofingErrorMessage(apiError(409, "customer_paused", "internal"), t),
-    ).toBe(t("identityProofing.errors.customerPaused"));
-  });
-
   it("maps known codes to their own copy", () => {
     expect(
       proofingErrorMessage(apiError(422, "flow_not_allowed", "internal"), t),
@@ -605,7 +1081,7 @@ describe("proofingErrorMessage", () => {
   });
 
   it.each([
-    [409, "customer_sessions_left", "customerSessionsLeft"],
+    [422, "no_default_flow", "noDefaultFlow"],
     [404, "api_key_not_found", "apiKeyNotFound"],
     [404, "session_not_found", "sessionNotFound"],
     [409, "not_under_review", "notUnderReview"],
@@ -614,6 +1090,7 @@ describe("proofingErrorMessage", () => {
     [404, "webhook_not_found", "webhookNotFound"],
     [409, "link_started", "linkStarted"],
     [422, "address_not_found", "addressNotFound"],
+    [409, "legal_retention", "legalRetention"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -673,20 +1150,18 @@ describe("addressVerificationNote", () => {
     ["unsupported", "unsupported"],
     [undefined, "declared"],
   ] as const)("says how a %s address was checked", (verification, key) => {
-    const copy = t(`customers.sessions.address.${key}`);
-    expect(copy).not.toBe(`customers.sessions.address.${key}`);
+    const copy = t(`identityProofing.sessions.address.${key}`);
+    expect(copy).not.toBe(`identityProofing.sessions.address.${key}`);
     expect(addressVerificationNote(verification, t)).toBe(copy);
   });
 });
 
 describe("proofing stats", () => {
   const row = (
-    customerId: string,
     flowId: string,
     sessions: number,
     approved: number,
   ): {
-    customerId: string;
     flowId: string;
     sessions: number;
     approved: number;
@@ -695,7 +1170,6 @@ describe("proofing stats", () => {
     expired: number;
     cancelled: number;
   } => ({
-    customerId,
     flowId,
     sessions,
     approved,
@@ -704,11 +1178,7 @@ describe("proofing stats", () => {
     expired: 1,
     cancelled: 1,
   });
-  const rows = [
-    row("c1", "f1", 10, 6),
-    row("c1", "f2", 4, 2),
-    row("c2", "f1", 5, 3),
-  ];
+  const rows = [row("f1", 10, 6), row("f2", 4, 2), row("f1", 5, 3)];
 
   it("sums every row", () => {
     expect(sumProofingStats(rows)).toEqual({
@@ -722,31 +1192,138 @@ describe("proofing stats", () => {
     expect(sumProofingStats([]).sessions).toBe(0);
   });
 
-  it("groups per customer and per flow", () => {
-    const perCustomer = proofingStatsBy(rows, (r) => r.customerId);
-    expect(perCustomer.get("c1")?.sessions).toBe(14);
-    expect(perCustomer.get("c2")?.approved).toBe(3);
-    expect(perCustomer.has("c3")).toBe(false);
-    const perFlow = proofingStatsBy(
-      rows.filter((r) => r.customerId === "c1"),
-      (r) => r.flowId,
-    );
+  it("groups per flow", () => {
+    const perFlow = proofingStatsBy(rows, (r) => r.flowId);
     expect([...perFlow.keys()]).toEqual(["f1", "f2"]);
+    expect(perFlow.get("f1")?.sessions).toBe(15);
+    expect(perFlow.get("f2")?.approved).toBe(2);
+    expect(perFlow.has("f3")).toBe(false);
   });
 
   it("has no verified share without sessions", () => {
     expect(verifiedShare(sumProofingStats([]))).toBeUndefined();
-    expect(verifiedShare(sumProofingStats([row("c", "f", 4, 3)]))).toBe(0.75);
+    expect(verifiedShare(sumProofingStats([row("f", 4, 3)]))).toBe(0.75);
   });
 });
 
-describe("searchCustomers", () => {
-  const customers = [{ name: "Veldhuis Verzekeringen" }, { name: "Kliq" }];
+describe("requestFlows", () => {
+  it("lists each flow once, by name", () => {
+    expect(
+      requestFlows([
+        { flowId: "b", flowName: "Ticket check" },
+        { flowId: "a", flowName: "Age check" },
+        { flowId: "b", flowName: "Ticket check" },
+      ]),
+    ).toEqual([
+      { id: "a", name: "Age check" },
+      { id: "b", name: "Ticket check" },
+    ]);
+    expect(requestFlows([])).toEqual([]);
+  });
 
-  it("matches on the name, ignoring case and space", () => {
-    expect(searchCustomers(customers, "  VERZ ")).toEqual([customers[0]]);
-    expect(searchCustomers(customers, "")).toEqual(customers);
-    expect(searchCustomers(customers, "nope")).toEqual([]);
+  it("names a renamed flow by its newest request", () => {
+    expect(
+      requestFlows([
+        { flowId: "a", flowName: "Age check 2026" },
+        { flowId: "a", flowName: "Age check" },
+      ]),
+    ).toEqual([{ id: "a", name: "Age check 2026" }]);
+  });
+});
+
+describe("listedCount", () => {
+  const full = Array.from({ length: MAX_LISTED_REQUESTS }, () => ({}));
+
+  it("reads a list as long as one read returns as possibly cut off", () => {
+    expect(requestListCapped(full)).toBe(true);
+    expect(requestListCapped(full.slice(1))).toBe(false);
+    expect(requestListCapped([])).toBe(false);
+  });
+
+  it("shows a count from a cut-off list as at least that many", () => {
+    expect(listedCount(MAX_LISTED_REQUESTS, true, t)).toBe("200+");
+    expect(listedCount(12, true, t)).toBe("12+");
+    expect(listedCount(12, false, t)).toBe("12");
+    expect(listedCount(0, false, t)).toBe("0");
+  });
+});
+
+describe("peopleRetentionOf", () => {
+  const flows = [{ id: "a" }, { id: "b" }];
+
+  it("states the org's retention across every flow", () => {
+    expect(peopleRetentionOf("", flows)).toEqual({ kind: "org" });
+    expect(peopleRetentionOf("", undefined)).toEqual({ kind: "org" });
+  });
+
+  it("states the picked flow's retention", () => {
+    expect(peopleRetentionOf("b", flows)).toEqual({
+      kind: "flow",
+      flow: { id: "b" },
+    });
+  });
+
+  it("states none for a picked flow the caller cannot read", () => {
+    expect(peopleRetentionOf("c", flows)).toEqual({ kind: "unknown" });
+    expect(peopleRetentionOf("a", undefined)).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("flowPurgeDays", () => {
+  const org = { dataRetentionDays: 30 };
+
+  it("purges after the org's retention unless the flow sets its own", () => {
+    expect(flowPurgeDays({}, org)).toBe(30);
+    expect(flowPurgeDays({ retentionOverrideSeconds: 0 }, org)).toBe(30);
+    expect(flowPurgeDays({ retentionOverrideSeconds: 7 * 86_400 }, org)).toBe(
+      7,
+    );
+  });
+
+  it("rounds a part of a day up", () => {
+    expect(flowPurgeDays({ retentionOverrideSeconds: 86_401 }, org)).toBe(2);
+  });
+});
+
+describe("flowStepLabels", () => {
+  it("names each step in the order given", () => {
+    expect(
+      flowStepLabels(
+        { steps: ["document_capture", "nfc_read", "face_verification"] },
+        t,
+      ),
+    ).toEqual(["Scan the document", "Read the document's chip", "Face check"]);
+  });
+
+  it("adds the wallet's diploma upload after the app's steps", () => {
+    expect(
+      flowStepLabels(
+        { steps: ["face_verification"], diplomaMode: "required" },
+        t,
+      ),
+    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
+    expect(
+      flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
+    ).toEqual(["Face check"]);
+  });
+
+  it("adds the address entry before the diploma upload", () => {
+    expect(
+      flowStepLabels(
+        {
+          steps: ["face_verification"],
+          addressMode: "required",
+          diplomaMode: "required",
+        },
+        t,
+      ),
+    ).toEqual(["Face check", "Enter the address", "Upload diplomas (DUO)"]);
+  });
+
+  it("shows a step it has no copy for as it is", () => {
+    expect(flowStepLabels({ steps: ["video_call"] }, t)).toEqual([
+      "video_call",
+    ]);
   });
 });
 
@@ -759,7 +1336,7 @@ describe("known flow values", () => {
   });
 });
 
-describe("sessions tab", () => {
+describe("people lists", () => {
   const sent = "2026-09-25T10:00:00Z";
   const expires = "2026-09-25T10:10:00Z";
 
@@ -770,17 +1347,27 @@ describe("sessions tab", () => {
       "rejected",
       "expired",
       "pending",
+      "in_progress",
+      "cancelled",
       "needs_review",
     ];
     expect(sessionFilterCounts(statuses.map((status) => ({ status })))).toEqual(
       {
-        all: 6,
+        all: 8,
+        in_progress: 2,
         review: 1,
         verified: 2,
         failed: 1,
         expired: 1,
       },
     );
+  });
+
+  it("shows a cancelled session under all only", () => {
+    expect(matchesSessionFilter("cancelled", "all")).toBe(true);
+    expect(matchesSessionFilter("cancelled", "in_progress")).toBe(false);
+    expect(matchesSessionFilter("pending", "in_progress")).toBe(true);
+    expect(matchesSessionFilter("approved", "in_progress")).toBe(false);
   });
 
   it("times a session to its outcome or its expiry", () => {
@@ -839,60 +1426,67 @@ describe("session settings mirror backend/internal/proofing", () => {
     expect([...SESSION_TTL_OPTIONS_SECONDS]).toEqual(backend);
   });
 
-  it("offers every data retention and no other", () => {
-    const list = /DataRetentionDayOptions = \[\]int\{([^}]*)\}/.exec(source);
-    expect(list).not.toBeNull();
-    const backend = list![1].split(",").map((e) => Number(e.trim()));
-    expect([...DATA_RETENTION_DAY_OPTIONS]).toEqual(backend);
+  it("caps a request list where the backend does", () => {
+    const cap = /const maxListedRequests = (\d+)/.exec(source);
+    expect(cap).not.toBeNull();
+    expect(MAX_LISTED_REQUESTS).toBe(Number(cap![1]));
   });
 });
 
-describe("customerDisplayStatus", () => {
-  it("flags an active customer whose webhook fails", () => {
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "failing" },
-        hasApiKey: true,
-      }),
-    ).toBe("needs_attention");
-    expect(
-      customerDisplayStatus({
-        status: "paused",
-        webhook: { state: "failing" },
-        hasApiKey: true,
-      }),
-    ).toBe("paused");
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "delivering" },
-        hasApiKey: true,
-      }),
-    ).toBe("active");
+// The face match slider's floor and recommended mark are the engine's.
+describe("face match threshold mirrors the backend", () => {
+  const read = (path: string): string =>
+    readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  const constant = (source: string, name: string): number => {
+    const found = new RegExp(`const ${name} = ([\\d.]+)`).exec(source);
+    expect(found, `${name} is declared`).not.toBeNull();
+    return Number(found![1]);
+  };
+
+  it("floors Substantial where the engine does", () => {
+    const flowGo = read(
+      "../../../backend/internal/proofingengine/flow/flow.go",
+    );
+    expect(SUBSTANTIAL_FACE_MATCH_FLOOR).toBe(
+      constant(flowGo, "SubstantialMinFaceMatch"),
+    );
   });
 
-  it("asks for a live API key before anything but a pause", () => {
-    expect(
-      customerDisplayStatus({
-        status: "active",
-        webhook: { state: "failing" },
-        hasApiKey: false,
-      }),
-    ).toBe("setup_needed");
-    expect(
-      customerDisplayStatus({
-        status: "paused",
-        webhook: { state: "delivering" },
-        hasApiKey: false,
-      }),
-    ).toBe("paused");
+  it("recommends Regula's default", () => {
+    const regulaGo = read(
+      "../../../backend/internal/proofingengine/regula/regula.go",
+    );
+    expect(FACE_MATCH_RECOMMENDED).toBe(
+      constant(regulaGo, "DefaultMatchThreshold"),
+    );
   });
+});
 
+describe("isSuccessStatus", () => {
   it("tells a 2xx from the rest", () => {
     expect(isSuccessStatus(204)).toBe(true);
     expect(isSuccessStatus(503)).toBe(false);
     expect(isSuccessStatus(301)).toBe(false);
+  });
+});
+
+describe("ownEndpointDeliveries", () => {
+  const delivery = (id: string, endpointUrl?: string): WebhookDelivery => ({
+    id,
+    event: "session.verified",
+    status: "delivered",
+    attempts: 1,
+    createdAt: "2026-10-16T10:00:00Z",
+    endpointUrl,
+  });
+
+  it("drops the deliveries to the wallet's default endpoint", () => {
+    const own = delivery("own", "https://hooks.example.org/yivi");
+    expect(ownEndpointDeliveries([delivery("default"), own])).toEqual([own]);
+  });
+
+  it("is empty for an org that never had an endpoint", () => {
+    expect(ownEndpointDeliveries([delivery("a"), delivery("b")])).toEqual([]);
   });
 });
 
@@ -1019,6 +1613,31 @@ describe("diploma modes mirror backend/internal/proofing", () => {
   });
 });
 
+// The flow kinds, and of them the data requests the send form offers, are the
+// backend's, both ways.
+describe("flow kinds mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/data_request.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/Flow\w+\s+FlowKind = "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend kind and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...FLOW_KINDS].sort()).toEqual([...backend].sort());
+    expect([...DATA_REQUEST_KINDS].sort()).toEqual(
+      backend.filter((kind) => kind !== "identity").sort(),
+    );
+  });
+});
+
 describe("erasure handlings mirror backend/internal/proofing", () => {
   const source = readFileSync(
     fileURLToPath(
@@ -1134,11 +1753,41 @@ describe("sessionView", () => {
   });
 });
 
+describe("app step", () => {
+  it("offers both apps when the Yivi app can run the flow", () => {
+    expect(methodChoices(true)).toEqual(["yivi_app", "idem_app"]);
+  });
+
+  // Continue never starts a session (#304): a flow with one app still shows
+  // the app step, with that one app to tap.
+  it("offers the Idem app alone otherwise, still as a step of its own", () => {
+    expect(methodChoices(false)).toEqual(["idem_app"]);
+    expect(verifyStages({ diplomas: false })).toContain("method");
+  });
+
+  it("offers the Yivi app for an age check only at an age it answers", () => {
+    const ageCheck = (ageOver: number) =>
+      methodChoices(
+        yiviAppAvailable({
+          steps: ["document_capture", "nfc_read"],
+          requestedAttributes: ["dg1", "age_over"],
+          ageOver,
+        }),
+      );
+    expect(ageCheck(21)).toEqual(["yivi_app", "idem_app"]);
+    expect(ageCheck(20)).toEqual(["idem_app"]);
+  });
+});
+
 describe("address step", () => {
   it("adds the address stage after the session, before the diplomas", () => {
-    expect(
-      verifyStages({ appChoice: false, address: true, diplomas: true }),
-    ).toEqual(["overview", "session", "address", "diplomas"]);
+    expect(verifyStages({ address: true, diplomas: true })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "address",
+      "diplomas",
+    ]);
   });
 
   it("is at the address or diploma step while it is open", () => {
@@ -1165,14 +1814,15 @@ describe("address step", () => {
 
 describe("diploma step", () => {
   it("adds the diploma stage after the session when the flow has it", () => {
-    expect(verifyStages({ appChoice: true, diplomas: true })).toEqual([
+    expect(verifyStages({ diplomas: true })).toEqual([
       "overview",
       "method",
       "session",
       "diplomas",
     ]);
-    expect(verifyStages({ appChoice: false, diplomas: false })).toEqual([
+    expect(verifyStages({ diplomas: false })).toEqual([
       "overview",
+      "method",
       "session",
     ]);
   });
@@ -1231,6 +1881,106 @@ describe("diploma step", () => {
   });
 });
 
+describe("sendRequestFields", () => {
+  const filled = {
+    delivery: "email",
+    matchable: true,
+    nameOn: false,
+    passOn: false,
+    email: " anna@example.org ",
+    name: " Anna ",
+    birthDate: "1990-04-02",
+  } as const;
+
+  it("sends only the address while both switches are off", () => {
+    const fields = sendRequestFields(filled);
+
+    expect(fields.email).toBe("anna@example.org");
+    expect(fields.name).toBe("");
+    expect(fields.birthDate).toBeUndefined();
+    expect(fields.missing).toEqual({
+      email: false,
+      name: false,
+      birthDate: false,
+    });
+  });
+
+  it("asks for an address only when the person gets a mail", () => {
+    expect(sendRequestFields({ ...filled, email: "" }).missing.email).toBe(
+      true,
+    );
+    expect(sendRequestFields({ ...filled, email: "anna" }).missing.email).toBe(
+      true,
+    );
+
+    for (const delivery of ["on_screen", "hosted"] as const) {
+      const fields = sendRequestFields({ ...filled, delivery, email: "" });
+
+      expect(fields.missing.email).toBe(false);
+      expect(sendRequestFields({ ...filled, delivery }).email).toBe("");
+    }
+  });
+
+  it("sends the name once its switch is on, and asks for it", () => {
+    const on = { ...filled, nameOn: true };
+
+    expect(sendRequestFields(on).name).toBe("Anna");
+    expect(sendRequestFields(on).nameShown).toBe(true);
+    expect(sendRequestFields({ ...on, name: " " }).missing.name).toBe(true);
+  });
+
+  it("passes one person on name and date of birth", () => {
+    const fields = sendRequestFields({ ...filled, passOn: true });
+
+    expect(fields.passing).toBe(true);
+    expect(fields.nameShown).toBe(true);
+    expect(fields.name).toBe("Anna");
+    expect(fields.birthDate).toBe("1990-04-02");
+    expect(
+      sendRequestFields({ ...filled, passOn: true, name: "" }).missing.name,
+    ).toBe(true);
+    expect(
+      sendRequestFields({ ...filled, passOn: true, birthDate: "" }).missing
+        .birthDate,
+    ).toBe(true);
+  });
+
+  it("ignores the pass switch on a flow that does not read identity", () => {
+    const fields = sendRequestFields({
+      ...filled,
+      passOn: true,
+      matchable: false,
+      birthDate: "",
+    });
+
+    expect(fields.passing).toBe(false);
+    expect(fields.birthDate).toBeUndefined();
+    expect(fields.name).toBe("");
+    expect(fields.missing).toEqual({
+      email: false,
+      name: false,
+      birthDate: false,
+    });
+  });
+});
+
+describe("mailLifetimeMinutes", () => {
+  it("takes the flow's own lifetime over the organisation's", () => {
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 120 }, 600)).toBe(2);
+  });
+
+  it("follows the organisation when the flow sets none", () => {
+    expect(mailLifetimeMinutes({}, 300)).toBe(5);
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 0 }, 300)).toBe(5);
+    expect(mailLifetimeMinutes(undefined, 300)).toBe(5);
+  });
+
+  it("is unknown until the organisation's settings are read", () => {
+    expect(mailLifetimeMinutes({}, undefined)).toBeUndefined();
+    expect(mailLifetimeMinutes({ sessionTtlSeconds: 120 }, undefined)).toBe(2);
+  });
+});
+
 describe("data request review", () => {
   it("starts an erasure with the matches read off a verified chip ticked", () => {
     expect(matchTickedByDefault("data_erasure", "strong")).toBe(true);
@@ -1279,7 +2029,8 @@ describe("data request review", () => {
   });
 
   it("names the sessions an erasure deletes", () => {
-    const key = "customers.sessions.dataRequest.data_erasure.confirm.title";
+    const key =
+      "identityProofing.sessions.dataRequest.data_erasure.confirm.title";
     expect(t(key, { count: 1 })).toBe("Erase 1 session?");
     expect(t(key, { count: 3 })).toBe("Erase 3 sessions?");
   });
@@ -1366,5 +2117,214 @@ describe("deliveriesPollInterval", () => {
     expect(typeof firstSend).toBe("number");
     expect(typeof retrying).toBe("number");
     expect(firstSend as number).toBeLessThan(retrying as number);
+  });
+});
+
+describe("effective branding", () => {
+  const org: ProofingBranding = {
+    displayName: "Acme",
+    primaryColor: "#111111",
+    secondaryColor: "#222222",
+    textColor: "#333333",
+    surfaceColor: "#444444",
+    borderColor: "#555555",
+    linkColor: "#666666",
+    successColor: "#777777",
+    warningColor: "#888888",
+    errorColor: "#999999",
+    topbarColor: "#aaaaaa",
+    fontFamily: "Open Sans, sans-serif",
+    supportContact: "help@acme.example",
+    privacyUrl: "https://acme.example/privacy",
+    logoUri: "/org-logo",
+    hidePoweredBy: true,
+  };
+  const none: ProofingFlowBranding = {
+    custom: true,
+    displayName: "",
+    primaryColor: "",
+    supportContact: "",
+    privacyUrl: "",
+    logoUri: "",
+  };
+
+  it("is the org's when the flow is not custom, whatever it holds", () => {
+    expect(
+      effectiveBranding(org, { ...none, custom: false, displayName: "Trips" }),
+    ).toEqual(org);
+  });
+
+  it("is the org's when a custom flow sets nothing", () => {
+    expect(effectiveBranding(org, none)).toEqual(org);
+  });
+
+  it("takes each field the flow sets and the org's for the rest", () => {
+    expect(
+      effectiveBranding(org, {
+        ...none,
+        displayName: "Acme Trips",
+        logoUri: "/flow-logo",
+      }),
+    ).toEqual({
+      ...org,
+      displayName: "Acme Trips",
+      logoUri: "/flow-logo",
+    });
+  });
+
+  it("keeps the org's powered-by line", () => {
+    expect(
+      effectiveBranding({ ...org, hidePoweredBy: false }, none).hidePoweredBy,
+    ).toBe(false);
+  });
+
+  it("keeps the org's white-label colours and font", () => {
+    const own = { ...none, primaryColor: "#abcdef" };
+    expect(effectiveBranding(org, own)).toEqual({
+      ...org,
+      primaryColor: "#abcdef",
+    });
+  });
+});
+
+describe("app look", () => {
+  const bare: ProofingBranding = {
+    displayName: "",
+    primaryColor: "",
+    secondaryColor: "",
+    textColor: "",
+    surfaceColor: "",
+    borderColor: "",
+    linkColor: "",
+    successColor: "",
+    warningColor: "",
+    errorColor: "",
+    topbarColor: "",
+    fontFamily: "",
+    supportContact: "help@acme.example",
+    privacyUrl: "https://acme.example/privacy",
+    logoUri: "",
+    hidePoweredBy: false,
+  };
+  const theme = {
+    primaryColor: "#036bd2",
+    topbarColor: "#101e1e",
+    logoUri: "/theme-logo",
+  };
+
+  it("is the org's theme under the branding's name without a look of its own", () => {
+    expect(
+      appLook({ ...bare, displayName: "Acme Trips" }, theme, "Acme"),
+    ).toEqual({
+      name: "Acme Trips",
+      primaryColor: "#036bd2",
+      headerColor: "#101e1e",
+      logoUri: "/theme-logo",
+    });
+  });
+
+  it("takes the branding's logo over the theme's", () => {
+    expect(appLook({ ...bare, logoUri: "/flow-logo" }, theme, "Acme")).toEqual({
+      name: "Acme",
+      primaryColor: "#036bd2",
+      headerColor: "#101e1e",
+      logoUri: "/flow-logo",
+    });
+  });
+
+  it("is the branding alone once it has a colour or a font, the app's own for the rest", () => {
+    expect(
+      appLook({ ...bare, primaryColor: "#22337a" }, theme, "Acme"),
+    ).toEqual({
+      name: "Acme",
+      primaryColor: "#22337a",
+      headerColor: "",
+      logoUri: "",
+    });
+    expect(
+      appLook({ ...bare, fontFamily: "Inter, sans-serif" }, theme, "Acme")
+        .primaryColor,
+    ).toBe("");
+    expect(
+      appLook(
+        { ...bare, secondaryColor: "#112233", topbarColor: "#0a3d2e" },
+        theme,
+        "Acme",
+      ).headerColor,
+    ).toBe("#0a3d2e");
+  });
+
+  it("does not count the support contact or privacy link as a look", () => {
+    expect(appLook(bare, theme, "Acme").primaryColor).toBe("#036bd2");
+  });
+});
+
+describe("going back to the organisation's branding", () => {
+  const saved: ProofingFlowBranding = {
+    custom: true,
+    displayName: "Acme Trips",
+    primaryColor: "",
+    supportContact: "",
+    privacyUrl: "",
+    logoUri: "/flow-logo",
+  };
+
+  it("drops the flow's own branding only when it had one", () => {
+    expect(dropsOwnBranding(saved, false)).toBe(true);
+    expect(dropsOwnBranding(saved, true)).toBe(false);
+    expect(dropsOwnBranding({ ...saved, custom: false }, false)).toBe(false);
+    expect(dropsOwnBranding({ ...saved, custom: false }, true)).toBe(false);
+  });
+});
+
+describe("hosted page form", () => {
+  const saved: ProofingFlowHosted = {
+    enabled: true,
+    locales: [],
+    completion: "redirect",
+  };
+
+  it("starts from what is saved, every language ticked for none", () => {
+    expect(hostedDraft(saved)).toEqual({
+      ...saved,
+      locales: [...SUPPORTED_LANGUAGES],
+    });
+    expect(hostedDraftDirty(hostedDraft(saved), saved)).toBe(false);
+  });
+
+  it("holds a change until it is reset to what is saved", () => {
+    const changed = { ...hostedDraft(saved), enabled: false, locales: ["nl"] };
+    expect(hostedDraftDirty(changed, saved)).toBe(true);
+    expect(hostedDraftDirty({ ...changed, enabled: true }, saved)).toBe(true);
+    expect(hostedDraftDirty(hostedDraft(saved), saved)).toBe(false);
+    expect(
+      hostedDraftDirty(
+        { ...hostedDraft(saved), completion: "done" as const },
+        saved,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("hosted page languages", () => {
+  it("shows every language ticked when none is saved", () => {
+    expect(selectedLocales([])).toEqual([...SUPPORTED_LANGUAGES]);
+  });
+
+  it("shows only the saved languages ticked", () => {
+    expect(selectedLocales(["nl"])).toEqual(["nl"]);
+  });
+
+  it("saves every language ticked as none", () => {
+    expect(savedLocales([...SUPPORTED_LANGUAGES])).toEqual([]);
+  });
+
+  it("saves a subset as ticked, in the order given", () => {
+    expect(savedLocales(["nl"])).toEqual(["nl"]);
+  });
+
+  it("round-trips none and a subset", () => {
+    expect(savedLocales(selectedLocales([]))).toEqual([]);
+    expect(savedLocales(selectedLocales(["en"]))).toEqual(["en"]);
   });
 });

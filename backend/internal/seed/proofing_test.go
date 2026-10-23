@@ -2,7 +2,6 @@ package seed
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
@@ -11,7 +10,7 @@ import (
 // Every demo flow is one the engine accepts, as its store checks on save.
 func TestDemoProofingFlowsAreValid(t *testing.T) {
 	for _, o := range demoProofingOrgs {
-		for _, f := range o.allFlows() {
+		for _, f := range o.flows {
 			def := f.def
 			def.TenantID = "tenant"
 			if err := flow.Validate(def); err != nil {
@@ -21,35 +20,11 @@ func TestDemoProofingFlowsAreValid(t *testing.T) {
 	}
 }
 
-// Every flow a demo customer names is one of its org's flows.
-func TestDemoCustomersNameOrgFlows(t *testing.T) {
+// A demo org's default flow is one of its own flows.
+func TestDemoDefaultFlowIsOrgFlow(t *testing.T) {
 	for _, o := range demoProofingOrgs {
-		names := []string{}
-		for _, f := range o.allFlows() {
-			names = append(names, f.def.Name)
-		}
-		for _, c := range o.customers {
-			for _, name := range c.flowNames() {
-				if !slices.Contains(names, name) {
-					t.Errorf("%s customer %q names unknown flow %q", o.slug, c.name, name)
-				}
-			}
-		}
-	}
-}
-
-// demoNameMark is what every seeded real-world name carries, as the proofing
-// orgs in seed.go do.
-const demoNameMark = " (Demo)"
-
-// Every demo customer's name says "(Demo)": they are real organisations'
-// names, used only to show the use cases.
-func TestDemoCustomersSayDemo(t *testing.T) {
-	for _, o := range demoProofingOrgs {
-		for _, c := range o.customers {
-			if !strings.HasSuffix(c.name, demoNameMark) {
-				t.Errorf("%s customer %q does not end in %q", o.slug, c.name, demoNameMark)
-			}
+		if !slices.ContainsFunc(o.flows, func(f demoProofingFlow) bool { return f.def.Name == o.defaultFlow }) {
+			t.Errorf("%s default flow %q is not one of its flows", o.slug, o.defaultFlow)
 		}
 	}
 }

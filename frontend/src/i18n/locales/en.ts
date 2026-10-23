@@ -38,8 +38,8 @@ export const en = {
     members: "Members",
     identityProofing: "Identity proofing",
     identityProofingOverview: "Overview",
-    identityProofingFlows: "Flows",
-    customers: "Customers",
+    flows: "Flows",
+    developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
     postguard: "PostGuard files",
@@ -421,36 +421,27 @@ export const en = {
       pausedTitle: "Identity proofing is paused",
       byPlatform:
         "The platform administrator paused identity proofing for this organisation. Contact them to resume it.",
-      byOrganization:
-        "An administrator of this organisation switched identity proofing off.",
       whatStops:
-        "While paused, nothing new starts: no requests, no customer API calls and no hosted links. Sessions waiting for review are rejected, and their subjects told to try again later. Sessions already running still finish, and their webhooks still go out.",
-      turnOn: "Switch identity proofing on",
-      turnOff: "Switch off",
-      switchTitle: "Switch off identity proofing",
-      switchHint:
-        "Stops identity proofing for this organisation until an administrator switches it back on.",
-      confirmTitle: "Switch off identity proofing?",
+        "While paused, nothing new starts: no requests, no API calls and no hosted links. Sessions waiting for review are rejected, and their subjects told to try again later. Sessions already running still finish, and their webhooks still go out.",
       platformColumn: "Identity proofing",
       active: "Active",
       unknown: "Unknown",
       pausedByPlatform: "Paused by {{name}}",
       pausedByPlatformAdmin: "Paused by a platform admin",
       platformConfirmTitle: "Pause identity proofing for {{name}}?",
-      byOrganizationMember:
-        "{{name}}, an administrator of this organisation, switched identity proofing off.",
-      pausedByOrganization: "Switched off by the organisation",
+      byPlatformAdmin:
+        "{{name}}, a platform administrator, paused identity proofing for this organisation. Contact them to resume it.",
       platformPause: "Pause",
       platformResume: "Resume",
     },
     overview: {
       apiDocs: "API docs",
       title: "Overview",
-      subtitle: "Identity checks you run for your customers. Last 30 days.",
+      subtitle: "Identity checks you run. Last 30 days.",
       stats: {
         sessions: "Sessions",
-        sessionsHint_one: "across {{count}} customer",
-        sessionsHint_other: "across {{count}} customers",
+        sessionsHint_one: "across {{count}} flow",
+        sessionsHint_other: "across {{count}} flows",
         verified: "Verified",
         verifiedHint: "{{share}} of sessions",
         failed: "Failed",
@@ -465,37 +456,39 @@ export const en = {
       },
       recent: {
         title: "Recent sessions",
-        scope: "all customers",
+        scope: "the whole organisation",
         scopeOwn: "sent by you",
-        customer: "Customer",
+        viewAll: "View all",
+        person: "Person",
         flow: "Flow",
         result: "Result",
         started: "Started",
         empty: "No sessions yet.",
-        emptyCustomer: "No sessions for this customer yet.",
-        filterLabel: "Show sessions of",
-        allCustomers: "All customers",
       },
-      customers: {
-        title: "Customers",
+      flows: {
+        title: "Flows",
         viewAll: "View all",
-        empty: "No customers yet.",
+        empty: "No flows yet.",
         summary_one: "{{count}} session · {{share}} verified",
         summary_other: "{{count}} sessions · {{share}} verified",
         noSessions: "No sessions in 30 days",
-        webhookAlertNoAnswer_one:
-          "{{name}}: webhook has not answered since {{since}}. {{count}} result is queued for retry.",
-        webhookAlertNoAnswer_other:
-          "{{name}}: webhook has not answered since {{since}}. {{count}} results are queued for retry.",
-        webhookAlert_one:
-          "{{name}}: webhook returns {{code}} since {{since}}. {{count}} result is queued for retry.",
-        webhookAlert_other:
-          "{{name}}: webhook returns {{code}} since {{since}}. {{count}} results are queued for retry.",
+        default: "Default",
       },
+      webhookAlertNoAnswer_one:
+        "The webhook endpoint has not answered since {{since}}. {{count}} result is queued for retry.",
+      webhookAlertNoAnswer_other:
+        "The webhook endpoint has not answered since {{since}}. {{count}} results are queued for retry.",
+      webhookAlert_one:
+        "The webhook endpoint returns {{code}} since {{since}}. {{count}} result is queued for retry.",
+      webhookAlert_other:
+        "The webhook endpoint returns {{code}} since {{since}}. {{count}} results are queued for retry.",
+      webhookAlertLink: "Open webhook",
     },
     requests: {
       empty: "No requests yet.",
       subject: "Person",
+      noName: "No name given",
+      atLeast: "{{count}}+",
       flow: "Flow",
       requestedBy: "Requested by",
       assurance: "Assurance",
@@ -529,7 +522,7 @@ export const en = {
       assuranceNotMet: "below the flow's required assurance level",
       manualReviewRejected: "refused by a reviewer",
       reviewLapsed: "not reviewed within 30 days",
-      legalRetention: "the customer is bound by law to keep this data",
+      legalRetention: "the organisation is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused while the session waited for review; try again later",
       identityMismatch:
@@ -545,29 +538,18 @@ export const en = {
       flowNotAllowed:
         "That flow is no longer available to members. Pick another one.",
       memberNotFound: "That person is not a member of this organization.",
-      customerNotFound: "That customer does not exist.",
-      customerExists:
-        "Your organization already has a customer with this name.",
-      flowNotAssigned:
-        "That flow is no longer assigned to this customer. Pick another one.",
-      customerPaused:
-        "Proofing is paused for this customer. An admin can resume it on the customer's page.",
-      customerHasOpenReviews:
-        "This customer has sessions waiting for review. Decide them before pausing.",
-      customerSessionsLeft:
-        "Sessions were sent for this customer while it was being removed. Try removing it again.",
+      noDefaultFlow:
+        "Your organisation has no default flow. Pick a flow, or set a default on the Flows page.",
       proofingPaused: "Identity proofing is paused for this organisation.",
-      customerNoApiKey:
-        "This customer has no API key yet. An admin can create one on the customer's API keys tab.",
-      apiKeyNotFound: "That API key no longer exists.",
+      apiKeyNotFound: "That API token no longer exists.",
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
       referencePhotoRequired:
-        "This flow compares the face with your own photo of the person, which can only be sent through the customer API. Pick another flow.",
+        "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
       webhookNotFound:
-        "This customer's webhook no longer exists: someone may have removed it. Reload the page.",
+        "The webhook endpoint no longer exists: someone may have removed it. Reload the page.",
       linkStarted:
         "This link was already opened somewhere else. Carry on there.",
       sessionOver: "This session has ended. Start a new one.",
@@ -575,6 +557,8 @@ export const en = {
         "The Idem app still has this session open: carry on there, or close it first.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
+      dataRequestFlow:
+        "See my data and Delete my data are the wallet's own flows: they cannot be changed.",
       diplomasNeedPage:
         "This flow asks for diplomas, which are uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       diplomasClosed:
@@ -590,10 +574,12 @@ export const en = {
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
-        "A data request flow is for a customer's subjects. Take it off the members' flows first.",
+        "A data request flow is for external people. Take it off the members' flows first.",
       exportUnavailable: "This data can no longer be downloaded.",
       mandateWithdrawn:
         "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
+      legalRetention:
+        "A session the law makes you keep cannot be erased yet. Untick it.",
       tooLarge: "The file is too large.",
       generic: "Something went wrong. Please try again.",
     },
@@ -660,105 +646,27 @@ export const en = {
         duplicate: "This diploma was added already.",
       },
     },
-  },
-  customers: {
-    title: "Customers",
-    subtitle:
-      "Organisations you verify people for. Each has its own flows and sessions.",
-    add: "Add customer",
-    status: {
-      active: "Active",
-      paused: "Paused",
-      needsAttention: "Needs attention",
-      setupNeeded: "Setup needed",
-    },
-    list: {
-      search: "Search customers",
-      count_one: "{{count}} customer",
-      count_other: "{{count}} customers",
-      name: "Customer",
-      flows: "Flows",
-      sessions: "Sessions 30d",
-      verified: "Verified",
-      status: "Status",
-      added: "Added {{date}}",
-      empty: "No customers yet.",
-      noMatch: "No customer matches your search.",
-      webhook: "Webhook",
-    },
-    new: {
-      title: "New customer",
-      name: "Name",
-      namePlaceholder: "Initech BV",
-      nameRequired: "Enter a name.",
-      create: "Add customer",
-      cancel: "Cancel",
-    },
-    detail: {
-      since_one:
-        "{{id}} · customer since {{date}} · {{count}} session in the last 30 days",
-      since_other:
-        "{{id}} · customer since {{date}} · {{count}} sessions in the last 30 days",
-      notFound: "This customer does not exist.",
-      verify: "Verify a person",
-      pause: "Pause proofing",
-      resume: "Resume proofing",
-      pausedNotice:
-        "Proofing is paused for this customer: no new request can be sent until an admin resumes it.",
-      noApiKeyNotice:
-        "This customer has no API key yet: create one before sending requests.",
-      noApiKeyNoticeMember:
-        "This customer has no API key yet, so no request can be sent. Ask an admin to create one.",
-      createApiKey: "Create API key",
-      pauseConfirm: {
-        title: "Pause proofing for {{name}}?",
-        message:
-          "No new request can be sent for this customer until you resume it. Requests already sent run out as usual.",
-        confirm: "Pause proofing",
-      },
-    },
-    tabs: {
-      flows: "Flows",
-      sessions: "Sessions",
-      settings: "Settings",
-      branding: "Branding",
-      apiKeys: "API keys",
-      webhooks: "Webhooks",
-    },
     flows: {
-      live: "Live",
       eidas: "eIDAS {{level}}",
-      intro:
-        "A flow sets which data is requested and the minimum assurance level. Requests for this customer can use the flows assigned here.",
-      sharedEditNote:
-        "Flows are shared: this change applies to every customer and member that uses this flow.",
-      newFlowNote: "The new flow is assigned to {{name}} straight away.",
-      newFlow: "New flow",
-      assignExisting: "Assign existing flows",
-      assignFailed:
-        "The flow was saved, but not assigned to this customer: {{reason}}",
-      noneAssignedAdmin:
-        "No flows are assigned to this customer yet. Create one with New flow, or assign one your organisation already has.",
-      done: "Done",
-      noneAssigned: "No flows are assigned to this customer yet.",
-      sessions_one: "{{count}} session in 30 days",
-      sessions_other: "{{count}} sessions in 30 days",
-      requestedData: "Requested data",
-      assuranceSteps: "Assurance · steps",
       noAssurance: "No minimum level",
-      noData: "Nothing requested",
-      edit: "Edit flow",
-      title: "Assigned flows",
-      hint: "Requests for this customer can use the flows ticked here, whether or not members may use them; the default is preselected.",
-      empty: "Your organization has no flows yet.",
-      default: "Default",
-      save: "Save assigned flows",
     },
     send: {
       title: "Verify a person",
-      hint: "The person gets a mail with a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request. They need no account.",
-      hintOnScreen:
-        "The person is with you. A page shows them what is collected, lets them choose the Yivi app or the Idem app, and shows its QR code. Nothing is mailed.",
+      what: {
+        legend: "What do you send?",
+        identity: {
+          title: "An identity check",
+          hint: "The person proves who they are, with the steps of a flow you pick.",
+        },
+        data_access: {
+          title: "See my data",
+          hint: "The person asks what you hold about them. They prove who they are first, and see it once a reviewer approves.",
+        },
+        data_erasure: {
+          title: "Delete my data",
+          hint: "The person asks you to delete what you hold about them. They prove who they are first.",
+        },
+      },
       channel: "How does the person get the QR code?",
       channels: {
         email: {
@@ -767,46 +675,58 @@ export const en = {
         },
         onScreen: {
           title: "Show on this screen",
-          hint: "A page here, for a person who is with you.",
+          hint: "For a person who is with you.",
         },
         link: {
           title: "Copy a link",
-          hint: "A link to the customer's page, which you send the person yourself. Valid 72 hours.",
+          hint: "You send the link yourself. It can be started once, within 72 hours.",
         },
       },
-      emailOptional: "E-mail address (optional)",
+      mailLifetime: "It works for {{minutes}} minutes after sending.",
       submitOnScreen: "Open page",
       submitLink: "Create link",
-      hintLink:
-        "You get a link to a page in the customer's branding. The person opens it on their own device, reads what is collected, picks the app and starts there; the session runs from then. Nothing is mailed.",
       linkTitle: "Link created",
       linkHint:
-        "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears under Sessions.",
+        "Send this link to the person, for example by chat. It can be started once, within 72 hours; the outcome appears on the People tab.",
+      linkOpen: {
+        label: "Open in new tab",
+        newTab: "(opens a new tab)",
+      },
       linkDone: "Done",
       email: "E-mail address",
+      emailPlaceholder: "name@example.nl",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
         "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
-      name: "Name (optional)",
-      nameHint:
-        "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
-      nameRequired: "Enter the name of the person the date of birth is for.",
-      birthDate: "Date of birth (optional)",
-      birthDateHint:
-        "With a date of birth, only this person can pass: the name and date of birth on their document must match, or the check is rejected.",
+      notLinkable:
+        "This flow is not sent by e-mail or as a link, so the person does it on this screen.",
+      addName: {
+        title: "Add the person's name",
+        hint: "Shown in your list until the check finishes; after that, the name from their document.",
+        passNote: "Needed to match the name on their document.",
+      },
+      onlyThisPerson: {
+        title: "Only let this person pass",
+        hint: "The name and date of birth on their document must match, or the check is rejected.",
+      },
+      name: "Name",
+      birthDate: "Date of birth",
+      required: "(required)",
+      nameRequired: "Enter the name of the person.",
+      birthDateRequired: "Enter the date of birth.",
       flow: "Flow",
       submit: "Send request",
       cancel: "Cancel",
-      noFlowsAdmin: "Assign a flow to this customer first, on the Flows tab.",
+      noFlowsAdmin: "Create a flow first, on the Flows page.",
       noFlowsMember:
-        "An admin has to assign a flow to this customer before you can send a request.",
+        "An admin has to make a flow available to members before you can send a request.",
       referencePhotoFlows:
-        "Flows that match the face against the customer's own photo are not listed: the customer's system sends those through the API, with the photo.",
+        "Flows that match the face against your own photo of the person are not listed: your software sends those through the API, with the photo.",
     },
     onScreen: {
       title: "Verify a person",
       missingFlow:
-        "This flow is no longer assigned to the customer. Go back and pick another one.",
+        "This flow no longer exists or cannot be sent from here. Go back and pick another one.",
       steps: {
         overview: "What is collected",
         method: "Choose an app",
@@ -819,12 +739,10 @@ export const en = {
         intro:
           "You check your identity with your passport or ID card. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
-        flow: "Flow",
-        assurance: "Assurance level",
         retention_one:
-          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} day after it ends.",
+          "This data is deleted at most {{count}} day after the check ends.",
         retention_other:
-          "What the verification collects (your name and the other data and photos listed above) is deleted at most {{count}} days after it ends.",
+          "This data is deleted at most {{count}} days after the check ends.",
         support: "Questions? {{contact}}",
         privacy: "Privacy statement",
         cancel: "Cancel",
@@ -857,7 +775,6 @@ export const en = {
             "Scan your passport or ID card with the Idem app and hold it to your phone to read its chip.",
         },
         back: "Back",
-        continue: "Show QR code",
       },
       scan: {
         yiviHeading: "Scan with the Yivi app",
@@ -905,6 +822,10 @@ export const en = {
           title: "Request refused",
           message: "You proved who you are, but your request was not granted.",
         },
+        legalRetention: {
+          title: "Your data cannot be deleted yet",
+          until: "All your data can be deleted from {{date}}.",
+        },
         expired: {
           title: "Session ended",
           message: "The check was not finished in time.",
@@ -918,14 +839,20 @@ export const en = {
           title: "Check stopped",
           message: "No identity check was done, and nothing was shared.",
         },
-        back: "Back to {{name}}",
+        back: "Back to the overview",
         again: "Verify again",
       },
+    },
+    people: {
+      title: "All people",
+      subtitle: "Everyone you sent a check to, on any flow.",
+      allFlows: "All flows",
+      details: "Details",
     },
     sessions: {
       review: {
         title: "Decide this review",
-        hint: "The checks could not decide on their own. Your decision settles the session and is sent to the customer.",
+        hint: "The checks could not decide on their own. Your decision settles the session and is sent to your webhook endpoint.",
         reason: "Reason",
         reasonPlaceholder: "What you checked, and why you decided so",
         reasonRequired: "Give a reason: it is kept in the audit log.",
@@ -942,7 +869,7 @@ export const en = {
         },
         data_erasure: {
           title: "This person asks for their data to be deleted",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and the customer is told per session.",
+          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and your webhook endpoint is told per session.",
           approve_one: "Approve: erase {{count}} session",
           approve_other: "Approve: erase {{count}} sessions",
           confirm: {
@@ -955,7 +882,7 @@ export const en = {
         reasonPlaceholder:
           "What you checked, and why, e.g. a legal duty to keep the data",
         noMatches:
-          "No other sessions of this person were found at this customer.",
+          "No other sessions of this person were found in your organisation.",
         matches_one: "{{count}} session of this person found",
         matches_other: "{{count}} sessions of this person found",
         emailMatches_one:
@@ -973,17 +900,20 @@ export const en = {
         erasureUntickHint:
           "Sessions whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept, for example under a legal retention duty.",
         erasureEmailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's to erase them too; the rest is deleted when the customer's retention lapses.",
+          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's to erase them too; the rest is deleted when the organisation's retention lapses.",
         untickHint:
           "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
         erased: "Erased",
         approved: "Approved",
         kept: "Kept",
+        heldUntil: "Kept by law until {{date}}",
+        heldHint:
+          "Sessions the law makes you keep cannot be erased yet, so they cannot be ticked. A request to delete them is declined until the date shown.",
         download: "Download the data",
         downloadUntil: "Available until {{date}}",
         downloadClosed: "The download was available until {{date}}.",
       },
-      method: "Method",
+      method: "App",
       timeline: "Timeline",
       noEvents: "Nothing recorded yet.",
       identity: {
@@ -992,8 +922,9 @@ export const en = {
         revealPhoto: "Show {{name}}",
         conceal: "Hide",
         photo: "Document photo",
-        referencePhoto: "Customer's photo",
-        noDocument: "None: the face was matched against the customer's photo",
+        referencePhoto: "Photo sent with the request",
+        noDocument:
+          "None: the face was matched against the photo sent with the request",
         selfie: "Selfie",
         documentImage: "Front of the document",
         documentImageBack: "Back of the document",
@@ -1016,29 +947,33 @@ export const en = {
           failed: "Failed",
         },
       },
-      filterLabel: "Filter sessions",
       filters: {
-        all: "All {{count}}",
-        review: "Needs review {{count}}",
-        verified: "Verified {{count}}",
-        failed: "Failed {{count}}",
-        expired: "Expired {{count}}",
+        all: "All ({{number}})",
+        in_progress: "In progress ({{number}})",
+        review: "Needs review ({{number}})",
+        verified: "Verified ({{number}})",
+        failed: "Failed ({{number}})",
+        expired: "Expired ({{number}})",
       },
       retention_one:
-        "Personal data is purged {{count}} day after a session ends. The result and the audit trail stay.",
+        "Personal data is purged {{count}} day after a check ends. The result and the audit trail stay.",
       retention_other:
-        "Personal data is purged {{count}} days after a session ends. The result and the audit trail stay.",
+        "Personal data is purged {{count}} days after a check ends. The result and the audit trail stay.",
+      retentionLegal:
+        "Personal data of identity checks is kept for at least {{period}} after they end, as the law requires. The result and the audit trail stay.",
+      retentionOwnLegal:
+        "You see the checks you sent. Personal data of identity checks is kept for at least {{period}} after they end.",
       retentionOwn_one:
-        "You see the sessions you sent. Personal data is purged {{count}} day after a session ends.",
+        "You see the checks you sent. Personal data is purged {{count}} day after a check ends.",
       retentionOwn_other:
-        "You see the sessions you sent. Personal data is purged {{count}} days after a session ends.",
-      viaApiKey: "API key · {{name}}",
-      session: "Session",
+        "You see the checks you sent. Personal data is purged {{count}} days after a check ends.",
+      viaApiKey: "API token · {{name}}",
       result: "Result",
       started: "Started",
       duration: "Duration",
-      details: "Details of session {{id}}",
-      fullId: "Session id",
+      details: "Details of check {{id}}",
+      flowVersion: "Flow version",
+      fullId: "Reference",
       reason: "Reason",
       completed: "Finished",
       purgeAt: "Personal data purged on",
@@ -1069,53 +1004,8 @@ export const en = {
       failedBecause: "{{status}} · {{reason}}",
     },
     settings: {
-      sessionsTitle: "Sessions",
-      qrLifetime: "QR lifetime",
-      qrLifetimeHint:
-        "After this the session expires and a new request is needed.",
-      minutes_one: "{{count}} min",
-      minutes_other: "{{count}} min",
-      retention: "Data retention",
-      retentionHint:
-        "A session's personal data (the name and e-mail address it was sent to, everything read off the document and chip, the photos, and any diplomas) is purged this long after it ends. The result and the audit trail stay. A change applies to existing sessions too.",
-      shortenConfirm: {
-        title: "Shorten retention to {{days}}?",
-        message:
-          "This applies to existing sessions too: every session that ended more than {{days}} ago loses its personal data within the hour, in the wallet and in the proofing service. This cannot be undone.",
-        confirm: "Shorten retention",
-      },
       days_one: "{{count}} day",
       days_other: "{{count}} days",
-      erasure: "Erasure requests",
-      erasureHint:
-        "How a request to delete someone's data is decided once their identity is proven.",
-      erasureOptions: {
-        review: "Reviewer decides",
-        automatic: "Automatic",
-        keep: "Keep: legal duty",
-      },
-      erasureOptionHints: {
-        review:
-          "A reviewer decides each request. Sessions proven to be this person's start ticked; the reviewer ticks any found only by e-mail address or name.",
-        automatic:
-          "Sessions proven to be this person's are deleted at once. Only sessions found by e-mail address or name go to a reviewer.",
-        keep: "Every request is refused and the data kept, because a law requires this customer to keep it. The person is told why.",
-      },
-      nameTitle: "Name",
-      nameHint: "Shown to your members and in the audit log.",
-      redirectOriginsTitle: "Redirect origins",
-      redirectOriginsHint:
-        "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
-      save: "Save",
-      removeTitle: "Remove customer",
-      removeHint:
-        "Revokes its API keys, removes its webhook and deletes its sessions. Audit log entries are kept.",
-      remove: "Remove customer",
-      removeConfirm: {
-        title: "Remove {{name}}?",
-        message:
-          "Its API keys stop working, its webhook is removed and every session sent for it is deleted, including its subjects' addresses and names. The audit log keeps what happened. This cannot be undone.",
-      },
     },
     webhookState: {
       delivering: "Delivering",
@@ -1130,31 +1020,36 @@ export const en = {
       done: "I have stored it",
     },
     branding: {
-      title: "Branding",
-      hint: "The customer's own look for its mail, its hosted page and the Idem app. With a colour or font set here, its flows use this look instead of the organisation's; with only a logo, they use the organisation's look with this logo.",
+      title: "Your brand",
+      hint: "Used in the proofing mail, on the hosted page and in the Idem app, for every flow. A flow can have its own, on its Branding tab.",
       displayName: "Display name",
       displayNameHint:
-        "Signs the proofing mail and its subject line. Empty uses the customer's name.",
+        "Signs the mail and its subject line. Empty uses the organisation's name.",
       logo: "Logo",
       logoSet: "Current logo",
       noLogo: "No logo: the display name is shown instead",
-      logoHint:
-        "PNG, JPEG, GIF or WebP, at most 512 KB. Mail clients do not show SVG.",
+      logoHint: "PNG, JPEG, GIF or WebP, at most 512 KB.",
       upload: "Upload",
       replace: "Replace",
       removeLogo: "Remove",
       primaryColor: "Primary colour",
-      customColor: "Pick a colour",
+      hexColor: "Hex colour",
       orgColor: "Default",
+      swatches: {
+        green: "Green",
+        blue: "Blue",
+        red: "Red",
+        black: "Black",
+      },
       colorInvalid: "Enter a hex colour like #1F5B4A.",
       primaryColorHint:
-        "Used for the mail's button and header mark. The text on it is adjusted for contrast.",
+        "For buttons and the header mark. Text on it is adjusted for contrast.",
       secondaryColor: "Secondary colour",
       secondaryColorHint:
         "Used for step labels and badges in the Idem app and on the hosted page.",
       themeTitle: "House style",
       themeHint:
-        "The rest of the customer's look in the Idem app and on its hosted page: the same options as the organisation's theme. Empty keeps the default design.",
+        "The rest of the organisation's look in the Idem app and on its hosted page: the same options as the organisation's theme. Empty keeps the default design.",
       supportContact: "Support contact",
       supportPlaceholder: "klantenservice@example.nl",
       privacyUrl: "Privacy statement URL",
@@ -1163,7 +1058,7 @@ export const en = {
       discard: "Discard",
       save: "Save branding",
       preview: {
-        caption: "Live preview · proofing mail",
+        caption: "Preview · proofing mail",
         heading: "{{name}} asks you to verify your identity",
         body: "{{name}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone.",
         button: "Open in the Idem app",
@@ -1172,35 +1067,125 @@ export const en = {
         footer: "Identity check by Yivi",
       },
     },
-    apiKeys: {
+    legalRetention: {
+      title: "Legal retention",
+      hint_one:
+        "Without a legal period, personal data is purged {{count}} day after a check ends.",
+      hint_other:
+        "Without a legal period, personal data is purged {{count}} days after a check ends.",
+      switch: "We must keep this data by law for a set time",
+      switchHint:
+        "For example when a sector law requires you to keep proof of identity.",
+      keepFor: "Keep for",
+      unit: "Unit",
+      units: {
+        years: "years",
+        months: "months",
+      },
+      period: {
+        years_one: "{{count}} year",
+        years_other: "{{count}} years",
+        months_one: "{{count}} month",
+        months_other: "{{count}} months",
+      },
+      countedFrom: "Counted from the end of each check.",
+      amountInvalid:
+        "Enter a whole number of at least 1, and at most 50 years.",
+      reason: "Reason, shown to the person",
+      reasonEn: "English",
+      reasonNl: "Nederlands",
+      reasonRequired:
+        "Give the reason in both languages, at most {{max}} characters each.",
+      changes: {
+        title: "What this changes",
+        keep: "Every flow keeps personal data for at least {{period}}. A flow can keep it longer, not shorter.",
+        erase:
+          "Delete my data is declined during the {{period}} after a check ends. The person sees the reason and the date their data can be deleted.",
+        access: "See my data keeps working.",
+      },
+      removeConfirm: {
+        title: "Remove the legal retention?",
+        message_one:
+          "Identity checks are then kept only as long as their flow says, or {{count}} day after they end for a flow without its own retention. Every check that ended longer ago than that loses its personal data within the hour, in the wallet and in the proofing service, and Delete my data is no longer declined. This cannot be undone.",
+        message_other:
+          "Identity checks are then kept only as long as their flow says, or {{count}} days after they end for a flow without its own retention. Every check that ended longer ago than that loses its personal data within the hour, in the wallet and in the proofing service, and Delete my data is no longer declined. This cannot be undone.",
+        confirm: "Remove legal retention",
+      },
+      shortenConfirm: {
+        title: "Shorten the legal retention to {{period}}?",
+        message:
+          "Every identity check that ended more than {{period}} ago, and is past its flow's own retention, loses its personal data within the hour, in the wallet and in the proofing service. This cannot be undone.",
+        confirm: "Shorten legal retention",
+      },
+      discard: "Discard",
+      save: "Save",
+    },
+    dataRequests: {
+      title: "Data requests from people",
       intro:
-        "Your backend uses these keys to create sessions and read their outcome through the proofing API. Only active keys work.",
-      create: "Create API key",
+        "Every organisation offers these two, as the GDPR requires. The person proves who they are first: Scan the document, Read the document's chip, Face check (eIDAS Substantial).",
+      access: {
+        title: "See my data",
+        hint: "The person sees what you hold about them, once a reviewer approves.",
+        state: "Always on",
+      },
+      erasure: {
+        title: "Delete my data",
+        hint: "Available once the legal period below has passed for that person's data.",
+        after: "After {{period}}",
+        anyTime: "Right away",
+      },
+      whoDecides: {
+        legend: "Who decides",
+        review: {
+          label: "A reviewer decides every request",
+          hint: "Nothing is deleted until someone in Reviews approves it.",
+        },
+        automatic: {
+          label: "Delete automatically when it is certain",
+          hint: "Checks proven with the same document are deleted at once. A reviewer decides about checks that match on name or e-mail address only.",
+        },
+      },
+    },
+    redirectOrigins: {
+      title: "Redirect origins",
+      hint: "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
+      save: "Save",
+    },
+    developers: {
+      title: "Developers",
+      subtitle:
+        "Everything in the Business Wallet works without setup. Come here only to do the same from your own software: mint a token to call the API, and add an endpoint that receives results.",
+      adminOnly: "Only an administrator can see this page.",
+    },
+    apiKeys: {
+      title: "API tokens",
+      nameRequired: "Enter a name.",
+      intro:
+        "A token lets your software start checks on any flow and read their results. It is shown once, when you create it.",
+      create: "Create token",
       name: "Name",
-      namePlaceholder: "Production backend",
-      key: "Key",
-      prefix: "{{prefix}}…",
+      nameHint:
+        "So you can tell your tokens apart, for example the system that uses it.",
       created: "Created",
       lastUsed: "Last used",
       neverUsed: "Never",
-      empty: "No API keys yet.",
-      status: "Status",
-      active: "Active",
-      revoked: "Revoked",
+      empty: "No tokens yet.",
+      actions: "Actions",
       revoke: "Revoke",
+      revokeNamed: "Revoke {{name}}",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
-          "Anything using this key stops working straight away. This cannot be undone.",
-        lastMessage:
-          "Anything using this key stops working straight away. It is this customer's last active key, so members cannot send its verification requests from the dashboard either until you create a new one. This cannot be undone.",
+          "Anything using this token stops working straight away. This cannot be undone.",
       },
-      createdTitle: "Your new API key",
+      createdTitle: "Copy your token now",
       createdHint:
-        "Copy it now and store it somewhere safe, like your backend's secret store: it is not shown again. Only a hash of it is kept.",
+        "This is the only time you see the token “{{name}}”. Store it somewhere safe, such as your backend's secret store.",
+      createdNote: "Lost it? Revoke it and create a new one.",
     },
     webhooks: {
-      endpoint: "Endpoint",
+      endpoint: "Webhook endpoint",
       formHint:
         "The wallet POSTs a signed event to this URL when a session is verified, fails, expires or has its personal data purged.",
       url: "URL",
@@ -1235,12 +1220,11 @@ export const en = {
       secretHint:
         "Copy it now and store it with your receiver: it is not shown again. Check the Yivi-Signature header with it.",
       recent: "Recent deliveries",
-      noEndpointTag: "No endpoint",
       defaultBody:
-        "No events are sent. Session results show on the Sessions tab, through the API, and in the audit log under this customer.",
+        "No events are sent. Results show on each flow's People tab, through the API and in the audit log.",
       defaultHint:
-        "Hosting your own receiver? Add its URL and the wallet POSTs each signed event there.",
-      useOwn: "Use own endpoint",
+        "Hosting your own receiver? Add its URL and every signed event is POSTed there, for all flows.",
+      useOwn: "Add endpoint",
       noDeliveries: "No events sent yet.",
       queuedTag: "Queued",
       noAnswer: "No answer",
@@ -1250,37 +1234,96 @@ export const en = {
     },
   },
   identityProofingFlows: {
-    title: "Proofing flows",
+    title: "Flows",
     subtitle:
-      "Define the checks and data of each flow, keep its versions, and choose which flows members may use.",
+      "A flow sets which data is requested and the minimum assurance level. Open a flow to see the people it identified.",
     adminOnly: "Only an admin of this organization can manage proofing flows.",
     notCompletable: "Cannot be sent from the wallet",
     referencePhoto: "Own photo, via API",
     versionShort: "v{{version}}",
-    edit: "Edit",
+    versionLong: "Version {{version}}",
+    edit: "Edit flow",
+    columns: {
+      flow: "Flow",
+      assurance: "Assurance",
+      people: "People, 30 days",
+      preselected: "Preselected",
+      members: "Members can use",
+      open: "Open",
+    },
+    open: "Open {{name}}",
     selection: {
-      title: "Flows",
-      hint: "Members send requests on the flows ticked here; the default is the one preselected for every member. Editing a flow saves a new version, which new requests use from then on.",
       empty: "No flows yet. Create one with New flow.",
       default: "Default",
+      members: "Members",
       save: "Save available flows",
+    },
+    page: {
+      notFound: "This flow does not exist.",
+      backToFlows: "Back to the flows",
+      defaultFlow: "Default flow",
+      tabsLabel: "Flow",
+      people: "People",
+    },
+    editTabs: {
+      check: "Check",
+      branding: "Branding",
+      hosted: "Hosted page",
+    },
+    branding: {
+      title: "Branding for this flow",
+      hint: "Used in this flow's proofing mail, on its hosted page and in the Idem app, for a person outside the organisation.",
+      which: "Which branding",
+      same: {
+        title: "Same as the organisation",
+        noLogo: "no logo",
+        change: "Change in Settings › Branding",
+      },
+      custom: {
+        title: "Custom for this flow",
+        hint: "For a product with its own name or look. Fields you leave empty use the organisation's.",
+      },
+      orgEmpty: "Organisation's: empty",
+      logoInherited: "The organisation's logo",
+      preview: {
+        caption: "Preview",
+        mail: "Proofing mail",
+        app: "Idem app",
+        start: "Start",
+        appNote:
+          "How the Idem app shows this flow's name, logo and colour when the person opens the request.",
+      },
+      dropConfirm: {
+        title: "Use the organisation's branding?",
+        message:
+          "This flow's own display name, logo, colour, support contact and privacy statement URL are deleted. Its mail, hosted page and the Idem app then show the organisation's branding.",
+        confirm: "Use the organisation's",
+      },
     },
     hosted: {
       title: "Hosted page",
-      enabled: "Customers may send links to a hosted page for this flow",
+      hint: "The page a person opens from a link or e-mail for this flow.",
+      enabled: "Allow sending this flow as a link",
+      enabledHint:
+        "Members can then pick “Copy a link” or e-mail when they verify a person.",
       locales: "Languages",
       localesHint:
-        "Tick none to offer every language. The page opens in the session's language, then the subject's browser language.",
+        "The page opens in the language of the request, otherwise in the person's browser language.",
+      localesRequired: "Keep at least one language.",
       completion: "When the check ends",
       completions: {
-        redirect:
-          "Send the subject to the session's redirect URL, or show a thank-you page without one",
-        done: "Always show the thank-you page (sessions may not carry a redirect URL)",
+        redirect: {
+          title: "Go back to your website",
+          hint: "To the address the request came with; a thank-you page if there is none.",
+        },
+        done: {
+          title: "Always show a thank-you page",
+          hint: "Requests can't carry a return address.",
+        },
       },
-      save: "Save hosted page",
-      previewAs: "Preview as customer",
-      preview: "Preview of the hosted page",
-      noCustomer: "Add a customer to preview the page in its branding.",
+      save: "Save",
+      preview: "Preview · first step",
+      previewNote: "Uses this flow's branding.",
     },
     versions: {
       title: "Versions",
@@ -1297,16 +1340,13 @@ export const en = {
       diploma_upload: "Upload diplomas (DUO)",
     },
     bsnPolicies: {
-      retrieve: "Release the BSN",
-      mask: "Release it masked",
+      retrieve: "Keep the full BSN",
+      mask: "Keep the last 3 digits",
       omit: "Leave it out",
     },
     assuranceLevels: {
       low: "Low",
       substantial: "Substantial",
-    },
-    faceProviders: {
-      regula: "Regula",
     },
     checks: {
       passiveAuth: "The chip's data is genuine and unaltered",
@@ -1328,116 +1368,181 @@ export const en = {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
       age_over:
         "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Never the date itself: ticked with Name and document details, those come without the date of birth.",
-      dg11: "Only when the document stores them on its chip; many do not. The BSN follows the BSN policy below.",
+      dg11: "Only when the chip stores them; many do not.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
       document_image:
-        "The front and back of the document (only the photo page of a passport), as taken: the BSN printed on it is not blurred yet.",
+        "The front and back of an ID card or driving licence, or the photo page of a passport.",
       selfie: "The photo of the person's face taken during the face check.",
       biometrics:
         "How closely the face matched the document photo, and whether it was a live person.",
     },
     kinds: {
-      identity: {
-        title: "Identity check",
-        hint: "The person proves who they are; the customer gets the outcome.",
-      },
-      data_access: {
-        title: "See my data",
-        hint: "A person asks the customer what data is held about them. After the identity check the session goes to review with their other sessions; approving lets them download that data.",
-      },
-      data_erasure: {
-        title: "Delete my data",
-        hint: "A person asks the customer to delete their data. After the identity check the session goes to review with their other sessions; approving erases them.",
-      },
+      identity: { title: "Identity check" },
+      data_access: { title: "See my data" },
+      data_erasure: { title: "Delete my data" },
+    },
+    dataRequests: {
+      title: "See my data and Delete my data are always available",
+      hint: "Every organisation offers these two GDPR requests. They are not flows you edit.",
+      link: "Settings › Data and privacy",
     },
     new: {
-      kind: "Type",
       title: "New flow",
       editTitle: "Edit {{name}}",
-      hint: "A flow is the steps a session walks through, the result data the proofing service returns, and the checks that score its assurance.",
-      editHint:
-        "Saving creates version {{version}} and activates it immediately. Requests already sent keep the version they started on.",
       name: "Name",
       namePlaceholder: "NL passport + selfie",
       create: "Create flow",
       saveVersion: "Save as version {{version}}",
-      stepsTitle: "Flow steps",
-      documentCaptureHint:
-        "The person photographs the code lines on their passport, ID card or Dutch driving licence with the Idem app, which unlocks the chip. Always together with reading the chip.",
-      nfcReadHint:
-        "The person holds the document against their phone and the Idem app reads its chip. Always together with the document scan.",
-      documentPhotoHint:
-        "The person photographs the front and back of their ID card or driving licence, or the photo page of their passport, in the Idem app.",
-      faceVerificationHint:
-        "The person takes a selfie, which is checked to be a live person and compared with the photo on the chip.",
-      stepsOrder: "Will be sent in this order: {{steps}}",
-      addressHint:
-        "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
-      diplomaUploadHint:
-        "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
-      faceLocationNative:
-        "The face check runs in the app: the person has no browser step.",
-      faceProvider: "Face check provider",
-      faceProviderHint:
-        "Regula checks liveness in the app and the wallet matches the face against the chip photo.",
-      faceWithoutChip:
-        "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
-      dataTitle: "Requested result data",
-      identityLocked:
-        "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
-      dataHint:
-        "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
-      checksTitle: "Required checks",
-      checksHint:
-        "Checking the chip's data is required when the chip is read, and the face match with the face check, so they are locked on; the copy check and the live-person check stay optional.",
-      faceMatchThreshold: "Face match threshold",
-      faceMatchThresholdHint:
-        "0–1, blank is pass/fail only. Only applies with the face check.",
-      documentsTitle: "Accepted documents",
-      documentTypes: "Accepted document types",
-      documentTypesHint:
-        "Comma-separated: P (passport), I (ID card), residence_permit, drivers_license (Dutch driving licence). Blank accepts any.",
-      issuingCountries: "Accepted issuing countries",
-      issuingCountriesHint:
-        "3-letter ICAO country codes such as NLD or DEU, comma-separated; blank accepts any. A code no country has is refused.",
-      policyTitle: "Assurance and privacy",
-      assuranceLevel: "Required assurance level",
-      assuranceLevelHint:
-        "With a required level the session is held to it: one that falls short is rejected. Without one the session still reports the level its checks reached. A face step whose liveness check or face match fails rejects the session either way. A session can reach a higher level than required. Only a face checked by Regula can reach Substantial.",
-      assuranceLevelNeeds: {
-        low: "Low needs the chip read with its data verified. Turn those settings on to save the flow.",
-        substantial:
-          "Substantial needs the chip read with its data and copy check verified, and a live face matched by Regula against the chip photo. Turn those settings on to save the flow.",
-      },
-      none: "(none)",
-      defaultOption: "(default: {{option}})",
-      yes: "Yes",
-      no: "No",
-      bsnPolicy: "BSN policy override",
-      retentionSeconds: "Retention override (seconds)",
-      retentionSecondsHint:
-        "Set, it replaces the customer's retention for this flow's sessions; blank or 0 keeps the customer's.",
-      keepFacePhotos: "Keep face photos override",
-      keepFacePhotosHint:
-        "Off: the portrait, selfie and customer's photo are dropped once the face match is done; its verdicts stay. Turn it on only for a customer that must keep them.",
-      blurBsn: "Blur BSN override",
-      ageOver: "Minimum age",
-      ageOverOption: "{{age}} or older",
-      ageOverHint:
-        "Age check only answers whether the person is this age or older on the day of the check.",
       errors: {
         name: "Give the flow a name.",
         steps: "Pick at least one step.",
         assuranceLevel:
           "This flow cannot reach the required level: turn on what the level needs, or lower it.",
-        issuingCountries:
-          "Use 3-letter country codes such as NLD, separated by commas.",
-        faceMatchThreshold: "Enter a number from 0 to 1.",
+        documentTypes: "Tick at least one document type.",
+        issuingCountries: "Add a country, or choose Any country.",
+        faceMatchThreshold: "Pick a face match threshold the level allows.",
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
         identity:
-          "A data request or diploma flow needs the name and date of birth: turn on the document scan and tick Name and document details.",
+          "A diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
+      },
+    },
+    editor: {
+      orgDefault: "Organisation default",
+      nameHint:
+        "Only you and your colleagues see this name. The person being checked never sees it.",
+      level: "Identity proofing level",
+      levelHint:
+        "The identity proofing part of an eIDAS level of assurance (Implementing Regulation 2015/1502).",
+      levels: {
+        none: {
+          title: "None",
+          hint: "No level is required. The person does the steps under Advanced settings; the result says which level they reached.",
+        },
+        low: {
+          title: "Low",
+          hint: "The person scans the chip in their passport or ID card with their phone. No selfie.",
+          caveat:
+            "Shows the document is genuine, not that the person scanning it is its owner or that the chip is the original.",
+        },
+        substantial: {
+          title: "Substantial",
+          hint: "The person scans their passport or ID card, holds it to their phone so the chip is read, and takes a selfie. A check that falls short is rejected.",
+        },
+      },
+      regula:
+        "Documents and faces are checked by Regula in the Idem app. The Yivi app shares a document already in it, with no face check.",
+      advanced: {
+        title: "Advanced settings",
+        hint: "Steps, documents, what you receive, privacy.",
+      },
+      locks: {
+        required: "Required for {{level}}",
+        mandatory: "This is mandatory for {{level}}",
+        passiveAuth: "Always on when the chip is read",
+        faceMatch: "Always on with the face check",
+        everyFlow: "Always on, for every flow",
+      },
+      steps: {
+        title: "What the person does",
+        hint: "Steps in the order they happen.",
+        scanAndRead: "Scan and read the document",
+        scanAndReadHint:
+          "The person scans the code lines of their passport, ID card or Dutch driving licence, then holds it to the phone so the chip is read.",
+        addressHint:
+          "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
+        photoHint:
+          "The front and back of an ID card or driving licence, or the photo page of a passport.",
+        faceHint:
+          "A selfie, checked to be a live person and compared with the photo on the chip.",
+        diplomaHint:
+          "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
+        faceWithoutChip:
+          "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
+        lifetime: "QR code lifetime",
+        lifetimeHint:
+          "After this the session expires and a new request is needed.",
+        lifetimeDefault: "Organisation default ({{minutes}} minutes)",
+        minutes_one: "{{count}} minute",
+        minutes_other: "{{count}} minutes",
+      },
+      documents: {
+        title: "Which documents",
+        hint: "A document that is not ticked is refused.",
+        types: "Document types",
+        passport: "Passport",
+        identity_card: "Identity card",
+        residence_permit: "Residence permit",
+        drivers_license: "Dutch driving licence",
+        countries: "Issuing countries",
+        any: "Any country",
+        only: "Only these countries",
+        add: "Add a country",
+        addPlaceholder: "Add a country",
+        addHint: "Pick from the list of countries that issue documents.",
+        remove: "Remove {{country}}",
+        removeLabel: "Remove",
+      },
+      receive: {
+        title: "What you receive",
+        hint: "With nothing ticked you only get the outcome.",
+        identityLocked:
+          "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
+        ageOver: "Minimum age",
+        ageOverOption: "{{age}} or older",
+        ageOverHint:
+          "Age check only answers whether the person is this age or older on the day of the check.",
+        ageOverLocked:
+          "Off with required diplomas: they are checked against the date of birth.",
+      },
+      checks: {
+        title: "Checks",
+        hint: "A failed check rejects the session.",
+        expired: "Reject expired documents",
+        threshold: {
+          label: "Face match threshold",
+          hint: "How closely the selfie must match the photo on the chip. Higher rejects more look-alikes, and more real holders.",
+          floor: "At least {{min}} for {{level}}",
+          recommended: "The mark at {{min}} is the recommended minimum.",
+          warningLabel: "Below {{min}} is not recommended",
+          warning:
+            "Below {{min}} is not recommended: more people who are not the document's holder get through.",
+        },
+      },
+      privacy: {
+        title: "Privacy",
+        hint: "How long data is kept and what is hidden.",
+        retention: "Keep personal data for",
+        retentionHint:
+          "Never shorter than a legal period set in Settings › Data and privacy.",
+        retentionDefault: "Organisation default ({{days}} days)",
+        retentionSeconds_one: "{{count}} second",
+        retentionSeconds_other: "{{count}} seconds",
+        bsn: "BSN",
+        bsnHint: "Keep the full BSN only if the law allows you to process it.",
+        blackOutBsn: "Black out the BSN on document photos",
+        keepFacePhotos: "Keep face photos after the match",
+        keepFacePhotosHint:
+          "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
+      },
+      footer:
+        "Saving creates version {{version}}. Requests already sent keep their version.",
+      countries: {
+        EUE: "European Union (laissez-passer)",
+        GBD: "British overseas territories citizen",
+        GBN: "British National (Overseas)",
+        GBO: "British overseas citizen",
+        GBP: "British protected person",
+        GBS: "British subject",
+        UNA: "United Nations specialised agency",
+        UNK: "United Nations mission in Kosovo (UNMIK)",
+        UNO: "United Nations",
+        XCC: "Caribbean Community (CARICOM)",
+        XES: "Organisation of Eastern Caribbean States",
+        XMP: "Mercosur",
+        XOM: "Sovereign Military Order of Malta",
+        XPO: "Interpol",
       },
     },
   },
@@ -1447,8 +1552,9 @@ export const en = {
     declineConfirm: {
       title: "Decline this request?",
       message:
-        "{{customer}} does not get your data, and this link stops working. To verify later, ask {{customer}} for a new link.",
+        "{{organization}} does not get your data, and this link stops working. To verify later, ask {{organization}} for a new link.",
       confirm: "Decline",
+      back: "Go back",
     },
     errors: {
       unavailable:
@@ -1461,29 +1567,33 @@ export const en = {
     dataRequest: {
       data_access: {
         intro:
-          "You are asking {{customer}} what data is held about you. First confirm who you are.",
+          "You are asking {{organization}} what data is held about you. First confirm who you are.",
         inReview:
-          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+          "Your request was sent to {{organization}} for review. Open this link again later to see the outcome.",
       },
       data_erasure: {
         intro:
-          "You are asking {{customer}} to delete your data. First confirm who you are.",
+          "You are asking {{organization}} to delete your data. First confirm who you are.",
         inReview:
-          "Your request was sent to {{customer}} for review. Open this link again later to see the outcome.",
+          "Your request was sent to {{organization}} for review. Open this link again later to see the outcome.",
       },
       erased: "Your data was deleted.",
       erasedPartly_one:
-        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{customer}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{organization}}'s retention period ends.",
       erasedPartly_other:
-        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{customer}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{organization}}'s retention period ends.",
+      keptByLaw_one:
+        "{{count}} identity check is kept until {{date}}, because the law requires {{organization}} to keep it. It is deleted then.",
+      keptByLaw_other:
+        "{{count}} identity checks are kept until {{date}}, because the law requires {{organization}} to keep them. They are deleted then.",
       refused: {
         reviewer:
-          "{{customer}} refused your request. Contact them if you want to know why.",
+          "{{organization}} refused your request. Contact them if you want to know why.",
         lapsed:
-          "{{customer}} did not answer your request within 30 days. Ask them for a new link.",
+          "{{organization}} did not answer your request within 30 days. Ask them for a new link.",
         paused:
-          "{{customer}} could not handle your request just now. Ask them for a new link later.",
-        law: "{{customer}} is required by law to keep your data, so it was not deleted.",
+          "{{organization}} could not handle your request just now. Ask them for a new link later.",
+        law: "{{organization}} is required by law to keep your data, so it was not deleted.",
       },
       download: "Download my data",
       downloadUntil: "Available until {{date}}.",
@@ -1676,19 +1786,13 @@ export const en = {
     identityProofingMailNotSent:
       "Request created, but the mail could not be sent. Check this organization's mail settings.",
     identityProofingRequestSent: "Request sent",
-    identityProofingCustomerCreated: "Customer added",
-    identityProofingCustomerRenamed: "Customer renamed",
-    identityProofingCustomerSettingsSaved: "Settings saved",
-    identityProofingCustomerPaused: "Proofing paused",
-    identityProofingCustomerResumed: "Proofing resumed",
-    identityProofingCustomerRemoved: "Customer removed",
+    identityProofingSettingsSaved: "Settings saved",
     identityProofingBrandingSaved: "Branding saved",
     identityProofingHostedSettingsSaved: "Hosted page settings saved",
-    identityProofingApiKeyRevoked: "API key revoked",
+    identityProofingApiKeyRevoked: "API token revoked",
     identityProofingWebhookSaved: "Webhook saved",
     identityProofingWebhookRemoved: "Webhook removed",
     identityProofingWebhookTestQueued: "Test event queued",
-    identityProofingCustomerFlowsSaved: "Assigned flows saved",
     notificationSettingsSaved: "Notification settings saved",
     provisioningSettingsSaved: "Directory sync settings saved",
     provisioningSyncCompleted: "Directory sync completed",
@@ -1698,7 +1802,7 @@ export const en = {
     onboardingAttestationsUpdated: "Onboarding attestations updated",
     wscaActivated: "Holder wallet activated",
     wscaRotated: "Wallet secret rotated",
-    themeSaved: "Branding updated",
+    themeSaved: "Wallet theme updated",
     avatarSaved: "Profile photo saved",
     avatarRemoved: "Profile photo removed",
   },
@@ -1789,7 +1893,7 @@ export const en = {
     loadMore: "Load more",
     empty: "No activity has been recorded yet.",
     system: "System",
-    apiKeyActor: "API key {{prefix}}…",
+    apiKeyActor: "API token {{prefix}}…",
     hostedLinkActor: "Subject, through a hosted link",
     adminActor: "An admin",
     columns: {
@@ -1990,13 +2094,15 @@ export const en = {
       identityProofingCustomerFlowsConfigured:
         "Changed the identity proofing flows assigned to a customer",
       identityProofingCustomerRemoved: "Removed identity proofing customer",
-      identityProofingApiKeyCreated: "Created customer API key",
-      identityProofingApiKeyRevoked: "Revoked customer API key",
-      identityProofingWebhookConfigured: "Configured customer webhook",
-      identityProofingWebhookSecretRotated: "Rotated customer webhook secret",
-      identityProofingWebhookRemoved: "Removed customer webhook",
+      identityProofingSettingsUpdated: "Updated identity proofing settings",
+      identityProofingApiKeyCreated: "Created API token",
+      identityProofingApiKeyRevoked: "Revoked API token",
+      identityProofingWebhookConfigured: "Configured webhook endpoint",
+      identityProofingWebhookSecretRotated: "Rotated webhook secret",
+      identityProofingWebhookRemoved: "Removed webhook endpoint",
       identityProofingPaused: "Paused identity proofing",
       identityProofingFlowHostedConfigured: "Changed a flow's hosted page",
+      identityProofingFlowBrandingConfigured: "Changed a flow's branding",
       identityProofingFlowDiplomasConfigured:
         "Changed whether a flow asks for diplomas",
       identityProofingDiplomaAdded: "Added a diploma",
@@ -2377,12 +2483,14 @@ export const en = {
   },
   settings: {
     title: "Settings",
-    subtitle: "Organization profile and preferences",
-    tabOrg: "Organization",
+    subtitle: "Organisation profile and preferences",
+    tabOrg: "Organisation",
     tabMandates: "Mandates",
     tabIdentity: "Identity",
     tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
+    tabPrivacy: "Data and privacy",
+    tabTheme: "Wallet theme",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
@@ -2394,9 +2502,29 @@ export const en = {
     tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
-    adminOnly: "Only organization admins can manage settings.",
-    orgProfile: "Organization profile",
+    adminOnly: "Only organisation admins can manage settings.",
     discard: "Discard",
+    organisation: {
+      title: "Organisation",
+      editName: "Edit name",
+      name: "Name",
+      shortName: "Short name",
+      wallet: {
+        title: "Business wallet",
+        hint: "From your registration; contact support to change these.",
+        kvkNumber: "KVK number",
+        euid: "EUID",
+        address: "Digital address",
+        noAddress: "No default digital address",
+        status: "Status",
+      },
+      statuses: {
+        active: "Active",
+        suspended: "Suspended",
+        revoked: "Revoked",
+      },
+      internalId: "Internal ID, for support:",
+    },
   },
   notifications: {
     heading: "Event notifications",
@@ -2679,7 +2807,7 @@ export const en = {
     actionError: "The operation failed: {{message}}",
   },
   themeSettings: {
-    title: "Branding",
+    title: "Wallet theme",
     intro:
       "Give this organization's wallet its own look. Set the brand colours and, optionally, the navigation colours (to set the sidebar and top bar apart from the working surface), the wider palette, and the body font; the logo replaces the Yivi wordmark. Colours are automatically kept readable (WCAG AA) in both light and dark mode. Leave a field empty to keep the default.",
     brandGroup: "Brand",
@@ -2712,13 +2840,13 @@ export const en = {
     preview: "Preview",
     previewButton: "Sample button",
     logoPreviewAlt: "Logo preview",
-    loadError: "Could not load branding: {{message}}",
-    saveError: "Could not save branding: {{message}}",
+    loadError: "Could not load the wallet theme: {{message}}",
+    saveError: "Could not save the wallet theme: {{message}}",
   },
   mailTemplates: {
     title: "Mail templates",
     intro:
-      "Compose the mail this organization sends from blocks. Every message has its own layout per language, and a message you have not edited uses the default. The branding comes from the Branding tab.",
+      "Compose the mail this organization sends from blocks. Every message has its own layout per language, and a message you have not edited uses the default. The branding comes from the Wallet theme tab. The proofing mail takes its colour and logo from the Branding tab when set.",
     language: "Language",
     message: "Message",
     status: "Status",

@@ -38,8 +38,8 @@ func (e *testEnv) orgAuditEvents(slug string) orgAuditPage {
 
 // An admin reads the org log in full; an ordinary member reads only the org's
 // configuration events, without who acted, on whom and what changed. An
-// invitation (its target is the invitee's email), a proofing customer and a
-// proofing request (whom it verified) stay admin-only.
+// invitation (its target is the invitee's email) and a proofing request (whom
+// it verified) stay admin-only.
 func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	env := setup(t)
 	orgID := env.adminOf("acme", "Acme", "boss@example.test")
@@ -54,7 +54,14 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create department = %d, want 201", resp.StatusCode)
 	}
-	env.newProofingTenant("acme", "Initech")
+	env.proofingDefaultFlow("acme")
+	key := env.proofingKey("acme", "backend")
+	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
+		map[string]any{"email": "person@acme.test", "sendMail": false})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create session = %d, want 201", resp.StatusCode)
+	}
 
 	admin := env.orgAuditEvents("acme")
 	invited := 0
@@ -74,10 +81,8 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 	if invited != 1 {
 		t.Fatalf("admin sees %d %s events, want 1", invited, audit.MembershipInvited)
 	}
-	for _, target := range []string{audit.TargetIdentityProofingCustomer, audit.TargetIdentityProofingRequest} {
-		if adminOnly[target] == 0 {
-			t.Fatalf("admin sees no %s events, want the customer and session created above", target)
-		}
+	if adminOnly[audit.TargetIdentityProofingRequest] == 0 {
+		t.Fatalf("admin sees no %s events, want the session created above", audit.TargetIdentityProofingRequest)
 	}
 
 	memberID := env.loginAs("member@example.test")
@@ -90,7 +95,7 @@ func TestOrgAuditDetailIsAdminOnly(t *testing.T) {
 			departments++
 		}
 		switch ev.TargetType {
-		case audit.TargetMembership, audit.TargetIdentityProofingCustomer, audit.TargetIdentityProofingRequest:
+		case audit.TargetMembership, audit.TargetIdentityProofingRequest:
 			t.Errorf("member sees %s, want %s events admin-only", ev.Action, ev.TargetType)
 		}
 		if !ev.DetailHidden || ev.Actor != nil || ev.TargetID != "" || string(ev.Metadata) != `{}` {

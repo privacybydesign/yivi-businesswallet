@@ -180,10 +180,11 @@ export function useUpdateOrganizationMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.organizationUpdated"));
-      void queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
       });
+      // Returned so a caller's onSuccess runs once the new name has loaded.
+      return queryClient.invalidateQueries({ queryKey: organizationsQueryKey });
     },
   });
 }

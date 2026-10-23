@@ -7,39 +7,31 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 // SetPlatformAdmins names who may pause any org's proofing; none when unset.
 func (h *Handler) SetPlatformAdmins(admins auth.PlatformAdmins) { h.platformAdmins = admins }
 
-// registerPause mounts the pause routes: the org's own switch, and the
-// platform admin's over every org.
+// registerPause mounts the pause routes: an org reading whether it is paused,
+// and the platform admin's over every org.
 func (h *Handler) registerPause(mux *http.ServeMux) {
 	member := func(next http.Handler) http.Handler { return h.requireUser(h.authorize(next)) }
-	admin := func(next http.Handler) http.Handler {
-		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
-	}
 	platform := func(next http.Handler) http.Handler {
 		return h.requireUser(auth.RequirePlatformAdmin(h.platformAdmins)(next))
 	}
 	mux.Handle("GET /orgs/{slug}/identity-proofing/pause", member(respond.HandlerFunc(h.getPause)))
-	mux.Handle("PUT /orgs/{slug}/identity-proofing/pause", admin(respond.HandlerFunc(h.setOrgPause)))
 	mux.Handle("GET /admin/identity-proofing/pauses", platform(respond.HandlerFunc(h.listPauses)))
 	mux.Handle("PUT /admin/organizations/{id}/identity-proofing/pause", platform(respond.HandlerFunc(h.setPlatformPause)))
 }
 
 type pauseResponse struct {
 	OrganizationID uuid.UUID `json:"organizationId"`
-	// Paused is whether proofing is stopped; PlatformPausedAt and OrgPausedAt
-	// say by whom (the org's admin cannot lift a platform pause).
-	Paused           bool       `json:"paused"`
-	PlatformPausedAt *time.Time `json:"platformPausedAt,omitempty"`
-	OrgPausedAt      *time.Time `json:"orgPausedAt,omitempty"`
-	// PlatformPausedBy and OrgPausedBy are who set each pause, when known.
+	// Paused is whether proofing is stopped by a platform admin, since when
+	// and by whom when known; only they lift it.
+	Paused           bool              `json:"paused"`
+	PlatformPausedAt *time.Time        `json:"platformPausedAt,omitempty"`
 	PlatformPausedBy *pausedByResponse `json:"platformPausedBy,omitempty"`
-	OrgPausedBy      *pausedByResponse `json:"orgPausedBy,omitempty"`
 }
 
 type pausedByResponse struct {
@@ -57,8 +49,7 @@ func newPausedBy(p *PausedBy) *pausedByResponse {
 func newPauseResponse(p OrgPause) pauseResponse {
 	return pauseResponse{
 		OrganizationID: p.OrganizationID, Paused: p.Paused(),
-		PlatformPausedAt: p.PlatformPausedAt, OrgPausedAt: p.OrgPausedAt,
-		PlatformPausedBy: newPausedBy(p.PlatformPausedBy), OrgPausedBy: newPausedBy(p.OrgPausedBy),
+		PlatformPausedAt: p.PlatformPausedAt, PlatformPausedBy: newPausedBy(p.PlatformPausedBy),
 	}
 }
 
@@ -95,19 +86,6 @@ func (h *Handler) getPause(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (h *Handler) setOrgPause(w http.ResponseWriter, r *http.Request) error {
-	state, err := decodePause(r)
-	if err != nil {
-		return err
-	}
-	p, err := h.service.SetProofingPaused(r.Context(), orgFromRequest(r).ID, PauseOrganization, state, pausedByCaller(r))
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, newPauseResponse(p))
-	return nil
-}
-
 type pauseListResponse struct {
 	Pauses []pauseResponse `json:"pauses"`
 }
@@ -134,7 +112,7 @@ func (h *Handler) setPlatformPause(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	p, err := h.service.SetProofingPaused(r.Context(), orgID, PausePlatform, state, pausedByCaller(r))
+	p, err := h.service.SetProofingPaused(r.Context(), orgID, state, pausedByCaller(r))
 	if err != nil {
 		return mapError(err)
 	}

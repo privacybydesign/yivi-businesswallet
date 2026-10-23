@@ -1,29 +1,37 @@
 import { useState } from "react";
+import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
+import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useDecideReviewMutation,
-  useProofingRequestsQuery,
+  useExternalRequestsQuery,
   useProofingRequestEventsQuery,
+  useProofingFlowsQuery,
   useProofingRequestResultQuery,
+  useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
-  ProofingCustomer,
+  ProofingFlow,
   ProofingImage,
   ProofingRequest,
   ProofingResult,
+  ProofingSettings,
 } from "../api/identity-proofing";
 import { isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import {
   AUDIT_TONE_CLASSES,
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
+import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   addressVerificationNote,
   assuranceLevelLabel,
+  flowPurgeDays,
   proofingErrorMessage,
   proofingMethodLabel,
   proofingRejectionReason,
@@ -33,7 +41,11 @@ import {
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
+  listedCount,
   matchesSessionFilter,
+  peopleRetentionOf,
+  requestFlows,
+  requestListCapped,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
@@ -43,125 +55,246 @@ import {
   timelineActor,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Button, Card, Icon, Table, Tag } from "../ui";
-import { ResultTag } from "./proofing-customer-ui";
+import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
+import { ResultTag } from "./proofing-ui";
 import { DataRequestPanel, DataRequestTag } from "./data-request-review";
+import { VerifyPerson } from "./proofing-send";
 
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
-const SESSION_COLUMNS = 8;
+const LABEL = "text-ink text-[13px] font-semibold";
+// Mirrors the Input base so the filters read as the same field.
+const SELECT_CLASS =
+  "rounded-yivi border-line-strong bg-surface text-ink h-9 appearance-none border pr-10 pl-4 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
+const CHEVRON_SIZE = 12;
+// Person, result, app, started and the details button; the flow and who
+// requested it come on top.
+const BASE_COLUMNS = 5;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
-// Every session sent for the customer (an admin's; a member's own), filterable
-// by outcome. A row opens to its details: who it went to, who sent it, and why
-// it failed.
-export function SessionsTab({
+// Whose sessions the list shows: an admin sees every one, a member their own.
+type SessionScope = "all" | "own";
+
+// Where the list sits: on one flow's People tab, or across every flow.
+type PeopleScope = "flow" | "all";
+
+// How long the checks' personal data is kept: the legal retention when the org
+// has one, else the flow's retention (the org's, across every flow).
+function retentionNote(
+  settings: ProofingSettings,
+  scope: SessionScope,
+  flow: ProofingFlow | undefined,
+  t: TFunction,
+): string {
+  if (settings.legalRetention && !isDataRequest(flow?.kind)) {
+    const period = legalPeriodLabel(settings.legalRetention.months, t);
+    return scope === "all"
+      ? t("identityProofing.sessions.retentionLegal", { period })
+      : t("identityProofing.sessions.retentionOwnLegal", { period });
+  }
+  const count = flow
+    ? flowPurgeDays(flow, settings)
+    : settings.dataRetentionDays;
+  return scope === "all"
+    ? t("identityProofing.sessions.retention", { count })
+    : t("identityProofing.sessions.retentionOwn", { count });
+}
+
+// Everyone the org sent a check to, on any flow. A member sees the ones they
+// sent, an admin every one; an admin also decides the ones waiting for review.
+export default function ProofingPeople(): React.JSX.Element {
+  const { t } = useTranslation();
+  const { orgSlug } = useParams();
+  // Guaranteed by the ":orgSlug" route segment this component mounts under.
+  const slug = orgSlug!;
+  const org = useOrganizationQuery(slug);
+  const isAdmin = org.data?.role === "admin";
+
+  return (
+    <>
+      <TopBar
+        title={t("identityProofing.people.title")}
+        subtitle={t("identityProofing.people.subtitle")}
+        actions={<VerifyPerson slug={slug} isAdmin={isAdmin} />}
+      />
+      <div className="flex flex-col gap-4 p-4 sm:p-8">
+        <PeopleList slug={slug} isAdmin={isAdmin} />
+      </div>
+    </>
+  );
+}
+
+// The external people checks were sent to (an admin's; a member's own),
+// filterable by outcome, and by flow unless the list is one flow's. A row opens
+// to its details: who sent it, and why it failed; ?session= opens one.
+export function PeopleList({
   slug,
-  customer,
   isAdmin,
+  flow,
 }: {
   slug: string;
-  customer: ProofingCustomer;
   isAdmin: boolean;
+  flow?: ProofingFlow;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useProofingRequestsQuery(slug, customer.id);
+  const [flowFilter, setFlowFilter] = useState("");
+  const scope: PeopleScope = flow ? "flow" : "all";
+  const flowId = flow?.id ?? flowFilter;
+  // The backend narrows to the flow before its cap, so a quiet flow on a busy
+  // org lists its own people; every flow's list names what the filter offers.
+  const requests = useExternalRequestsQuery(slug, flowId);
+  const everyone = useExternalRequestsQuery(slug, "", scope === "all");
+  // A member reads the flows offered to them; another flow's retention is
+  // then not stated.
+  const flows = useProofingFlowsQuery(
+    slug,
+    scope === "all" && flowFilter !== "",
+  );
+  const settings = useProofingSettingsQuery(slug);
   const formatWhen = useWhenFormatter();
+  const [searchParams] = useSearchParams();
   const [filter, setFilter] = useState<SessionFilter>("all");
-  const [open, setOpen] = useState<string | null>(null);
-  const all = requests.data ?? [];
-  const counts = sessionFilterCounts(all);
-  const shown = all.filter((r) => matchesSessionFilter(r.status, filter));
+  const [open, setOpen] = useState<string | null>(searchParams.get("session"));
+  const columns = BASE_COLUMNS + (scope === "all" ? 1 : 0) + (isAdmin ? 1 : 0);
+  const onFlow = requests.data ?? [];
+  const capped = requestListCapped(onFlow);
+  const counts = sessionFilterCounts(onFlow);
+  const shown = onFlow.filter((r) => matchesSessionFilter(r.status, filter));
+  const retentionOf = flow
+    ? ({ kind: "flow", flow } as const)
+    : peopleRetentionOf(flowFilter, flows.data);
 
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
-          aria-label={t("customers.sessions.filterLabel")}
-          className="flex flex-wrap gap-2"
-        >
-          {SESSION_FILTERS.map((key) => {
-            const active = filter === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setFilter(key)}
-                className={[
-                  "h-8 rounded-full border px-3 text-[12.5px] font-semibold transition-colors",
-                  active
-                    ? "border-ink bg-ink text-surface"
-                    : "border-line-strong bg-surface text-ink-soft hover:text-ink",
-                ].join(" ")}
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:gap-x-4">
+          {scope === "all" && (
+            <div className="flex items-center gap-2.5">
+              <label htmlFor="people-flow-filter" className={LABEL}>
+                {t("identityProofing.requests.flow")}
+              </label>
+              <div className="relative min-w-0 flex-1 sm:flex-none">
+                <select
+                  id="people-flow-filter"
+                  value={flowFilter}
+                  onChange={(event) => setFlowFilter(event.target.value)}
+                  className={`${SELECT_CLASS} w-full sm:w-64`}
+                >
+                  <option value="">
+                    {t("identityProofing.people.allFlows")}
+                  </option>
+                  {requestFlows(everyone.data ?? []).map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <Icon
+                  name="chevron_down"
+                  size={CHEVRON_SIZE}
+                  className="pointer-events-none absolute top-3 right-4"
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-2.5">
+            <label htmlFor="people-result-filter" className={LABEL}>
+              {t("identityProofing.sessions.result")}
+            </label>
+            <div className="relative min-w-0 flex-1 sm:flex-none">
+              <select
+                id="people-result-filter"
+                value={filter}
+                onChange={(event) =>
+                  setFilter(
+                    SESSION_FILTERS.find((key) => key === event.target.value) ??
+                      "all",
+                  )
+                }
+                className={`${SELECT_CLASS} w-full sm:w-56`}
               >
-                {t(`customers.sessions.filters.${key}`, {
-                  count: counts[key],
-                })}
-              </button>
-            );
-          })}
+                {SESSION_FILTERS.map((key) => (
+                  <option key={key} value={key}>
+                    {t(`identityProofing.sessions.filters.${key}`, {
+                      number: listedCount(counts[key], capped, t),
+                    })}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron_down"
+                size={CHEVRON_SIZE}
+                className="pointer-events-none absolute top-3 right-4"
+              />
+            </div>
+          </div>
         </div>
-        <p className="text-muted text-[12px]">
-          {isAdmin
-            ? t("customers.sessions.retention", {
-                count: customer.dataRetentionDays,
-              })
-            : t("customers.sessions.retentionOwn", {
-                count: customer.dataRetentionDays,
-              })}
-        </p>
+        {settings.data && retentionOf.kind !== "unknown" && (
+          <p className="text-muted text-[12px]">
+            {retentionNote(
+              settings.data,
+              isAdmin ? "all" : "own",
+              retentionOf.kind === "flow" ? retentionOf.flow : undefined,
+              t,
+            )}
+          </p>
+        )}
       </div>
       <Card>
         <Table>
           <Table.Head>
-            <Table.HeaderCell>
-              {t("customers.sessions.session")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
+            <Table.HeaderCell scope="col">
               {t("identityProofing.requests.subject")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("identityProofing.requests.flow")}
+            {scope === "all" && (
+              <Table.HeaderCell scope="col">
+                {t("identityProofing.requests.flow")}
+              </Table.HeaderCell>
+            )}
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.sessions.result")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.method")}
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.sessions.method")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.result")}
+            {isAdmin && (
+              <Table.HeaderCell scope="col">
+                {t("identityProofing.requests.requestedBy")}
+              </Table.HeaderCell>
+            )}
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.sessions.started")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.started")}
+            <Table.HeaderCell scope="col" srOnly>
+              {t("identityProofing.people.details")}
             </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.duration")}
-            </Table.HeaderCell>
-            <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
           <Table.Body>
-            {requests.isPending ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {t("common.loading")}
-              </Table.State>
-            ) : requests.isError ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
+            {requests.isPending && (
+              <Table.State colSpan={columns}>{t("common.loading")}</Table.State>
+            )}
+            {requests.isError && (
+              <Table.State colSpan={columns}>
                 {proofingErrorMessage(requests.error, t)}
               </Table.State>
-            ) : shown.length === 0 ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
+            )}
+            {requests.isSuccess && shown.length === 0 && (
+              <Table.State colSpan={columns}>
                 {t("identityProofing.requests.empty")}
               </Table.State>
-            ) : (
+            )}
+            {requests.isSuccess &&
               shown.map((request) => (
                 <SessionRow
                   key={request.id}
                   slug={slug}
                   request={request}
                   isAdmin={isAdmin}
+                  scope={scope}
+                  columns={columns}
                   expanded={open === request.id}
                   onToggle={() =>
                     setOpen((current) =>
@@ -170,8 +303,7 @@ export function SessionsTab({
                   }
                   formatWhen={formatWhen}
                 />
-              ))
-            )}
+              ))}
           </Table.Body>
         </Table>
       </Card>
@@ -179,10 +311,19 @@ export function SessionsTab({
   );
 }
 
+// Who sent the check: the API token that created it, else the member.
+function requestedBy(request: ProofingRequest, t: TFunction): string {
+  return request.apiKeyName
+    ? t("identityProofing.sessions.viaApiKey", { name: request.apiKeyName })
+    : request.requestedByName;
+}
+
 function SessionRow({
   slug,
   request,
   isAdmin,
+  scope,
+  columns,
   expanded,
   onToggle,
   formatWhen,
@@ -190,6 +331,8 @@ function SessionRow({
   slug: string;
   request: ProofingRequest;
   isAdmin: boolean;
+  scope: PeopleScope;
+  columns: number;
   expanded: boolean;
   onToggle: () => void;
   formatWhen: (iso: string) => string;
@@ -215,9 +358,6 @@ function SessionRow({
         className="hover:bg-surface-2 cursor-pointer transition-colors"
         onClick={onToggle}
       >
-        <Table.Cell className="text-ink-soft font-mono text-[12px]">
-          {shortRequestId(request.id)}
-        </Table.Cell>
         <Table.Cell>
           {subject.name ? (
             <div
@@ -228,7 +368,9 @@ function SessionRow({
             </div>
           ) : (
             <div className="text-muted italic">
-              {t("customers.sessions.purgedSubject")}
+              {request.purgedAt
+                ? t("identityProofing.sessions.purgedSubject")
+                : t("identityProofing.requests.noName")}
             </div>
           )}
           {subject.verifiedAs && (
@@ -238,29 +380,30 @@ function SessionRow({
               })}
             </div>
           )}
+          <div className="text-ink-soft font-mono text-[11.5px]">
+            {shortRequestId(request.id)}
+          </div>
         </Table.Cell>
-        <Table.Cell>{request.flowName}</Table.Cell>
-        <Table.Cell className="text-ink-soft whitespace-nowrap">
-          {proofingMethodLabel(request.method, t)}
-        </Table.Cell>
+        {scope === "all" && <Table.Cell>{request.flowName}</Table.Cell>}
         <Table.Cell>
           <ResultTag request={request} compact />{" "}
           <AddressTag request={request} />
           <DiplomaTag request={request} />
           <DataRequestTag request={request} />
         </Table.Cell>
+        <Table.Cell className="text-ink-soft whitespace-nowrap">
+          {proofingMethodLabel(request.method, t)}
+        </Table.Cell>
+        {isAdmin && <Table.Cell>{requestedBy(request, t) || "—"}</Table.Cell>}
         <Table.Cell className="whitespace-nowrap">
           {formatWhen(request.createdAt)}
-        </Table.Cell>
-        <Table.Cell className="text-ink-soft">
-          {duration === undefined ? "—" : formatDuration(duration)}
         </Table.Cell>
         <Table.Cell className="w-10 text-right">
           <button
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
-            aria-label={t("customers.sessions.details", {
+            aria-label={t("identityProofing.sessions.details", {
               id: shortRequestId(request.id),
             })}
             onClick={(event) => {
@@ -279,55 +422,37 @@ function SessionRow({
       {expanded && (
         <tr id={detailsId}>
           <td
-            colSpan={SESSION_COLUMNS}
+            colSpan={columns}
             className="border-line bg-surface-2 border-b px-5 py-4"
           >
             <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
               <div className="flex min-w-0 flex-col gap-4">
                 <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
                   <dt className="text-muted">
-                    {t("customers.sessions.method")}
+                    {t("identityProofing.sessions.method")}
                   </dt>
                   <dd>{proofingMethodLabel(request.method, t)}</dd>
                   <dt className="text-muted">
-                    {t("customers.sessions.fullId")}
+                    {t("identityProofing.send.email")}
                   </dt>
-                  <dd className="font-mono text-[12px] break-all">
-                    {request.id}
-                  </dd>
-                  <dt className="text-muted">{t("customers.send.email")}</dt>
                   <dd>{request.subjectEmail || "—"}</dd>
-                  {request.expectedSubject && (
-                    <>
-                      <dt className="text-muted">
-                        {t("customers.sessions.expectedSubject")}
-                      </dt>
-                      <dd>{t("customers.sessions.expectedSubjectValue")}</dd>
-                    </>
-                  )}
                   {isAdmin && (
                     <>
                       <dt className="text-muted">
                         {t("identityProofing.requests.requestedBy")}
                       </dt>
-                      <dd>
-                        {request.apiKeyName
-                          ? t("customers.sessions.viaApiKey", {
-                              name: request.apiKeyName,
-                            })
-                          : request.requestedByName || "—"}
-                      </dd>
+                      <dd>{requestedBy(request, t) || "—"}</dd>
                     </>
                   )}
                   <dt className="text-muted">
-                    {t("identityProofing.requests.flow")}
+                    {t("identityProofing.sessions.flowVersion")}
                   </dt>
                   <dd>
-                    {request.flowName}
-                    {request.flowVersion !== undefined &&
-                      ` ${t("identityProofingFlows.versionShort", {
-                        version: request.flowVersion,
-                      })}`}
+                    {request.flowVersion === undefined
+                      ? "—"
+                      : t("identityProofingFlows.versionShort", {
+                          version: request.flowVersion,
+                        })}
                   </dd>
                   <dt className="text-muted">
                     {t("identityProofing.requests.assurance")}
@@ -337,10 +462,26 @@ function SessionRow({
                       ? assuranceLevelLabel(request.eidasLevel, t)
                       : "—"}
                   </dd>
+                  <dt className="text-muted">
+                    {t("identityProofing.sessions.fullId")}
+                  </dt>
+                  <dd className="font-mono text-[12px] break-all">
+                    {request.id}
+                  </dd>
+                  {request.expectedSubject && (
+                    <>
+                      <dt className="text-muted">
+                        {t("identityProofing.sessions.expectedSubject")}
+                      </dt>
+                      <dd>
+                        {t("identityProofing.sessions.expectedSubjectValue")}
+                      </dd>
+                    </>
+                  )}
                   {request.errorCode && (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.reason")}
+                        {t("identityProofing.sessions.reason")}
                       </dt>
                       <dd>{proofingRejectionReason(request.errorCode, t)}</dd>
                     </>
@@ -348,15 +489,23 @@ function SessionRow({
                   {request.completedAt && (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.completed")}
+                        {t("identityProofing.sessions.completed")}
                       </dt>
                       <dd>{formatWhen(request.completedAt)}</dd>
+                    </>
+                  )}
+                  {duration !== undefined && (
+                    <>
+                      <dt className="text-muted">
+                        {t("identityProofing.sessions.duration")}
+                      </dt>
+                      <dd>{formatDuration(duration)}</dd>
                     </>
                   )}
                   {request.purgedAt ? (
                     <>
                       <dt className="text-muted">
-                        {t("customers.sessions.purged")}
+                        {t("identityProofing.sessions.purged")}
                       </dt>
                       <dd>{formatWhen(request.purgedAt)}</dd>
                     </>
@@ -364,7 +513,7 @@ function SessionRow({
                     request.purgeAt && (
                       <>
                         <dt className="text-muted">
-                          {t("customers.sessions.purgeAt")}
+                          {t("identityProofing.sessions.purgeAt")}
                         </dt>
                         <dd>{formatWhen(request.purgeAt)}</dd>
                       </>
@@ -379,7 +528,7 @@ function SessionRow({
                 )}
                 {showIdentity && (
                   <p className={HINT}>
-                    {t("customers.sessions.identity.audited")}
+                    {t("identityProofing.sessions.identity.audited")}
                   </p>
                 )}
                 {request.addressMode !== "off" && (
@@ -417,7 +566,9 @@ function AddressTag({
     request.address === undefined &&
     request.purgedAt === undefined
   ) {
-    return <Tag tone="amber">{t("customers.sessions.address.missing")}</Tag>;
+    return (
+      <Tag tone="amber">{t("identityProofing.sessions.address.missing")}</Tag>
+    );
   }
   return null;
 }
@@ -433,10 +584,10 @@ function SessionAddress({
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-ink text-[13.5px] font-bold">
-        {t("customers.sessions.address.title")}
+        {t("identityProofing.sessions.address.title")}
       </h3>
       {a === undefined ? (
-        <p className={HINT}>{t("customers.sessions.address.none")}</p>
+        <p className={HINT}>{t("identityProofing.sessions.address.none")}</p>
       ) : (
         <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
           {`${a.street} ${a.houseNumber}`}
@@ -462,14 +613,16 @@ function DiplomaTag({
   if (request.diplomas.length > 0) {
     return (
       <Tag tone="blue">
-        {t("customers.sessions.diplomas.tag", {
+        {t("identityProofing.sessions.diplomas.tag", {
           count: request.diplomas.length,
         })}
       </Tag>
     );
   }
   if (request.diplomaMode === "required" && request.status === "approved") {
-    return <Tag tone="amber">{t("customers.sessions.diplomas.missing")}</Tag>;
+    return (
+      <Tag tone="amber">{t("identityProofing.sessions.diplomas.missing")}</Tag>
+    );
   }
   return null;
 }
@@ -485,10 +638,10 @@ function SessionDiplomas({
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-ink text-[13.5px] font-bold">
-        {t("customers.sessions.diplomas.title")}
+        {t("identityProofing.sessions.diplomas.title")}
       </h3>
       {request.diplomas.length === 0 ? (
-        <p className={HINT}>{t("customers.sessions.diplomas.none")}</p>
+        <p className={HINT}>{t("identityProofing.sessions.diplomas.none")}</p>
       ) : (
         <ul className="border-line divide-y rounded-lg border">
           {request.diplomas.map((d) => (
@@ -514,7 +667,7 @@ function SessionDiplomas({
                   .join(" · ")}
               </span>
               <span className="text-muted font-mono text-[11.5px]">
-                {t("customers.sessions.diplomas.number", {
+                {t("identityProofing.sessions.diplomas.number", {
                   number: d.documentNumber,
                 })}
               </span>
@@ -552,33 +705,33 @@ function ReviewDecision({
   return (
     <div className="border-line mt-4 flex flex-col gap-2 border-t pt-4">
       <h3 className="text-ink text-[14px] font-bold">
-        {t("customers.sessions.review.title")}
+        {t("identityProofing.sessions.review.title")}
       </h3>
       <p className="text-ink-soft text-[13px]">
-        {t("customers.sessions.review.hint")}
+        {t("identityProofing.sessions.review.hint")}
       </p>
       <label
         htmlFor={fieldId}
         className="text-ink-soft text-[12px] font-semibold"
       >
-        {t("customers.sessions.review.reason")}
+        {t("identityProofing.sessions.review.reason")}
       </label>
       <textarea
         id={fieldId}
         value={reason}
         aria-invalid={(touched && missing) || tooLong}
-        placeholder={t("customers.sessions.review.reasonPlaceholder")}
+        placeholder={t("identityProofing.sessions.review.reasonPlaceholder")}
         onChange={(event) => setReason(event.target.value)}
         className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
       />
       {touched && missing && (
         <p className="text-error text-[12.5px]">
-          {t("customers.sessions.review.reasonRequired")}
+          {t("identityProofing.sessions.review.reasonRequired")}
         </p>
       )}
       {tooLong && (
         <p className="text-error text-[12.5px]">
-          {t("customers.sessions.review.reasonTooLong", {
+          {t("identityProofing.sessions.review.reasonTooLong", {
             max: REVIEW_REASON_MAX_CHARS,
           })}
         </p>
@@ -596,7 +749,7 @@ function ReviewDecision({
           disabled={decide.isPending}
           onClick={() => submit("approve")}
         >
-          {t("customers.sessions.review.approve")}
+          {t("identityProofing.sessions.review.approve")}
         </Button>
         <Button
           size="sm"
@@ -606,7 +759,7 @@ function ReviewDecision({
           disabled={decide.isPending}
           onClick={() => submit("reject")}
         >
-          {t("customers.sessions.review.reject")}
+          {t("identityProofing.sessions.review.reject")}
         </Button>
       </div>
     </div>
@@ -622,17 +775,21 @@ function IdentityRows({
   result: UseQueryResult<ProofingResult, Error>;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const check = (value: string | undefined): string =>
-    value === undefined || value === ""
-      ? "—"
-      : isCheckOutcome(value)
-        ? t(`customers.sessions.identity.checks.${value}`)
-        : value;
+  const check = (value: string | undefined): string => {
+    if (value === undefined || value === "") {
+      return "—";
+    }
+    return isCheckOutcome(value)
+      ? t(`identityProofing.sessions.identity.checks.${value}`)
+      : value;
+  };
 
   if (result.isPending) {
     return (
       <>
-        <dt className="text-muted">{t("customers.sessions.identity.name")}</dt>
+        <dt className="text-muted">
+          {t("identityProofing.sessions.identity.name")}
+        </dt>
         <dd className="text-ink-soft">{t("common.loading")}</dd>
       </>
     );
@@ -651,7 +808,7 @@ function IdentityRows({
       {identity ? (
         <>
           <dt className="text-muted">
-            {t("customers.sessions.identity.name")}
+            {t("identityProofing.sessions.identity.name")}
           </dt>
           <dd>
             {[identity.givenName, identity.familyName]
@@ -659,51 +816,51 @@ function IdentityRows({
               .join(" ") || "—"}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.birthDate")}
+            {t("identityProofing.sessions.identity.birthDate")}
           </dt>
           <dd>{identity.birthDate || "—"}</dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.nationality")}
+            {t("identityProofing.sessions.identity.nationality")}
           </dt>
           <dd>{identity.nationality || "—"}</dd>
           {identity.ageOver && (
             <>
               <dt className="text-muted">
-                {t("customers.sessions.identity.ageOver", {
+                {t("identityProofing.sessions.identity.ageOver", {
                   age: identity.ageOver.age,
                 })}
               </dt>
               <dd>
                 {identity.ageOver.over
-                  ? t("customers.sessions.identity.ageOverYes")
-                  : t("customers.sessions.identity.ageOverNo")}
+                  ? t("identityProofing.sessions.identity.ageOverYes")
+                  : t("identityProofing.sessions.identity.ageOverNo")}
               </dd>
             </>
           )}
         </>
       ) : (
         <dd className="text-ink-soft sm:col-span-2">
-          {t("customers.sessions.identity.none")}
+          {t("identityProofing.sessions.identity.none")}
         </dd>
       )}
       {evidence && (
         <>
           <dt className="text-muted">
-            {t("customers.sessions.identity.document")}
+            {t("identityProofing.sessions.identity.document")}
           </dt>
           <dd>
             {evidence.type === "reference_photo"
-              ? t("customers.sessions.identity.noDocument")
+              ? t("identityProofing.sessions.identity.noDocument")
               : [evidence.documentType, evidence.issuingState]
                   .filter(Boolean)
                   .join(" · ") || evidence.type}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.passiveAuth")}
+            {t("identityProofing.sessions.identity.passiveAuth")}
           </dt>
           <dd>{check(evidence.passiveAuth)}</dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.faceMatch")}
+            {t("identityProofing.sessions.identity.faceMatch")}
           </dt>
           <dd>
             {evidence.faceMatch === undefined
@@ -711,7 +868,7 @@ function IdentityRows({
               : `${Math.round(evidence.faceMatch * PERCENT)}%`}
           </dd>
           <dt className="text-muted">
-            {t("customers.sessions.identity.liveness")}
+            {t("identityProofing.sessions.identity.liveness")}
           </dt>
           <dd>{check(evidence.liveness)}</dd>
         </>
@@ -721,7 +878,7 @@ function IdentityRows({
 }
 
 // The document's photo (read off the chip over NFC, or the disclosed
-// credential's), or the customer's own photo for a flow without the chip,
+// credential's), or the sender's own photo for a flow without the chip,
 // beside the live selfie matched against it, and the photos of
 // the document's front and back; only an approval carries them, only when
 // the flow requested them, and the face photos only when it keeps them. Each
@@ -748,7 +905,7 @@ function IdentityPhotos({
             <RevealablePhoto
               key={key}
               image={image}
-              label={t(`customers.sessions.identity.${key}`)}
+              label={t(`identityProofing.sessions.identity.${key}`)}
             />
           ),
       )}
@@ -782,14 +939,14 @@ function RevealablePhoto({
           <button
             type="button"
             onClick={() => setRevealed(true)}
-            aria-label={t("customers.sessions.identity.revealPhoto", {
+            aria-label={t("identityProofing.sessions.identity.revealPhoto", {
               name: label,
             })}
             className="focus-visible:ring-ink/30 absolute inset-0 flex items-center justify-center outline-none focus-visible:ring-3"
           >
             <span className="bg-surface/90 text-ink inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold shadow-sm">
               <Icon name="view" size={REVEAL_ICON_SIZE} />
-              {t("customers.sessions.identity.reveal")}
+              {t("identityProofing.sessions.identity.reveal")}
             </span>
           </button>
         )}
@@ -802,7 +959,7 @@ function RevealablePhoto({
             onClick={() => setRevealed(false)}
             className="text-link font-semibold hover:underline"
           >
-            {t("customers.sessions.identity.conceal")}
+            {t("identityProofing.sessions.identity.conceal")}
           </button>
         )}
       </figcaption>
@@ -811,7 +968,7 @@ function RevealablePhoto({
 }
 
 // A session's timeline: every audit event about it, oldest first, with who
-// acted (a member, the system, or the customer's API) and what it added.
+// acted (a member, the system, or the API) and what it added.
 function SessionTimeline({
   slug,
   request,
@@ -829,17 +986,20 @@ function SessionTimeline({
         id={`timeline-${request.id}`}
         className="text-muted font-label mb-3 text-[10.5px] font-medium tracking-[0.08em] uppercase"
       >
-        {t("customers.sessions.timeline")}
+        {t("identityProofing.sessions.timeline")}
       </h3>
-      {events.isPending ? (
+      {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-      ) : events.isError ? (
+      )}
+      {events.isError && (
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
-      ) : events.data.length === 0 ? (
+      )}
+      {events.isSuccess && events.data.length === 0 && (
         <p className="text-ink-soft text-[13px]">
-          {t("customers.sessions.noEvents")}
+          {t("identityProofing.sessions.noEvents")}
         </p>
-      ) : (
+      )}
+      {events.isSuccess && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

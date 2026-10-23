@@ -34,12 +34,13 @@ func (d failingFinishDB) Exec(ctx context.Context, sql string, args ...any) (pgc
 	return d.DB.Exec(ctx, sql, args...)
 }
 
-// idemFixture is a customer and an idempotent route in front of next.
+// idemFixture is an org with an API key, calling an idempotent route in front
+// of next.
 type idemFixture struct {
-	pool       *pgxpool.Pool
-	orgID      uuid.UUID
-	customerID uuid.UUID
-	userID     uuid.UUID
+	pool   *pgxpool.Pool
+	orgID  uuid.UUID
+	keyID  uuid.UUID
+	userID uuid.UUID
 }
 
 func newIdemFixture(t *testing.T) idemFixture {
@@ -47,11 +48,17 @@ func newIdemFixture(t *testing.T) idemFixture {
 	pool, _ := testdb.Fresh(t)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
-	customer, err := NewCustomerStore(pool, audit.NopRecorder{}).Create(context.Background(), orgID, sam, "Initech")
+	return idemFixture{pool: pool, orgID: orgID, keyID: makeAPIKey(t, pool, orgID, sam), userID: sam}
+}
+
+// makeAPIKey creates an API key of the org and returns its id.
+func makeAPIKey(t *testing.T, pool *pgxpool.Pool, orgID, createdBy uuid.UUID) uuid.UUID {
+	t.Helper()
+	key, _, err := NewAPIKeyStore(pool, audit.NopRecorder{}).Create(context.Background(), orgID, createdBy, "Backend", APIKeyScopes)
 	if err != nil {
-		t.Fatalf("create customer: %v", err)
+		t.Fatalf("create api key: %v", err)
 	}
-	return idemFixture{pool: pool, orgID: orgID, customerID: customer.ID, userID: sam}
+	return key.ID
 }
 
 // call sends one keyed POST through an idempotent next on store.
@@ -60,7 +67,7 @@ func (f idemFixture) call(t *testing.T, store *IdempotencyStore, key string, nex
 	h := &Handler{idempotency: store}
 	r := httptest.NewRequest(http.MethodPost, "/proofing/sessions", strings.NewReader(`{"email":"a@example.org"}`))
 	r.Header.Set(idempotencyHeader, key)
-	r = r.WithContext(context.WithValue(r.Context(), apiCallerKey{}, APIKeyCaller{CustomerID: f.customerID}))
+	r = r.WithContext(context.WithValue(r.Context(), apiCallerKey{}, APIKeyCaller{KeyID: f.keyID, Org: Org{ID: f.orgID}}))
 	w := httptest.NewRecorder()
 	h.idempotent(next).ServeHTTP(w, r)
 	return w
@@ -70,7 +77,7 @@ func (f idemFixture) keyCount(t *testing.T) int {
 	t.Helper()
 	var n int
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM identity_proofing_idempotency_keys WHERE customer_id = $1`, f.customerID).Scan(&n); err != nil {
+		`SELECT count(*) FROM identity_proofing_idempotency_keys WHERE organization_id = $1`, f.orgID).Scan(&n); err != nil {
 		t.Fatalf("count keys: %v", err)
 	}
 	return n
@@ -83,6 +90,89 @@ func answerWith(id uuid.UUID, runs *int) respond.HandlerFunc {
 		w.WriteHeader(http.StatusCreated)
 		_, err := w.Write([]byte(`{"id":"` + publicSessionID(id) + `"}`))
 		return err
+	}
+}
+
+// A key is the org's: another org sending the same key runs its own call, and a
+// retry in the first org replays its answer.
+func TestIdemKeyIsPerOrg(t *testing.T) {
+	f := newIdemFixture(t)
+	cipher := newTestCipher(t)
+	store := NewIdempotencyStore(f.pool, cipher)
+	requests := NewRequestStore(f.pool, audit.NopRecorder{}, cipher)
+	other := f
+	other.orgID = makeOrg(t, f.pool, "globex")
+	other.keyID = makeAPIKey(t, f.pool, other.orgID, f.userID)
+	ctx := context.Background()
+	// The stored answer names a session, which has to exist.
+	ours, err := requests.Create(ctx, newStoredRequest(f.orgID, f.userID, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	theirs, err := requests.Create(ctx, newStoredRequest(other.orgID, f.userID, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("create other org's request: %v", err)
+	}
+	runs := 0
+
+	if first := f.call(t, store, "k1", answerWith(ours.ID, &runs)); first.Code != http.StatusCreated || runs != 1 {
+		t.Fatalf("first call = %d after %d runs, want 201 from one run", first.Code, runs)
+	}
+	if second := other.call(t, store, "k1", answerWith(theirs.ID, &runs)); second.Code != http.StatusCreated || runs != 2 {
+		t.Errorf("other org's call = %d after %d runs, want 201 from its own run", second.Code, runs)
+	}
+	replay := f.call(t, store, "k1", answerWith(ours.ID, &runs))
+	if replay.Code != http.StatusCreated || replay.Header().Get(headerIdempotentReplayed) != "true" || runs != 2 {
+		t.Errorf("retry = %d (replayed %q) after %d runs, want the first answer replayed",
+			replay.Code, replay.Header().Get(headerIdempotentReplayed), runs)
+	}
+	if n, m := f.keyCount(t), other.keyCount(t); n != 1 || m != 1 {
+		t.Errorf("keys held = %d and %d, want one each", n, m)
+	}
+}
+
+// A key is the API key's: another key of the same org sending the same one
+// runs its own call and is never replayed the first key's answer, which
+// carries its subject's details; each key's retry replays its own.
+func TestIdemKeyIsPerAPIKey(t *testing.T) {
+	f := newIdemFixture(t)
+	cipher := newTestCipher(t)
+	store := NewIdempotencyStore(f.pool, cipher)
+	requests := NewRequestStore(f.pool, audit.NopRecorder{}, cipher)
+	other := f
+	other.keyID = makeAPIKey(t, f.pool, f.orgID, f.userID)
+	ctx := context.Background()
+	ours, err := requests.Create(ctx, newStoredRequest(f.orgID, f.userID, externalSubject("a@example.org")))
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	theirs, err := requests.Create(ctx, newStoredRequest(f.orgID, f.userID, externalSubject("b@example.org")))
+	if err != nil {
+		t.Fatalf("create the other key's request: %v", err)
+	}
+	runs := 0
+
+	if first := f.call(t, store, "k1", answerWith(ours.ID, &runs)); first.Code != http.StatusCreated || runs != 1 {
+		t.Fatalf("first call = %d after %d runs, want 201 from one run", first.Code, runs)
+	}
+	second := other.call(t, store, "k1", answerWith(theirs.ID, &runs))
+	if second.Code != http.StatusCreated || runs != 2 || second.Header().Get(headerIdempotentReplayed) != "" ||
+		!strings.Contains(second.Body.String(), publicSessionID(theirs.ID)) {
+		t.Errorf("other key's call = %d (replayed %q, %s) after %d runs, want 201 from its own run",
+			second.Code, second.Header().Get(headerIdempotentReplayed), second.Body.String(), runs)
+	}
+	for _, c := range []struct {
+		caller idemFixture
+		want   uuid.UUID
+	}{{f, ours.ID}, {other, theirs.ID}} {
+		replay := c.caller.call(t, store, "k1", answerWith(c.want, &runs))
+		if replay.Header().Get(headerIdempotentReplayed) != "true" || !strings.Contains(replay.Body.String(), publicSessionID(c.want)) {
+			t.Errorf("retry = %s (replayed %q), want its own key's answer replayed",
+				replay.Body.String(), replay.Header().Get(headerIdempotentReplayed))
+		}
+	}
+	if runs != 2 {
+		t.Errorf("runs = %d, want the two first calls only", runs)
 	}
 }
 
@@ -108,12 +198,11 @@ func TestIdemLostCallStaysInFlight(t *testing.T) {
 	hash := []byte("hash")
 	// A claim from a replica that died an hour ago.
 	if _, err := f.pool.Exec(context.Background(), `INSERT INTO identity_proofing_idempotency_keys
-		(organization_id, customer_id, key, request_hash, created_at)
-		SELECT organization_id, id, 'k1', $2, now() - interval '1 hour' FROM identity_proofing_customers WHERE id = $1`,
-		f.customerID, hash); err != nil {
+		(organization_id, api_key_id, key, request_hash, created_at) VALUES ($1, $2, 'k1', $3, now() - interval '1 hour')`,
+		f.orgID, f.keyID, hash); err != nil {
 		t.Fatalf("insert claim: %v", err)
 	}
-	if _, err := store.begin(context.Background(), f.customerID, "k1", hash); !errors.Is(err, errIdempotencyInFlight) {
+	if _, err := store.begin(context.Background(), idempotencyScope{orgID: f.orgID, apiKeyID: f.keyID}, "k1", hash); !errors.Is(err, errIdempotencyInFlight) {
 		t.Errorf("begin = %v, want errIdempotencyInFlight", err)
 	}
 }
@@ -146,8 +235,7 @@ func TestPurgeDropsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	var reqs []Request
 	for range 2 {
-		req, err := requests.Create(ctx, newStoredRequest(f.orgID, f.userID,
-			Subject{CustomerID: &f.customerID, Email: "a@example.org"}))
+		req, err := requests.Create(ctx, newStoredRequest(f.orgID, f.userID, externalSubject("a@example.org")))
 		if err != nil {
 			t.Fatalf("create request: %v", err)
 		}

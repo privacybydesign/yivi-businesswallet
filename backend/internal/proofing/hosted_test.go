@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -18,15 +19,19 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
+// saveOrigins sets the org's redirect origins as a settings update does.
+func saveOrigins(svc *Service, origins []string) (Settings, error) {
+	return svc.UpdateSettings(context.Background(), testOrg.ID, SettingsChange{RedirectOrigins: &origins})
+}
+
 func TestRedirectOriginsAreHTTPS(t *testing.T) {
 	f := newFixture()
-	customer := f.testCustomer()
-	saved, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
-		[]string{"https://Portal.Initech.example/", "http://localhost:3000", "https://portal.initech.example", "http://[::1]:8080"})
+	saved, err := saveOrigins(f.svc,
+		[]string{"https://Portal.Acme.example/", "http://localhost:3000", "https://portal.acme.example", "http://[::1]:8080"})
 	if err != nil {
-		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+		t.Fatalf("saveOrigins: %v", err)
 	}
-	if want := []string{"https://portal.initech.example", "http://localhost:3000", "http://[::1]:8080"}; !slices.Equal(saved.RedirectOrigins, want) {
+	if want := []string{"https://portal.acme.example", "http://localhost:3000", "http://[::1]:8080"}; !slices.Equal(saved.RedirectOrigins, want) {
 		t.Errorf("origins = %v, want %v (lowercased, once each)", saved.RedirectOrigins, want)
 	}
 	tooMany := make([]string, maxRedirectOrigins+1)
@@ -34,21 +39,21 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 		tooMany[i] = "https://a" + strings.Repeat("a", i) + ".example"
 	}
 	for name, origins := range map[string][]string{
-		"plain http":     {"http://portal.initech.example"},
-		"a path":         {"https://portal.initech.example/done"},
-		"a query":        {"https://portal.initech.example?x=1"},
-		"credentials":    {"https://user@portal.initech.example"},
+		"plain http":     {"http://portal.acme.example"},
+		"a path":         {"https://portal.acme.example/done"},
+		"a query":        {"https://portal.acme.example?x=1"},
+		"credentials":    {"https://user@portal.acme.example"},
 		"no host":        {"https://"},
 		"another scheme": {"javascript:alert(1)"},
 		"too many":       tooMany,
 		// Each would mean something else in the hosted page's frame-ancestors.
 		"any host":         {"https://*"},
-		"any subdomain":    {"https://*.initech.example"},
+		"any subdomain":    {"https://*.acme.example"},
 		"a CSP keyword":    {"https://'self'"},
 		"a CSP separator":  {"https://a.example;script-src"},
-		"a leading hyphen": {"https://-initech.example"},
+		"a leading hyphen": {"https://-acme.example"},
 	} {
-		if _, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID, origins); !errors.Is(err, ErrInvalidInput) {
+		if _, err := saveOrigins(f.svc, origins); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
 		}
 	}
@@ -56,39 +61,37 @@ func TestRedirectOriginsAreHTTPS(t *testing.T) {
 
 func TestHostedRedirectAllowedOnly(t *testing.T) {
 	f := newFixture()
-	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
-	if _, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, customer.ID,
-		[]string{"https://portal.initech.example"}); err != nil {
-		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
 	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
 	for name, redirect := range map[string]string{
 		"another origin":  "https://evil.example/done",
-		"a lookalike":     "https://portal.initech.example.evil.example/done",
-		"plain http":      "http://portal.initech.example/done",
+		"a lookalike":     "https://portal.acme.example.evil.example/done",
+		"plain http":      "http://portal.acme.example/done",
 		"a relative path": "/done",
 	} {
 		_, err := f.svc.CreateRequest(context.Background(), testOrg, by,
-			NewRequest{CustomerID: &customer.ID, Channel: ChannelHosted, RedirectURL: redirect})
+			NewRequest{Channel: ChannelHosted, RedirectURL: redirect})
 		if !errors.Is(err, ErrRedirectNotAllowed) && !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want the redirect refused", name, err)
 		}
 	}
 	if _, err := f.svc.CreateRequest(context.Background(), testOrg, by, NewRequest{
-		CustomerID: &customer.ID, Channel: ChannelOnScreen, RedirectURL: "https://portal.initech.example/done",
+		Channel: ChannelOnScreen, RedirectURL: "https://portal.acme.example/done",
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("on-screen request with a redirect: %v, want ErrInvalidInput", err)
 	}
 
 	sent, err := f.svc.CreateRequest(context.Background(), testOrg, by, NewRequest{
-		CustomerID: &customer.ID, Channel: ChannelHosted, Language: email.LocaleNL,
-		RedirectURL: "https://PORTAL.initech.example/done?ref=42",
+		Channel: ChannelHosted, Language: email.LocaleNL,
+		RedirectURL: "https://PORTAL.acme.example/done?ref=42",
 	})
 	if err != nil {
 		t.Fatalf("CreateRequest(allowed redirect): %v", err)
 	}
-	if sent.Request.RedirectURL != "https://PORTAL.initech.example/done?ref=42" || sent.Request.Language != email.LocaleNL {
+	if sent.Request.RedirectURL != "https://PORTAL.acme.example/done?ref=42" || sent.Request.Language != email.LocaleNL {
 		t.Errorf("stored redirect %q language %q; want them as sent",
 			sent.Request.RedirectURL, sent.Request.Language)
 	}
@@ -145,11 +148,10 @@ func TestHostedPageFrameOrigins(t *testing.T) {
 	if got := csp("/p/" + token); got != frameNone {
 		t.Errorf("no origins: CSP = %q, want %q", got, frameNone)
 	}
-	if _, err := f.svc.SaveCustomerRedirectOrigins(context.Background(), testOrg.ID, initech.ID,
-		[]string{"https://portal.initech.example", "http://localhost:3000"}); err != nil {
-		t.Fatalf("SaveCustomerRedirectOrigins: %v", err)
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example", "http://localhost:3000"}); err != nil {
+		t.Fatalf("saveOrigins: %v", err)
 	}
-	if got, want := csp("/p/"+token), "frame-ancestors https://portal.initech.example http://localhost:3000"; got != want {
+	if got, want := csp("/p/"+token), "frame-ancestors https://portal.acme.example http://localhost:3000"; got != want {
 		t.Errorf("with origins: CSP = %q, want %q", got, want)
 	}
 	if got := csp("/p/unknown"); got != frameNone {
@@ -172,6 +174,16 @@ func (f *fakeFlowHosted) Get(_ context.Context, _ uuid.UUID, flowID string) (Flo
 	return DefaultFlowHosted(), nil
 }
 
+func (f *fakeFlowHosted) Disabled(context.Context, uuid.UUID) ([]string, error) {
+	var out []string
+	for id, h := range f.byFlow {
+		if !h.Enabled {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s FlowHosted) (FlowHosted, error) {
 	f.byFlow[flowID] = s
 	return s, nil
@@ -180,15 +192,14 @@ func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s F
 func TestFlowHostedSettingsLinks(t *testing.T) {
 	f := newFixture()
 	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
-	customer := f.testCustomer()
 	f.svc.SetHostedBaseURL(testHostedBase)
 	ctx := context.Background()
-	if _, err := f.svc.SaveCustomerRedirectOrigins(ctx, testOrg.ID, customer.ID, []string{"https://portal.initech.example"}); err != nil {
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
 		t.Fatal(err)
 	}
 	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
 	create := func(in NewRequest) error {
-		in.CustomerID, in.Channel = &customer.ID, ChannelHosted
+		in.Channel = ChannelHosted
 		_, err := f.svc.CreateRequest(ctx, testOrg, by, in)
 		return err
 	}
@@ -211,7 +222,7 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	if err != nil || !slices.Equal(saved.Locales, []email.Locale{email.LocaleNL}) {
 		t.Fatalf("SaveFlowHosted = %+v, %v; want nl once", saved, err)
 	}
-	if err := create(NewRequest{RedirectURL: "https://portal.initech.example/done"}); !errors.Is(err, ErrInvalidInput) {
+	if err := create(NewRequest{RedirectURL: "https://portal.acme.example/done"}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("redirect on a thank-you-page flow: %v, want ErrInvalidInput", err)
 	}
 	if err := create(NewRequest{Language: email.LocaleEN}); !errors.Is(err, ErrInvalidInput) {
@@ -273,5 +284,36 @@ func TestHostedViewHidesDocNumber(t *testing.T) {
 	}
 	if got := w.Header().Get(headerCacheControl); got != cacheNoStore {
 		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+}
+
+// The person's page gets what is asked of them, not the flow's internal name
+// or its assurance level.
+func TestHostedViewLeavesOutFlowLabels(t *testing.T) {
+	f := newFixture()
+	f.ips.flows[0].RequiredAssuranceLevel = "low"
+	_, token := f.sendHosted(t)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+	r.SetPathValue("token", token)
+	w := httptest.NewRecorder()
+	if err := NewHandler(f.svc, nil, nil).hostedView(w, r); err != nil {
+		t.Fatalf("hostedView: %v", err)
+	}
+	var view struct {
+		Flow map[string]json.RawMessage `json:"flow"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode hosted view: %v", err)
+	}
+	if view.Flow["requestedAttributes"] == nil {
+		t.Fatalf("hosted view flow = %v, want what it collects", view.Flow)
+	}
+	for _, internal := range []string{"name", "requiredAssuranceLevel"} {
+		if _, ok := view.Flow[internal]; ok {
+			t.Errorf("hosted view flow carries %q; want it left out", internal)
+		}
+	}
+	if strings.Contains(w.Body.String(), appFlow.Name) {
+		t.Errorf("hosted view = %s, want no flow name %q", w.Body.String(), appFlow.Name)
 	}
 }

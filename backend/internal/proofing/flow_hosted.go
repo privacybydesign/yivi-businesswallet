@@ -82,6 +82,21 @@ func getFlowHosted(ctx context.Context, q database.Querier, orgID uuid.UUID, flo
 	return f, nil
 }
 
+// Disabled returns the org's flows whose hosted page is switched off: the ones
+// not sent as a link.
+func (s *FlowHostedStore) Disabled(ctx context.Context, orgID uuid.UUID) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT flow_id FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND NOT hosted_enabled`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list unhosted flows org %s: %w", orgID, err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list unhosted flows org %s: %w", orgID, err)
+	}
+	return ids, nil
+}
+
 // Save replaces the flow's settings and audits
 // identity_proofing.flow_hosted_configured with before and after. Saving what
 // it already has changes and audits nothing.
@@ -122,6 +137,15 @@ func (s *Service) flowHosted(ctx context.Context, orgID uuid.UUID, flowID string
 	return s.flowHostedSettings.Get(ctx, orgID, flowID)
 }
 
+// hostedDisabledFlows is the org's flows whose hosted page is switched off;
+// none without a store.
+func (s *Service) hostedDisabledFlows(ctx context.Context, orgID uuid.UUID) ([]string, error) {
+	if s.flowHostedSettings == nil {
+		return nil, nil
+	}
+	return s.flowHostedSettings.Disabled(ctx, orgID)
+}
+
 // FlowHosted returns one of the org's flows' hosted page settings.
 func (s *Service) FlowHosted(ctx context.Context, org Org, flowID string) (FlowHosted, error) {
 	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
@@ -131,7 +155,8 @@ func (s *Service) FlowHosted(ctx context.Context, org Org, flowID string) (FlowH
 }
 
 // SaveFlowHosted replaces one of the org's flows' hosted page settings: the
-// languages are supported ones, kept once in the order given.
+// languages are supported ones, kept once in the order given. A data request
+// flow's stay the defaults.
 func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f FlowHosted) (FlowHosted, error) {
 	if s.flowHostedSettings == nil {
 		return FlowHosted{}, errors.New("proofing: no hosted settings store configured")
@@ -151,6 +176,9 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 	}
 	f.Locales = locales
 	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
+		return FlowHosted{}, err
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return FlowHosted{}, err
 	}
 	return s.flowHostedSettings.Save(ctx, org.ID, flowID, f)

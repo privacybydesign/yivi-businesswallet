@@ -205,6 +205,41 @@ func TestDecideReviewKeepsTheReview(t *testing.T) {
 	}
 }
 
+// A face is matched at the flow's own face.match threshold, lower or higher
+// than the deployment's, else at the deployment's; a flow requiring
+// Substantial never under its floor, whatever the deployment sets.
+func TestFaceMatchThreshold(t *testing.T) {
+	const lowDeployment = 0.6
+	withThreshold := func(level flow.AssuranceLevel, threshold float64) *flow.FlowDefinition {
+		fd := &flow.FlowDefinition{RequiredAssuranceLevel: level}
+		if threshold != 0 {
+			fd.CheckThresholds = map[flow.Check]float64{flow.CheckFaceMatch: threshold}
+		}
+		return fd
+	}
+	for name, tc := range map[string]struct {
+		deployment float64
+		fd         *flow.FlowDefinition
+		want       float64
+	}{
+		"no flow":                         {regula.DefaultMatchThreshold, nil, regula.DefaultMatchThreshold},
+		"no setting":                      {regula.DefaultMatchThreshold, &flow.FlowDefinition{}, regula.DefaultMatchThreshold},
+		"stricter":                        {regula.DefaultMatchThreshold, withThreshold("", 0.9), 0.9},
+		"looser":                          {regula.DefaultMatchThreshold, withThreshold("", 0.5), 0.5},
+		"looser at Low":                   {regula.DefaultMatchThreshold, withThreshold(flow.AssuranceLevelLow, 0.5), 0.5},
+		"Substantial on a low deployment": {lowDeployment, withThreshold(flow.AssuranceLevelSubstantial, 0), flow.SubstantialMinFaceMatch},
+		"Substantial with its own":        {lowDeployment, withThreshold(flow.AssuranceLevelSubstantial, 0.8), 0.8},
+		"no level on a low deployment":    {lowDeployment, withThreshold("", 0), lowDeployment},
+	} {
+		cfg := DefaultConfig()
+		cfg.RegulaFaceMatchThreshold = tc.deployment
+		s := New(cfg, newMemSessions(), nil, nil, nil)
+		if got := s.faceMatchThreshold(tc.fd); got != tc.want {
+			t.Errorf("%s: threshold = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 // A Yivi session is eIDAS low and not scored on the tier ladder, which needs
 // checks it does not run.
 func TestBoundLoginAssuranceUnscored(t *testing.T) {

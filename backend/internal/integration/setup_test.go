@@ -38,6 +38,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
@@ -260,13 +261,20 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	proofingStub := proofingprovider.NewStub()
 	proofingRecorder := audit.NewDBRecorder()
+	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
 	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
-		proofing.NewRequestStore(pool, proofingRecorder, proofingCipher),
+		proofingRequests,
 		proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher),
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetPlatformAdmins(admins)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
+	// The hosted page takes its theme and logo from the Idem app's branding, as
+	// cmd/api wires it.
+	proofingHandler.SetAppBranding(proofing.NewAppBrandingResolver(proofingRequests,
+		proofing.NewOrgSettingsStore(pool, proofingRecorder), proofing.NewFlowBrandingStore(pool, proofingRecorder),
+		themesettings.NewStore(pool, proofingRecorder)))
 
 	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)

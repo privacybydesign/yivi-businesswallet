@@ -23,7 +23,7 @@ const (
 	logoFormField     = "logo"
 )
 
-// brandingResponse is a customer's branding as the app shows it; LogoURI is
+// brandingResponse is the org's branding as the app shows it; LogoURI is
 // "" without a logo and carries a version so a replaced logo is re-fetched.
 type brandingResponse struct {
 	DisplayName    string `json:"displayName"`
@@ -45,19 +45,19 @@ type brandingResponse struct {
 	HidePoweredBy bool `json:"hidePoweredBy"`
 }
 
-func newBrandingResponse(slug string, c Customer) brandingResponse {
+func newBrandingResponse(slug string, s Settings) brandingResponse {
 	b := brandingResponse{
-		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
-		SecondaryColor: c.Branding.SecondaryColor, TextColor: c.Branding.TextColor,
-		SurfaceColor: c.Branding.SurfaceColor, BorderColor: c.Branding.BorderColor, LinkColor: c.Branding.LinkColor,
-		SuccessColor: c.Branding.SuccessColor, WarningColor: c.Branding.WarningColor, ErrorColor: c.Branding.ErrorColor,
-		TopbarColor: c.Branding.TopbarColor, FontFamily: c.Branding.FontFamily,
-		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
-		HidePoweredBy: c.Branding.HidePoweredBy,
+		DisplayName: s.Branding.DisplayName, PrimaryColor: s.Branding.PrimaryColor,
+		SecondaryColor: s.Branding.SecondaryColor, TextColor: s.Branding.TextColor,
+		SurfaceColor: s.Branding.SurfaceColor, BorderColor: s.Branding.BorderColor, LinkColor: s.Branding.LinkColor,
+		SuccessColor: s.Branding.SuccessColor, WarningColor: s.Branding.WarningColor, ErrorColor: s.Branding.ErrorColor,
+		TopbarColor: s.Branding.TopbarColor, FontFamily: s.Branding.FontFamily,
+		SupportContact: s.Branding.SupportContact, PrivacyURL: s.Branding.PrivacyURL,
+		HidePoweredBy: s.Branding.HidePoweredBy,
 	}
-	if c.Branding.HasLogo {
-		b.LogoURI = fmt.Sprintf("/api/v1/orgs/%s/customers/%s/logo?v=%d",
-			url.PathEscape(slug), c.ID, c.UpdatedAt.Unix())
+	if s.Branding.HasLogo {
+		b.LogoURI = fmt.Sprintf("/api/v1/orgs/%s/identity-proofing/settings/logo?v=%d",
+			url.PathEscape(slug), s.UpdatedAt.Unix())
 	}
 	return b
 }
@@ -66,22 +66,11 @@ func newBrandingResponse(slug string, c Customer) brandingResponse {
 // and a "logo" file to replace the logo or "removeLogo=true" to clear it;
 // neither keeps it.
 func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
+	logo, err := readBrandingForm(w, r)
 	if err != nil {
 		return err
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, themesettings.MaxLogoBytes+brandingBodySlack)
-	if err := r.ParseMultipartForm(brandingFormMemory); err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "the logo is too large"}
-		}
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid multipart form"}
-	}
-	logo, err := parseCustomerLogo(r)
-	if err != nil {
-		return err
-	}
-	c, err := h.service.SaveCustomerBranding(r.Context(), orgFromRequest(r).ID, id, CustomerBranding{
+	settings, err := h.service.SaveBranding(r.Context(), orgFromRequest(r).ID, Branding{
 		DisplayName:    r.FormValue("displayName"),
 		PrimaryColor:   r.FormValue("primaryColor"),
 		SecondaryColor: r.FormValue("secondaryColor"),
@@ -101,10 +90,29 @@ func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	return h.respondCustomer(w, r, c)
+	return h.respondSettings(w, r, settings)
 }
 
-func parseCustomerLogo(r *http.Request) (LogoChange, error) {
+// readBrandingForm parses a branding form and returns what it does to the logo.
+func readBrandingForm(w http.ResponseWriter, r *http.Request) (LogoChange, error) {
+	if err := parseBrandingForm(w, r); err != nil {
+		return LogoChange{}, err
+	}
+	return parseLogo(r)
+}
+
+func parseBrandingForm(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, themesettings.MaxLogoBytes+brandingBodySlack)
+	if err := r.ParseMultipartForm(brandingFormMemory); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			return &respond.APIError{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", Message: "the logo is too large"}
+		}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "invalid multipart form"}
+	}
+	return nil
+}
+
+func parseLogo(r *http.Request) (LogoChange, error) {
 	file, _, err := r.FormFile(logoFormField)
 	if errors.Is(err, http.ErrMissingFile) {
 		return LogoChange{Replace: r.FormValue("removeLogo") == strconv.FormatBool(true)}, nil
@@ -128,23 +136,23 @@ func parseCustomerLogo(r *http.Request) (LogoChange, error) {
 		// Mail clients do not render SVG, and this logo is for mail.
 		return LogoChange{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "the logo must be a PNG, JPEG, GIF or WebP image"}
 	}
-	return LogoChange{Replace: true, Logo: CustomerLogo{Bytes: data, ContentType: contentType}}, nil
+	return LogoChange{Replace: true, Logo: Logo{Bytes: data, ContentType: contentType}}, nil
 }
 
-func (h *Handler) serveCustomerLogo(w http.ResponseWriter, r *http.Request) error {
-	id, err := customerIDFromPath(r)
-	if err != nil {
-		return err
-	}
-	logo, err := h.service.CustomerLogo(r.Context(), orgFromRequest(r).ID, id)
+func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
+	logo, err := h.service.Logo(r.Context(), orgFromRequest(r).ID)
 	if err != nil {
 		return mapError(err)
 	}
+	writeLogo(w, r, logo)
+	return nil
+}
+
+func writeLogo(w http.ResponseWriter, r *http.Request, logo Logo) {
 	themesettings.SetLogoResponseHeaders(w.Header(), logo.ContentType)
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(logo.Bytes); err != nil {
 		// The status is committed; a failed write can only be logged.
-		slog.ErrorContext(r.Context(), "proofing: write customer logo", slog.Any("error", err))
+		slog.ErrorContext(r.Context(), "proofing: write logo", slog.Any("error", err))
 	}
-	return nil
 }

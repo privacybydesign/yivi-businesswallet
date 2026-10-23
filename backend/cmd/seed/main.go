@@ -35,7 +35,7 @@ func run() error {
 	partnersOnly := flag.Bool("partners", false,
 		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins — Gemeente Nijmegen also gets its APV standplaatsvergunning attestation catalogue; no other demo data, idempotent — staging only, not for production")
 	proofingDemo := flag.Bool("proofing-demo", false,
-		"provision the identity proofing demo orgs (Radboud, a.s.r., Unibet, CM) with their flows and customers, and the Yivi team as their admins; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
+		"provision the identity proofing demo orgs (Radboud, a.s.r., Unibet, CM) with their flows, and the Yivi team as their admins; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
 	flag.Parse()
 
 	cfg, err := config.Load()

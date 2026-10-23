@@ -12,34 +12,8 @@ import (
 // dataExportFilename is the name a "see my data" export downloads as.
 const dataExportFilename = "my-data.json"
 
-type flowKindBody struct {
-	Kind FlowKind `json:"kind"`
-}
-
-func (h *Handler) getFlowKind(w http.ResponseWriter, r *http.Request) error {
-	kind, err := h.service.FlowKind(r.Context(), orgFromRequest(r), r.PathValue("flowID"))
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, flowKindBody{Kind: kind})
-	return nil
-}
-
-func (h *Handler) saveFlowKind(w http.ResponseWriter, r *http.Request) error {
-	var body flowKindBody
-	if err := decode(r, &body); err != nil {
-		return err
-	}
-	kind, err := h.service.SaveFlowKind(r.Context(), orgFromRequest(r), r.PathValue("flowID"), body.Kind)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, flowKindBody{Kind: kind})
-	return nil
-}
-
 // dataMatchesResponse is what a data request's review shows next to the
-// person's identity: what they ask for, and the customer's sessions of them.
+// person's identity: what they ask for, and the org's sessions of them.
 type dataMatchesResponse struct {
 	FlowKind FlowKind            `json:"flowKind"`
 	Matches  []dataMatchResponse `json:"matches"`
@@ -59,6 +33,10 @@ type dataMatchResponse struct {
 	Level          MatchLevel `json:"level"`
 	// Approved is the reviewer's choice; absent until the decision.
 	Approved *bool `json:"approved,omitempty"`
+	// HeldUntil is when the org's legal retention lets an erasure take the
+	// session; absent when none applies or it passed, and on any request but
+	// an erasure.
+	HeldUntil *time.Time `json:"heldUntil,omitempty"`
 }
 
 func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
@@ -71,12 +49,17 @@ func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	out := dataMatchesResponse{FlowKind: req.FlowKind, Matches: make([]dataMatchResponse, 0, len(matches))}
+	now := time.Now()
 	for _, m := range matches {
-		out.Matches = append(out.Matches, dataMatchResponse{
+		item := dataMatchResponse{
 			RequestID: m.RequestID.String(), SessionID: publicSessionID(m.RequestID), FlowName: m.FlowName,
 			Status: m.Status, Method: m.Method, AssuranceLevel: m.AssuranceLevel, EIDASLevel: m.EIDASLevel,
 			CreatedAt: m.CreatedAt, CompletedAt: m.CompletedAt, PurgedAt: m.PurgedAt, Level: m.Level, Approved: m.Approved,
-		})
+		}
+		if req.FlowKind == FlowDataErasure && m.held(now) {
+			item.HeldUntil = m.HeldUntil
+		}
+		out.Matches = append(out.Matches, item)
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
@@ -105,7 +88,7 @@ type dataExportSessionResponse struct {
 	// match carries Identity, Diplomas and Address: another may be someone
 	// else's session.
 	Match MatchLevel `json:"match"`
-	// Contact is the name and address the customer gave for the person, only
+	// Contact is the name and address the sender gave for the person, only
 	// when the session was approved for that person (DataExportSession.Addressed).
 	Contact  *dataExportContact  `json:"contact,omitempty"`
 	Identity *dataExportIdentity `json:"identity,omitempty"`
@@ -205,7 +188,7 @@ func (h *Handler) apiDataExport(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	export, err := h.service.CustomerDataExport(r.Context(), caller.Scope(), id)
+	export, err := h.service.ExternalDataExport(r.Context(), caller.Org.ID, id)
 	return writeDataExport(w, r, export, err)
 }
 

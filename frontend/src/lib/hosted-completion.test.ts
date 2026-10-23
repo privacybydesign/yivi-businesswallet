@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canCloseDecline,
   completedMessage,
   completionRedirect,
   hostedHandBack,
@@ -36,7 +37,7 @@ describe("hostedLanguage", () => {
 describe("completionRedirect", () => {
   const done = completedMessage("ps_abc", "approved");
 
-  it("adds the session and status, keeping the customer's query", () => {
+  it("adds the session and status, keeping the redirect's query", () => {
     expect(completionRedirect("https://portal.example/done?ref=42", done)).toBe(
       "https://portal.example/done?ref=42&session=ps_abc&status=approved",
     );
@@ -126,7 +127,7 @@ describe("hostedHandBack", () => {
 });
 
 describe("postCompletion", () => {
-  it("posts only to the customer's origins, never to any origin", () => {
+  it("posts only to the org's origins, never to any origin", () => {
     const posted: [unknown, string][] = [];
     const parent: MessageTarget = {
       postMessage: (message, origin) => posted.push([message, origin]),
@@ -165,7 +166,7 @@ describe("originLines", () => {
 });
 
 describe("hostedTheme", () => {
-  it("brands the page in the customer's colour only", () => {
+  it("brands the page in the org's colour only", () => {
     const theme = hostedTheme(undefined, "#0a7c59");
     expect(theme.primaryColor).toBe("#0a7c59");
     expect(theme.accentColor).toBe("");
@@ -200,5 +201,37 @@ describe("hostedTheme", () => {
     expect(theme.accentColor).toBe("#5412c7");
     expect(theme.topbarColor).toBe("#101e1e");
     expect(theme.surfaceColor).toBe("#fbfbfc");
+  });
+
+  it("puts the branding's own colour, a flow's, over the session's theme", () => {
+    const sessionTheme = {
+      primaryColor: "#036bd2",
+      secondaryColor: "#5412c7",
+      textColor: "",
+      surfaceColor: "",
+      borderColor: "",
+      linkColor: "",
+      successColor: "",
+      warningColor: "",
+      errorColor: "",
+      headerColor: "#101e1e",
+      fontFamily: "",
+    };
+    const theme = hostedTheme(sessionTheme, "#22337a");
+    expect(theme.primaryColor).toBe("#22337a");
+    expect(theme.accentColor).toBe("#5412c7");
+    expect(theme.topbarColor).toBe("#101e1e");
+    expect(hostedTheme(sessionTheme, "red").primaryColor).toBe("#036bd2");
+  });
+});
+
+describe("canCloseDecline", () => {
+  it("keeps the dialog open while the decline is in flight", () => {
+    expect(canCloseDecline("pending")).toBe(false);
+  });
+
+  it("closes it before the decline and after it failed", () => {
+    expect(canCloseDecline("idle")).toBe(true);
+    expect(canCloseDecline("error")).toBe(true);
   });
 });

@@ -2,25 +2,48 @@
 
 **Status:** Integrated (backend + frontend). The wallet runs proofing itself, in
 its own engine (`internal/proofingengine`, §0); every org is the engine's
-tenant under the org's own id, with no provisioning step. The sidebar's "Identity proofing" section holds three pages under
-`/{org}/identity-proofing`: **Overview** (the last 30 days' customer sessions
-counted, the newest ones, the customers, and an alert per failing webhook),
-**Customers** (search, 30-day sessions and verified share, webhook health,
-status) and, admin-only, **Flows** (full flow configuration, versioned, and which
-flows members may use). A customer's page has tabs: Flows and Sessions for every
-member; Branding, API keys, Webhooks and Settings for an admin. "Verify a
-person" in its header opens the send form; an admin can pause a customer, after
-which no request can be sent for it (`customer_paused`, 409) while sent ones run
-out. The customers API is at `/orgs/{slug}/customers`. A member is sent a
-request from their member detail page (admin-only, like that page). Customers
-are B2B clients with no login: members act for them, and their own backend can
-through the public API with one of their keys. Sending creates an engine session
-(2, 5 or 10 minutes, per customer) and mails its vcmrtd deep link as a QR code
+tenant under the org's own id, with no provisioning step. Flows are the org's
+main object: an org has one set of flows with one default, one set of settings,
+one set of API keys and one webhook endpoint, and no customers (§1). The
+sidebar's "Identity proofing" section holds up to three pages under
+`/{org}/identity-proofing`: **Overview** (the last 30 days' external sessions
+counted, the newest ones, the org's flows with their sessions, and an alert
+for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
+with the people each identified in 30 days, the default flow and which flows
+members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
+with **People** and **Versions** tabs, **Edit flow** (tabs **Check**, **Branding**
+and **Hosted page**) and "Verify a person") and
+**Developers** (no tabs: the **API tokens**
+table (name, created with who by, last used, revoke; revoked ones are not
+listed), the **Webhook endpoint** and its **Recent deliveries**). The **All people** list
+(`/{org}/identity-proofing/people`, opened from the Overview;
+`?session=<id>` opens a row) is not in the sidebar; a flow's People tab is the
+same table narrowed to that flow by the backend (`?flowId=`), as is All people
+when its Flow filter picks one, whose retention line then states that flow's
+retention. A count read from a list of 200, the cap, may be short, so it shows
+as "200+" ("12+" for a part of it). "Verify a person" in the
+header of the Overview, of All people and of a flow opens the send form, for any member. From a
+flow the dialog sends on that flow; from the Overview or All people it asks first what to send
+(for an admin: an identity check, See my data or Delete my data, §15) and, for an identity
+check, the flow. It asks how the person gets the QR code (the e-mail address sits inside the
+e-mail option; a flow whose "Allow sending this flow as a link" switch is off offers only Show on
+this screen) and has two switches, off by default: "Add the person's name" and "Only let this
+person pass". The Flows page lists neither GDPR request: one line under the table says See my
+data and Delete my data are always available and links to Settings › Data and privacy. Only a
+platform admin pauses an org's proofing, after which no request can be sent
+(`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
+request from their member detail page (admin-only, like that page). The people
+an org verifies are its members, or external people with no login: an e-mail
+address and an optional name, a request without a `userId`. The org's own
+backend can send to them through the public API with one of its keys. Sending
+creates an engine session (2, 5 or 10 minutes: the flow's own lifetime when it
+sets one, else the org's fixed 10 minutes for an external person) and mails its vcmrtd deep link as a QR code
 and a button: the mail is the session, with no wallet page in between. The
-outcome lands on the request, in the audit log and at the customer's webhook.
+outcome lands on the request, in the audit log and, for an external person, at
+the org's webhook.
 The send form can instead **show the session on this screen**
 (`channel: on_screen`, for a subject who is with the member): it opens
-`customers/{id}/verify?flow=`, a page in the customer's branding that shows what
+`/{org}/identity-proofing/verify?flow=`, a page in the org's branding that shows what
 the flow collects, lets the subject pick the Yivi app or the Idem app, and only
 then creates the request (so the session's minutes start there). Idem shows the
 vcmrtd QR and link; Yivi starts an **OpenID4VP** disclosure of the passport,
@@ -46,19 +69,29 @@ The hosted page's completion (redirect origins, decline, locale) is in §7.
 **Slice:** `internal/proofingengine` (the engine: sessions, flows, the Idem app's
 routes, chip verification, results, Regula), `internal/proofingprovider` (the
 seam's value types + a test stub, leaf level),
-`internal/proofing` (settings, flow selection, members, requests, service,
+`internal/proofing` (org settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
 `frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
-`frontend/src/routes/customer-*-tab.tsx` (branding, API keys, webhooks,
-settings), `internal/proofing/api_handler.go` (the public API),
+`frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
+`developers-webhook.tsx` (the Developers page), `proofing-branding.tsx`
+(Settings › Branding) + `proofing-branding-fields.tsx` (its fields and mail
+preview, shared with a flow's), `flow_branding*.go` +
+`routes/flow-branding.tsx` (a flow's own branding), `routes/flow-tabs.tsx`
+(the flow page's tabs),
+`internal/proofing/api_handler.go` (the
+public API and the API key routes), `apikey_store.go` (keys),
+`org_settings_store.go` + `settings_handler.go` + `branding_handler.go` (the org's
+settings; `settings_store.go` is the flow selection),
 `webhook*.go` (endpoint, outbox, deliverer), `internal/safehttp` (the SSRF
 guard every externally supplied URL goes through),
-`frontend/src/routes/identity-proofing-flows.tsx` (admin: flows, versions,
-selection) + `flow-editor.tsx` (the editor, also on a customer's Flows tab),
-`frontend/src/routes/customers.tsx` + `customer-detail.tsx` (customers, tabs,
-pause) + `customer-flows-tab.tsx` (assignment, send) + `customer-sessions-tab.tsx`
-(requests, review), with their decisions in `lib/identity-proofing.ts`, `hosted*.go` +
+`frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table),
+`flow-editor.tsx` + `flow-editor-advanced.tsx` + `flow-editor-parts.tsx` (the
+flow editor), `frontend/src/lib/issuing-countries.ts` (its country list),
+`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
+details and review), `proofing-send.tsx` (the Verify a person dialog),
+`proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
+tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `routes/proof.tsx` (the hosted link, §7), `pause*.go` (§8), `flow_hosted*.go` +
 `routes/flow-hosted-settings.tsx` (per-flow hosted settings), `diploma*.go` +
 `internal/diploma` + `routes/flow-editor.tsx` (the flow's diploma
@@ -137,10 +170,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   (go-jpeg2000, the only pure-Go decoder; OpenJPEG would mean C in-process)
   for display. The BSN region is covered through the same helper.
 - **Face photos are not kept by default.** The document portrait (DG2, or a
-  disclosed credential's), the selfie and the customer's reference photo
+  disclosed credential's), the selfie and the sender's reference photo
   leave the result and the stored evidence once the face match is done
   (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A flow
-  sets `KeepFacePhotos` for a customer that must keep them, for its
+  sets `KeepFacePhotos` for an org that must keep them, for its
   retention. Covering a face instead was dropped: a mosaic or blur can still
   be matched against candidate photos, and a flat cover holds nothing. The
   wallet shows kept photos blurred until a member clicks to reveal one.
@@ -154,13 +187,16 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 - **Retention.** Every session the wallet creates carries its own retention,
   the one the wallet purges the request after, plus a day (`engineRetention`),
   so `PurgeDue` erases it first: its flow's retention override when set, else
-  the customer's data retention, else for a member's request
-  `proofedNameRetention` (30 days). The engine's own default, 90 days after a
-  session ended, applies only to a session created without one. `PurgeDue`,
-  `Engine.Purge` (removal in batches of 100, each with its own timeout) and
-  `Engine.SweepRegula` run at start and then every `SESSION_PRUNE_INTERVAL`
-  (`startPruner`): a replica restarted more often than the interval would
-  otherwise never purge.
+  the org's fixed 7 days for an external person's request, else for a member's
+  request `proofedNameRetention` (30 days); for an external person's identity
+  check never less than the org's legal retention (§4). A legal retention
+  saved later is given to the sessions already created (`syncEngineRetention`,
+  §4). The engine's own
+  default, 90 days after a session ended, applies only to a session created
+  without one. `PurgeDue`, `Engine.Purge` (removal in batches of 100, each with
+  its own timeout) and `Engine.SweepRegula` run at start and then every
+  `SESSION_PRUNE_INTERVAL` (`startPruner`): a replica restarted more often than
+  the interval would otherwise never purge.
 - **Device trail.** Which device claimed a session, handovers, and refused app
   requests go to the org's audit log (`Config.DeviceTrail` →
   `RequestStore.RecordDeviceEvent`: `identity_proofing.device_claimed`,
@@ -189,24 +225,34 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 - **The org is the engine's tenant: one tenant id, the org's.** A session and a
   flow carry `organizations.id`; there is nothing to provision, no key to hold
   and no enable step.
-- **Customers are the wallet's, not engine tenants.** A customer
-  (`identity_proofing_customers`) is a wallet row under the org, and every
-  session runs on the org's tenant in the engine. A customer
-  has no login: members act for it in the UI (the design plan's "org is the only
-  party in the UI"), and its own backend uses the customer API with its keys (§4). Flows stay the org's; a customer gets an
-  allow-list over them with one default (`identity_proofing_customer_flows`,
-  audited `customer_flows_configured` with before/after), independent of the
-  members' list: any completable org flow may be assigned. Customers are created,
-  renamed and paused or resumed (`customer_created`; `customer_updated` with the
-  `name` or `status` before and after; `paused_at` on the row), and removed
-  (`customer_removed`), which first purges each of its requests as an erasure
-  does (engine session deleted, subject scrubbed from their audit events), then
-  deletes them (§4).
+- **There are no customers; what an org sets up is the org's own, once, for all
+  its flows.** Every session runs on the org's tenant in the engine, and an
+  external person has no login or row of their own: they are the subject of a
+  request. The org holds (§4 has the detail):
+  - **Settings**, one row per org (`identity_proofing_settings`,
+    `OrgSettingsStore` in `org_settings_store.go`, `Settings` in `proofing.go`):
+    session (QR) lifetime and data retention, fixed defaults of 10 minutes and
+    7 days that each flow overrides (`SessionTTLSeconds` and
+    `RetentionOverrideSeconds` on the flow, §2, §10); how "delete my data"
+    requests are decided (`review` or `automatic`, default `review`); a legal
+    retention; branding (display name, colours, font, logo, support contact,
+    privacy URL, hide "powered by"); allowed redirect origins. No row reads as
+    the defaults (10 minutes, 7 days, review, no legal retention, the org's own
+    look, no redirect origins).
+  - **API keys**, one set: a key works on every flow and reaches every
+    external request of the org. No key is needed to send from the app.
+  - **One webhook endpoint** for the events of all its flows.
+  - **Flows**, one set with one default, and the list of flows members may use
+    (below). Nothing is assigned to anyone; who may send which flow is under
+    Recipients.
+  - The rate limits (`apiCallLimit`, `APISessionLimit`) and the hosted page's
+    (`hostedCallLimit`) are per org.
 - **Flows live in the engine** (`proofingengine/flow`), versioned per org; the
-  wallet's "Proofing flows" tab edits them through `proofing.Service`, and it is
+  wallet's "Flows" pages edit them through `proofing.Service`, and it is
   `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
-    `nfc_read` (NFC chip read) toggle as a pair; `document_photo` (a photo of
+    `nfc_read` (NFC chip read) toggle as a pair, shown as one step, "Scan and
+    read the document"; `document_photo` (a photo of
     the printed page, `POST /app/{token}/steps/document_photo`) stands
     alone; `face_verification` is one step. `draftSteps` lists
     `document_photo` between `document_capture` and `nfc_read`: the Idem app
@@ -218,20 +264,26 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
-    `face.match`.
+    `face.match` (see the face match threshold below). "Reject expired
+    documents" is a read-only row, always on: the engine refuses an expired
+    document on every flow (`DOC_EXPIRED`).
   - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
-    codes. Each item is available only with its step and cleared otherwise;
-    none is forced on. With none ticked the editor saves `outcome_only`, which
+    codes, in the order of `REQUESTED_ATTRIBUTES`. Each item is available only
+    with its step and cleared otherwise;
+    none is forced on, and a new flow starts with none ticked; a data request
+    or required diplomas tick and lock `dg1` (`identityRequired`). With none
+    ticked the editor saves `outcome_only`, which
     releases the outcome only (status and assurance), as the subject is told.
     A flow saved without a list releases everything its steps collect
     (`requestedAttributesOf`), and a flow read back always lists what it
     releases.
   - Age check (`age_over`, "Age check"): releases whether the holder is the
     flow's `AgeOver` (1..120 years) or older, as `ageOver: {age, over}`.
-    - The editor picks the age in a dropdown under the checkbox: 12, 16,
-      18 (the default), 21 or 65, plus a saved flow's own age when it is
+    - The editor lists it under What you receive, after Name and document
+      details, and picks the age in a "Minimum age" dropdown under it: 12,
+      16, 18 (the default), 21 or 65, plus a saved flow's own age when it is
       another (`ageOverChoices`).
     - Derived by the engine (`ageOverOf`) at the chip read, from the date of
       birth in the verified chip evidence, never the MRZ scan alone:
@@ -267,7 +319,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       stay).
       - Such a flow does not read the identity (`readsIdentity`), so it cannot
         check for one known person, and a data request or diploma flow, which
-        needs the date of birth, cannot tick it.
+        needs the date of birth, cannot tick it: choosing either ticks `dg1`
+        and unticks the age check (`withIdentity`), which then stays off with
+        a lock note, and the editor refuses to save the two together for such
+        a flow (`flowDraftError`), as `EditFlow` does (`releasesIdentity`).
       - The subject's consent screen describes `dg1` without the date of
         birth (`dg1WithoutBirthDate`).
     - `over` holds from the birthday the holder turns `age`, on the UTC date
@@ -275,15 +330,36 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - It decides no outcome: an approved minor is approved with `over: false`;
       the relying party decides.
     - Off in a new flow, never in a flow without a list (`attributesForSteps`).
-    - Reaches the customer API and admin result as `identity.ageOver`, and the
-      Sessions tab. The Idem app's consent screen names the age from the app
-      session view's `ageOver`.
+    - Reaches the public API and admin result as `identity.ageOver`, and a
+      person's row details in the people table ("18 or older: Yes/No"), on a
+      flow's People tab and on All people. The Idem app's consent screen
+      names the age from the app session view's `ageOver`.
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
     UNA, UNK, XOM, XPO, XCC, XES, XMP, RKS and the GBD/GBN/GBO/GBP/GBS
     variants). A German document writes "D", which counts as DEU
-    (`flow.IssuingStateCode`). The editor checks the 3-letter form first.
+    (`flow.IssuingStateCode`). The editor picks them from a list, never typed
+    (`lib/issuing-countries.ts`: the ISO countries named in the page's language
+    and ICAO's own codes named by the editor), and a Go test beside
+    `ValidIssuingCountry` holds every code on it to the engine's. "Any country"
+    saves an empty list.
+  - Document types: `acceptedDocumentTypes` lists document codes or kinds
+    (`AcceptsDocumentType` matches either). The editor saves kinds, as the
+    engine names them: Passport (`passport`), Identity card
+    (`identity_card`), Residence permit (`residence_permit`) and Dutch driving
+    licence (`drivers_license`); `lib/identity-proofing.test.ts` holds them to
+    `flow.go`. The engine tells a chip's kind from its code, issuing state and
+    nationality (`DocumentKindOf`), so a residence permit coded `ID` is no
+    identity card and a `PD` passport is a passport; a Yivi credential's kind
+    is its credential (`yiviDocumentKinds`), as the disclosure carries no code
+    (`openid4vpverifier.proofingQuery`), so a flow listing codes refuses every
+    Yivi disclosure and one listing kinds does not. A stored code reads as its
+    kind (`P`; `I`, `ID`; a kind in any case), and an unchanged save sends the
+    stored list as it was; another code is kept. All four ticked saves an
+    empty list, any document: `DocumentKindOf` leaves some cards without a
+    kind (a foreigner's card coded `ID` is a residence permit in Belgium, an
+    identity card in Estonia), which a list of all four would refuse.
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
@@ -332,10 +408,14 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - substantial: low plus `nfc.chip_auth`, `face.match` and `face.liveness`,
       the face matched by Regula against the chip's portrait (DG2, a
       licence's DG6).
-  - **The level is a minimum, nothing more.** Picking one turns no step, check
-    or provider on. A flow whose settings cannot reach it is not saved
-    (`reachesAssuranceLevel` in the editor, `flow.Validate` in the engine).
-    `draftFromFlow` loads a version as stored.
+  - **Picking a level ticks what it needs and locks it** (`withAssuranceLevel`,
+    `lockedByLevel`): Low the chip read and its genuineness check, Substantial
+    also the copy check and the face check with liveness. The rest stays free,
+    and what a higher level ticked stays ticked when a lower one is picked.
+    `draftFromFlow` applies the level too, so a stored version is consistent
+    with its locks. A flow whose settings still cannot reach the level is not
+    saved (`reachesAssuranceLevel` in the editor, `flow.Validate` in the
+    engine).
   - **The level a session achieves** is the highest whose checks all verified
     on the evidence it produced (`computeEIDASAssuranceLevel`):
     - computed without the required level, so it can come out higher;
@@ -380,11 +460,47 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     approved by the engine without comparing (create already refused it on
     a flow above low); one reported with no level counts as low
     (`yiviEIDASLevel`).
-  - Overrides: BSN policy, keep face photos and blur BSN (default/true/false),
-    and retention in seconds, which replaces the customer's retention for the
-    flow's sessions. An unset BSN policy is `omit` (`privacy.DefaultBSNPolicy`):
-    an organisation may process a BSN only where a law allows it, so keeping
-    one is the flow's choice. Unset keep face photos and blur BSN are off.
+  - Privacy and timing, always saved explicitly by the editor:
+    - BSN policy, "Leave it out" (`omit`, a new flow's), "Keep the last 3
+      digits" (`mask`) or "Keep the full BSN" (`retrieve`). The engine reads a
+      flow without a policy as `omit` (`privacy.DefaultBSNPolicy`), so the
+      editor shows a stored flow with none as that (`UNSET_BSN_POLICY`): an
+      organisation may process a BSN only where a law allows it, so keeping
+      one is the flow's choice.
+    - "Black out the BSN on document photos" is `blurBsn` (on in a new flow),
+      which fills the printed BSN region solid on a Dutch document's photos;
+      another country's are released as taken.
+    - "Keep face photos after the match" is `keepFacePhotos` (off in a new
+      flow): off pixelates the chip portrait and the selfie once the match
+      ran.
+    - Retention in days ("Organisation default (7 days)", 1, 30 or 90; stored
+      in seconds, and a stored value that is none of them stays a choice),
+      which replaces the org's fixed 7 days for the flow's sessions.
+    - The session (QR) lifetime (the org's fixed 10 minutes, 2, 5 or 10
+      minutes), saved on the flow version.
+  - The face match threshold is a slider under Checks while the flow has the
+    face check: 0 to 1.00 in steps of 0.01, the value beside it, a scale at 0,
+    0.50, 0.75 and 1.00. A flow with none starts the slider at 0.75, Regula's
+    default (`FACE_MATCH_RECOMMENDED`), and saves one only once it is moved.
+    The flow's threshold replaces the deployment's
+    (`REGULA_FACE_MATCH_THRESHOLD`) for that flow's face match, lower or
+    higher, at the Idem app's face step (`faceMatchThreshold`; the Yivi app
+    runs no face check); a flow
+    requiring Substantial matches at 0.75 at least, also on a deployment set
+    lower, so a face under it fails the face step rather than reaching the
+    end and failing `ASSURANCE_NOT_MET`. Before, a flow's threshold could only
+    make the deployment's stricter: migration `20261021116000` dropped every
+    stored one under 0.75, from inactive versions too, so an existing flow
+    matches as it did (on a deployment set under 0.75, one stored between the
+    two is lost). At Substantial the range starts at 0.75
+    (`SUBSTANTIAL_FACE_MATCH_FLOOR`, `flow.SubstantialMinFaceMatch`): the part
+    below is greyed out and out of reach, picking Substantial lifts a lower
+    stored threshold to it, and the engine refuses a Substantial flow with one
+    under it. At None or Low the whole range can be picked, with a mark at
+    0.75; below it the track and value turn amber and a warning with a tooltip
+    appears. The eIDAS level a session reaches has the same floor
+    (`meetsFaceMatchFloor`): a face scored under 0.75 reaches no more than Low,
+    whichever threshold matched it, the flow's or the deployment's.
   - Legal basis, purpose and assurance tiers are not in the editor: they are
     carried over unchanged when a version is saved.
   Face capture is forced to `native` (§11). The face provider is always
@@ -395,7 +511,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   the Idem app does, or requires more than low, the level a Yivi session
   reaches (`yiviEIDASLevel`; it would only end `ASSURANCE_NOT_MET`). A face step without `nfc_read` needs a
   per-session reference photo (§14): such a flow is not `completable` for
-  members, but a customer may be assigned it and send it through its API. A flow with
+  members, but it is `externalCompletable`, so an admin or an API key may send it
+  to an external person (only the API carries the photo). A flow with
   `document_photo` (front and back, or a passport's photo page) runs in the
   Idem app only: it rules out the Yivi app. "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
@@ -403,14 +520,23 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   (`flow_version`). Activating an earlier version rolls back. Audited:
   `flow_created`, `flow_version_created`, `flow_version_activated`, each with
   the full configuration (a flow holds no personal data).
-- **Admin allow-list.** `identity_proofing_flow_settings.member_allowed` marks the
-  flows an admin made available to members, and `member_default` exactly one
-  default (partial unique index). That table is the wallet's one row per org and
-  flow id, shared with the hosted, diploma and kind settings below; saving one
-  of the four leaves the others alone, and no row reads as every default.
-  `PUT /flow-selection` replaces it whole, audited `identity_proofing.flows_configured`
-  with before/after. A new flow starts unselected. A request is refused
-  (`flow_not_allowed`) on any flow outside the list, for admins too. An id the
+- **Flow selection.** `identity_proofing_flow_settings.member_allowed` marks the
+  flows an admin made available to members, and `is_default` exactly one
+  default (partial unique index), the org's: the flow an external person's
+  request without a `flowId` runs, and the one the send form preselects. The default is
+  independent of `member_allowed`; it must be an identity flow an external person
+  can be sent (`externalCompletable`), never a data request flow (a CHECK, and
+  400 `invalid_input` from `validSelection`). That table is the wallet's one row per org and
+  flow id, shared with the hosted, diploma, address and kind settings below; saving one
+  leaves the others alone, and no row reads as every default. `GET .../flows` (and
+  the API's `GET /proofing/flows`) never lists a data request flow (§15), and its rows
+  carry `hostedEnabled`, the flow's "Allow sending this flow as a link" switch.
+  `PUT /flow-selection {flowIds, defaultFlowId}` replaces the selection whole
+  (`flowIds` are the flows members may use), audited `identity_proofing.flows_configured`
+  with before/after. `GET .../flows` rows carry `allowed`, `default` and
+  `retentionDays`. A new flow starts unselected. A request to a member is
+  refused (`flow_not_allowed`) on any flow outside the list, for admins too
+  (for an external person, see Recipients). An id the
   engine does not list is ignored on read. With the stub provider, flows live in memory, so
   a backend restart empties the list while the settings rows stay (and are ignored).
   Stub sessions never decide unless `IDENTITY_PROOFING_STUB_OUTCOME` is set
@@ -421,30 +547,146 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   API). It is the request mail's locale and the engine session's `language`,
   which the Idem app gets, so the app shows the same language. Absent, the mail
   uses the deployment default and the app the phone's language.
-- **Recipients: a member, or a customer's subject.** A request names either a
-  `userId` of the org (`subject_user_id`; any role, employees and externals
-  alike) on a flow members may use, or a `customerId` plus an e-mail address and
-  an optional name (a CHECK keeps the two exclusive) on a flow assigned to that
-  customer (`flow_not_assigned` otherwise). A subject is never a user or member.
-  Name and address are a snapshot; `subject_name` is `''` when none was given.
-- **Roles:** any member lists allowed flows, customers and a customer's
-  assigned flows, sends requests, and sees the requests they sent; creating and
-  editing flows, versions and the selection, and creating, renaming and assigning
-  flows to customers, are `RequireOrgAdmin`; an admin lists every flow (with
-  `allowed`/`default`, or `assigned`/`default` per customer) and every request of
-  the org. `GET requests?customerId=` narrows either view to one customer.
+- **Recipients: a member, or an external person.** A request names either a
+  `userId` of the org (`subject_user_id`, `subject_kind` `member`; any role,
+  employees and externals alike), or an e-mail address and an optional name
+  (`subject_kind` `external`, no `userId`; a CHECK keeps an external request
+  free of one). `subject_kind` is stored because `subject_user_id` is cleared
+  when the member's user is removed; `SubjectKind` and `Request.External()` read
+  it, and the request responses carry `external`. An external person is never a
+  user or member. Name and address are a snapshot; `subject_name` is `''` when
+  none was given. Which flow:
+  - a member recipient: only a flow members may use (`flow_not_allowed`
+    otherwise), whoever sends;
+  - an external person: an admin and an API key may send any flow a recipient
+    can finish (`externalCompletable`); a plain member only a flow members may
+    use (`flow_not_allowed` otherwise);
+  - an omitted `flowId` is the org's default flow for an external person, else
+    422 `no_default_flow` (`sendableFlow` in `service.go`; `Requester.Admin`
+    and `APIKeyID` decide who is held to the members' list).
+- **Roles:** any member lists the flows made available to them, reads the org's
+  settings, sends requests, and sees the requests they sent; creating and
+  editing flows, versions and the selection, changing the org's settings, API
+  keys and webhook, reading a request's result and deciding reviews are
+  `RequireOrgAdmin`; an admin lists every flow (with `allowed`/`default`) and
+  every request of the org. `GET requests?subjectUserId=` narrows either view to
+  the requests proofing one member, `?subjectKind=external|member` to those
+  sent to external people or to members, and `?flowId=` to those sent on one
+  flow (any version; index `identity_proofing_requests_org_flow_idx`); the
+  narrowings combine, and the list's cap of 200 applies after them, so the All
+  people page and the Overview ask for `external`, and a flow's People tab for
+  its `flowId` too.
+- **Customers were removed from the model** (thirteen migrations,
+  `20261021100000` to `20261021101200`, after the newest one that touched
+  customers, `20261019120000`;
+  `internal/migrate/customers_removed_integration_test.go` runs them over
+  several customers' data, down and up again). What the org keeps of them:
+  - their settings, merged (`identity_proofing_settings`, migration
+    `20261021100000`): what the customers agree on stays; where they differ,
+    no customer's subjects get less than that customer promised them, so the
+    shortest session lifetime and data retention, erasure handling `review`,
+    and every redirect origin any of them allowed (so each one's portal still
+    embeds the hosted page). The look (display name, colours, font, logo,
+    support contact, privacy URL, "powered by") cannot be merged and is the
+    oldest customer's;
+  - all API keys, now the org's. A key keeps working, except that a paused
+    customer's keys are revoked (a pause stopped them, and nothing pauses a
+    customer any more). A key reaches every external session of the org (list,
+    read results, cancel, purge), also those sent from the app or for a
+    customer that never had a key, and the org's one webhook gets every flow's
+    events. So in an org with more than one customer, a key now reaches
+    sessions of customers it was not issued to. The migration does not rotate
+    keys; before deploying, find the orgs where that happens (a working key and
+    more than one customer) with
+
+    ```sql
+    SELECT c.organization_id
+    FROM identity_proofing_customers c
+    GROUP BY c.organization_id
+    HAVING count(*) > 1
+       AND EXISTS (SELECT 1
+                   FROM identity_proofing_api_keys k
+                            JOIN identity_proofing_customers kc ON kc.id = k.customer_id
+                   WHERE k.organization_id = c.organization_id
+                     AND k.revoked_at IS NULL
+                     AND kc.paused_at IS NULL);
+    ```
+
+    (`TestUpFoldsCustomersIntoOrg` runs it; it needs `customer_id`, which is
+    gone after the migration);
+  - one webhook endpoint, the oldest customer's that had one. A delivery still
+    waiting for another customer is deleted, whatever URL it last named, since
+    it would go to the kept URL under the kept secret; the kept customer's own
+    stay, also those queued before it moved its URL. Delivered and failed ones
+    stay as history (webhook health only counts what the current URL
+    answered, §4). The kept Idempotency-Key answers are deleted;
+  - one default flow, `is_default`, which an API call that names no `flowId`
+    runs and the send forms preselect. A customer's default wins over the
+    members' default, so an integration that names no flow keeps running the
+    flow it ran: of the customers whose key still works (not revoked, the
+    customer not paused) the oldest one's default, else the oldest customer's
+    with a default. A data request flow cannot be the default, so a customer
+    whose default was one is passed over. What this changes:
+    - an org whose customers' working keys ran different defaults keeps one; a
+      call with the other customers' keys that names no flow now runs the org's
+      default (or answers 422 `no_default_flow`). Find those orgs before
+      deploying with
+
+      ```sql
+      SELECT cf.organization_id
+      FROM identity_proofing_customer_flows cf
+               JOIN identity_proofing_customers c ON c.id = cf.customer_id
+      WHERE cf.is_default
+        AND c.paused_at IS NULL
+        AND EXISTS (SELECT 1
+                    FROM identity_proofing_api_keys k
+                    WHERE k.customer_id = c.id
+                      AND k.revoked_at IS NULL)
+      GROUP BY cf.organization_id
+      HAVING count(DISTINCT cf.flow_id) > 1;
+      ```
+
+    - a members' default replaced by a customer's no longer preselects in the
+      form for a member: it preselects the org's default when members may use
+      it, else the first flow they may use. A member's request always names its
+      flow, so a member is never sent a flow the sender did not pick;
+
+    the per-customer assignment (`identity_proofing_customer_flows`) is
+    dropped;
+  - every request: one that had a customer is `external`, one that had none
+    `member`; already sent requests keep their stored purge time until their
+    next write. Their children (a data request's matches and match checks,
+    webhook deliveries, idempotency answers) and the API key a request names
+    keep it by foreign keys on the org instead of the customer;
+  - the identity match keys, which hashed the customer in, are cleared: the
+    family name and birth date they were made of are not kept, so they cannot be
+    made again. A session settled before the migration is therefore not found
+    by a data request (§15);
+  - what was paused stays paused, as a platform pause (§8): an org its own
+    admin had paused, since they did, and an org whose every customer was
+    paused, since the last of them was. A customer paused while others were not
+    only loses its keys (above): a hosted link sent for it and not started yet
+    can now be started, as the org's.
+
+  Audit events recorded for customers stay in the log and still read
+  (`customer_created`, `customer_updated`, `customer_flows_configured`,
+  `customer_removed`). The down migrations rebuild one customer per org; keys
+  stay revoked and pauses stay platform pauses.
 
 ## 2. The mail is the session
 
-A session runs the customer's session lifetime (2, 5 or 10 minutes) within the
+A session runs its flow's own lifetime when the flow sets one (2, 5 or 10
+minutes), else `SessionTTL`, 10, the org's fixed default (`flowSessionTTL`),
+within the
 engine's hard cap `SessionMaxLifetime` (15), and its claim, the `handover`
 token in the `vcmrtd://verify?handover=…&api=…` deep link, is single use and
 claimable for `ClaimTokenTTL` (10 minutes, never past the session's own
 expiry), so the mailed QR works for the whole session.
 
-**Send.** `CreateRequest` creates the engine session (`SessionInput.TTL` = the
-customer's `session_ttl_seconds`, else `proofing.SessionTTL` (600); client
-reference = the request id), stores the request
+**Send.** `CreateRequest` creates the engine session (`TTL` = the flow's
+`sessionTtlSeconds`, else the org's `session_ttl_seconds` for an external person,
+else `proofing.SessionTTL` (600);
+client reference = the request id), stores the request
 with `link_expires_at` = the session's expiry, attaches the session
 (`AttachSession`, audited `identity_proofing.session_created`; `flow_version`
 becomes the version the engine pinned), and mails the create response's native claim:
@@ -518,7 +760,7 @@ engine still reports open past its cap is asked again after 30 s. The job leases
 what it re-checks (`ips_reconcile_leased_until`, `FOR UPDATE SKIP LOCKED`), so
 API replicas never re-check the same session at once. Nothing runs on a fixed
 interval but the job's one-minute safety net (below). List reads never call the engine; a single-request read (the on-screen page,
-the customer API's `GET sessions/{id}`) re-checks a live request at most once
+the public API's `GET sessions/{id}`) re-checks a live request at most once
 per `readReconcileEvery` (10 s), as a fallback for a missed notice. A change for a
 session not attached yet is dropped; its deadline or next change reconciles it. `needs_review` is not final: a reviewer decides it, or the engine ends it (expired/cancelled), which ends the request as expired and sends
 `session.expired`. The UI treats it as not live: it stops polling and shows
@@ -529,9 +771,10 @@ is never lost. `expired` is
 derived (no live session and no outcome), never stored. An engine failure during
 a read is logged and the last known status is shown.
 
-**Counts.** `GET /identity-proofing/stats` counts the customer requests of the
-last `statsWindow` (30 days) per customer and flow, by outcome, scoped like the
-request list (an admin's the org's, a member's their own). Expired is derived
+**Counts.** `GET /orgs/{slug}/identity-proofing/stats` counts the external
+requests of the last `statsWindow` (30 days) per flow, by outcome, scoped like the
+request list (an admin's the org's, a member's their own); members' own
+requests are not counted. Expired is derived
 in SQL exactly as `EffectiveStatus` does; cancelled requests have their own
 count. The counts are as last reconciled: they read the rows, never the engine, so an outcome no list read has picked up yet is
 not in them. The stats query key sits under the requests key, so whatever
@@ -539,7 +782,7 @@ refreshes the request lists refreshes the counts.
 
 **No background polling.** `database.RunOnNotify` runs a job on a Postgres
 NOTIFY or at the deadline the job returns, never on a ticker; the deadline job
-and the customer-webhook deliverer both use it. The deadline job sleeps at most
+and the webhook deliverer both use it. The deadline job sleeps at most
 `deadlineSafetyNet` (a minute), so a request a replica leased and then died
 with is picked up again without waiting for an unrelated notice, and it skips
 (and logs) a request whose seal does not open instead of failing the rest.
@@ -571,21 +814,28 @@ an outcome not decided in review, names that app instead (`subjectAppContext`,
 actor label `app:<method>`, shown as "Idem app"/"Yivi app"); an expiry and a
 post-review outcome stay the system's.
 
-## 4. Customer API, webhooks, branding
+## 4. Public API, webhook, settings
 
-- **API keys** (`identity_proofing_api_keys`): `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. Revoke is
-  permanent; removing the customer removes them. Audited `api_key_created`
-  (with its scopes) and `api_key_revoked` on the customer. There are no test keys
-  (§5). A customer takes no request, from the dashboard or otherwise, until it
-  holds an unrevoked key (409 `customer_no_api_key`; `hasApiKey` on the
-  customer, "Setup needed" in the UI).
+- **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
+  org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
+  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
+  stored as SHA-256 only, shown once; `prefix` tells keys apart. The page calls
+  them API tokens. `createdByName` is the creator's display name, absent once
+  that user is deleted. One key works
+  on every flow and reaches every external request of the org. Revoke is
+  permanent. Audited `api_key_created` (with its scopes) / `api_key_revoked` on
+  the org (target `org_identity_proofing_settings`). There are no test keys
+  (§5). No key is needed to send from the app.
 - **Public API** (`/api/v1/proofing/{flows,sessions,sessions/{id}}`, Bearer
-  key, no cookie): acts exactly as a member sending for the customer, on its
-  assigned flows (no `flowId` is its default), refused while paused. `sendMail:
+  key, no cookie): acts as an admin sending to an external person, on any flow
+  a recipient can finish (`externalCompletable`; no `flowId` is the org's
+  default flow, else 422 `no_default_flow`), refused while paused. It reaches
+  the org's external requests only (`RequestStore.GetExternal`,
+  `ListExternalPage`); a member's request is a 404 there. `sendMail:
   false` skips the mail; the create answer always carries the `deepLink`. A
   request made this way has `requested_by` NULL and `api_key_id` set, and every
-  mail for a customer's subject names the customer as requester, never the key.
+  mail to an external person names the org as requester (`Settings.SignedAs`:
+  the branding's display name, else the org's name), never the key or the member.
   `POST /proofing/sessions/{id}/cancel` ends a `pending`/`in_progress` session in
   the engine too (`cancelled_at`; status reads `cancelled`; audited `session_cancelled`).
   `DELETE /proofing/sessions/{id}` erases it in the engine (a session already
@@ -600,7 +850,7 @@ post-review outcome stay the system's.
   decodes the name, birth date, nationality, document type, issuing state and
   expiry, the checks, and the images: `photo`, `selfie`, `referencePhoto`,
   `documentImage` and `documentImageBack`; never the document number),
-  audited `result_read`; 404 once erased. The customer API never returns an image.
+  audited `result_read`; 404 once erased. The public API never returns an image.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
@@ -608,10 +858,10 @@ post-review outcome stay the system's.
   every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
   (anything else, like an unconverted JPEG2000, is dropped): `photo` (the
   document's portrait, DG2 or the disclosed credential's), `selfie`,
-  `referencePhoto` (the customer's own photo of the person, §14), and
+  `referencePhoto` (the sender's own photo of the person, §14), and
   `documentImage` / `documentImageBack` (the document's front and back). A flow
   that does not keep face photos has dropped the face images after the match.
-  The customer's Sessions tab reads it when
+  The people table (`proofing-people.tsx`) reads it when
   an admin opens an approved, rejected or in-review row and folds
   it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
@@ -619,10 +869,13 @@ post-review outcome stay the system's.
   `flows:read`); every key gets all four, and only a signed-in org admin
   creates one. A missing scope is 403
   `insufficient_scope`.
-  `GET /proofing/sessions?limit=&cursor=` pages a customer's sessions newest
-  first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
+  `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
+  newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
-  `identity_proofing_idempotency_keys`, pruned after 24 h):
+  `identity_proofing_idempotency_keys`, keyed by API key and Idempotency-Key, so
+  two keys, of one org or of two, may use the same one and are never replayed
+  each other's answer (`TestIdemKeyIsPerAPIKey`, `TestIdemKeyIsPerOrg`); pruned
+  after 24 h, and dropped with the key):
   - the same key and body replay the first successful answer
     (`Idempotent-Replayed: true`); another body is 422 `idempotency_key_reused`;
     a call still running is 409 `idempotency_in_flight`.
@@ -635,22 +888,25 @@ post-review outcome stay the system's.
     (409) until the 24 h prune. There is no timeout release.
   - the stored answer is sealed and linked to its session (`request_id`, read
     from the answer's `id`); `RequestStore.Purge` deletes it.
+
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
-  `hosted: true` session in that app from the customer's own UI (`appLink` or
+  `hosted: true` session in that app from the org's own UI (`appLink` or
   `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
   answers from stored state. The hosted token is the poll token: the Yivi
   disclosure poll and a new Idem code run through `/proof/{token}/…`.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
-  `public_id.go`) on the customer API and in webhooks; the org routes take
+  `public_id.go`) on the public API and in webhooks; the org routes take
   either form.
   What a key causes is audited with the key as actor: `audit_events.actor_label`
   `api_key:<prefix>`, no `actor_user_id`; the audit log shows "API key <prefix>…".
-  Rate-limited per customer (`internal/ratelimit`, in-process token buckets,
+  Rate-limited per org (`internal/ratelimit`, in-process token buckets,
   so per API replica): `apiCallLimit` 120 calls a minute, and of those
-  `APISessionLimit` 10 session creations, so one customer cannot use up the
-  deployment's capacity. Past it: 429 `rate_limited` with `Retry-After`.
-  - The key lookup is a read; the customer's limit is taken before the key's
-    `last_used_at` is written, at most once a minute (`apiKeyTouchEvery`).
+  `APISessionLimit` 10 session creations, so one org cannot use up the
+  deployment's capacity. Past it: 429 `rate_limited` with `Retry-After`. The
+  hosted page has its own per-org bucket (§7).
+  - The key lookup is a read; the org's limit is taken before the key's
+    `last_used_at` is written (`Touch`), at most once a minute
+    (`apiKeyTouchEvery`).
   - An unknown key counts against its source (`authFailureLimit`, 60 a
     minute): past it the guess answers 429 instead of 401. It never holds a
     valid key, so a shared proxy address is never locked out by someone
@@ -658,11 +914,16 @@ post-review outcome stay the system's.
     `TRUSTED_PROXIES`, an IPv6 one its /64 (`SourceKey`); the first request
     with `X-Forwarded-For` from a peer the list leaves out is logged once, as
     every caller would then share the proxy's limit.
-- **Webhooks**: a customer's results show in Sessions, the API and the audit
-  log whatever its webhook. A customer without an endpoint of its own is sent
-  no events (nothing is queued; `test` needs an endpoint). One that hosts its
-  own receiver adds one endpoint (`identity_proofing_webhooks`, secret sealed
-  with the proofing key, `whsec_…`, shown once).
+- **Webhook**: one endpoint per org, for the events of all its flows
+  (`identity_proofing_webhooks`, one row per org, secret sealed with the
+  proofing key, `whsec_…`, shown once). Admin only: `GET`, `PUT` and `DELETE
+  /orgs/{slug}/identity-proofing/webhook`, `POST .../webhook/rotate-secret`,
+  `POST .../webhook/test` and `GET .../webhook/deliveries` (the 20 most recent).
+  Removing the endpoint deletes the deliveries still waiting for it. The org's
+  results show in Sessions, the API and the audit log whatever its webhook.
+  Only external requests send webhook events: a member's request sends none. An
+  org without an endpoint is sent no events (nothing is queued; `test` needs an
+  endpoint).
   - Rotating the secret keeps the previous one signing next to the new one for
     24 h (`webhookSecretOverlap`, `previous_secret_*`): the signature then
     carries a `v1` for each, so the receiver can switch without refusing a
@@ -673,10 +934,11 @@ post-review outcome stay the system's.
   - Without `IDENTITY_PROOFING_ENCRYPTION_KEY` the deliverer does not run, and
     the API says so once at boot. Events
   `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
-  `.review_opened` / `.expired` / `.cancelled` / `.purged` are written to the
-  outbox (`identity_proofing_webhook_deliveries`) in the same transaction as the
+  `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added`
+  (`WebhookEvents`) are written to the
+  outbox (`identity_proofing_webhook_deliveries`, keyed by org) in the same transaction as the
   change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
-  `EndSession`, `LapseLinks`, `Cancel`, `Purge`); an
+  `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow,
   method, assurance and error code: never a name or address (the API has those).
@@ -685,7 +947,7 @@ post-review outcome stay the system's.
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
   - Per batch (`deliveryBatch` 20) `claimDue` takes at most `endpointWorkers`
     (2) of one endpoint's deliveries, its oldest (a `row_number()` per
-    customer over everything due, held rows counted, so across replicas too).
+    org over everything due, held rows counted, so across replicas too).
     `deliveryWorkers` (10) send at once, `sendFair` keeping to 2 per URL. The
     next batch waits for the last, so an endpoint that never answers costs
     every other org one `safehttp.RequestTimeout` per batch, not its backlog.
@@ -695,48 +957,159 @@ post-review outcome stay the system's.
   - A delivery whose endpoint secret no longer decrypts counts as a failed
     attempt, so it fails in time and drops its diploma, instead of being
     claimed every 5 minutes forever.
-  - `POST …/webhook/test` is 10 a minute per customer (`webhookTestLimit`).
+  - `POST …/webhook/test` is 10 a minute per org (`webhookTestLimit`).
 
   It POSTs
   through `safehttp` (https, public addresses only, dialed IP = vetted IP, no
   redirects) with `Yivi-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`
   (a second `v1` during a rotation's overlap),
   `Yivi-Event`, `Yivi-Delivery`; 8 attempts over about 24 h, then `failed`.
-  Health (`delivering` / `failing` since / pending retries) is derived from the
-  deliveries; a failing endpoint makes an active customer read "Needs attention".
-  The failing streak counts from a delivery's `first_attempt_at` (or the last
-  success, if later): `last_attempt_at` moves with every retry.
-- **Branding** (columns on the customer): display name, `#rrggbb` colour, logo
-  (PNG/JPEG/GIF/WebP, 512 KiB; no SVG, mail clients do not render it), support
-  contact, https privacy URL. It applies to the proofing mail of the customer's
-  subjects: subject, heading and requester are the display name, the colour
-  replaces the org's primary seed, the logo replaces the org's (none shows the
-  name as wordmark, never the org's logo), and the `supportContact` /
-  `privacyUrl` paragraphs appear only when set (an all-empty paragraph collapses).
-- **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`): the
-  app session view carries `branding`, so the app looks like the requester's
-  own: the org theme's colours (accent as secondary, top bar as header), font
-  and logo, and `GET /app/{token}/branding/logo` serves the logo to a device
-  holding the session. It is resolved from the session alone (tenant = org,
-  client reference = request), never from the request: a customer with a
-  colour or a font of its own gets only that white-label (its colours, font and
-  logo; what it leaves out keeps the design's own, not the org's). A customer
-  with neither gets the org theme under its display name, with its own logo or
-  else the org's. Nothing set at either level is no `branding`. `relyingParty`
-  stays the org's own name next to it.
-- **Settings**: `session_ttl_seconds` (120/300/600), `data_retention_days`
-  (7/30/90/180/365, default 30: the design's maximum of a year; the proofed-name retention)
-  and `erasure_handling` (`review`/`automatic`/`keep`, §15). A change sets
-  only what it names, applied under the customer's lock, and a `PATCH` checks
-  every part before it saves any (`UpdateCustomer`). The frontend options are held to the Go
-  lists by `lib/identity-proofing.test.ts`.
-- **Remove customer** deletes its requests (addresses, names, outcomes), keys,
-  endpoint and deliveries; the audit trail stays (`customer_removed`).
-  - Each request is purged first (§10), then `CustomerStore.Remove` locks the
-    customer row (a request's insert waits on it) and refuses while any request
-    is unpurged: one sent meanwhile.
-  - The service purges and tries again, `removeCustomerAttempts` (3) times, then
-    answers 409 `customer_sessions_left`.
+  Health is one `WebhookHealth` for the org (`not_configured`, `delivering`, or
+  `failing` since, with the last status code and the pending retries), derived
+  from the deliveries last sent to the endpoint's current URL (a delivery's
+  `endpoint_url`, which `claimDue` sets): what an earlier URL, or a customer's
+  endpoint the migration dropped, answered does not count
+  (`TestWebhookHealthCountsCurrentURL`); a failing endpoint shows as an alert on
+  the Overview (for an admin) and on the Developers page. The failing streak counts
+  from a delivery's `first_attempt_at` (or the last success, if later):
+  `last_attempt_at` moves with every retry.
+- **Settings** (`identity_proofing_settings`, one row per org): `GET` and
+  `PATCH /orgs/{slug}/identity-proofing/settings` (any of `erasureHandling`,
+  `legalRetention` (null removes it), `allowedRedirectOrigins`; absent is
+  left as is; `sessionTtlSeconds` or `dataRetentionDays` is 400
+  `invalid_input`, `checkSettingsChange`), `PUT .../settings/branding` (multipart) and `GET .../settings/logo`.
+  Any member reads them (the verify page needs the branding); an admin writes
+  them. Audited `identity_proofing.settings_updated` on target
+  `org_identity_proofing_settings`, with before and after (whether a logo is
+  set, never its bytes; a replaced logo adds `logoReplaced`); saving what it
+  already holds changes and audits nothing. Held in `OrgSettingsStore`; no row
+  reads as the defaults. A session change sets only what it names, applied under
+  the advisory lock on the org (`lockSettings`), and a `PATCH` checks every part
+  before it saves any, then saves the session settings, the legal retention and
+  the redirect origins in one transaction with one audit event (`UpdateSettings`,
+  `OrgSettingsStore.Save`, `TestSettingsSaveIsOneTransaction`). The white-label
+  columns and `erasure_handling` were columns of the customers: migration
+  `20261021100000` merges them into the org's settings (§1).
+  - **Session**: `session_ttl_seconds` (600) and `data_retention_days` (7:
+    "purged 7 days after a check ends", VC3) are fixed defaults
+    (`SessionTTL`, `defaultDataRetentionDays`), which a flow overrides in the
+    flow editor, and `erasure_handling` (`review`/`automatic`, default
+    `review`, §15). Migration `20261021110200` set the retention column's
+    default to 7, as `defaultDataRetentionDays` is, and first gave an org that
+    had sent an external request without saving settings a row with the 30
+    days it had then. `keep` (refuse every erasure) is gone: the legal
+    retention says what the law keeps; migration `20261021110100` made it
+    `review`. The lifetime and the retention were the org's to set until
+    migrations `20261021114000` to `20261021114200`: those gave every active
+    flow version that set neither a new version carrying the org's value where
+    it was not the default (an org without a settings row was already on it),
+    stamped its unpurged external requests without a retention of their own
+    with it (`retention_override_seconds`), then set every org to 600 seconds
+    and 7 days. No flow or sent request changes; a member's request on such a
+    flow now follows the flow's copied retention rather than
+    `proofedNameRetention`. The Downs leave the copies, since the org's own
+    values are not given back. The editor's lifetime options are held to the Go
+    list by `lib/identity-proofing.test.ts`. In the app "Who decides", the legal
+    retention and the redirect origins are on Settings › Data and privacy.
+  - **Legal retention** (`legal_retention_months` 1 to 600, with
+    `legal_retention_reason_en` and `_nl`, all or none; Settings › Data and
+    privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
+    the data of every approved identity check, counted from the end of the
+    check, with the reason shown to the person in each language. It holds only
+    an approved external identity check (`legalHeld`): one that was rejected,
+    expired, cancelled or never started proved nobody, so it is purged at its
+    own retention and blocks no erasure. It is the floor of such a check's
+    retention (§10): the check is purged at the later of its flow's or the
+    org's retention and the legal period, and the engine session, the proofed
+    name (once approved, `RecordOutcome`) and the days a person is told follow
+    (`engineRetention`, `subjectRetentionDays`, `LegalRetention.longest`). A
+    data request, a member's request and another org's are not held. The
+    period counts calendar months as the database does (`addMonths`); the form
+    states years or months, and switching it off or shortening it asks to
+    confirm first (`legalRetentionLoss`). `Service.UpdateSettings` checks it
+    with the rest before saving any (`LegalRetention.check`), and saving it
+    moves the purge time of the org's unpurged external requests under the
+    settings lock (`SaveLegalRetention`). Its Down migration puts `purge_at`
+    back to the retention alone.
+    - **Engine retention.** The engine fixes a session's retention when it
+      creates it, so a save sets it again for the org's unpurged identity
+      checks (`syncEngineRetention`, `Provider.SetSessionsRetention`). The save
+      marks the org (`engine_retention_stale`) in its transaction; the sync
+      runs under the same settings write lock, reads the settings under it,
+      and clears the mark once every batch succeeded
+      (`OrgSettingsStore.SyncEngineRetention`). Two saves at once therefore
+      leave the engine at what was saved last, and a failed sync is not the
+      update's failure (logged): the hourly `PurgeDue` syncs every org still
+      marked (`syncStaleEngineRetention`). A check created against settings
+      that changed before its session was attached marks its org too
+      (`markIfRetentionMoved`), since a sync that ran in between did not see
+      it.
+    - **The org's own purge** (`PurgeRequest`, `DELETE
+      /proofing/sessions/{id}`) refuses a check the legal retention still
+      holds: 409 `legal_retention` (`RequestStore.HeldUntil`).
+  - **Branding**: display name, `#rrggbb` colour, logo (PNG/JPEG/GIF/WebP,
+    512 KiB; no SVG, mail clients do not render it), support contact, https
+    privacy URL, and whether to hide "powered by" (§7). It applies to the
+    proofing mail of external people (a member's mail is the org's own):
+    subject, heading and requester are the display name, the colour replaces
+    the org's theme primary seed, the logo replaces the org's theme logo (none
+    shows the name as wordmark, never the theme logo), and the `supportContact`
+    / `privacyUrl` paragraphs appear only when set (an all-empty paragraph
+    collapses). The hosted page and the on-screen page show the same display
+    name, colour, logo, support contact and privacy URL.
+  - **White-label** (the same branding save): a second colour
+    (`secondary_color`, the Idem app's), the palette the org theme has (text,
+    surface, border, link, success, warning, error and top bar colours) and a
+    font family, all `#rrggbb` or a CSS font-family list; NULL keeps the
+    design's own. Any colour or the font is a look of its own
+    (`whiteLabeled`); a logo, name, support contact and privacy link alone are
+    not. It applies to the Idem app and the hosted page (below).
+  - **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`):
+    the app session view carries `branding`, so the app looks like the
+    requester's own: colours (accent as secondary, top bar as header), font and
+    logo, and `GET /app/{token}/branding/logo` serves the logo to a device
+    holding the session. It is resolved from the session alone (tenant = org,
+    client reference = request), never from the request, through
+    `AppBrandingResolver` over `RequestStore.SubjectKindOf` (the subject kind
+    and the request's flow), the org's settings and the flow's own branding: a
+    request to an external person gets the proofing branding its mail and
+    hosted page wear, the flow's own over the org's (`Settings.brandedFor`).
+    With white-label (a colour or the font, a flow's own colour included) that
+    is its colours, font and logo (the flow's, else the org's proofing logo);
+    what it leaves out keeps the design's own, not the org's theme's. Without,
+    the org theme under the name the proofing mail signs with, with the
+    proofing logo (the flow's, else the org's) or else the theme's. A request
+    to a member gets the org theme under the org's name, whatever its flow.
+    Nothing set at either level is no `branding`. `relyingParty` stays the
+    org's own name next to it. The hosted page applies the same look (`theme`
+    in the hosted view).
+  - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
+    org and flow, `flow_branding.go`; a row is "custom for this flow", none is
+    "same as the organisation"): `GET` and `PUT
+    /orgs/{slug}/identity-proofing/flows/{flowID}/branding` (multipart; `custom`,
+    true or false, is required) and `GET .../branding/logo`, admin only. It holds
+    the org's name, colour, logo, support contact and privacy URL; the
+    white-label colours and font and "powered by" stay the org's. Each field it
+    sets replaces the org's, and one left empty, or no logo, falls back to it;
+    the org's white-label colours and font stay under it (`Branding.over`,
+    mirrored by `effectiveBranding` in `lib/identity-proofing.ts`). It styles
+    the flow's proofing mail (`proofingMail`: a branding that cannot be read
+    blocks the mail, a logo that cannot be read leaves the wordmark), its
+    hosted page (`HostedRequest`, `HostedLogo`; where `SetAppBranding` is
+    wired, as in `cmd/api` and the integration harness, the page's `theme` and
+    logo come from `AppBrandingResolver`, which applies it as well) and the
+    Idem app of an external person. The on-screen page, a member's mail and a
+    member's app session still show the org's. Going back to "same as the
+    organisation" deletes the row, logo included, after the tab asks to
+    confirm, and checks none of the form's fields or its logo upload (the
+    handler does not read it): the tab sends its hidden draft text fields in
+    that mode too. Audited `identity_proofing.flow_branding_configured` with
+    before and after. The form is the Branding tab of Edit flow, with a preview
+    that switches between the proofing mail and the Idem app (`appLook` in
+    `lib/identity-proofing.ts` mirrors the resolver for an external person).
+  - **Allowed redirect origins** (§7).
+  - Branding is under Settings › Branding (the org's, for every flow; the
+    wallet's own look is the separate Settings › Wallet theme).
 
 ## 5. No test mode
 
@@ -770,10 +1143,10 @@ manual "Show a new code", which the hosted page still uses.
 
 ## 7. Hosted link
 
-`POST /proofing/sessions` with `hosted: true` (customer API)
+`POST /proofing/sessions` with `hosted: true` (public API)
 creates no engine session: it stores the request with a link token (only its
 SHA-256, `link_token_hash`) valid `hostedLinkTTL` (72 h) and answers
-`hostedUrl` = `APP_BASE_URL/p/<token>`, which the customer hands its subject.
+`hostedUrl` = `APP_BASE_URL/p/<token>`, which the org hands its subject.
 Nothing is mailed. The public page `/p/:token` (`routes/proof.tsx`) runs the
 same steps as the on-screen page (`routes/proofing-verify-steps.tsx`, shared):
 what is collected, the app, then its session. Its API is `/api/v1/proof/{token}`
@@ -781,13 +1154,13 @@ what is collected, the app, then its session. Its API is `/api/v1/proof/{token}`
 the API is:
 
 - The link is looked up once per call (the limiter hands the request it read
-  to the handler). A live link's call counts against its customer's
-  `hostedCallLimit` across all its links (every link belongs to a customer:
-  `normalizeRequest` refuses one without); a link no longer live (`Request.linkLive`: not waiting to start, its
-  session not running or in review, no diploma or export window open) counts
-  against its own `staleLinkLimit` (60 a minute), so an old link polled hard
-  leaves the customer's live pages alone. Every call also counts against its
-  source's `hostedSourceLimit`; an IPv6 source is its /64 (`clientip.SourceKey`).
+  to the handler). A live link's call counts against its org's
+  `hostedCallLimit` across all its links; a link no longer live
+  (`Request.linkLive`: not waiting to start, its session not running or in
+  review, no diploma or export window open) counts against its own
+  `staleLinkLimit` (60 a minute), so an old link polled hard leaves the org's
+  live pages alone. Every call also counts against its source's
+  `hostedSourceLimit`; an IPv6 source is its /64 (`clientip.SourceKey`).
   Past either: 429 `rate_limited` with `Retry-After`.
 - Its own bucket, not the API's, sized for the page (status and Yivi polls
   every 2 s).
@@ -795,38 +1168,55 @@ the API is:
   against its source's `authFailureLimit`; past it, 429.
 
 Its routes: the page, `status`, `start` (once: a second start is 409
-`link_started`), the customer's `logo`, and the Yivi `start`/`disclosure`
+`link_started`), the org's `logo`, and the Yivi `start`/`disclosure`
 routes, which share their implementation with the org routes. The session is
 created at `start` for the app the subject picked (`AttachSession` records it)
-and runs the customer's session TTL. An unstarted link reads as pending until
+and runs its flow's session lifetime, else the org's fixed 10 minutes. An
+unstarted link reads as pending until
 it lapses, then expired, in `EffectiveStatus` and the stats alike.
 
-A member makes the same link from the wallet: "Copy a link" in the send form
-(`channel: hosted` on `POST .../requests`, which answers `hostedUrl`), for a
-person not present and a flow the mail cannot carry (diplomas); the form
-shows the link to copy (`SecretReveal`). No redirect: the page ends on its
-own done screen.
+A member makes the same link from the wallet: "Copy a link" in the Verify a
+person dialog (`channel: hosted` on `POST .../requests`, which answers
+`hostedUrl`; for an external person only), for a
+person not present and a flow the mail cannot carry (diplomas); the dialog
+shows the link to copy (`SecretReveal`) once it has closed, on one line, with
+"Open in new tab" beside Done. Opening it only loads the page (`GET`
+`/proof/{token}` reads); the link is used by `start`, when an app is picked.
+No redirect: the page ends on its own done screen.
 
 A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link). The retention it states is the
-server's `retentionDays` (hosted view `flow`, customer flow list):
-`subjectRetentionDays`, the flow's override else the customer's days, plus the
-engine's day of grace, rounded up ("deleted at most N days after"). Its Decline,
-after a confirmation that says the link stops working, calls
+what is collected, retention, privacy link). It never shows the flow's name or
+its assurance level, and the hosted view leaves both out of its `flow`: the
+token alone opens it. The retention it states is the
+server's `retentionDays` (hosted view `flow`, flow list):
+`subjectRetentionDays`, the flow's override else the org's days, plus the
+engine's day of grace, rounded up ("deleted at most N days after"); a flow that
+collects nothing (only the outcome) states none. **Continue only moves on to
+the app step, on every flow** (#304): opening the link or pressing Continue
+starts nothing. The app step lists the apps `methodChoices` gives (Yivi app and
+Idem app when `yiviAvailable`, else the Idem app alone, still as a step of its
+own; `yiviAppAvailable`, so an age check at an age the Yivi credentials carry
+no claim for is Idem-only), and tapping one is the start (no radio, no confirm button; Back is
+disabled while it runs). The on-screen page follows the same steps. The step
+headings are h1 on the hosted page (`StepRegion headingLevel`) and h2 under the
+on-screen page's title. The overview's Decline asks to confirm first (`ConfirmDialog`:
+"Go back" or Decline, saying the link stops working; it stays open while the
+request is in flight), then calls
 `POST /proof/{token}/decline`, which cancels a link not yet started
 (`DeclineHosted` → `RequestStore.Cancel`, audited `session_cancelled` with the
-actor label `hosted_link`); a started link is 409 `link_started`. A customer
-lists `allowedRedirectOrigins` (customer settings tab, `PATCH` customer; stored
-`identity_proofing_customers.allowed_redirect_origins`): https origins, or http
+actor label `hosted_link`); a started link is 409 `link_started`. The org
+lists `allowedRedirectOrigins` (org settings, `PATCH .../settings`; stored
+`identity_proofing_settings.allowed_redirect_origins`): https origins, or http
 on a loopback host, at most 10, normalised lowercase. The host must be a DNS
 name or an IP address (`validHost`): the origins are written into the page's
 `frame-ancestors`, where `*`, a quote or a `;` would mean something else. A hosted create may carry
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
 400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
-`embedOrigins` and `language`. Once `Session` reports an outcome
+`embedOrigins`, `language` and `organization` (name, branding and data
+retention; the branding is the flow's own over the org's). Once `Session` reports an outcome
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
 to its parent for each allowed origin (never `*`), then redirects
 (`location.replace`, so back does not land on the link and redirect again) with
@@ -839,7 +1229,7 @@ stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the
 SPA handler asks it for headers on each index fallback; on `/p/<token>` it sets
 `Content-Security-Policy: frame-ancestors <allowed origins>`, or `'none'` for no
 origins, an unknown or throttled link, or a failed read (counted against the
-link's customer's `hostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
+link's org's `hostedCallLimit`). Only where the API serves the SPA (`STATIC_DIR`); in
 dev Vite serves it without the header. The rest of the SPA still sends no CSP.
 The page's outcomes, failures and errors are live regions (`role="alert"`
 for a failure, `status` otherwise); the diploma step keeps one mounted for
@@ -853,30 +1243,35 @@ provider, so keyed on org and flow id with no foreign key): `enabled` (off: a
 hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
 with another `language` is 400; the page keeps to them), and `completion`
 (`redirect`, or `done`, where a create with a `redirectUrl` is 400).
-Admins edit them under "Hosted page" on a flow in the flows page, with a
-preview of the overview step in a customer's branding. No row is the defaults.
-**Theme:** the page applies the customer's `primaryColor` through
-`applyOrgTheme` (`hostedTheme`) while it shows, and a "Powered by Yivi" line the
-customer can leave off (`hide_powered_by`, branding tab).
+Admins edit them on the Hosted page tab of a flow's Edit flow view, with a
+preview of the overview step in the flow's branding; Cancel there discards
+that tab's changes only, so Edit flow and the other tabs' drafts stay. The
+languages show ticked when none is saved, and all ticked saves as none. No row
+is the defaults.
+**Theme:** the page applies `theme` through `applyOrgTheme` (`hostedTheme`)
+while it shows, with the branding's own `primaryColor` (the flow's, else the
+org's) over the theme's, and a "Powered by Yivi" line the
+org can leave off (`hide_powered_by`, Settings › Branding).
 
 ## 8. Pausing an org's proofing
 
-Two switches, either of which stops it (`identity_proofing_org_pauses`,
-`pause.go`): a platform admin's pause (`PUT /admin/organizations/{id}/identity-proofing/pause`,
-the "Identity proofing" column on `/admin/organizations`, list at
-`GET /admin/identity-proofing/pauses`), which the org cannot lift, and the org
-admin's own switch (`PUT /orgs/{slug}/identity-proofing/pause`, the card at the
-bottom of the overview). Default: never paused. Audited `identity_proofing.paused`
-/ `.resumed` with `by: platform|organization`. While paused, nothing new
-starts: `CreateRequest` (a member's send, the customer API's create) and
+Only a platform admin pauses an org's proofing (`identity_proofing_org_pauses`,
+`pause.go`): `PUT /admin/organizations/{id}/identity-proofing/pause`, the
+"Identity proofing" column on `/admin/organizations`, list at
+`GET /admin/identity-proofing/pauses`. The org cannot pause or resume itself,
+and nothing below the org (a flow, a person) can be paused. Any member reads
+`GET /orgs/{slug}/identity-proofing/pause`, and the Overview shows why proofing
+is stopped (`proofing-pause.tsx`). Default: never paused. Audited
+`identity_proofing.paused` / `.resumed` with `by: platform`. While paused,
+nothing new starts: `CreateRequest` (a member's send, the API's create) and
 `startHosted` (a hosted link's start, the API's headless start) answer 403
-`proofing_paused`; the overview shows why. Every other route stays open, so an
-admin who paused over a leaked key can still revoke it, remove a webhook or
-erase data. Running sessions still settle (engine notices, the deadline job,
-an on-screen Yivi disclosure) and webhooks still go out. Pausing (either
-level) rejects every open review of the org with `ORG_PAUSED` (reviewer
+`proofing_paused`. Every other route stays open, so an admin who paused over a
+leaked key can still revoke it, remove a webhook or erase data. Running sessions
+still settle (engine notices, the deadline job, an on-screen Yivi disclosure)
+and webhooks still go out. Pausing rejects every open review of the org
+with `ORG_PAUSED` (reviewer
 "system: organisation paused"), so nothing waits on a decision nobody can
-make; both pause dialogs say so. No review stays open under a pause:
+make; the pause's confirmation says so. No review stays open under a pause:
 
 | When | What |
 |---|---|
@@ -885,25 +1280,27 @@ make; both pause dialogs say so. No review stays open under a pause:
 | A session reaches review while paused | `tryReconcile` rejects it at once (`rejectIfPaused`). The pause is read after the review is written, and the pause lists reviews after it is set, so one of the two sees the other. |
 | A rejection there failed | The hourly `PurgeDue` rejects the reviews still open in every paused org (`rejectPausedReviews`). |
 
-The platform pause asks for confirmation, and both levels record who paused (`platformPausedBy`, `orgPausedBy`). A customer
-cannot be paused while one of its sessions waits for review (409
-`customer_has_open_reviews`), checked in the pause's own transaction under the
-customer row's lock. A review reached after a customer pause stays decidable:
-a customer pause refuses only new requests. `Stores.Pauses` nil
+The pause records who set it (`PlatformPausedBy`). The
+columns of an org's own pause (`org_paused_at`, `org_paused_by`) are dropped.
+Migration `20261021101000` turned a pause an org had set itself, and the pause
+of every customer of an org, into a platform pause that names nobody (the
+notice then reads "the platform administrator"); the hourly sweep rejects
+the reviews such an org still had open. Audit events recorded with
+`by: organization` stay in the log. `Stores.Pauses` nil
 (unit tests) never pauses.
 
 ## 9. Manual review
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
 end it, §3). The reviewer sees the person's identity and check results (an
-audited result read). An admin decides it on the customer's Sessions tab (filter
+audited result read). An admin decides it on the All people page or the flow's People tab (filter
 "Needs review", also counted on the overview): approve or reject (optionally
 with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
 `DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
 decided, why and when with the session, `session.ReviewDecision`), audits
 `identity_proofing.review_decided` with the admin as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
-assurance level and the customer's webhook is sent. A request no longer under
+assurance level and the org's webhook is sent (for an external request). A request no longer under
 review is 409 `not_under_review`. Two reviewers deciding at once are
 serialised (`LockReview`).
 
@@ -921,27 +1318,31 @@ names its subject
 What the wallet reads from the engine is not what it keeps. Reconciling reads
 `SessionStatus`, which carries no personal data. It reads the identity
 (`SessionIdentity`) to compare an expected subject (§13) and for a decided or
-in-review customer session's match key (`recordIdentityKey`: an HMAC of the
+in-review external session's match key (`recordIdentityKey`: an HMAC of the
 family name and birth date, §15), the full result (`SessionResult`) for the
 name it keeps (below), and the identity with its images on each result read
 (§4). Of those reads it keeps only the sealed name and that HMAC.
 
-The name is the one exception, and only for a **customer's subject** once the
+The name is the one exception, and only for an **external person** once the
 session is **approved**, or for a data request once its person is proven and
 it goes to review (the sender may know only an address): it is sealed
 under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `proofedName`, never audited. A member's request, a rejected one, or an
 identity check in review keeps no name.
 
-Under a flow's BlurBSN policy a document photo is released and stored only
-with the BSN region the app located filled solid; a photo that came without
-one is withheld from the result and dropped from storage (`coverBSN`), since
-the server never guesses where the BSN is.
+Under a flow's BlurBSN policy (or a mask or omit BSN policy) a document photo
+is released and stored only with the BSN region the app located filled solid;
+a photo that came without one is withheld from the result and dropped from
+storage (`coverBSN`), since the server never guesses where the BSN is. Only a
+Dutch document prints a BSN, so a photo of a document known not to be Dutch
+is released and stored as taken; one whose issuing state is not known is
+treated as Dutch (`coversDocumentBSN`).
 
 A session is purged by the `identity_proofing_purge` pruner
 (`Service.PurgeDue`) its flow's retention override (kept on the request,
-`retention_override_seconds`) or, without one, its customer's
-`data_retention_days` (§4), or for a member's request `proofedNameRetention`
+`retention_override_seconds`) or, without one, for an external person's request the org's
+`data_retention_days` (§4; `defaultDataRetentionDays`, 7, without a settings
+row), or for a member's `proofedNameRetention`
 (30 days), after it ends (completed, cancelled, expired, or gone to review: an
 undecided identity review is kept no longer than a decided one; a data request
 in review lapses after `dataRequestReviewDays` instead): as `DELETE`
@@ -957,7 +1358,9 @@ dashboard shows the time as `purgeAt`.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
     request's review lapse after `dataRequestReviewDays`, an approved erasure
-    when it was decided).
+    when it was decided; the legal retention is a floor of an approved external
+    identity check's retention, the later of two moments, not of two intervals:
+    PostgreSQL compares a month to 30 days, `TestLegalCountsCalendarMonths`).
   - Every write to one of its inputs calls `refreshPurgeAt` on the same
     transaction, after the write:
 
@@ -971,26 +1374,25 @@ dashboard shows the time as `purgeAt`.
 
     A new write to one of those columns must call it too;
     `TestPurgeAtSetOnEveryWrite` checks each against the rule.
-  - A customer's changed `data_retention_days` (`SaveSettings`) recomputes its
-    unpurged requests without a flow retention (`refreshCustomerPurgeAt`,
-    through the org's customer index). A shorter one therefore erases older
-    sessions within the hour: the settings tab confirms it first. Lock order (rule at
-    `lockCustomer`):
+  - An org's changed `data_retention_days` (`OrgSettingsStore.SaveSession`;
+    no longer reachable from the API, the value is fixed) recomputes the purge
+    time of its unpurged external requests that follow its retention, with no
+    flow override (`refreshOrgPurgeAt`). Lock order (rule at `lockSettings`, an advisory lock
+    on the org: an org that saved nothing has no settings row to lock):
 
-    | Transaction | Customer row | Request rows |
+    | Transaction | Settings lock | Request rows |
     |---|---|---|
-    | `SaveSettings` | `FOR NO KEY UPDATE`, first | then all unpurged, `FOR NO KEY UPDATE` in id order |
-    | `RequestStore.Create` | `FOR SHARE`, before the insert | its new row |
-    | Request writers (`Cancel`, `RecordOutcome`, `Purge`, ...) | `FOR KEY SHARE` (webhook delivery's foreign key), after | their row, first |
-    | `SetStatus`, `Remove` | `FOR UPDATE` | read only (`Remove` deletes purged ones) |
-    | `ClearExpiredProofedNames` | none | due rows in id order |
+    | `SaveSession`, `SaveLegalRetention` | exclusive (`settingsLockWrite`), first | then all unpurged external ones, `FOR NO KEY UPDATE` in id order |
+    | `RequestStore.Create` (external person) | shared (`settingsLockCreate`), before the insert | its new row |
+    | Request writers (`Cancel`, `RecordOutcome`, `Purge`, ...) | none | their row |
+    | `ClearExpiredProofedNames` | none | due rows in id order, `FOR NO KEY UPDATE` |
 
-    - `FOR SHARE` and `FOR NO KEY UPDATE` conflict, so no request is created
-      against the old retention and left stale (`TestRetentionWaitsForInsert`).
-    - `FOR KEY SHARE` passes `FOR NO KEY UPDATE`, so a request writer holding
-      a row the retention change waits on still enqueues its webhook and
-      commits. With `FOR UPDATE` that was a deadlock (40P01,
-      `TestRetentionBesideWrite`).
+    - The exclusive and the shared lock conflict, so no request is created
+      against the old retention and left stale (`TestRetentionWaitsForInsert`);
+      inserts share it and never wait on each other.
+    - No other writer takes the lock, so none waits on it while holding a
+      request's row: a request writer holding a row the retention change waits
+      on still enqueues its webhook and commits (`TestRetentionBesideWrite`).
     - Statements that wait on several request rows lock them in id order;
       `LapseLinks` and `ListDue` use `SKIP LOCKED` and never wait.
   - A running session's cap is stored before it passes; the purge asks
@@ -1043,19 +1445,22 @@ Everything this feature does not do yet, in one place.
   expected person to the subject.
 - **Reference photo (§14):** not sent from the wallet's own send form; not
   combined with the expected-subject match, which needs the document data.
-- **Data requests (§15):** no matching across customers or orgs (each customer
-  is the controller of its own sessions); no mail to the person when decided;
-  no data requests on members' own proofing requests. An erasure cannot take a
-  `probable`, `email` or `name` match: those wait for the customer's retention.
+- **Data requests (§15):** no matching across orgs (each org is the controller
+  of its own sessions); no mail to the person when decided; no data requests on
+  members' own proofing requests; only an admin (or an API key) sends one. An
+  erasure cannot take a `probable`, `email` or `name` match: those wait for the
+  org's retention. A deployment without Regula cannot create the standard flows
+  (they check the face), so it cannot send a data request.
 - **Chip Authentication** over DG14 is not run: `nfc.chip_auth` is checked
   through Active Authentication only (`chip_verify.go`), so a chip with
   Chip Authentication and no AA key is not proven genuine against cloning.
 - **Yivi app:**
   - It reaches low only, so it is offered on no flow requiring substantial;
     a Yivi path to substantial is planned.
-  - Its disclosure (`proofingQuery`, `dcql.go`) asks no document type,
-    issuing country or expiry, so a flow that restricts the type or country
-    refuses every Yivi disclosure.
+  - Its disclosure (`proofingQuery`, `dcql.go`) asks no document code,
+    issuing country or expiry, so a flow that restricts the country, or the
+    document codes, refuses every Yivi disclosure; one listing kinds, as the
+    editor saves them, is held to the credential's kind.
 - **Yivi route end to end.** It does not work end to end yet. Still to do:
   - require the device token on the Yivi routes, as on the Idem ones;
   - give a failed hosted Yivi session a restart (R26);
@@ -1066,30 +1471,26 @@ Everything this feature does not do yet, in one place.
   moves the slot and revokes the old device. Restricting who may mint one is a
   later feature. The hosted page does not follow the app (`waiting` / `connected` /
   `away`) as the on-screen page does, so its session QR stays shown.
-- **Custom domains and white labelling** of the hosted page are not built:
-  the page is on the wallet's own domain with the customer's branding (§4).
-  Planned: white labelling per org, then per customer, carried through to the
-  QR into the Idem app, usable only with that org's and customer's API key.
+- **Custom domains** for the hosted page are not built: the page is on the
+  wallet's own domain with the org's branding and white-label (§4).
 - **Settings still open:**
-  - which fields a customer must send with a session, and what a mismatch
+  - which fields the sender must send with a session, and what a mismatch
     does, cannot be set per flow in the editor (§13 is per session);
-  - raising a customer's retention after a session moves the wallet's purge,
+  - raising the org's retention after a session moves the wallet's purge,
     not the engine copy's, and the subject was told the old number.
-- **Rate limits** are a fixed bucket per customer (`apiCallLimit`,
-  `APISessionLimit`, `hostedCallLimit`), per replica; an org has no total.
-  Planned: an org budget with customer limits inside it, `RateLimit-*`
-  headers, and API usage per org ranked by customer and key.
+- **Rate limits** are a fixed bucket per org (`apiCallLimit`,
+  `APISessionLimit`, `hostedCallLimit`), per replica. Planned: `RateLimit-*`
+  headers, and API usage per org ranked by key.
 - **App long-poll.** `GET /app/{token}/events` re-reads the session every
   `SessionEventsPoll` while a client waits; a change notice would spare those
   reads.
 - **Tests without a DOM:** `SecretReveal`'s `dismissible={false}` has no
   render test.
-- **Planned features:** who sees what (member, admin, platform admin,
-  customer); audit log filter and export (the buttons exist); DigiD for the
+- **Planned features:** who sees what (member, admin, platform admin); audit log filter and export (the buttons exist); DigiD for the
   address, compared with what the person gave (Idem route); anti-glare for document capture; `high` assurance, only with a
   certified liveness vendor.
 - **Before launch:**
-  - The DPA and the controller and processor chain with each customer.
+  - The DPA and the controller and processor chain with each org.
   - The Regula licence for production.
   - Verifying the EU Trusted Lists' XAdES signatures: §12 trusts them on
     transport security alone (`diploma/eutl`).
@@ -1107,9 +1508,9 @@ only: the engine knows nothing of it.
   audited `flow_diplomas_configured`. A step is in the flow or not, so there is
   no optional diploma step. `required` needs a flow that reads the name and
   date of birth (`flow_no_identity`): each extract's holder is matched
-  against them. `identityRequired` holds such a flow, and a data request
-  flow, to it in `EditFlow` (the spec must name `dg1`) and
-  `ActivateFlowVersion` too; the editor locks Name and document details on
+  against them. `identityRequired` holds such a flow to it in `EditFlow` (the
+  spec must name `dg1`) and `ActivateFlowVersion` too (a data request flow is
+  never edited, §15); the editor locks Name and document details on
   and saves a setting that lifts the rule before a version that drops `dg1`.
   The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
   for the admin, never sent to the engine (its steps are the app's, and it
@@ -1168,8 +1569,8 @@ only: the engine knows nothing of it.
   PDF, the holder's name or birth date. Audited `diploma_added` (webhook
   `session.diploma_added`) and `diploma_rejected` (reason only:
   `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
-  Shown in the request responses, the customer API's `result`, and the
-  Sessions tab. `Purge` deletes them with the rest.
+  Shown in the request responses, the public API's `result`, and the
+  people table. `Purge` deletes them with the rest.
 
 
 ## 13. One known person (expected subject)
@@ -1179,10 +1580,11 @@ account recovery (the org's "wachtwoord vergeten" sends its user to a hosted
 session) or "Dibran Mulder must identify himself". Wallet-side only: the engine
 proofs whoever scans, and the wallet holds the outcome to the person.
 
-- **Send.** A customer's request with a `birthDate` (YYYY-MM-DD, past, with
-  `name`): the send form's "Date of birth" (shown only for a flow that reads
-  the document data), `POST .../requests`, and the customer API's
-  `POST /proofing/sessions`, on every channel. A member's request cannot
+- **Send.** An external person's request with a `birthDate` (YYYY-MM-DD, past, with
+  `name`): the Verify a person dialog's "Only let this person pass" switch (shown only for a
+  flow that reads the document data), which asks for the name and the date of birth,
+  `POST .../requests`, and the public API's
+  `POST /proofing/sessions`, on every channel. A request to a member cannot
   (`ErrInvalidInput`: the wallet holds no birth date of a member), nor a flow
   whose result lacks the document data (`readsIdentity`, the same name in the
   backend and the frontend: `dg1` requested). Without a birth date the name stays a
@@ -1204,28 +1606,30 @@ proofs whoever scans, and the wallet holds the outcome to the person.
   `rejected` with `IDENTITY_MISMATCH` (no proofed name kept); a failed
   identity read leaves the request undecided for the next reconcile. A
   review approval is matched too. The engine still holds its approval, so
-  the result read (`requestResult` → `heldToVerdict`, customer API and admin
+  the result read (`requestResult` → `heldToVerdict`, public API and admin
   view alike) answers the wallet's rejection and code with no identity or
   images: the other person is never shown (`ASSURANCE_NOT_MET` likewise).
-- **Shown.** `expectedSubject` on the request, the customer API's session
-  and its webhooks; "Expected person" in the Sessions tab's details; the
+- **Shown.** `expectedSubject` on the request, the public API's session
+  and its webhooks; "Expected person" in the people table's details; the
   reason in words (`proofingRejectionReason`).
 
-## 14. The customer's own photo (reference photo)
+## 14. The org's own photo (reference photo)
 
-For a customer that already holds a photo of the person and wants a live face
+For an org that already holds a photo of the person and wants a live face
 check against it without the document (an insurer confirming a policy
 holder's change of bank account).
 
 - **Flow.** A face step without `nfc_read` (`NeedsReferencePhoto`; the
   editor's "Face check" alone). `Completable` stays false for it (a member
-  has no photo to send); `customerCompletable` is true, so it can be
-  assigned to a customer, and the flow lists carry `needsReferencePhoto`.
+  has no photo to send); `externalCompletable` is true, so an admin or an API
+  key can send it to an external person, and the flow lists carry
+  `needsReferencePhoto`.
   It runs in the Idem app only (`yiviAppAvailable` false: the Yivi app
   matches against its credential's photo) and reaches no eIDAS level (the
-  levels need the chip; the engine scores it as `matchedRelyingPartyPhoto`).
+  levels need the chip; the engine scores it with the sender's photo as the face's
+  source, `matchedRelyingPartyPhoto`).
   The send form leaves it out.
-- **Send.** Only the customer API: `referencePhoto`, standard base64,
+- **Send.** Only the public API: `referencePhoto`, standard base64,
   sniffed as PNG/JPEG/WebP and decoded when the engine session is made
   (`checkReferencePhoto`; one that does not decode is 400, not a failed
   face step later): at send, or for a hosted request at its subject's start,
@@ -1246,27 +1650,70 @@ holder's change of bank account).
 - **In the result.** The session's result marks `faceReference:
   relying_party` (the evidence reads `reference_photo`, not `emrtd`) and,
   when the flow requests the selfie, releases the photo beside it
-  (`referencePhoto`), kept and purged with the selfie: the Sessions tab
-  shows "Customer's photo" next to the selfie. The customer API's result
+  (`referencePhoto`), kept and purged with the selfie: the people table
+  shows "Photo sent with the request" next to the selfie. The public API's result
   carries no image, as ever.
 
 ## 15. Data requests (GDPR access and erasure)
 
-A person asks a customer what is held of them ("see my data", Art. 15) or for
-its erasure ("delete my data", Art. 17). The customer sends them a session on
-a flow of that kind, like any other session (API, hosted link, mail or
-on-screen); the person proves who they are, and the session goes to the
-customer's **needs review**, where an org admin decides. Code:
-`data_request*.go`; frontend `routes/data-request-review.tsx`, the flow
-editor's Type, and the hosted page.
+A person asks the org what is held of them ("see my data", Art. 15) or for
+its erasure ("delete my data", Art. 17). See my data and Delete my data are a
+standard feature of every org, not flows anyone sets up: the org sends the
+person a session on its standard flow of that kind, like any other session
+(API, hosted link, mail or on-screen); the person proves who they are, and the
+session goes to the org's **needs review**, where an org admin decides. Code:
+`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`,
+the Verify a person dialog's "What do you send?" and the hosted page.
 
-- **Flow kind.** `identity_proofing_flow_settings.kind`: `identity` (the
-  default), `data_access` or `data_erasure`, set in the flow editor
-  (`PUT …/flows/{id}/kind`, audited `identity_proofing.flow_kind_configured`).
-  A data request flow must read the name and date of birth
-  (`flow_no_identity`) and is never a members' flow (`data_flow_for_member`,
-  a CHECK and both service paths); it asks for no diplomas. A request keeps
-  the kind it was sent with (`identity_proofing_requests.flow_kind`).
+- **Standard flows.** One flow per org of each kind, `data_access` and
+  `data_erasure` (`identity_proofing_flow_settings.kind`, `standard` true; a
+  partial unique index allows one per kind, a CHECK none of kind `identity`).
+  The wallet creates them (`Service.standardFlows`) the first time an org
+  needs them: `GET .../data-request-flows` (admin; the dialog and the on-screen
+  page read them there) or a send of a data request. That is lazy rather than
+  a backfill because the flows live in the proofing engine, which validates
+  and stores a flow only through its own interface (a migration would have to
+  write the engine's definition JSON), and it covers new and existing orgs
+  alike. Their definition is the wallet's (`standardFlowSpec`): document scan,
+  chip read and a face check (Regula, liveness) at eIDAS Substantial, releasing
+  the document data (`dg1`, the name and date of birth a request finds the
+  person's sessions by), `chip_checks` and `biometrics`, never an image and
+  never the age check, which would withhold that date of birth; legal basis
+  `legal_obligation`. A standard flow whose active version falls short of it
+  (`meetsStandard`, which needs `readsIdentity`: `dg1` without `age_over`)
+  gets it back in a new version under its own name, and
+  one the engine no longer lists is replaced. Both are audited
+  `flow_created`/`flow_version_created` and `flow_kind_configured` without an
+  actor. Two first sends at once each create a flow; `ClaimStandardFlow`
+  (an advisory lock per org and kind) makes the first the standard one and
+  leaves the other a hidden data request flow.
+- **Not a flow anyone edits.** No flow becomes a data request any other way
+  (the flow editor's Type and `PUT …/flows/{id}/kind` are gone). A data
+  request flow is not in `GET .../flows`, the API's `GET /proofing/flows` or
+  any flow picker, and `EditFlow`, `ActivateFlowVersion` and the hosted,
+  branding, diploma and address saves refuse it (409 `data_request_flow`). It
+  is never a members' flow (`data_flow_for_member`, a CHECK and both service
+  paths) nor the org's default flow (a CHECK, and 400 `invalid_input` from
+  `validSelection`); it asks for no diplomas and no address.
+- **Sending one.** `flowKind` `data_access` or `data_erasure` on
+  `POST .../requests` (the dialog) and the API's `POST /proofing/sessions`
+  runs on the standard flow of that kind, created first if need be
+  (`requestFlowID`); only an admin or an API key sends one
+  (`flow_not_allowed`), only to an external person. A `flowId` that names a data
+  request flow (an API caller that kept a standard flow's id) runs on the
+  standard flow of its kind, and a `flowKind` that is not the named flow's kind
+  is 400 `invalid_input`. A request keeps the kind it was sent with
+  (`identity_proofing_requests.flow_kind`).
+- **Flows from before (migration 20261021122000).** Only the seed made data
+  request flows (it no longer does). An org that has flows of a data request
+  kind keeps the oldest of each kind as its standard flow: the one whose first
+  engine version is oldest, else (a flow the engine does not hold, as under the
+  in-memory stub) the one whose settings were written first. The others stay
+  data request flows: hidden, not editable, and a request naming one runs on the
+  standard flow of its kind; their past requests keep pointing at them. Every
+  data request flow's hosted page goes back to the default (on, every language,
+  ending on the redirect), since nobody can open its Hosted page tab any more;
+  Down drops the mark and leaves the hosted pages on.
 - **The subject's page.** A data request refused after the person proved who
   they are (`dataRequestRefusal`: `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
   `ORG_PAUSED`, `LEGAL_RETENTION`) reads "Request refused" with the reason in
@@ -1280,33 +1727,35 @@ editor's Type, and the hosted page.
   name like an approval. From then on the wallet owns the decision: a later
   engine read (approved, or the session purged at the engine) changes nothing.
 - **Matches.** `findDataMatches` reads the person's identity and every
-  `Candidates` session of the **same customer** (not purged, settled; the
+  `Candidates` session of the **org**, external ones only (not purged, settled; the
   person's earlier data requests too once decided, as each holds who asked, so
   an erasure clears them; one still in review never) with the person's
   identity match key. A match needs the same full name word for
   word (`diploma.SameName`) and birth date: `strong` when document type,
   issuing state and expiry also agree (the same document; the document number
-  is never read), `probable` otherwise. The customer's unfinished sessions
+  is never read), `probable` otherwise. The org's unfinished external sessions
   (pending, in progress, expired, cancelled; `UnfinishedCandidates`) hold no
   proofed identity, only what the sender typed, and are listed apart:
   - `email`: sent to exactly the same e-mail address, case aside.
   - `name`: otherwise, the typed name is the person's full name word for word
     (`diploma.SameName`).
   Stored in `identity_proofing_request_matches`, whose composite foreign keys
-  keep both requests with the matching request's customer. One reconcile at a
+  keep both requests within the matching request's org. One reconcile at a
   time finds a request's matches (a hosted status poll meanwhile waits), and
   what it read per candidate is kept (`identity_proofing_request_match_checks`)
   so a retry reads none again.
-- **Identity match key.** `identity_match_key` is an HMAC of the customer, the
+- **Identity match key.** `identity_match_key` is an HMAC of the org, the
   normalised family name and the date of birth, under a secret derived from
-  the encryption key. It is set when a customer's session is decided or goes
-  to review (`recordIdentityKey`; a data request's by its own search) and
-  cleared by the purge.
+  the encryption key. It is set when an external person's session is decided
+  or goes to review (`recordIdentityKey`; a data request's by its own search)
+  and cleared by the purge. The migration that removed the customers cleared
+  the keys made per customer, so older sessions have none and are not
+  candidates.
   - `Candidates` selects on it, so only sessions with the person's family
     name and date of birth are read from the engine.
-  - It links one person's sessions at one customer for a database reader,
-    who can already link them by the plaintext `subject_email`; it never
-    links across customers.
+  - It links one person's sessions at one org for a database reader, who can
+    already link them by the plaintext `subject_email`; it never links across
+    orgs.
 - **Review.** The session's panel shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
@@ -1322,21 +1771,41 @@ editor's Type, and the hosted page.
   session), then the request itself. Access sets `data_export_until`
   (`DataExportWindow`, 7 days; 24 h through the hosted link). Reject records
   `MANUAL_REVIEW_REJECTED` unless a code is given.
-- **How an erasure is decided** is the customer's `erasure_handling`
-  (`ErasureHandling`, its Settings tab; `handleErasure`, run once as the
-  request reaches review, under the review lock):
+- **How an erasure is decided** is the org's `erasure_handling`
+  (`ErasureHandling`, in `identity_proofing_settings`; "Who decides" on the
+  Data requests card of Settings › Data and privacy; `handleErasure`, run once
+  as the request reaches review, under the review lock):
   - `review` (default): a reviewer decides, as above.
   - `automatic`: the sure matches are erased at once. Without unsure ones the
     request is approved and purged then (reviewer `automatic`); with them it
     waits for a reviewer, who decides only those (the erased ones show
     "Erased" and stay ticked).
-  - `keep`: refused at once with `LEGAL_RETENTION`, for a customer bound by
-    law to keep the data (Art. 17(3)(b)); nothing is erased.
-  A failure there leaves the request in review. An approved erasure stores how
+  What the law makes an org keep (Art. 17(3)(b)) is its legal retention, not a
+  handling: `keep`, which refused every erasure, is gone. A failure there
+  leaves the request in review. An approved erasure stores how
   many matches it kept (`data_matches_kept`), and the hosted page says so
-  instead of "Your data was deleted."; a refused one says the customer must
+  instead of "Your data was deleted."; a refused one says the org must
   keep the data by law. Its `purge_at` is its decision time, so a final purge
   that failed is retried by the hourly `PurgeDue`.
+- **Legal retention** (§4). An erasure takes no session the org's legal
+  retention still holds (`DataMatch.HeldUntil`, from `legalHeldUntil` in
+  `data_request_store.go`: the end of the check plus the legal period).
+  `approvedMatches` leaves a held session out of the default choice and refuses
+  a tick on one (`ErrLegalRetention`, 409 `legal_retention`); the review shows it
+  unticked with its date. When every identity check still found is held (and
+  one is), `declineHeldErasure` declines the request as it reaches review,
+  without a reviewer: rejected `LEGAL_RETENTION`, decided by `automatic`. The
+  person's earlier data requests among the matches do not count: each holds
+  only who asked and goes at its own retention, so it sends nobody to review.
+  If some identity check is free the request goes to review as before; an
+  `automatic` erasure likewise leaves a held session alone and erases the free
+  sure ones. Either decision records what the law still holds
+  (`data_matches_held`, `data_held_until`, `DataHold`), which outlives the
+  request's purge. The person's page then shows how many sessions are kept,
+  the org's reason in their language and the date the last of them goes
+  (`legalRetention` in the hosted progress, `withLegalNotice`, GDPR Art.
+  12(4)), on a declined request and on an approved one alike, until that date.
+  "See my data" is never held.
 - **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
   12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`. An identity
   review counts its retention from going to review, and lapses the same way
@@ -1344,13 +1813,13 @@ editor's Type, and the hosted page.
 - **Export.** An approved access request's data: per approved session the
   outcome and its `match`. Only a `strong` match also carries identity and
   evidence, the address, and diplomas: a ticked `probable`, `email` or `name` match may be
-  someone else's session. The contact the customer gave (the name and address
+  someone else's session. The contact the sender gave (the name and address
   it typed) goes out only for a strong match that was also approved for the
   one person it was sent to (`DataExportSession.Addressed`). Images are named in
   `imagesHeld`, never included. For the person on their
   hosted link (`GET /proof/{token}/data-export`, `dataExportUntil` in the
   progress; 24 h), for the admin (`…/requests/{id}/data-export`) and for the
-  customer (`GET /proofing/sessions/{id}/data-export`). Audited
+  org's software (`GET /proofing/sessions/{id}/data-export`). Audited
   `identity_proofing.data_exported`.
 
 ## 16. Postal address
@@ -1411,7 +1880,7 @@ declares, never read off a document; a Dutch one is checked against the BAG.
 - **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on
   every request read. Audited `address_added` without the address; the webhook
   `session.address_added` carries it.
-  - Shown in the request responses, the customer API's `result`, a data
-    access export (strong match only), and the Sessions tab.
+  - Shown in the request responses, the public API's `result`, a data
+    access export (strong match only), and the Sessions page.
   - `Purge` clears it and strips `address` from the request's webhook
     deliveries.

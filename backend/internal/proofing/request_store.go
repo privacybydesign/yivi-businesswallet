@@ -39,12 +39,12 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	r.subject_user_id, COALESCE(r.flow_version, 0),
-	r.customer_id, COALESCE(c.name, ''), r.proofed_name_ciphertext, c.data_retention_days,
+	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
-	r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at, ` + purgeAtColumn
+	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -59,34 +59,59 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 // Art. 12(3)'s month to answer. Its purge comes up then (lapseReview).
 const dataRequestReviewDays = 30
 
+// settledAt is when an external request ended, for what is counted from it:
+// cancelled, its session ended, decided, or else its running session's or
+// unstarted link's cap.
+const settledAt = `COALESCE(r.cancelled_at, r.ips_session_ended_at,
+			CASE WHEN r.status IN ('approved', 'rejected')
+				OR (r.status = 'needs_review' AND r.flow_kind = 'identity') THEN r.completed_at END,
+			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
+			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)`
+
+// legalHeld is an external identity check its org's legal retention holds: an
+// approved one, which proved who the person is. An unstarted, expired,
+// cancelled or rejected check proved nobody, so the law keeps nothing of it.
+const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND r.status = 'approved'`
+
+// legalHeldUntil is when an external identity check the legal retention holds
+// (legalHeld) may be erased: that long after it ended. NULL for any other
+// request, one already purged, and an org with no legal retention.
+const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
+		THEN ` + settledAt + ` + make_interval(months => st.legal_retention_months) END`
+
 // setPurgeAt stores purge_at on the requests r its WHERE (appended, over $1)
-// selects; $2 is dataRequestReviewDays and $3 proofedNameRetention in seconds.
-// It is the one rule for when a request is purged, so ListPurgeDue reads an
-// index instead of computing it for every unpurged row:
-//   - its retention (its flow's override, else its customer's
-//     data_retention_days, else for a member's proofedNameRetention) after it
-//     settled: cancelled, its session ended, decided, or else its running
-//     session's or unstarted link's cap. A cap is stored before it passes; the
-//     purge asks purge_at <= now(), which holds only after the cap anyway,
-//     since a retention is never zero. An identity review counts as settled
-//     when it went there: undecided, it is kept no longer than a decided one,
-//     the most its subject was told.
+// selects; $2 is dataRequestReviewDays, $3 proofedNameRetention in seconds and
+// $4 defaultDataRetentionDays. It is the one rule for when a request is
+// purged, so ListPurgeDue reads an index instead of computing it for every
+// unpurged row:
+//   - its retention (its flow's override, else for an external person's the
+//     org's data_retention_days, or defaultDataRetentionDays in an org that
+//     saved no settings, else proofedNameRetention: a member's) after it
+//     settled (settledAt), and for an approved external identity check
+//     (legalHeld) never before the org's legal retention has passed. The
+//     later of two moments, not of two intervals: PostgreSQL compares a month
+//     to 30 days. A cap is stored before it passes; the purge asks
+//     purge_at <= now(), which holds only after the cap anyway, since a
+//     retention is never zero. An identity review counts as settled when it
+//     went there: undecided, it is kept no longer than a decided one, the
+//     most its subject was told.
 //   - a data request in review: dataRequestReviewDays after it went there.
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
-// The customer's retention is read in the statement: CustomerStore.SaveSettings
-// sets it again for that customer's requests (refreshCustomerPurgeAt).
+// The org's retention is read in the statement: OrgSettingsStore.Save (and
+// its SaveSession and SaveLegalRetention wrappers) sets it again for the
+// org's requests (refreshOrgPurgeAt).
 const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
-		COALESCE(r.cancelled_at, r.ips_session_ended_at,
-			CASE WHEN r.status IN ('approved', 'rejected')
-				OR (r.status = 'needs_review' AND r.flow_kind = 'identity') THEN r.completed_at END,
-			CASE WHEN r.status IN ('pending', 'in_progress') THEN r.ips_session_expires_at END,
-			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)
+		GREATEST(` + settledAt + `
 			+ COALESCE(make_interval(secs => r.retention_override_seconds),
-				make_interval(days => (SELECT c.data_retention_days FROM identity_proofing_customers c
-					WHERE c.id = r.customer_id)),
+				CASE WHEN r.subject_kind = 'external' THEN make_interval(days => COALESCE((
+					SELECT st.data_retention_days FROM identity_proofing_settings st
+					WHERE st.organization_id = r.organization_id), $4)) END,
 				make_interval(secs => $3)),
+			CASE WHEN ` + legalHeld + ` THEN ` + settledAt + `
+				+ (SELECT make_interval(months => st.legal_retention_months) FROM identity_proofing_settings st
+					WHERE st.organization_id = r.organization_id) END),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
 			THEN r.completed_at + make_interval(days => $2) END,
 		CASE WHEN r.status = 'approved' AND r.flow_kind = 'data_erasure' THEN r.completed_at END)
@@ -101,38 +126,81 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, proofedNameRetention.Seconds()); err != nil {
+	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, proofedNameRetention.Seconds(),
+		defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time requests %v: %w", ids, err)
 	}
 	return nil
 }
 
-// refreshCustomerPurgeAt stores purge_at again for every unpurged request of
-// customer id that follows its retention (no flow override): that retention
-// changed. It reads them through the org's customer index
-// (identity_proofing_requests_org_customer_idx), never the whole table. The
-// caller holds the customer's row
-// (lockCustomer, customerLockSettings), which a request insert waits on
-// (customerLockCreate), so no request is created against the old retention
+// refreshOrgPurgeAt stores purge_at again for every unpurged external request
+// of org id: its retention or its legal retention changed, which a flow's own
+// retention does not escape. The caller holds the org's settings
+// (lockSettings, settingsLockWrite), which a request insert waits on
+// (settingsLockCreate), so no request is created against the old retention
 // while this runs and stays stale. It locks the rows in id order before it
 // writes them, so it never deadlocks another statement that does too.
-func refreshCustomerPurgeAt(ctx context.Context, q database.Querier, orgID, id uuid.UUID) error {
+func refreshOrgPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) error {
 	if _, err := q.Exec(ctx, `SELECT id FROM identity_proofing_requests
-		WHERE organization_id = $1 AND customer_id = $2 AND purged_at IS NULL AND retention_override_seconds IS NULL
-		ORDER BY id FOR NO KEY UPDATE`, orgID, id); err != nil {
-		return fmt.Errorf("proofing: lock requests customer %s: %w", id, err)
+		WHERE organization_id = $1 AND subject_kind = 'external' AND purged_at IS NULL
+		ORDER BY id FOR NO KEY UPDATE`, id); err != nil {
+		return fmt.Errorf("proofing: lock requests org %s: %w", id, err)
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $4 AND r.customer_id = $1 AND r.purged_at IS NULL
-		AND r.retention_override_seconds IS NULL`, id, dataRequestReviewDays, proofedNameRetention.Seconds(), orgID); err != nil {
-		return fmt.Errorf("proofing: set purge time customer %s: %w", id, err)
+	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL`,
+		id, dataRequestReviewDays, proofedNameRetention.Seconds(), defaultDataRetentionDays); err != nil {
+		return fmt.Errorf("proofing: set purge time org %s: %w", id, err)
 	}
 	return nil
 }
 
-// requestFrom joins a request to its sender and its customer.
+// HeldUntil is when the org's legal retention lets its request id be erased
+// (legalHeldUntil); nil when it holds nothing of it.
+func (s *RequestStore) HeldUntil(ctx context.Context, orgID, id uuid.UUID) (*time.Time, error) {
+	var until *time.Time
+	err := s.db.QueryRow(ctx, `SELECT `+legalHeldUntil+` FROM identity_proofing_requests r
+		LEFT JOIN identity_proofing_settings st ON st.organization_id = r.organization_id
+		WHERE r.id = $1 AND r.organization_id = $2`, id, orgID).Scan(&until)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRequestNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("proofing: legal hold request %s: %w", id, err)
+	}
+	return until, nil
+}
+
+// IdentitySessions lists the engine sessions of the org's unpurged external
+// identity checks, grouped by the retention override each was sent with (0 for
+// none).
+func (s *RequestStore) IdentitySessions(ctx context.Context, orgID uuid.UUID) (map[time.Duration][]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT COALESCE(retention_override_seconds, 0), array_agg(ips_session_id)
+		FROM identity_proofing_requests
+		WHERE organization_id = $1 AND subject_kind = 'external' AND flow_kind = 'identity'
+			AND purged_at IS NULL AND ips_session_id IS NOT NULL
+		GROUP BY 1`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list identity sessions org %s: %w", orgID, err)
+	}
+	defer rows.Close()
+	out := map[time.Duration][]string{}
+	for rows.Next() {
+		var seconds int
+		var ids []string
+		if err := rows.Scan(&seconds, &ids); err != nil {
+			return nil, fmt.Errorf("proofing: scan identity sessions org %s: %w", orgID, err)
+		}
+		out[time.Duration(seconds)*time.Second] = ids
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proofing: list identity sessions org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
+// requestFrom joins a request to its sender and its org's settings.
 const requestFrom = ` FROM identity_proofing_requests r
 	LEFT JOIN users u ON u.id = r.requested_by
-	LEFT JOIN identity_proofing_customers c ON c.id = r.customer_id
+	LEFT JOIN identity_proofing_settings st ON st.organization_id = r.organization_id
 	LEFT JOIN identity_proofing_api_keys k ON k.id = r.api_key_id`
 
 func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
@@ -141,44 +209,34 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
 	var nameCT, birthDateCT, addressCT []byte
-	var retentionDays, overrideSeconds *int
+	var retentionDays, legalMonths, overrideSeconds, heldSessions *int
+	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
-		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
+		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds,
+		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
+		&heldSessions, &heldUntil, &overrideSeconds,
 		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
-	r.NameRetention = proofedNameRetention
-	if retentionDays != nil {
-		r.NameRetention = CustomerSettings{DataRetentionDays: *retentionDays}.DataRetention()
+	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
+	// A name is personal data of the check, kept as long as the law says once
+	// it is approved (RecordOutcome).
+	if legalMonths != nil && r.External() && r.FlowKind == FlowIdentity {
+		r.legalNameRetention = LegalRetention{Months: *legalMonths}.longest()
 	}
-	if overrideSeconds != nil {
-		r.RetentionOverride = time.Duration(*overrideSeconds) * time.Second
-		r.NameRetention = r.RetentionOverride
+	if heldSessions != nil && heldUntil != nil {
+		r.DataHold = &DataHold{Sessions: *heldSessions, Until: *heldUntil}
 	}
-	if nameCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		name, err := s.cipher.Decrypt(nameCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt proofed name request %s: %w", r.ID, err)}
-		}
-		r.ProofedName = string(name)
+	var err error
+	if r.ProofedName, err = s.openSealed(r.ID, "proofed name", nameCT); err != nil {
+		return Request{}, err
 	}
-	if birthDateCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		birthDate, err := s.cipher.Decrypt(birthDateCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)}
-		}
-		r.expectedBirthDate = string(birthDate)
+	if r.expectedBirthDate, err = s.openSealed(r.ID, "expected birth date", birthDateCT); err != nil {
+		return Request{}, err
 	}
 	if addressCT != nil {
 		addr, err := s.decryptAddress(r.ID, addressCT)
@@ -203,6 +261,43 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	return r, nil
 }
 
+// nameRetention is how long a request's proofed name is kept, and the flow's
+// override of the retention, zero when the flow sets none: the wallet's own
+// retention for a member's request, the org's for an external person's
+// (retentionDays, the default for an org without settings), and the override
+// (overrideSeconds) over either.
+func nameRetention(external bool, retentionDays, overrideSeconds *int) (keep, override time.Duration) {
+	keep = proofedNameRetention
+	if external {
+		days := defaultDataRetentionDays
+		if retentionDays != nil {
+			days = *retentionDays
+		}
+		keep = SessionSettings{DataRetentionDays: days}.DataRetention()
+	}
+	if overrideSeconds != nil {
+		override = time.Duration(*overrideSeconds) * time.Second
+		keep = override
+	}
+	return keep, override
+}
+
+// openSealed opens what, a sealed field of request id; a field not set opens
+// to "".
+func (s *RequestStore) openSealed(id uuid.UUID, what string, ciphertext []byte) (string, error) {
+	if ciphertext == nil {
+		return "", nil
+	}
+	if s.cipher == nil {
+		return "", ErrNoEncryptionKey
+	}
+	plain, err := s.cipher.Decrypt(ciphertext)
+	if err != nil {
+		return "", &unreadableRequestError{id: id, err: fmt.Errorf("proofing: decrypt %s request %s: %w", what, id, err)}
+	}
+	return string(plain), nil
+}
+
 // unreadableRequestError is a request row whose sealed fields do not open: a
 // failure of that row, not of the read it is in.
 type unreadableRequestError struct {
@@ -218,8 +313,8 @@ func (e *unreadableRequestError) Unwrap() error { return e.err }
 type NewStoredRequest struct {
 	ID    uuid.UUID
 	OrgID uuid.UUID
-	// RequestedBy is the member who sent it, APIKeyID the customer key that
-	// created it; exactly one is set.
+	// RequestedBy is the member who sent it, APIKeyID the key that created
+	// it; exactly one is set.
 	RequestedBy   *uuid.UUID
 	APIKeyID      *uuid.UUID
 	Subject       Subject
@@ -276,22 +371,22 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		// Before the row: a retention change in flight finishes first, and the
-		// next waits for this insert (lockCustomer's lock order).
-		if in.Subject.CustomerID != nil {
-			if err := lockCustomer(ctx, q, in.OrgID, *in.Subject.CustomerID, customerLockCreate); err != nil {
+		// next waits for this insert (lockSettings' lock order).
+		if in.Subject.Kind == SubjectExternal {
+			if err := lockSettings(ctx, q, in.OrgID, settingsLockCreate); err != nil {
 				return err
 			}
 		}
 
 		const insert = `INSERT INTO identity_proofing_requests
-			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
+			(id, organization_id, requested_by, subject_user_id, subject_kind, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
 			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
 				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'))`
-		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
+		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, string(in.Subject.Kind),
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
@@ -323,8 +418,8 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 		if in.Subject.UserID != nil {
 			fields["subjectUserId"] = in.Subject.UserID.String()
 		}
-		if in.Subject.CustomerID != nil {
-			fields["customerId"] = in.Subject.CustomerID.String()
+		if in.Subject.Kind == SubjectExternal {
+			fields["external"] = true
 		}
 		if in.APIKeyID != nil {
 			fields["apiKeyId"] = in.APIKeyID.String()
@@ -487,7 +582,7 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 					req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
 				return err
 			}
-			if err := enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+			if err := enqueueRequestWebhook(ctx, q, req, EventSessionExpired,
 				sessionEventData(req, StatusExpired)); err != nil {
 				return err
 			}
@@ -670,27 +765,26 @@ func (s *RequestStore) Get(ctx context.Context, orgID, id uuid.UUID) (Request, e
 	return req, nil
 }
 
-// CustomerOf returns the customer the org's request was sent for (nil for a
-// member's), or ErrRequestNotFound.
-func (s *RequestStore) CustomerOf(ctx context.Context, orgID, id uuid.UUID) (*uuid.UUID, error) {
-	var customerID *uuid.UUID
-	err := s.db.QueryRow(ctx, `SELECT customer_id FROM identity_proofing_requests
-		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&customerID)
+// SubjectKindOf returns whether the org's request went to a member or to an
+// external person, and the flow it runs, or ErrRequestNotFound.
+func (s *RequestStore) SubjectKindOf(ctx context.Context, orgID, id uuid.UUID) (kind SubjectKind, flowID string, err error) {
+	err = s.db.QueryRow(ctx, `SELECT subject_kind, flow_id FROM identity_proofing_requests
+		WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&kind, &flowID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrRequestNotFound
+		return "", "", ErrRequestNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("proofing: customer of request %s: %w", id, err)
+		return "", "", fmt.Errorf("proofing: subject kind of request %s: %w", id, err)
 	}
-	return customerID, nil
+	return kind, flowID, nil
 }
 
-// GetForCustomer returns one of the requests scope reaches, or
-// ErrRequestNotFound.
-func (s *RequestStore) GetForCustomer(ctx context.Context, scope CustomerScope, id uuid.UUID) (Request, error) {
+// GetExternal returns one of the org's external requests, or ErrRequestNotFound:
+// what an API key reaches.
+func (s *RequestStore) GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
 	query := `SELECT ` + requestColumns + requestFrom + `
-		WHERE r.id = $1 AND r.organization_id = $2 AND r.customer_id = $3`
-	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, scope.OrgID, scope.CustomerID))
+		WHERE r.id = $1 AND r.organization_id = $2 AND r.subject_kind = 'external'`
+	req, err := s.scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrRequestNotFound
 	}
@@ -713,10 +807,11 @@ func (s *RequestStore) get(ctx context.Context, id uuid.UUID) (Request, error) {
 func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
-			AND ($3::uuid IS NULL OR r.customer_id = $3)
-			AND ($5::uuid IS NULL OR r.subject_user_id = $5)
-		ORDER BY r.created_at DESC LIMIT $4`
-	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, filter.CustomerID, maxListedRequests, filter.SubjectUserID)
+			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
+			AND ($5::text IS NULL OR r.subject_kind = $5)
+			AND ($6::text IS NULL OR r.flow_id = $6)
+		ORDER BY r.created_at DESC LIMIT $3`
+	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind, filter.FlowID)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
@@ -735,32 +830,32 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	return out, nil
 }
 
-// ListPage returns up to limit of the requests scope reaches, newest first,
-// after the cursor when one is given: the customer API's paged list.
-func (s *RequestStore) ListPage(ctx context.Context, scope CustomerScope, after *RequestCursor, limit int) ([]Request, error) {
+// ListExternalPage returns up to limit of the org's external requests, newest
+// first, after the cursor when one is given: the API's paged list.
+func (s *RequestStore) ListExternalPage(ctx context.Context, orgID uuid.UUID, after *RequestCursor, limit int) ([]Request, error) {
 	var afterAt *time.Time
 	var afterID *uuid.UUID
 	if after != nil {
 		afterAt, afterID = &after.CreatedAt, &after.ID
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2
-			AND ($3::timestamptz IS NULL OR (r.created_at, r.id) < ($3, $4::uuid))
-		ORDER BY r.created_at DESC, r.id DESC LIMIT $5`, scope.OrgID, scope.CustomerID, afterAt, afterID, limit)
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external'
+			AND ($2::timestamptz IS NULL OR (r.created_at, r.id) < ($2, $3::uuid))
+		ORDER BY r.created_at DESC, r.id DESC LIMIT $4`, orgID, afterAt, afterID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: page requests customer %s: %w", scope.CustomerID, err)
+		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	defer rows.Close()
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request customer %s: %w", scope.CustomerID, err)
+			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
 		}
 		out = append(out, req)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: page requests customer %s: %w", scope.CustomerID, err)
+		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	return out, nil
 }
@@ -807,7 +902,7 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 			}))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCreated, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCreated,
 			sessionEventData(req, StatusPending))
 	})
 	return attached, err
@@ -878,7 +973,7 @@ func (s *RequestStore) MarkStarted(ctx context.Context, req Request, sessionID s
 		}
 		started := req
 		started.Method = methodOr(method, req.Method)
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionStarted, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionStarted,
 			sessionEventData(started, StatusInProgress))
 	})
 }
@@ -898,7 +993,7 @@ func (s *RequestStore) RecordHandover(ctx context.Context, req Request, expiresA
 			}, req.Method)))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionHandover, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionHandover,
 			sessionEventData(req, req.Status))
 	})
 }
@@ -939,7 +1034,7 @@ func (s *RequestStore) EndSession(ctx context.Context, req Request, sessionID st
 				req.auditFields(withMethod(map[string]any{"status": string(StatusExpired), "ipsStatus": string(ipsStatus)}, method)))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionExpired,
 			sessionEventData(req, StatusExpired))
 	})
 }
@@ -995,7 +1090,7 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionCancelled, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled,
 			sessionEventData(req, StatusCancelled))
 	})
 	return done, err
@@ -1082,7 +1177,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 			audit.Deleted(map[string]any{"status": string(req.Status)})); err != nil {
 			return err
 		}
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionPurged, &req.ID,
+		return enqueueRequestWebhook(ctx, q, req, EventSessionPurged,
 			sessionEventData(req, req.Status))
 	})
 }
@@ -1159,23 +1254,9 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
 	}
-	var nameCT []byte
-	// retainSecs is how long the proofed name is kept, from the database's now().
-	var retainSecs *float64
-	if res.Name != "" {
-		if s.cipher == nil {
-			return ErrNoEncryptionKey
-		}
-		var err error
-		if nameCT, err = s.cipher.Encrypt([]byte(res.Name)); err != nil {
-			return fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
-		}
-		retention := req.NameRetention
-		if retention == 0 {
-			retention = proofedNameRetention
-		}
-		secs := retention.Seconds()
-		retainSecs = &secs
+	nameCT, retainSecs, err := s.sealProofedName(req, status, res.Name)
+	if err != nil {
+		return err
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
@@ -1198,14 +1279,7 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		after := withMethod(map[string]any{"status": string(status)}, res.Method)
-		for key, value := range map[string]string{
-			"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
-		} {
-			if value != "" {
-				after[key] = value
-			}
-		}
+		after := outcomeAuditFields(status, res)
 		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
@@ -1217,14 +1291,53 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		}
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, event, &req.ID, sessionEventData(decided, status))
+		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
 	})
+}
+
+// sealProofedName seals the name a session proofed for req, with retainSecs
+// how long it is kept, counted from the database's now(): once the session is
+// approved, at least as long as the law makes the org keep it. No name seals
+// to nothing.
+func (s *RequestStore) sealProofedName(req Request, status Status, name string) (nameCT []byte, retainSecs *float64, err error) {
+	if name == "" {
+		return nil, nil, nil
+	}
+	if s.cipher == nil {
+		return nil, nil, ErrNoEncryptionKey
+	}
+	if nameCT, err = s.cipher.Encrypt([]byte(name)); err != nil {
+		return nil, nil, fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
+	}
+	retention := req.NameRetention
+	if retention == 0 {
+		retention = proofedNameRetention
+	}
+	if status == StatusApproved {
+		retention = max(retention, req.legalNameRetention)
+	}
+	secs := retention.Seconds()
+	return nameCT, &secs, nil
+}
+
+// outcomeAuditFields is the state a recorded outcome audits the request in:
+// its status and method, and the levels and error code the session gave.
+func outcomeAuditFields(status Status, res proofingprovider.Result) map[string]any {
+	after := withMethod(map[string]any{"status": string(status)}, res.Method)
+	for key, value := range map[string]string{
+		"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
+	} {
+		if value != "" {
+			after[key] = value
+		}
+	}
+	return after
 }
 
 // ListPurgeDue returns up to limit requests past their purge time and any
 // DeferPurge wait, the longest overdue first. It reads the stored purge_at
 // over its partial index (unpurged rows only), so an hourly run touches only
-// what is due; refreshPurgeAt and refreshCustomerPurgeAt keep it. A row whose
+// what is due; refreshPurgeAt and refreshOrgPurgeAt keep it. A row whose
 // sealed fields do not open is logged, deferred and left out.
 func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
@@ -1289,8 +1402,8 @@ func (s *RequestStore) DeferPurge(ctx context.Context, id uuid.UUID) error {
 
 // ClearExpiredProofedNames drops every proofed name past its
 // proofed_name_purge_after (RecordOutcome's proofedNameRetention). It locks
-// the rows in id order, as refreshCustomerPurgeAt does, so the two never
-// deadlock on rows of the same customer.
+// the rows in id order, as refreshOrgPurgeAt does, so the two never deadlock on
+// rows of the same org.
 func (s *RequestStore) ClearExpiredProofedNames(ctx context.Context) (int64, error) {
 	tag, err := s.db.Exec(ctx, `WITH due AS MATERIALIZED (
 			SELECT id FROM identity_proofing_requests WHERE proofed_name_purge_after <= now()
@@ -1305,13 +1418,12 @@ func (s *RequestStore) ClearExpiredProofedNames(ctx context.Context) (int64, err
 	return tag.RowsAffected(), nil
 }
 
-// ListOpenReviews returns the org's requests waiting for a review decision,
-// of one customer when customerID is set: needs_review, not erased, its
-// session not ended.
-func (s *RequestStore) ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error) {
+// ListOpenReviews returns the org's requests waiting for a review decision:
+// needs_review, not erased, its session not ended.
+func (s *RequestStore) ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error) {
 	return s.scanAll(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.customer_id = $2) AND `+openReviewWhere+`
-		ORDER BY r.created_at`, orgID, customerID)
+		WHERE r.organization_id = $1 AND `+openReviewWhere+`
+		ORDER BY r.created_at`, orgID)
 }
 
 // openReviewWhere is a request r waiting for a review decision: needs_review,
@@ -1335,33 +1447,13 @@ func (s *RequestStore) scanAll(ctx context.Context, query string, args ...any) (
 	return out, rows.Err()
 }
 
-// ListUnpurgedForCustomer returns every request of a customer that still holds personal data: what removing the customer erases first.
-func (s *RequestStore) ListUnpurgedForCustomer(ctx context.Context, orgID, customerID uuid.UUID) ([]Request, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.customer_id = $2 AND r.purged_at IS NULL
-		ORDER BY r.created_at`, orgID, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: list unpurged requests customer %s: %w", customerID, err)
-	}
-	defer rows.Close()
-	var out []Request
-	for rows.Next() {
-		req, err := s.scanRequest(rows)
-		if err != nil {
-			return nil, fmt.Errorf("proofing: scan unpurged request customer %s: %w", customerID, err)
-		}
-		out = append(out, req)
-	}
-	return out, rows.Err()
-}
-
-// Stats counts the customer requests sent since since, per customer and
-// flow, by outcome; requestedBy narrows them to the requests one member sent. A row
+// Stats counts the external requests sent since since, per flow, by outcome;
+// requestedBy narrows them to the requests one member sent. A row
 // counts as cancelled when it was cancelled before an outcome, else as expired
 // exactly when Request.EffectiveStatus reads it so, and as last reconciled: an outcome the engine holds but no list read picked up yet is not in
 // it.
 func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error) {
-	const query = `SELECT customer_id, flow_id, count(*),
+	const query = `SELECT flow_id, count(*),
 			count(*) FILTER (WHERE status = $4),
 			count(*) FILTER (WHERE status = $5),
 			count(*) FILTER (WHERE status = $6 AND ips_session_ended_at IS NULL),
@@ -1372,10 +1464,10 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 						AND (ips_session_expires_at IS NULL OR ips_session_expires_at <= now())))))),
 			count(*) FILTER (WHERE status NOT IN ($4, $5) AND cancelled_at IS NOT NULL)
 		FROM identity_proofing_requests
-		WHERE organization_id = $1 AND customer_id IS NOT NULL
+		WHERE organization_id = $1 AND subject_kind = 'external'
 			AND ($2::uuid IS NULL OR requested_by = $2) AND created_at >= $3
-		GROUP BY customer_id, flow_id
-		ORDER BY customer_id, flow_id`
+		GROUP BY flow_id
+		ORDER BY flow_id`
 	rows, err := s.db.Query(ctx, query, orgID, requestedBy, since,
 		StatusApproved, StatusRejected, StatusNeedsReview)
 	if err != nil {
@@ -1383,7 +1475,7 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StatsRow, error) {
 		var r StatsRow
-		err := row.Scan(&r.CustomerID, &r.FlowID, &r.Sessions, &r.Approved, &r.Rejected, &r.NeedsReview, &r.Expired, &r.Cancelled)
+		err := row.Scan(&r.FlowID, &r.Sessions, &r.Approved, &r.Rejected, &r.NeedsReview, &r.Expired, &r.Cancelled)
 		return r, err
 	})
 	if err != nil {

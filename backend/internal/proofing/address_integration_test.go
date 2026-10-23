@@ -39,20 +39,15 @@ func TestFlowAddressSavesAndAudits(t *testing.T) {
 func TestAddressSealedUntilPurge(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
-	customers := NewCustomerStore(pool, audit.NopRecorder{})
 	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
 	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	customer, err := customers.Create(ctx, orgID, sam, "Gemeente")
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if _, _, err := webhooks.Save(ctx, orgID, customer.ID, "https://hooks.example.org/x", []string{EventSessionAddressAdded}); err != nil {
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionAddressAdded}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
 	}
-	in := newStoredRequest(orgID, sam, Subject{CustomerID: &customer.ID, Email: "anna@example.org"})
+	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
 	in.Address = AddressRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Address != AddressRequired {
@@ -82,7 +77,7 @@ func TestAddressSealedUntilPurge(t *testing.T) {
 	if auditCount(t, pool, audit.IdentityProofingAddressAdded) != 1 {
 		t.Error("want one address_added event")
 	}
-	deliveries, err := webhooks.Deliveries(ctx, orgID, customer.ID)
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressAdded {
 		t.Errorf("deliveries = %+v, %v; want one session.address_added", deliveries, err)
 	}

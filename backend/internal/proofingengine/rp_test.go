@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -54,5 +55,49 @@ func TestSessionIdentityEvidence(t *testing.T) {
 		if ev := id.Evidence; ev.Type != tc.evidence || ev.PassiveAuth != tc.passive || ev.ActiveAuth != tc.aa {
 			t.Errorf("%s: evidence = %s PA %s AA %s; want %s PA %s AA %s", tc.sess.ID, ev.Type, ev.PassiveAuth, ev.ActiveAuth, tc.evidence, tc.passive, tc.aa)
 		}
+	}
+}
+
+func TestSessionTTLBoundsRefused(t *testing.T) {
+	s := &Server{}
+	for _, seconds := range []int{-1, maxSessionTTLSeconds + 1, 1 << 62} {
+		spec := pp.FlowSpec{Name: "x", Steps: []string{"document_capture"}, SessionTTLSeconds: seconds}
+		var refused *pp.RejectedError
+		if _, err := s.CreateFlow(context.Background(), pp.Tenant{ID: "org"}, spec); !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
+			t.Errorf("CreateFlow(sessionTtlSeconds %d) = %v, want 400", seconds, err)
+		}
+	}
+}
+
+func TestSessionTTLRoundTrips(t *testing.T) {
+	spec := pp.FlowSpec{Name: "x", Steps: []string{"document_capture", "nfc_read"}, SessionTTLSeconds: 300}
+	fd := toDefinition("org", "f1", spec)
+	if fd.SessionTTL != 5*time.Minute {
+		t.Errorf("definition's session TTL = %v, want 5m0s", fd.SessionTTL)
+	}
+	if got := toFlow(fd).SessionTTLSeconds; got != 300 {
+		t.Errorf("flow's sessionTtlSeconds = %d, want 300", got)
+	}
+}
+
+// A session's retention changes to a positive one, never to the engine's
+// default: 0 would drop the flow's own.
+func TestSetSessionsRetention(t *testing.T) {
+	sessions := newMemSessions(session.Session{ID: "s1", TenantID: "org", RetentionOverride: time.Hour})
+	s := New(DefaultConfig(), sessions, nil, nil, nil)
+	tenant := pp.Tenant{ID: "org"}
+
+	var refused *pp.RejectedError
+	if err := s.SetSessionsRetention(context.Background(), tenant, []string{"s1"}, 0); !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
+		t.Errorf("SetSessionsRetention(0) = %v, want 400", err)
+	}
+	if got, _ := sessions.Get("org", "s1"); got.RetentionOverride != time.Hour {
+		t.Errorf("a refused call left retention %v, want the hour kept", got.RetentionOverride)
+	}
+	if err := s.SetSessionsRetention(context.Background(), tenant, []string{"s1"}, 48*time.Hour); err != nil {
+		t.Fatalf("SetSessionsRetention: %v", err)
+	}
+	if got, _ := sessions.Get("org", "s1"); got.RetentionOverride != 48*time.Hour {
+		t.Errorf("retention = %v, want 48h", got.RetentionOverride)
 	}
 }

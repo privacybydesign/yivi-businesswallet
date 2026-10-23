@@ -1,39 +1,31 @@
 import { useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useActivateFlowMutation,
-  useProofingFlowVersionsQuery,
   useProofingFlowsQuery,
+  useProofingStatsQuery,
   useSetFlowSelectionMutation,
 } from "../api/identity-proofing.queries";
-import { isDataRequest } from "../api/identity-proofing";
 import type { ProofingFlow } from "../api/identity-proofing";
-import { useWhenFormatter } from "../lib/format-when";
 import {
-  CHECK_CHIP_AUTH,
-  CHECK_FACE_MATCH,
-  CHECK_LIVENESS,
-  CHECK_PASSIVE_AUTH,
   assuranceLevelLabel,
   editedFlowSelection,
-  isProofingStep,
+  flowStepLabels,
   proofingErrorMessage,
+  proofingStatsBy,
 } from "../lib/identity-proofing";
-import { Button, Card, Tag, TopBar } from "../ui";
-import { FlowHostedSettings } from "./flow-hosted-settings";
+import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
 import { FlowEditor } from "./flow-editor";
-import type { EditorMode } from "./flow-editor";
 
-const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
+const OPEN_ICON_SIZE = 16;
 
-// The org admin's identity proofing flows: define flows at the proofing
-// service with every setting it takes, edit one by saving a new version (active
-// at once; sent requests keep the version they pinned), roll back to an earlier
-// version, and choose which flows members may send a request on.
+// The org admin's identity proofing flows: what each one requests and at which
+// minimum assurance level, how many people it identified lately, which flow a
+// request form starts on and which flows members may use. A flow opens to its
+// own page: the people it identified, its versions and its editor.
 export default function IdentityProofingFlows(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug } = useParams();
@@ -42,7 +34,7 @@ export default function IdentityProofingFlows(): React.JSX.Element {
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const flows = useProofingFlowsQuery(slug, isAdmin);
-  const [editor, setEditor] = useState<EditorMode | null>(null);
+  const [creating, setCreating] = useState(false);
 
   return (
     <>
@@ -51,8 +43,8 @@ export default function IdentityProofingFlows(): React.JSX.Element {
         subtitle={t("identityProofingFlows.subtitle")}
         actions={
           isAdmin &&
-          editor === null && (
-            <Button icon="add" onClick={() => setEditor({ kind: "new" })}>
+          !creating && (
+            <Button icon="add" onClick={() => setCreating(true)}>
               {t("identityProofingFlows.new.title")}
             </Button>
           )
@@ -71,24 +63,15 @@ export default function IdentityProofingFlows(): React.JSX.Element {
           <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
         ) : (
           <>
-            {editor !== null && (
+            {creating && (
               <FlowEditor
-                // A fresh editor per flow and version, seeded from it.
-                key={
-                  editor.kind === "new"
-                    ? "new"
-                    : `${editor.flow.id}@${editor.flow.version}`
-                }
                 slug={slug}
-                mode={editor}
-                onDone={() => setEditor(null)}
+                mode={{ kind: "new" }}
+                onDone={() => setCreating(false)}
               />
             )}
-            <FlowsCard
-              slug={slug}
-              flows={flows.data}
-              onEdit={(flow) => setEditor({ kind: "edit", flow })}
-            />
+            <FlowsTable slug={slug} flows={flows.data} />
+            <DataRequestsNote slug={slug} />
           </>
         )}
       </div>
@@ -96,17 +79,17 @@ export default function IdentityProofingFlows(): React.JSX.Element {
   );
 }
 
-function FlowsCard({
+function FlowsTable({
   slug,
   flows,
-  onEdit,
 }: {
   slug: string;
   flows: ProofingFlow[];
-  onEdit: (flow: ProofingFlow) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSetFlowSelectionMutation(slug);
+  const stats = useProofingStatsQuery(slug);
+  const perFlow = proofingStatsBy(stats.data?.rows ?? [], (r) => r.flowId);
   // Seeded once from the server; a flow created later starts unselected.
   const [allowed, setAllowed] = useState<ReadonlySet<string>>(
     () => new Set(flows.filter((f) => f.allowed).map((f) => f.id)),
@@ -114,14 +97,11 @@ function FlowsCard({
   const [defaultId, setDefaultId] = useState(
     () => flows.find((f) => f.default)?.id ?? "",
   );
-  const [historyOf, setHistoryOf] = useState<string | null>(null);
-  const [hostedOf, setHostedOf] = useState<string | null>(null);
 
-  // A default the admin unticked falls to the first flow still ticked; a flow
-  // that can no longer be ticked drops out.
-  const selectable = flows.filter(
-    (f) => f.completable && !isDataRequest(f.kind),
-  );
+  // A flow that can no longer be ticked drops out. The default is any flow an
+  // external person can be sent, whether or not members may use it. The list
+  // holds no data request flow.
+  const selectable = flows.filter((f) => f.completable);
   const { selection, dirty } = editedFlowSelection(
     selectable,
     allowed,
@@ -131,7 +111,6 @@ function FlowsCard({
       defaultFlowId: flows.find((f) => f.default)?.id ?? "",
     },
   );
-  const effectiveDefault = selection.defaultFlowId;
 
   function toggle(id: string, on: boolean): void {
     setAllowed((current) => {
@@ -150,250 +129,163 @@ function FlowsCard({
     save.mutate(selection);
   }
 
-  return (
-    <Card className="p-6">
-      <h2 className="font-display text-[16px] font-bold">
-        {t("identityProofingFlows.selection.title")}
-      </h2>
-      <p className={`${HINT} mt-1`}>
-        {t("identityProofingFlows.selection.hint")}
+  if (flows.length === 0) {
+    return (
+      <p className="text-ink-soft text-[13px]">
+        {t("identityProofingFlows.selection.empty")}
       </p>
+    );
+  }
 
-      {flows.length === 0 ? (
-        <p className="text-ink-soft mt-4 text-[13px]">
-          {t("identityProofingFlows.selection.empty")}
-        </p>
-      ) : (
-        <form className="mt-4 flex flex-col gap-4" onSubmit={submit} noValidate>
-          <ul className="border-line divide-y rounded-lg border">
+  return (
+    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+      <Card>
+        <Table>
+          <Table.Head>
+            <Table.HeaderCell scope="col">
+              {t("identityProofingFlows.columns.flow")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col">
+              {t("identityProofingFlows.columns.assurance")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col" className="text-right">
+              {t("identityProofingFlows.columns.people")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col">
+              {t("identityProofingFlows.columns.preselected")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col">
+              {t("identityProofingFlows.columns.members")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col" srOnly>
+              {t("identityProofingFlows.columns.open")}
+            </Table.HeaderCell>
+          </Table.Head>
+          <Table.Body>
             {flows.map((flow) => {
-              const checkboxId = `proofing-flow-allowed-${flow.id}`;
-              const on = allowed.has(flow.id) && selectable.includes(flow);
+              const nameId = `proofing-flow-name-${flow.id}`;
+              const canSelect = selectable.includes(flow);
               return (
-                <li key={flow.id} className="flex flex-col gap-3 px-4 py-3">
-                  <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
-                    <div className="flex min-w-0 flex-1 basis-64 items-start gap-2.5">
-                      <input
-                        id={checkboxId}
-                        type="checkbox"
-                        className="mt-0.5 h-4 w-4"
-                        checked={on}
-                        disabled={!flow.completable || isDataRequest(flow.kind)}
-                        onChange={(event) =>
-                          toggle(flow.id, event.target.checked)
-                        }
-                      />
-                      <label
-                        htmlFor={checkboxId}
-                        className="flex min-w-0 flex-col gap-1"
-                      >
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold">{flow.name}</span>
-                          <Tag>
-                            {t("identityProofingFlows.versionShort", {
-                              version: flow.version,
-                            })}
+                <Table.Row key={flow.id}>
+                  <Table.Cell>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          id={nameId}
+                          to={flowPath(slug, flow.id)}
+                          className="text-ink text-[15px] font-semibold hover:underline"
+                        >
+                          {flow.name}
+                        </Link>
+                        {!flow.completable && (
+                          <Tag tone="amber">
+                            {t("identityProofingFlows.notCompletable")}
                           </Tag>
-                          {flow.requiredAssuranceLevel && (
-                            <Tag tone="blue">
-                              {assuranceLevelLabel(
-                                flow.requiredAssuranceLevel,
-                                t,
-                              )}
-                            </Tag>
-                          )}
-                          {flow.kind && isDataRequest(flow.kind) && (
-                            <Tag tone="amber">
-                              {t(
-                                `identityProofingFlows.kinds.${flow.kind}.title`,
-                              )}
-                            </Tag>
-                          )}
-                          {!flow.completable && (
-                            <Tag tone="amber">
-                              {t("identityProofingFlows.notCompletable")}
-                            </Tag>
-                          )}
-                        </span>
-                        <FlowSummary flow={flow} />
-                      </label>
+                        )}
+                      </div>
+                      <div className="text-ink-soft text-[12.5px]">
+                        {[
+                          t("identityProofingFlows.versionLong", {
+                            version: flow.version,
+                          }),
+                          flowStepLabels(flow, t).join(", "),
+                        ]
+                          .filter((part) => part !== "")
+                          .join(" · ")}
+                      </div>
                     </div>
-                    <label className="flex items-center gap-2 text-[13px]">
+                  </Table.Cell>
+                  <Table.Cell>
+                    {flow.requiredAssuranceLevel
+                      ? assuranceLevelLabel(flow.requiredAssuranceLevel, t)
+                      : t("identityProofing.flows.noAssurance")}
+                  </Table.Cell>
+                  <Table.Cell className="text-right font-semibold">
+                    {stats.data ? (perFlow.get(flow.id)?.sessions ?? 0) : "—"}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <label className="inline-flex items-center gap-2">
                       <input
                         type="radio"
                         name="proofing-default-flow"
                         className="h-4 w-4"
-                        checked={on && effectiveDefault === flow.id}
-                        disabled={!on}
+                        aria-describedby={nameId}
+                        checked={defaultId === flow.id}
+                        disabled={!canSelect}
                         onChange={() => setDefaultId(flow.id)}
                       />
                       {t("identityProofingFlows.selection.default")}
                     </label>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        icon="edit"
-                        onClick={() => onEdit(flow)}
-                      >
-                        {t("identityProofingFlows.edit")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        icon="time"
-                        aria-expanded={historyOf === flow.id}
-                        onClick={() =>
-                          setHistoryOf((current) =>
-                            current === flow.id ? null : flow.id,
-                          )
+                  </Table.Cell>
+                  <Table.Cell>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        aria-describedby={nameId}
+                        checked={allowed.has(flow.id) && canSelect}
+                        disabled={!canSelect}
+                        onChange={(event) =>
+                          toggle(flow.id, event.target.checked)
                         }
-                      >
-                        {t("identityProofingFlows.versions.title")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        icon="settings"
-                        aria-expanded={hostedOf === flow.id}
-                        onClick={() =>
-                          setHostedOf((current) =>
-                            current === flow.id ? null : flow.id,
-                          )
-                        }
-                      >
-                        {t("identityProofingFlows.hosted.title")}
-                      </Button>
-                    </div>
-                  </div>
-                  {historyOf === flow.id && (
-                    <VersionHistory slug={slug} flowId={flow.id} />
-                  )}
-                  {hostedOf === flow.id && (
-                    <FlowHostedSettings slug={slug} flow={flow} />
-                  )}
-                </li>
+                      />
+                      {t("identityProofingFlows.selection.members")}
+                    </label>
+                  </Table.Cell>
+                  <Table.Cell className="text-right">
+                    <Link
+                      to={flowPath(slug, flow.id)}
+                      aria-label={t("identityProofingFlows.open", {
+                        name: flow.name,
+                      })}
+                      className="text-ink hover:text-ink-soft inline-flex h-11 w-11 items-center justify-center"
+                    >
+                      <Icon name="chevron_right" size={OPEN_ICON_SIZE} />
+                    </Link>
+                  </Table.Cell>
+                </Table.Row>
               );
             })}
-          </ul>
-          {save.isError && (
-            <p className={ERROR}>{proofingErrorMessage(save.error, t)}</p>
-          )}
-          <div>
-            <Button type="submit" loading={save.isPending} disabled={!dirty}>
-              {t("identityProofingFlows.selection.save")}
-            </Button>
-          </div>
-        </form>
+          </Table.Body>
+        </Table>
+      </Card>
+      {save.isError && (
+        <p className={ERROR}>{proofingErrorMessage(save.error, t)}</p>
       )}
+      <div>
+        <Button type="submit" loading={save.isPending} disabled={!dirty}>
+          {t("identityProofingFlows.selection.save")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// See my data and Delete my data are not in the list: every org offers them,
+// and they are set in Settings › Data and privacy, not edited as flows.
+function DataRequestsNote({ slug }: { slug: string }): React.JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div className="flex flex-col gap-1">
+        <span className="text-ink text-[14px] font-semibold">
+          {t("identityProofingFlows.dataRequests.title")}
+        </span>
+        <span className="text-ink-soft text-[13px]">
+          {t("identityProofingFlows.dataRequests.hint")}
+        </span>
+      </div>
+      <Link
+        to={`/${slug}/settings?tab=privacy`}
+        className="text-link text-[14px] font-semibold hover:underline"
+      >
+        {t("identityProofingFlows.dataRequests.link")}
+      </Link>
     </Card>
   );
 }
 
-// The label key of each check the flow editor offers; another check the
-// service reports shows as it is.
-const CHECK_LABELS: Record<
-  string,
-  "passiveAuth" | "chipAuth" | "faceMatch" | "liveness"
-> = {
-  [CHECK_PASSIVE_AUTH]: "passiveAuth",
-  [CHECK_CHIP_AUTH]: "chipAuth",
-  [CHECK_FACE_MATCH]: "faceMatch",
-  [CHECK_LIVENESS]: "liveness",
-};
-
-// A flow version's steps and checks in a line, in words.
-function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
-  const { t } = useTranslation();
-  const steps = flow.steps.map((step) =>
-    isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
-  );
-  // The wallet's own steps, after the app's: given in the browser.
-  if (flow.addressMode === "required") {
-    steps.push(t("identityProofingFlows.steps.address"));
-  }
-  if (flow.diplomaMode === "required") {
-    steps.push(t("identityProofingFlows.steps.diploma_upload"));
-  }
-  const checks = (flow.requiredChecks ?? []).map((check) => {
-    const key = CHECK_LABELS[check];
-    return key ? t(`identityProofingFlows.checks.${key}`) : check;
-  });
-  const parts = [steps.join(" → "), checks.join(", ")].filter(
-    (part) => part !== "",
-  );
-  return (
-    <span className="text-ink-soft text-[12px]">{parts.join("  ·  ")}</span>
-  );
-}
-
-function VersionHistory({
-  slug,
-  flowId,
-}: {
-  slug: string;
-  flowId: string;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const formatWhen = useWhenFormatter();
-  const versions = useProofingFlowVersionsQuery(slug, flowId, true);
-  const activate = useActivateFlowMutation(slug, flowId);
-
-  if (versions.isPending) {
-    return <p className={HINT}>{t("common.loading")}</p>;
-  }
-  if (versions.isError) {
-    return <p className={ERROR}>{proofingErrorMessage(versions.error, t)}</p>;
-  }
-  // Newest first reads as a history.
-  const newestFirst = [...versions.data].reverse();
-  return (
-    <div className="bg-surface-2 rounded-lg p-3">
-      <p className={`${HINT} mb-2`}>
-        {t("identityProofingFlows.versions.hint")}
-      </p>
-      <ul className="flex flex-col gap-2">
-        {newestFirst.map((version) => (
-          <li
-            key={version.version}
-            className="flex flex-wrap items-center gap-x-4 gap-y-1"
-          >
-            <span className="font-semibold">
-              {t("identityProofingFlows.versionShort", {
-                version: version.version,
-              })}
-            </span>
-            <span className="text-[13px]">{version.name}</span>
-            <span className={HINT}>{formatWhen(version.createdAt)}</span>
-            <FlowSummary flow={version} />
-            {version.active ? (
-              <Tag tone="green">
-                {t("identityProofingFlows.versions.active")}
-              </Tag>
-            ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                loading={
-                  activate.isPending && activate.variables === version.version
-                }
-                onClick={() => activate.mutate(version.version)}
-              >
-                {t("identityProofingFlows.versions.activate")}
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
-      {activate.isError && (
-        <p className={`${ERROR} mt-2`}>
-          {proofingErrorMessage(activate.error, t)}
-        </p>
-      )}
-    </div>
-  );
+function flowPath(slug: string, flowId: string): string {
+  return `/${slug}/identity-proofing/flows/${encodeURIComponent(flowId)}`;
 }

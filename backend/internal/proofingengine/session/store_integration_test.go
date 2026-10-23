@@ -5,6 +5,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -171,5 +172,45 @@ func TestStoreChangedAt(t *testing.T) {
 	}
 	if _, err := s.ChangedAt("00000000-0000-0000-0000-000000000000", created.ID); !errors.Is(err, session.ErrNotFound) {
 		t.Fatalf("other tenant err = %v", err)
+	}
+}
+
+// SetRetention changes how long the named sessions of one tenant are kept once
+// they ended, and no other session's.
+func TestStoreSetRetention(t *testing.T) {
+	s, org := newStore(t)
+	expired := func() session.Session {
+		sess, err := s.Create(session.Session{
+			TenantID: org, Method: session.MethodNFCPassport, ExpiresAt: time.Now().Add(-time.Second), RetentionOverride: time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sess
+	}
+	extended, ofAnotherTenant, untouched := expired(), expired(), expired()
+
+	if err := s.SetRetention(org, []string{extended.ID}, time.Hour); err != nil {
+		t.Fatalf("SetRetention: %v", err)
+	}
+	if err := s.SetRetention("00000000-0000-0000-0000-000000000000", []string{ofAnotherTenant.ID}, time.Hour); err != nil {
+		t.Fatalf("SetRetention of another tenant: %v", err)
+	}
+	purgedAt := func(after time.Duration) []string {
+		removed, err := s.Purge(0, time.Now().Add(after))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, sess := range removed {
+			ids = append(ids, sess.ID)
+		}
+		return ids
+	}
+	if got := purgedAt(10 * time.Minute); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values([]string{ofAnotherTenant.ID, untouched.ID}))) {
+		t.Errorf("purge after 10 minutes removed %v; want the two sessions on their own minute", got)
+	}
+	if got := purgedAt(2 * time.Hour); !slices.Equal(got, []string{extended.ID}) {
+		t.Errorf("purge after 2 hours removed %v; want the extended session", got)
 	}
 }

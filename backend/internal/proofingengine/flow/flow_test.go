@@ -170,6 +170,56 @@ func TestSubstantialNeedsBinding(t *testing.T) {
 	wantRefused(t, fd, "requiredAssuranceLevel \"substantial\" requires requiredChecks")
 }
 
+// A Substantial flow may raise the face match threshold, or leave it to the
+// deployment's default, but not set it under the floor.
+func TestSubstantialFaceMatchFloor(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		threshold float64
+		refused   bool
+	}{
+		{"at the floor", SubstantialMinFaceMatch, false},
+		{"above the floor", 0.9, false},
+		{"under the floor", SubstantialMinFaceMatch - 0.01, true},
+		{"zero", 0, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fd := substantialFlow()
+			fd.CheckThresholds = map[Check]float64{CheckFaceMatch: c.threshold}
+			if c.refused {
+				wantRefused(t, fd, "requires a face match threshold of at least 0.75")
+				return
+			}
+			if err := Validate(fd); err != nil {
+				t.Fatalf("Validate(substantial, threshold %v) = %v, want nil", c.threshold, err)
+			}
+		})
+	}
+}
+
+func TestSubstantialNoThreshold(t *testing.T) {
+	fd := substantialFlow()
+	fd.CheckThresholds = nil
+	if err := Validate(fd); err != nil {
+		t.Fatalf("Validate(substantial without a threshold) = %v, want nil", err)
+	}
+}
+
+// Below Substantial any threshold from 0 up is the flow's own call.
+func TestLowAllowsLowThreshold(t *testing.T) {
+	fd := validFlow()
+	fd.Steps = []Step{StepDocumentCapture, StepNFCRead, StepFaceVerification}
+	fd.RequiredChecks = []Check{CheckNFCPassiveAuth, CheckFaceMatch}
+	fd.SelfieLocation, fd.FaceProvider = LocationNative, FaceProviderRegula
+	for _, level := range []AssuranceLevel{"", AssuranceLevelLow} {
+		fd.RequiredAssuranceLevel = level
+		fd.CheckThresholds = map[Check]float64{CheckFaceMatch: 0.5}
+		if err := Validate(fd); err != nil {
+			t.Errorf("Validate(level %q, threshold 0.5) = %v, want nil", level, err)
+		}
+	}
+}
+
 func TestValidateLowChipReadOnly(t *testing.T) {
 	fd := validFlow()
 	fd.Steps = []Step{StepDocumentCapture, StepNFCRead}
@@ -414,6 +464,21 @@ func TestValidatePositiveRetention(t *testing.T) {
 	fd.RetentionOverride = 24 * time.Hour
 	if err := Validate(fd); err != nil {
 		t.Fatalf("Validate(positive retentionOverride) = %v, want nil", err)
+	}
+}
+
+func TestValidateSessionTTL(t *testing.T) {
+	for ttl, refused := range map[time.Duration]bool{
+		0: false, 2 * time.Minute: false, MaxSessionTTL: false,
+		-time.Minute: true, MaxSessionTTL + time.Second: true,
+	} {
+		fd := validFlow()
+		fd.SessionTTL = ttl
+		if refused {
+			wantRefused(t, fd, "sessionTtl must be between")
+		} else if err := Validate(fd); err != nil {
+			t.Errorf("Validate(sessionTtl %v) = %v, want nil", ttl, err)
+		}
 	}
 }
 
