@@ -84,16 +84,19 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	if !employmentDue.IsZero() && (next.IsZero() || employmentDue.Before(next)) {
-		next = employmentDue
+	next = earliest(next, employmentDue)
+	if open {
+		next = earliest(next, now.Add(deadlineRetry))
 	}
-	if retry := now.Add(deadlineRetry); open && (next.IsZero() || retry.Before(next)) {
-		next = retry
+	return earliest(next, now.Add(deadlineSafetyNet)), nil
+}
+
+// earliest is the earlier of a and b, a zero time standing for none.
+func earliest(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
 	}
-	if net := now.Add(deadlineSafetyNet); next.IsZero() || net.Before(next) {
-		next = net
-	}
-	return next, nil
+	return a
 }
 
 func (r Request) stillOpen() bool {

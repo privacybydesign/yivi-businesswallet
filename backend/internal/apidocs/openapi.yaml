@@ -6805,8 +6805,9 @@ paths:
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
         refused one `identity_proofing.employment_rejected`. A kept statement with no current
         job (`employed: false`) moves the approved session to `needs_review` with
-        `reviewReason` `no_current_employment`, and one with a current UWV benefit beside a job
-        with `current_benefit` (webhook `session.review_opened`), decided by an
+        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
+        with `current_benefit`, and one with other current income paid without hours worked
+        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
         administrator through the review endpoint.
       requestBody:
         required: true
@@ -8494,8 +8495,9 @@ paths:
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
         refused one `identity_proofing.employment_rejected`. A kept statement with no current
         job (`employed: false`) moves the approved session to `needs_review` with
-        `reviewReason` `no_current_employment`, and one with a current UWV benefit beside a job
-        with `current_benefit` (webhook `session.review_opened`), decided by an
+        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
+        with `current_benefit`, and one with other current income paid without hours worked
+        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
         administrator through the review endpoint.
       requestBody:
         required: true
@@ -11259,8 +11261,8 @@ components:
           description: Why the session was rejected; see `ProofingApiSession.errorCode`.
         reviewReason:
           type: string
-          enum: [no_current_employment, current_benefit]
-          description: Why the session went to review after its identity was approved. `no_current_employment` is a Verzekeringsbericht that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job; a reviewer decides it in the wallet. Absent otherwise.
+          enum: [no_current_employment, current_benefit, current_other_income]
+          description: Why the session went to review after its identity was approved. `no_current_employment` is a Verzekeringsbericht that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job, `current_other_income` one that lists other current income paid without hours worked beside a job; a reviewer decides it in the wallet. Absent otherwise.
         verifiedAt:
           type: string
           format: date-time
@@ -11555,8 +11557,8 @@ components:
             properties:
               kind:
                 type: string
-                enum: [employment, benefit, sick_via_employer]
-                description: '`benefit` is a benefit UWV pays, recognised as HDN''s Inkomensbepaling Loondienst does (Appendix 5) by its exact description and loonheffingennummer. `sick_via_employer` is a sickness or WAZO benefit paid through the employer.'
+                enum: [employment, benefit, sick_via_employer, other_income]
+                description: '`benefit` is a benefit UWV pays, recognised as HDN''s Inkomensbepaling Loondienst does (Appendix 5) by its description and loonheffingennummer. `sick_via_employer` is a sickness or WAZO benefit paid through the employer. `other_income` is a current payment without hours worked from any other payer: a pension, AOW, social assistance, or a final payment.'
               employer:
                 type: string
                 description: The employer or paying body (`Werkgever/Instantie`).
@@ -12139,8 +12141,8 @@ components:
           description: When the person can last upload their Verzekeringsbericht; absent until the identity is approved, and once one was kept.
         reviewReason:
           type: string
-          enum: [no_current_employment, current_benefit]
-          description: Why the wallet put the session in review after the identity was approved (no current job, or a current UWV benefit, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
+          enum: [no_current_employment, current_benefit, current_other_income]
+          description: Why the wallet put the session in review after the identity was approved (no current job, a current UWV benefit, or other current income paid without hours worked, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
         expectedSubject:
           type: boolean
         flowKind:

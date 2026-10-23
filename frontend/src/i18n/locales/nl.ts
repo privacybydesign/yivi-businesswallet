@@ -712,12 +712,15 @@ export const nl: Translation<typeof en> = {
       keptChecks:
         "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
       noRelations: "Er staat geen huidig dienstverband in.",
-      since: "sinds {{from}}",
+      period: "sinds {{from}}, laatst aangegeven {{to}}",
       benefit: "(uitkering)",
+      otherIncome: "(ander inkomen)",
       review:
         "Er staat geen huidige baan in. De organisatie beoordeelt je controle voordat er een besluit is.",
       reviewBenefit:
         "Er staat een lopende uitkering in. De organisatie beoordeelt je controle voordat er een besluit is.",
+      reviewOtherIncome:
+        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je controle voordat er een besluit is.",
       reasons: {
         notAStatement:
           "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
@@ -1010,6 +1013,8 @@ export const nl: Translation<typeof en> = {
           "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder. Jouw besluit rondt de sessie af en gaat naar de klant.",
         currentBenefit:
           "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat een lopende uitkering van UWV. Bekijk het dienstverband hieronder. Jouw besluit rondt de sessie af en gaat naar de klant.",
+        currentOtherIncome:
+          "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren: een pensioen, AOW, bijstand of een laatste betaling. Bekijk het dienstverband hieronder. Jouw besluit rondt de sessie af en gaat naar de klant.",
       },
       dataRequest: {
         data_access: {
@@ -1154,9 +1159,10 @@ export const nl: Translation<typeof en> = {
         employed: "Heeft nu werk: ja",
         notEmployed: "Heeft nu werk: nee",
         benefit: "Uitkering",
+        otherIncome: "Ander inkomen",
         sickViaEmployer: "Ziek, betaald via werkgever",
         payrollTaxNumber: "Loonheffingennummer {{number}}",
-        since: "sinds {{from}}",
+        period: "sinds {{from}}, laatst aangegeven {{to}}",
         source:
           "Uit het Verzekeringsbericht van UWV, gecontroleerd op het zegel van UWV en op de geverifieerde naam en geboortedatum. Alleen het dienstverband dat op de datum van het bericht loopt wordt bewaard.",
       },

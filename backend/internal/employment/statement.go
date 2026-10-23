@@ -35,27 +35,30 @@ type Statement struct {
 // benefit paid in one. Not those reporting the statement's newest month:
 // someone who stopped in June would otherwise have their June job read as
 // current. A month paid without hours (a final payment, an allowance, an
-// on-call contract without shifts) is no work.
+// on-call contract without shifts) is no work: such a relation paid in one,
+// and worked in none, is current as KindOtherIncome. A pension, AOW or
+// social assistance, which IBL does not name, reads that way.
 func (st *Statement) Current() []Relation {
 	cutoff := time.Date(st.Date.Year(), st.Date.Month()-currentMonths, 1, 0, 0, 0, 0, time.UTC)
 	current := []Relation{}
 	for _, r := range st.Relations {
-		last := r.To
-		if r.Kind == KindEmployment {
-			last = r.Worked
-		}
-		if !last.Before(cutoff) {
+		switch {
+		case r.To.Before(cutoff):
+		case r.Kind == KindEmployment && r.Worked.Before(cutoff):
+			r.Kind = KindOtherIncome
+			current = append(current, r)
+		default:
 			current = append(current, r)
 		}
 	}
 	return current
 }
 
-// Employed reports whether the holder has a current relation that is not a
-// benefit: a job, or a sickness benefit their employer pays.
+// Employed reports whether the holder has a current job, or a sickness
+// benefit their employer pays.
 func (st *Statement) Employed() bool {
 	for _, r := range st.Current() {
-		if r.Kind != KindBenefit {
+		if r.Kind == KindEmployment || r.Kind == KindSickViaEmployer {
 			return true
 		}
 	}
@@ -68,11 +71,15 @@ type Kind string
 const (
 	// KindEmployment is a job.
 	KindEmployment Kind = "employment"
-	// KindBenefit is a benefit UWV pays (isUWVBenefit).
+	// KindBenefit is a benefit UWV pays (classify).
 	KindBenefit Kind = "benefit"
 	// KindSickViaEmployer is a sickness or WAZO benefit paid through the
 	// employer: the holder still has the job.
 	KindSickViaEmployer Kind = "sick_via_employer"
+	// KindOtherIncome is a current payment without hours worked from a payer
+	// that is no UWV benefit: a pension, AOW, social assistance, or a job's
+	// final payment (Statement.Current).
+	KindOtherIncome Kind = "other_income"
 )
 
 // Relation is one income relation: an employer or a paying body (UWV)

@@ -85,7 +85,8 @@ const proofingEmploymentSchema = z.object({
   employed: z.boolean(),
   relations: z.array(
     z.object({
-      // employment, benefit (paid by UWV) or sick_via_employer.
+      // employment, benefit (paid by UWV), sick_via_employer or
+      // other_income (paid without hours worked).
       kind: z.string(),
       employer: z.string(),
       payrollTaxNumber: z.string(),
@@ -237,7 +238,8 @@ const proofingRequestSchema = z.object({
   employment: proofingEmploymentSchema.optional(),
   employmentUntil: z.string().optional(),
   // Why the wallet put the session in review after the identity was
-  // approved (no_current_employment); absent otherwise.
+  // approved (no_current_employment, current_benefit,
+  // current_other_income); absent otherwise.
   reviewReason: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).

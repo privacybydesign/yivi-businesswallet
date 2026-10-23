@@ -215,6 +215,7 @@ func TestEmploymentReviewReason(t *testing.T) {
 	job := EmploymentRelation{Kind: string(employment.KindEmployment)}
 	sick := EmploymentRelation{Kind: string(employment.KindSickViaEmployer)}
 	benefit := EmploymentRelation{Kind: string(employment.KindBenefit)}
+	other := EmploymentRelation{Kind: string(employment.KindOtherIncome)}
 	for _, tc := range []struct {
 		name string
 		emp  Employment
@@ -223,7 +224,10 @@ func TestEmploymentReviewReason(t *testing.T) {
 		{"job", Employment{Employed: true, Relations: []EmploymentRelation{job}}, ""},
 		{"sick via employer", Employment{Employed: true, Relations: []EmploymentRelation{sick}}, ""},
 		{"job and benefit", Employment{Employed: true, Relations: []EmploymentRelation{job, benefit}}, ReviewCurrentBenefit},
+		{"job and other income", Employment{Employed: true, Relations: []EmploymentRelation{job, other}}, ReviewCurrentOtherIncome},
+		{"job, benefit and other income", Employment{Employed: true, Relations: []EmploymentRelation{job, other, benefit}}, ReviewCurrentBenefit},
 		{"benefit only", Employment{Relations: []EmploymentRelation{benefit}}, ReviewNoCurrentEmployment},
+		{"other income only", Employment{Relations: []EmploymentRelation{other}}, ReviewNoCurrentEmployment},
 		{"nothing", Employment{}, ReviewNoCurrentEmployment},
 	} {
 		if got := tc.emp.reviewReason(); got != tc.want {

@@ -1032,12 +1032,16 @@ export function employmentStepDone(
 }
 
 // Why a kept statement sends the session to review, as the wallet decides it:
-// no current job, or a current UWV benefit beside one. undefined for neither.
+// no current job, or a current UWV benefit or other income beside one.
+// undefined for none.
 export function employmentReview(
   kept: ProofingEmployment,
-): "noJob" | "benefit" | undefined {
+): "noJob" | "benefit" | "otherIncome" | undefined {
   if (!kept.employed) return "noJob";
   if (kept.relations.some((r) => r.kind === "benefit")) return "benefit";
+  if (kept.relations.some((r) => r.kind === "other_income")) {
+    return "otherIncome";
+  }
   return undefined;
 }
 

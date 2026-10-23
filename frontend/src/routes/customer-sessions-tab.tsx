@@ -603,6 +603,11 @@ function SessionEmployment({
                         {t("customers.sessions.employment.benefit")}
                       </Tag>
                     )}
+                    {r.kind === "other_income" && (
+                      <Tag tone="amber">
+                        {t("customers.sessions.employment.otherIncome")}
+                      </Tag>
+                    )}
                     {r.kind === "sick_via_employer" && (
                       <Tag tone="blue">
                         {t("customers.sessions.employment.sickViaEmployer")}
@@ -611,8 +616,9 @@ function SessionEmployment({
                   </span>
                   <span className={HINT}>
                     {[
-                      t("customers.sessions.employment.since", {
+                      t("customers.sessions.employment.period", {
                         from: formatMonth(r.from),
+                        to: formatMonth(r.to),
                       }),
                       r.contractForm,
                     ]
@@ -641,10 +647,12 @@ const REVIEW_REASON_HINT: Partial<
     string,
     | "customers.sessions.review.noCurrentEmployment"
     | "customers.sessions.review.currentBenefit"
+    | "customers.sessions.review.currentOtherIncome"
   >
 > = {
   no_current_employment: "customers.sessions.review.noCurrentEmployment",
   current_benefit: "customers.sessions.review.currentBenefit",
+  current_other_income: "customers.sessions.review.currentOtherIncome",
 };
 
 // An administrator's decision on a session under review: approve or reject,

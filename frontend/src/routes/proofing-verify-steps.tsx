@@ -101,6 +101,7 @@ const MIJN_UWV_URL = "https://mijn.uwv.nl";
 const EMPLOYMENT_REVIEW_KEYS = {
   noJob: "identityProofing.employment.review",
   benefit: "identityProofing.employment.reviewBenefit",
+  otherIncome: "identityProofing.employment.reviewOtherIncome",
 } as const;
 // How long typing a postal code or house number pauses before the address is
 // looked up.
@@ -897,9 +898,15 @@ function EmploymentStep({
                         {t("identityProofing.employment.benefit")}{" "}
                       </span>
                     )}
+                    {r.kind === "other_income" && (
+                      <span className="text-ink-soft">
+                        {t("identityProofing.employment.otherIncome")}{" "}
+                      </span>
+                    )}
                     <span className="text-ink-soft">
-                      {t("identityProofing.employment.since", {
+                      {t("identityProofing.employment.period", {
                         from: formatMonth(r.from),
+                        to: formatMonth(r.to),
                       })}
                     </span>
                   </li>
