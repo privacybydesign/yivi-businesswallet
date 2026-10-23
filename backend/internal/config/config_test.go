@@ -395,7 +395,7 @@ func TestLoadEmploymentDefaultUWV(t *testing.T) {
 
 // The pinned roots hold no root UWV's seal chains to, so pinning them under
 // the real UWV check would reject every statement: it fails the boot instead.
-func TestLoadRejectsPinnedTrustForUWV(t *testing.T) {
+func TestLoadRefusesPinnedForUWV(t *testing.T) {
 	if _, err := loadWith(t, map[string]string{envDiplomaTrustSource: DiplomaTrustPinned}); err == nil {
 		t.Error("pinned trust with the UWV check loaded, want an error")
 	}

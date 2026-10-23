@@ -765,6 +765,7 @@ func loadDocumentValidators(c *Config) error {
 	if c.EmploymentValidatorProvider != ProviderStub && c.EmploymentValidatorProvider != ProviderUWV {
 		return fmt.Errorf("config: %s must be %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV)
 	}
+
 	// The pinned roots hold only PKIoverheid and certSIGN, and UWV's seal
 	// chains to QuoVadis: that pairing would reject every statement.
 	if c.DiplomaTrustSource == DiplomaTrustPinned && c.EmploymentValidatorProvider == ProviderUWV {

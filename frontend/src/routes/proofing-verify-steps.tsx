@@ -657,10 +657,6 @@ export function Session({
   );
 }
 
-// After an approved identity: the subject uploads the extracts of their
-// diplomas they downloaded from DUO, each checked at once against DUO's
-// signature and their proven name and date of birth. The step ends once one
-// is held, or the time to add one is up.
 // The opening of an upload step: the identity done, what to upload and the
 // three steps to get it, the first linking to where it is downloaded.
 function UploadStepIntro({
@@ -712,6 +708,10 @@ function UploadStepIntro({
   );
 }
 
+// After an approved identity: the subject uploads the extracts of their
+// diplomas they downloaded from DUO, each checked at once against DUO's
+// signature and their proven name and date of birth. The step ends once one
+// is held, or the time to add one is up.
 function DiplomaStep({
   target,
   until,

@@ -283,6 +283,7 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 		if err := enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data); err != nil {
 			return err
 		}
+
 		reason := emp.reviewReason()
 		if reason == "" {
 			return nil
@@ -376,6 +377,7 @@ func (s *RequestStore) rejectDueWithoutEmployment(ctx context.Context, q databas
 	if err := refreshPurgeAt(ctx, q, ids...); err != nil {
 		return nil, err
 	}
+
 	rows, err := q.Query(ctx, `SELECT `+requestColumns+requestFrom+` WHERE r.id = ANY($1)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)

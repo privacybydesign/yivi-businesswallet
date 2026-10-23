@@ -137,7 +137,7 @@ func TestAddEmploymentKeepsOnce(t *testing.T) {
 		t.Fatalf("AddEmployment = %+v, %v; want it kept", kept, err)
 	}
 	want := EmploymentRelation{
-		Kind: "employment", Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", ContractForm: "schriftelijke arbeidsovereenkomst voor onbepaalde tijd",
+		Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", ContractForm: "schriftelijke arbeidsovereenkomst voor onbepaalde tijd",
 		From: "2025-01-01", To: "2026-09-30",
 	}
 	got := e.requests.stored.SubjectEmployment
@@ -158,7 +158,7 @@ func TestAddEmploymentKeepsOnce(t *testing.T) {
 
 // No current job sends the approved request to review, which the wallet
 // decides itself: the engine approved the session and holds no review.
-func TestNoCurrentEmploymentGoesToReview(t *testing.T) {
+func TestNoJobGoesToReview(t *testing.T) {
 	for _, approve := range []bool{true, false} {
 		checkNoJobReviewDecided(t, approve)
 	}
@@ -177,7 +177,7 @@ func checkNoJobReviewDecided(t *testing.T, approve bool) {
 	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
 		t.Fatalf("request = %s (%q), want needs_review for no current employment", got.Status, got.ReviewReason)
 	}
-	if got := e.requests.stored.SubjectEmployment.Relations; len(got) != 1 || got[0].Kind != "benefit" {
+	if got := e.requests.stored.SubjectEmployment.Relations; len(got) != 1 || got[0].Kind != string(employment.KindBenefit) {
 		t.Errorf("kept relations = %+v, want the WW benefit", got)
 	}
 
@@ -199,7 +199,7 @@ func checkNoJobReviewDecided(t *testing.T, approve bool) {
 }
 
 // A current benefit beside a job sends the approved request to review too.
-func TestCurrentBenefitGoesToReview(t *testing.T) {
+func TestBenefitGoesToReview(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
 	verdict, err := e.upload(req, "benefit")
@@ -238,7 +238,7 @@ func TestEmploymentReviewReason(t *testing.T) {
 
 // The engine still reports the approval of a session the wallet put in
 // review: reading it must not flip the request back.
-func TestWalletReviewIsNotReconciled(t *testing.T) {
+func TestWalletReviewNotReconciled(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
 	if _, err := e.upload(req, "no job"); err != nil {
@@ -286,7 +286,7 @@ func TestMissingEmploymentRejects(t *testing.T) {
 
 // A rejection for a missing statement is the wallet's: the engine's approval,
 // read again, leaves it.
-func TestMissingEmploymentIsNotReconciled(t *testing.T) {
+func TestNoStatementNotReconciled(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	sendApprovedAddress(t, e.fixture, EmploymentWindow+time.Minute)
 	if _, err := e.svc.ReconcileDue(context.Background()); err != nil {

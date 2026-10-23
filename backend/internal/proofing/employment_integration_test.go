@@ -129,7 +129,7 @@ func approvedRequest(t *testing.T, requests *RequestStore, in NewStoredRequest, 
 
 // A kept statement without a current job puts the approved request in review,
 // in the same transaction, and it lists as an open review.
-func TestNoCurrentEmploymentOpensReview(t *testing.T) {
+func TestNoJobOpensReview(t *testing.T) {
 	f := newSealedFixture(t, EventSessionReviewOpened)
 	ctx := context.Background()
 	f.in.Employment = EmploymentRequired
@@ -172,6 +172,7 @@ func checkWalletDecidesReview(t *testing.T, requests *RequestStore, got Request)
 	if still, err := requests.Get(ctx, got.OrganizationID, got.ID); err != nil || still.Status != StatusNeedsReview {
 		t.Fatalf("after the engine's outcome = %s, %v; want still in review", still.Status, err)
 	}
+
 	if err := requests.RecordWalletOutcome(ctx, got, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
 		t.Fatal(err)
@@ -202,6 +203,7 @@ func approvedSince(t *testing.T, f sealedFixture, session string, approvedAgo ti
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
+
 	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - make_interval(secs => $2)
 		WHERE id = $1`, req.ID, approvedAgo.Seconds()); err != nil {
 		t.Fatal(err)
@@ -264,7 +266,7 @@ func checkStatuses(t *testing.T, requests *RequestStore, want map[*Request]Statu
 
 // A current benefit, or other income, beside a job also puts the approved
 // request in review.
-func TestIncomeBesideJobOpensReview(t *testing.T) {
+func TestIncomeBesideJobReview(t *testing.T) {
 	for _, tc := range []struct {
 		kind, employer, number, want string
 	}{
