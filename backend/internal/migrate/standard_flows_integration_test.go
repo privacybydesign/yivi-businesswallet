@@ -32,36 +32,7 @@ func TestUpMarksStandardFlows(t *testing.T) {
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
-	var orgID string
-	if err := conn.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('Standard BV', 'standard', '11223344', 'NLNHR.11223344', 'standard@qerds.test') RETURNING id`).Scan(&orgID); err != nil {
-		t.Fatalf("insert org: %v", err)
-	}
-	// a-old's engine flow is older than a-new's, though its settings were
-	// written later; e-stub has no engine flow; id is an identity check.
-	for _, v := range []struct{ flow, created string }{
-		{"a-old", "2026-01-01"}, {"a-new", "2026-02-01"}, {"id", "2025-12-01"},
-	} {
-		if _, err := conn.Exec(ctx, `INSERT INTO identity_proofing_flow_versions (organization_id, flow_id, version, definition, active, created_at)
-			VALUES ($1, $2, 1, '{}', true, $3)`, orgID, v.flow, v.created); err != nil {
-			t.Fatalf("insert engine flow %s: %v", v.flow, err)
-		}
-	}
-	for _, s := range []struct{ flow, kind, created string }{
-		{"a-new", "data_access", "2026-03-01"},
-		{"a-old", "data_access", "2026-04-01"},
-		{"e-stub", "data_erasure", "2026-03-01"},
-		{"id", "identity", "2026-03-01"},
-	} {
-		if _, err := conn.Exec(ctx, `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, kind, created_at)
-			VALUES ($1, $2, $3, $4)`, orgID, s.flow, s.kind, s.created); err != nil {
-			t.Fatalf("insert settings %s: %v", s.flow, err)
-		}
-	}
-	if _, err := conn.Exec(ctx, `UPDATE identity_proofing_flow_settings
-		SET hosted_enabled = false, hosted_locales = '{nl}', hosted_completion = 'done' WHERE flow_id IN ('a-new', 'id')`); err != nil {
-		t.Fatalf("switch hosted pages off: %v", err)
-	}
+	seedStandardFlowCandidates(t, ctx, conn)
 
 	if err := migrate.UpTo(ctx, dsn, standardFlowsVersion); err != nil {
 		t.Fatalf("migrate up: %v", err)
@@ -94,4 +65,40 @@ func TestUpMarksStandardFlows(t *testing.T) {
 	assertCount(t, ctx, conn, "the standard column after down", 0,
 		`SELECT count(*) FROM information_schema.columns
 		WHERE table_name = 'identity_proofing_flow_settings' AND column_name = 'standard'`)
+}
+
+// seedStandardFlowCandidates fills one org with the flows the migration picks
+// its standard flows from. a-old's engine flow is older than a-new's, though
+// its settings were written later; e-stub has no engine flow; id is an
+// identity check. The hosted pages of a-new and id are off.
+func seedStandardFlowCandidates(t *testing.T, ctx context.Context, conn *pgx.Conn) {
+	t.Helper()
+	var orgID string
+	if err := conn.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		VALUES ('Standard BV', 'standard', '11223344', 'NLNHR.11223344', 'standard@qerds.test') RETURNING id`).Scan(&orgID); err != nil {
+		t.Fatalf("insert org: %v", err)
+	}
+	for _, v := range []struct{ flow, created string }{
+		{"a-old", "2026-01-01"}, {"a-new", "2026-02-01"}, {"id", "2025-12-01"},
+	} {
+		if _, err := conn.Exec(ctx, `INSERT INTO identity_proofing_flow_versions (organization_id, flow_id, version, definition, active, created_at)
+			VALUES ($1, $2, 1, '{}', true, $3)`, orgID, v.flow, v.created); err != nil {
+			t.Fatalf("insert engine flow %s: %v", v.flow, err)
+		}
+	}
+	for _, s := range []struct{ flow, kind, created string }{
+		{"a-new", "data_access", "2026-03-01"},
+		{"a-old", "data_access", "2026-04-01"},
+		{"e-stub", "data_erasure", "2026-03-01"},
+		{"id", "identity", "2026-03-01"},
+	} {
+		if _, err := conn.Exec(ctx, `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, kind, created_at)
+			VALUES ($1, $2, $3, $4)`, orgID, s.flow, s.kind, s.created); err != nil {
+			t.Fatalf("insert settings %s: %v", s.flow, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `UPDATE identity_proofing_flow_settings
+		SET hosted_enabled = false, hosted_locales = '{nl}', hosted_completion = 'done' WHERE flow_id IN ('a-new', 'id')`); err != nil {
+		t.Fatalf("switch hosted pages off: %v", err)
+	}
 }

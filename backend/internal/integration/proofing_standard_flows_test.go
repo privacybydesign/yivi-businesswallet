@@ -38,9 +38,7 @@ func TestProofingStandardFlows(t *testing.T) {
 		t.Fatalf("data request flows = %+v; want See my data, then Delete my data", standard)
 	}
 	for _, f := range standard {
-		if f.HostedEnabled == nil || !*f.HostedEnabled || !f.Completable || f.Allowed || f.Default {
-			t.Errorf("standard flow = %+v; want sendable as a link, completable, not for members, not the default", f)
-		}
+		assertStandardFlowListed(t, f)
 	}
 	again := decodeJSON[[]proofingListedFlowResp](t, env.do(http.MethodGet, base+"/data-request-flows", nil))
 	if len(again) != 2 || again[0].ID != standard[0].ID || again[1].ID != standard[1].ID {
@@ -69,7 +67,26 @@ func TestProofingStandardFlows(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	resp = env.postJSON(base+"/requests", map[string]any{"email": "anna@example.org", "flowKind": "data_access"})
+	assertDataRequestSentByKind(t, env, base, access, own.ID)
+	assertHostedSwitchListed(t, env, base, own.ID)
+	assertStandardFlowsOverAPI(t, env, own.ID, standard)
+}
+
+// assertStandardFlowListed checks a standard flow as its list has it:
+// sendable as a link, completable, not for members and not the default.
+func assertStandardFlowListed(t *testing.T, f proofingListedFlowResp) {
+	t.Helper()
+	if f.HostedEnabled == nil || !*f.HostedEnabled || !f.Completable || f.Allowed || f.Default {
+		t.Errorf("standard flow = %+v; want sendable as a link, completable, not for members, not the default", f)
+	}
+}
+
+// assertDataRequestSentByKind checks that See my data is sent by its kind, on
+// its flow access, and that a data request naming the admin's own flow ownID
+// is refused.
+func assertDataRequestSentByKind(t *testing.T, env *testEnv, base, access, ownID string) {
+	t.Helper()
+	resp := env.postJSON(base+"/requests", map[string]any{"email": "anna@example.org", "flowKind": "data_access"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("send See my data = %d, want 201", resp.StatusCode)
 	}
@@ -77,28 +94,39 @@ func TestProofingStandardFlows(t *testing.T) {
 		t.Errorf("sent = %+v; want a data_access request on %s", sent, access)
 	}
 	wantProofingError(t, "a data request naming the admin's flow", env.postJSON(base+"/requests", map[string]any{
-		"email": "anna@example.org", "flowKind": "data_erasure", "flowId": own.ID,
+		"email": "anna@example.org", "flowKind": "data_erasure", "flowId": ownID,
 	}), http.StatusBadRequest, "invalid_input")
+}
 
-	// Switched off, a flow's hosted page shows in the list.
-	resp = env.putJSON(base+"/flows/"+own.ID+"/hosted", map[string]any{"enabled": false, "locales": []string{}, "completion": "redirect"})
+// assertHostedSwitchListed checks that the hosted page of the admin's flow
+// ownID, switched off, shows so in the flow list.
+func assertHostedSwitchListed(t *testing.T, env *testEnv, base, ownID string) {
+	t.Helper()
+	resp := env.putJSON(base+"/flows/"+ownID+"/hosted", map[string]any{"enabled": false, "locales": []string{}, "completion": "redirect"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("switch off hosted = %d, want 200", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	listed = decodeJSON[[]proofingListedFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
+	listed := decodeJSON[[]proofingListedFlowResp](t, env.do(http.MethodGet, base+"/flows", nil))
 	if len(listed) != 1 || listed[0].HostedEnabled == nil || *listed[0].HostedEnabled {
 		t.Errorf("flows = %+v; want the admin's flow not sendable as a link", listed)
 	}
+}
 
+// assertStandardFlowsOverAPI checks the API: it lists only the admin's own
+// flow ownID, sends Delete my data by its kind, and sends on a standard flow's
+// id a caller kept.
+func assertStandardFlowsOverAPI(t *testing.T, env *testEnv, ownID string, standard []proofingListedFlowResp) {
+	t.Helper()
+	access := standard[0].ID
 	key := env.proofingKey("acme", "Backend")
 	apiFlows := decodeJSON[[]struct {
 		ID string `json:"id"`
 	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/flows", key.Secret, nil))
-	if len(apiFlows) != 1 || apiFlows[0].ID != own.ID {
+	if len(apiFlows) != 1 || apiFlows[0].ID != ownID {
 		t.Errorf("API flows = %+v; want only the admin's own", apiFlows)
 	}
-	resp = env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret, map[string]any{"email": "anna@example.org", "flowKind": "data_erasure"})
+	resp := env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret, map[string]any{"email": "anna@example.org", "flowKind": "data_erasure"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("API Delete my data = %d, want 201", resp.StatusCode)
 	}
