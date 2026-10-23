@@ -14,7 +14,7 @@ import {
 } from "../api/attestations.queries";
 import type { MemberType } from "../api/organization";
 import { ApiError } from "../api/http";
-import { Button, Card, Icon, Tag, TopBar } from "../ui";
+import { Button, Card, Icon, Select, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const INVITE_MODES = [
@@ -123,14 +123,14 @@ function Field({
   error,
   className,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   className?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className={["flex flex-col gap-1", className ?? ""].join(" ")}>
       <label htmlFor={id} className={FIELD_LABEL}>
@@ -161,9 +161,9 @@ function Field({
 // this invitation. Only natural-person templates can be auto-issued to a member.
 function OnboardingAttestationsCard({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const onboarding = useOnboardingAttestationsQuery(slug);
   const templates = useAttestationTemplatesQuery(slug);
@@ -230,9 +230,9 @@ function OnboardingAttestationsCard({
           {t("memberInvite.attestationsNoTemplates")}
         </p>
       ) : (
-        <select
+        <Select
           aria-label={t("memberInvite.addMore")}
-          className={[control(false), "mt-3"].join(" ")}
+          className="mt-3 w-full"
           value=""
           disabled={save.isPending || available.length === 0}
           onChange={(e) => add(e.target.value)}
@@ -243,7 +243,7 @@ function OnboardingAttestationsCard({
               {tmpl.displayName || tmpl.name}
             </option>
           ))}
-        </select>
+        </Select>
       )}
     </Card>
   );
@@ -454,9 +454,8 @@ export default function MemberInvite(): React.JSX.Element | null {
                 <div className={SUBHEAD}>{t("memberInvite.groupRoleDept")}</div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field id="invite-role" label={t("common.role")}>
-                    <select
+                    <Select
                       id="invite-role"
-                      className={control(false)}
                       value={role}
                       onChange={(e) => setRole(e.target.value)}
                     >
@@ -466,12 +465,11 @@ export default function MemberInvite(): React.JSX.Element | null {
                       <option value="admin">
                         {t("memberInvite.roleAdmin")}
                       </option>
-                    </select>
+                    </Select>
                   </Field>
                   <Field id="invite-department" label={t("common.department")}>
-                    <select
+                    <Select
                       id="invite-department"
-                      className={control(false)}
                       value={departmentId}
                       onChange={(e) => setDepartmentId(e.target.value)}
                     >
@@ -483,7 +481,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                           {d.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </Field>
                   <Field id="invite-job-title" label={t("common.jobTitle")}>
                     <input
@@ -499,9 +497,8 @@ export default function MemberInvite(): React.JSX.Element | null {
                     id="invite-member-type"
                     label={t("memberInvite.memberType")}
                   >
-                    <select
+                    <Select
                       id="invite-member-type"
-                      className={control(false)}
                       value={memberType}
                       onChange={(e) =>
                         setMemberType(e.target.value as MemberType)
@@ -513,7 +510,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                       <option value="external">
                         {t("memberInvite.memberTypeExternal")}
                       </option>
-                    </select>
+                    </Select>
                   </Field>
                   {memberType === "external" && (
                     <Field

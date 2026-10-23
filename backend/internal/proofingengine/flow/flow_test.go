@@ -25,6 +25,41 @@ func TestValidateMinimalFlow(t *testing.T) {
 	}
 }
 
+func TestValidateAgeOver(t *testing.T) {
+	ok := validFlow()
+	ok.RequestedAttributes, ok.AgeOver = []string{AttributeAgeOver}, 18
+	if err := Validate(ok); err != nil {
+		t.Fatalf("Validate(age_over 18) = %v, want nil", err)
+	}
+	withDocument := ok
+	withDocument.RequestedAttributes = []string{AttributeAgeOver, "dg1"}
+	if err := Validate(withDocument); err != nil {
+		t.Fatalf("Validate(age_over with dg1) = %v, want nil", err)
+	}
+
+	noChip := ok
+	noChip.Steps = []Step{StepDocumentPhoto}
+	noChip.RequiredChecks = nil
+	noAge, tooOld, ageOnly := ok, ok, validFlow()
+	noAge.AgeOver = 0
+	tooOld.AgeOver = maxAgeOver + 1
+	ageOnly.AgeOver = 18
+
+	for name, tc := range map[string]struct {
+		fd   FlowDefinition
+		want string
+	}{
+		"no chip read":          {noChip, "requires nfc_read"},
+		"no age":                {noAge, "ageOver must be between"},
+		"too old":               {tooOld, "ageOver must be between"},
+		"age without attribute": {ageOnly, "ageOver set without"},
+	} {
+		if err := Validate(tc.fd); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Validate(%s) = %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
 func TestValidateRequiresName(t *testing.T) {
 	fd := validFlow()
 	fd.Name = "  "
@@ -133,6 +168,56 @@ func TestSubstantialNeedsBinding(t *testing.T) {
 	fd.RequiredChecks = []Check{CheckNFCPassiveAuth}
 	fd.RequiredAssuranceLevel = AssuranceLevelSubstantial
 	wantRefused(t, fd, "requiredAssuranceLevel \"substantial\" requires requiredChecks")
+}
+
+// A Substantial flow may raise the face match threshold, or leave it to the
+// deployment's default, but not set it under the floor.
+func TestSubstantialFaceMatchFloor(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		threshold float64
+		refused   bool
+	}{
+		{"at the floor", SubstantialMinFaceMatch, false},
+		{"above the floor", 0.9, false},
+		{"under the floor", SubstantialMinFaceMatch - 0.01, true},
+		{"zero", 0, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fd := substantialFlow()
+			fd.CheckThresholds = map[Check]float64{CheckFaceMatch: c.threshold}
+			if c.refused {
+				wantRefused(t, fd, "requires a face match threshold of at least 0.75")
+				return
+			}
+			if err := Validate(fd); err != nil {
+				t.Fatalf("Validate(substantial, threshold %v) = %v, want nil", c.threshold, err)
+			}
+		})
+	}
+}
+
+func TestSubstantialNoThreshold(t *testing.T) {
+	fd := substantialFlow()
+	fd.CheckThresholds = nil
+	if err := Validate(fd); err != nil {
+		t.Fatalf("Validate(substantial without a threshold) = %v, want nil", err)
+	}
+}
+
+// Below Substantial any threshold from 0 up is the flow's own call.
+func TestLowAllowsLowThreshold(t *testing.T) {
+	fd := validFlow()
+	fd.Steps = []Step{StepDocumentCapture, StepNFCRead, StepFaceVerification}
+	fd.RequiredChecks = []Check{CheckNFCPassiveAuth, CheckFaceMatch}
+	fd.SelfieLocation, fd.FaceProvider = LocationNative, FaceProviderRegula
+	for _, level := range []AssuranceLevel{"", AssuranceLevelLow} {
+		fd.RequiredAssuranceLevel = level
+		fd.CheckThresholds = map[Check]float64{CheckFaceMatch: 0.5}
+		if err := Validate(fd); err != nil {
+			t.Errorf("Validate(level %q, threshold 0.5) = %v, want nil", level, err)
+		}
+	}
 }
 
 func TestValidateLowChipReadOnly(t *testing.T) {
@@ -379,6 +464,21 @@ func TestValidatePositiveRetention(t *testing.T) {
 	fd.RetentionOverride = 24 * time.Hour
 	if err := Validate(fd); err != nil {
 		t.Fatalf("Validate(positive retentionOverride) = %v, want nil", err)
+	}
+}
+
+func TestValidateSessionTTL(t *testing.T) {
+	for ttl, refused := range map[time.Duration]bool{
+		0: false, 2 * time.Minute: false, MaxSessionTTL: false,
+		-time.Minute: true, MaxSessionTTL + time.Second: true,
+	} {
+		fd := validFlow()
+		fd.SessionTTL = ttl
+		if refused {
+			wantRefused(t, fd, "sessionTtl must be between")
+		} else if err := Validate(fd); err != nil {
+			t.Errorf("Validate(sessionTtl %v) = %v, want nil", ttl, err)
+		}
 	}
 }
 

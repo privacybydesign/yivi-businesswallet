@@ -12,7 +12,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// SettingsStore persists the org admin's flow selection.
+// SettingsStore persists the org admin's flow selection: the flows members may
+// use and the org's default flow.
 type SettingsStore struct {
 	db    database.DB
 	audit audit.Recorder
@@ -22,12 +23,12 @@ func NewSettingsStore(db database.DB, recorder audit.Recorder) *SettingsStore {
 	return &SettingsStore{db: db, audit: recorder}
 }
 
-// FlowSelection returns the org's allow-list; empty when the admin chose none.
+// FlowSelection returns the org's selection; empty when the admin chose none.
 func (s *SettingsStore) FlowSelection(ctx context.Context, orgID uuid.UUID) (FlowSelection, error) {
 	return readFlowSelection(ctx, s.db, orgID)
 }
 
-// SaveFlowSelection replaces the org's allow-list and audits
+// SaveFlowSelection replaces the org's selection and audits
 // identity_proofing.flows_configured in the same transaction. A flow taken off
 // the list keeps its other settings.
 func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, sel FlowSelection) error {
@@ -37,16 +38,24 @@ func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, 
 			return err
 		}
 		if _, err := q.Exec(ctx, `UPDATE identity_proofing_flow_settings
-			SET member_allowed = false, member_default = false, updated_at = now()
-			WHERE organization_id = $1 AND member_allowed`, orgID); err != nil {
+			SET member_allowed = false, is_default = false, updated_at = now()
+			WHERE organization_id = $1 AND (member_allowed OR is_default)`, orgID); err != nil {
 			return fmt.Errorf("proofing: clear flow selection org %s: %w", orgID, err)
 		}
-		const upsert = `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, member_allowed, member_default)
-			SELECT $1, id, true, id = $3 FROM unnest($2::text[]) AS id
-			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
-				member_allowed = true, member_default = EXCLUDED.member_default, updated_at = now()`
-		if _, err := q.Exec(ctx, upsert, orgID, sel.FlowIDs, sel.DefaultFlowID); err != nil {
-			return fmt.Errorf("proofing: save flow selection org %s: %w", orgID, err)
+		const allow = `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, member_allowed)
+			SELECT $1, id, true FROM unnest($2::text[]) AS id
+			ON CONFLICT (organization_id, flow_id) DO UPDATE SET member_allowed = true, updated_at = now()`
+		if _, err := q.Exec(ctx, allow, orgID, sel.FlowIDs); err != nil {
+			return fmt.Errorf("proofing: save allowed flows org %s: %w", orgID, err)
+		}
+
+		if sel.DefaultFlowID != "" {
+			const setDefault = `INSERT INTO identity_proofing_flow_settings (organization_id, flow_id, is_default)
+				VALUES ($1, $2, true)
+				ON CONFLICT (organization_id, flow_id) DO UPDATE SET is_default = true, updated_at = now()`
+			if _, err := q.Exec(ctx, setDefault, orgID, sel.DefaultFlowID); err != nil {
+				return fmt.Errorf("proofing: save default flow org %s: %w", orgID, err)
+			}
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingFlowsConfigured,
 			audit.Target{Type: audit.TargetIdentityProofingSettings, ID: orgID.String(), OrgID: &orgID},
@@ -56,8 +65,8 @@ func (s *SettingsStore) SaveFlowSelection(ctx context.Context, orgID uuid.UUID, 
 
 func readFlowSelection(ctx context.Context, q database.Querier, orgID uuid.UUID) (FlowSelection, error) {
 	rows, err := q.Query(ctx,
-		`SELECT flow_id, member_default FROM identity_proofing_flow_settings
-			WHERE organization_id = $1 AND member_allowed ORDER BY flow_id`, orgID)
+		`SELECT flow_id, member_allowed, is_default FROM identity_proofing_flow_settings
+			WHERE organization_id = $1 AND (member_allowed OR is_default) ORDER BY flow_id`, orgID)
 	if err != nil {
 		return FlowSelection{}, fmt.Errorf("proofing: read flow selection org %s: %w", orgID, err)
 	}
@@ -65,11 +74,13 @@ func readFlowSelection(ctx context.Context, q database.Querier, orgID uuid.UUID)
 	sel := FlowSelection{FlowIDs: []string{}}
 	for rows.Next() {
 		var id string
-		var isDefault bool
-		if err := rows.Scan(&id, &isDefault); err != nil {
+		var allowed, isDefault bool
+		if err := rows.Scan(&id, &allowed, &isDefault); err != nil {
 			return FlowSelection{}, fmt.Errorf("proofing: scan flow selection org %s: %w", orgID, err)
 		}
-		sel.FlowIDs = append(sel.FlowIDs, id)
+		if allowed {
+			sel.FlowIDs = append(sel.FlowIDs, id)
+		}
 		if isDefault {
 			sel.DefaultFlowID = id
 		}

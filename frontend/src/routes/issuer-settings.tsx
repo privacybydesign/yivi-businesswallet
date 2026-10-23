@@ -31,9 +31,9 @@ const MAX_LOGO_BYTES = 512 * 1024;
 
 export function IssuerSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useIssuerSettingsQuery(slug);
 
@@ -69,10 +69,10 @@ export function IssuerSettingsPanel({
 function IssuerForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: IssuerSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateIssuerSettingsMutation(slug);
 
@@ -239,7 +239,7 @@ function IssuerForm({
 
 // BundlePanel generates the GitOps files (issuer/did/metadata/vct) an operator
 // commits to the issuer ops repo (openid4vc-poc-ops) and redeploys.
-function BundlePanel({ slug }: { slug: string }): React.JSX.Element {
+function BundlePanel({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const [show, setShow] = useState(false);
   const bundle = useIssuerBundleQuery(slug, show);

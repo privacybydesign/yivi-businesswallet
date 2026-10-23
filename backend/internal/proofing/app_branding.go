@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
@@ -52,9 +51,14 @@ func fromTheme(name string, theme themesettings.Settings) AppBranding {
 // ErrNoAppLogo is AppBrandingResolver.Logo's answer for a request without one.
 var ErrNoAppLogo = errors.New("proofing: no app branding logo")
 
-type appBrandingCustomers interface {
-	Get(ctx context.Context, orgID, id uuid.UUID) (Customer, error)
-	Logo(ctx context.Context, orgID, id uuid.UUID) (CustomerLogo, error)
+type appBrandingSettings interface {
+	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
+	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
+}
+
+type appBrandingFlows interface {
+	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowBranding, error)
+	Logo(ctx context.Context, orgID uuid.UUID, flowID string) (Logo, error)
 }
 
 type appBrandingThemes interface {
@@ -62,31 +66,29 @@ type appBrandingThemes interface {
 	GetLogo(ctx context.Context, orgID uuid.UUID) (themesettings.Logo, error)
 }
 
-type appBrandingOrgs interface {
-	GetByID(ctx context.Context, id uuid.UUID) (organization.Organization, error)
-}
-
-// AppBrandingResolver picks a request's branding from who sent it, never from
-// anything the app sends. The org's own requests get the org's theme. A
-// customer's request gets the customer's white-labeling when it has one (see
-// whiteLabeled): its colours, font and logo, the design's own for the rest; else the
-// org's theme, with the customer's logo when it has one and the org's
-// otherwise. Either way under the customer's name.
+// AppBrandingResolver picks a request's branding from who it was sent to and
+// the flow it runs, never from anything the app sends. A request to a member
+// gets the org's theme under the org's name. A request to an external person
+// gets the proofing branding its mail and hosted page wear: the flow's own over
+// the org's (Settings.brandedFor). When that has white-labeling (see
+// whiteLabeled), its colours, font and logo, the design's own for the rest;
+// else the org's theme, with the proofing logo when it has one and the org's
+// otherwise. Either way under the name the proofing mail signs with.
 type AppBrandingResolver struct {
-	requests  *RequestStore
-	customers appBrandingCustomers
-	themes    appBrandingThemes
-	orgs      appBrandingOrgs
+	requests *RequestStore
+	settings appBrandingSettings
+	flows    appBrandingFlows
+	themes   appBrandingThemes
 }
 
-func NewAppBrandingResolver(requests *RequestStore, customers appBrandingCustomers, themes appBrandingThemes, orgs appBrandingOrgs) *AppBrandingResolver {
-	return &AppBrandingResolver{requests: requests, customers: customers, themes: themes, orgs: orgs}
+func NewAppBrandingResolver(requests *RequestStore, settings appBrandingSettings, flows appBrandingFlows, themes appBrandingThemes) *AppBrandingResolver {
+	return &AppBrandingResolver{requests: requests, settings: settings, flows: flows, themes: themes}
 }
 
-// Branding is the org's requestID's branding, nil when neither the customer
-// nor the org set any.
+// Branding is the org's requestID's branding, nil when neither the proofing
+// branding nor the org's theme set any.
 func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uuid.UUID) (*AppBranding, error) {
-	customerID, err := r.requests.CustomerOf(ctx, orgID, requestID)
+	kind, flowID, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -95,28 +97,28 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 		return nil, fmt.Errorf("proofing: app branding org theme: %w", err)
 	}
 	var out AppBranding
-	if customerID != nil {
-		customer, err := r.customers.Get(ctx, orgID, *customerID)
+	if kind == SubjectExternal {
+		settings, _, err := r.externalBranding(ctx, orgID, flowID)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: app branding customer: %w", err)
+			return nil, err
 		}
-		if b := customer.Branding; whiteLabeled(b) {
+		if b := settings.Branding; whiteLabeled(b) {
 			out = AppBranding{
-				Name: customer.SignedAs(), PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor,
+				Name: settings.SignedAs(), PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor,
 				TextColor: b.TextColor, SurfaceColor: b.SurfaceColor, BorderColor: b.BorderColor,
 				LinkColor: b.LinkColor, SuccessColor: b.SuccessColor, WarningColor: b.WarningColor,
 				ErrorColor: b.ErrorColor, HeaderColor: b.TopbarColor, FontFamily: b.FontFamily, HasLogo: b.HasLogo,
 			}
 		} else {
-			out = fromTheme(customer.SignedAs(), theme)
-			out.HasLogo = out.HasLogo || customer.Branding.HasLogo
+			out = fromTheme(settings.SignedAs(), theme)
+			out.HasLogo = out.HasLogo || b.HasLogo
 		}
 	} else {
-		org, err := r.orgs.GetByID(ctx, orgID)
+		settings, err := r.settings.Get(ctx, orgID)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: app branding org: %w", err)
+			return nil, fmt.Errorf("proofing: app branding settings: %w", err)
 		}
-		out = fromTheme(org.Name, theme)
+		out = fromTheme(settings.OrgName, theme)
 	}
 	if out == (AppBranding{Name: out.Name}) {
 		return nil, nil
@@ -125,43 +127,58 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 }
 
 // Logo is the logo Branding reported, or ErrNoAppLogo.
-func (r *AppBrandingResolver) Logo(ctx context.Context, orgID, requestID uuid.UUID) (CustomerLogo, error) {
-	customerID, err := r.requests.CustomerOf(ctx, orgID, requestID)
+func (r *AppBrandingResolver) Logo(ctx context.Context, orgID, requestID uuid.UUID) (Logo, error) {
+	kind, flowID, err := r.requests.SubjectKindOf(ctx, orgID, requestID)
 	if err != nil {
-		return CustomerLogo{}, err
+		return Logo{}, err
 	}
-	if customerID != nil {
-		customer, err := r.customers.Get(ctx, orgID, *customerID)
+	if kind == SubjectExternal {
+		settings, own, err := r.externalBranding(ctx, orgID, flowID)
 		if err != nil {
-			return CustomerLogo{}, fmt.Errorf("proofing: app branding customer: %w", err)
+			return Logo{}, err
 		}
-		if whiteLabeled(customer.Branding) || customer.Branding.HasLogo {
-			logo, err := r.customers.Logo(ctx, orgID, *customerID)
-			if errors.Is(err, ErrNoCustomerLogo) {
-				return CustomerLogo{}, ErrNoAppLogo
+		if whiteLabeled(settings.Branding) || settings.Branding.HasLogo {
+			logo, err := flowOrOrgLogo(ctx, r.flows, r.settings, orgID, flowID, own)
+			if errors.Is(err, ErrNoLogo) {
+				return Logo{}, ErrNoAppLogo
 			}
 			return logo, err
 		}
 	}
 	logo, err := r.themes.GetLogo(ctx, orgID)
 	if errors.Is(err, themesettings.ErrNoLogo) {
-		return CustomerLogo{}, ErrNoAppLogo
+		return Logo{}, ErrNoAppLogo
 	}
 	if err != nil {
-		return CustomerLogo{}, fmt.Errorf("proofing: app branding org logo: %w", err)
+		return Logo{}, fmt.Errorf("proofing: app branding org logo: %w", err)
 	}
-	return CustomerLogo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
+	return Logo{Bytes: logo.Bytes, ContentType: logo.ContentType}, nil
 }
 
-// whiteLabeled reports whether a customer has white-labeling of its own: a
-// colour or a font. A logo alone is a mark under the org's look, not a look of
-// its own; its name, support contact and privacy link are not looks either.
-func whiteLabeled(b CustomerBranding) bool {
-	look := CustomerBranding{
+// externalBranding is the org's proofing settings with flowID's own branding
+// over them, and that own branding.
+func (r *AppBrandingResolver) externalBranding(ctx context.Context, orgID uuid.UUID, flowID string) (Settings, FlowBranding, error) {
+	settings, err := r.settings.Get(ctx, orgID)
+	if err != nil {
+		return Settings{}, FlowBranding{}, fmt.Errorf("proofing: app branding settings: %w", err)
+	}
+	own, err := r.flows.Get(ctx, orgID, flowID)
+	if err != nil {
+		return Settings{}, FlowBranding{}, fmt.Errorf("proofing: app branding flow: %w", err)
+	}
+	return settings.brandedFor(own), own, nil
+}
+
+// whiteLabeled reports whether the org's proofing has white-labeling of its
+// own: a colour or a font. A logo alone is a mark under the org's look, not a
+// look of its own; its name, support contact and privacy link are not looks
+// either.
+func whiteLabeled(b Branding) bool {
+	look := Branding{
 		PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor, TextColor: b.TextColor,
 		SurfaceColor: b.SurfaceColor, BorderColor: b.BorderColor, LinkColor: b.LinkColor,
 		SuccessColor: b.SuccessColor, WarningColor: b.WarningColor, ErrorColor: b.ErrorColor,
 		TopbarColor: b.TopbarColor, FontFamily: b.FontFamily,
 	}
-	return look != CustomerBranding{}
+	return look != Branding{}
 }

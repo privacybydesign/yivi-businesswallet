@@ -288,8 +288,24 @@ func meetsLevelRequirement(fd *flow.FlowDefinition, level flow.LevelRequirement,
 			return false
 		}
 	}
+
+	if !meetsFaceMatchFloor(level, req.Biometrics) {
+		return false
+	}
+
 	if level.FaceProvider == "" {
 		return true
 	}
 	return source == matchedChipPortrait && req.Biometrics != nil && req.Biometrics.Engine == string(level.FaceProvider)
+}
+
+// meetsFaceMatchFloor reports whether the face score reaches level's floor.
+// face.match passes at the flow's own threshold, or the deployment's, which may
+// be lower: a level's floor holds whatever either says. A face without a score
+// does not reach it.
+func meetsFaceMatchFloor(level flow.LevelRequirement, b *biometricsInfo) bool {
+	if level.MinFaceMatch == 0 || !slices.Contains(level.Checks, flow.CheckFaceMatch) {
+		return true
+	}
+	return b != nil && b.FaceMatchScore != nil && *b.FaceMatchScore >= level.MinFaceMatch
 }

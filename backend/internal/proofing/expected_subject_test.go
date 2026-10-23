@@ -6,17 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
-// sendForPerson sends initech's subject a request for one known person.
+// sendForPerson sends an external person a request for one known person.
 func (f fixture) sendForPerson(t *testing.T, name, birthDate string) Sent {
 	t.Helper()
-	sent, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"},
+	sent, err := f.svc.CreateRequest(context.Background(), testOrg, sam,
 		NewRequest{
-			CustomerID: &initech.ID, SubjectEmail: "anna@example.org", SubjectName: name,
+			SubjectEmail: "anna@example.org", SubjectName: name,
 			SubjectBirthDate: birthDate, FlowID: chipFlow.ID,
 		})
 	if err != nil {
@@ -63,7 +61,7 @@ func TestExpectedSubjectIsMatched(t *testing.T) {
 // label, and the identity is never read to match it.
 func TestNameAloneIsNotMatched(t *testing.T) {
 	f := newFixture()
-	f.sendForCustomer(t, "anna@example.org", "Dibran Mulder")
+	f.sendExternal(t, "anna@example.org", "Dibran Mulder")
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}
 	if req := f.reconcile(t); req.Status != StatusApproved || req.ExpectsSubject {
 		t.Errorf("status = %s, expects subject = %v; want approved for anyone", req.Status, req.ExpectsSubject)
@@ -91,21 +89,18 @@ func TestExpectedSubjectReadFails(t *testing.T) {
 func TestExpectedSubjectValidates(t *testing.T) {
 	future := time.Now().AddDate(1, 0, 0).Format(birthDateLayout)
 	for name, tc := range map[string]NewRequest{
-		"no name":          {CustomerID: &initech.ID, SubjectEmail: "a@example.org", SubjectBirthDate: testBirthDate, FlowID: chipFlow.ID},
-		"not a date":       {CustomerID: &initech.ID, SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: "12-04-1990", FlowID: chipFlow.ID},
-		"in the future":    {CustomerID: &initech.ID, SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: future, FlowID: chipFlow.ID},
+		"no name":          {SubjectEmail: "a@example.org", SubjectBirthDate: testBirthDate, FlowID: chipFlow.ID},
+		"not a date":       {SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: "12-04-1990", FlowID: chipFlow.ID},
+		"in the future":    {SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: future, FlowID: chipFlow.ID},
 		"a member":         {SubjectUserID: alex.UserID, SubjectBirthDate: testBirthDate, FlowID: appFlow.ID},
-		"no document data": {CustomerID: &initech.ID, SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: testBirthDate, FlowID: "f-nodata"},
+		"no document data": {SubjectEmail: "a@example.org", SubjectName: "Anna Jansen", SubjectBirthDate: testBirthDate, FlowID: "f-nodata"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture()
 			noData := testFlow("f-nodata", "Chip, no document data", []string{"document_capture", "nfc_read"}, "native")
 			noData.RequestedAttributes = []string{"dg2", "chip_checks"}
 			f.ips.flows = append(f.ips.flows, noData)
-			c := f.customers.byID[initech.ID]
-			c.Flows.FlowIDs = append(c.Flows.FlowIDs, noData.ID)
-			f.customers.byID[initech.ID] = c
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New(), Name: "Sam"}, tc)
+			_, err := f.svc.CreateRequest(context.Background(), testOrg, sam, tc)
 			if !errors.Is(err, ErrInvalidInput) {
 				t.Errorf("err = %v, want ErrInvalidInput", err)
 			}
@@ -129,6 +124,9 @@ func TestReadsIdentity(t *testing.T) {
 		"requests the document data": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}}, true,
 		},
+		"withholds the date of birth for the age check": {
+			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"nfc_read"}, RequestedAttributes: []string{"dg1", "age_over"}}}, false,
+		},
 		"leaves the document data out": {
 			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg2"}}}, false,
 		},
@@ -149,7 +147,7 @@ func TestMismatchHidesIdentity(t *testing.T) {
 		t.Fatalf("code = %q, want %s", req.ErrorCode, errorIdentityMismatch)
 	}
 	f.requests.stored.Status, f.requests.stored.ErrorCode = StatusRejected, errorIdentityMismatch
-	_, identity, err := f.svc.AdminRequestResult(context.Background(), testOrg.ID, sent.Request.ID)
+	_, identity, err := f.svc.AdminRequestResult(context.Background(), testOrg.ID, sent.Request.ID, ReviewScopeAll)
 	if err != nil {
 		t.Fatalf("AdminRequestResult: %v", err)
 	}

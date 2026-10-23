@@ -46,7 +46,7 @@ const (
 	DeliveryHeader = "Yivi-Delivery"
 )
 
-// Deliverer sends due webhook deliveries to customers' endpoints through the
+// Deliverer sends due webhook deliveries to orgs' endpoints through the
 // SSRF-guarded client.
 type Deliverer struct {
 	store  *WebhookStore

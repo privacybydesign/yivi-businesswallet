@@ -13,14 +13,12 @@ import type {
   ScreeningSettingsInput,
 } from "../api/organization";
 import { VOG_FUNCTION_ASPECTS } from "../lib/vog-codes";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, Select } from "../ui";
 import * as React from "react";
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[12px]";
 const SECTION = "text-ink text-[13px] font-semibold";
-const CONTROL =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 
 const REQUIRED_FOR_VALUES: readonly ScreeningRequiredFor[] = [
   "nobody",
@@ -72,9 +70,9 @@ function parseExtraCodes(raw: string): string[] | null {
 
 export function ScreeningSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useScreeningSettingsQuery(slug, true);
 
@@ -102,10 +100,10 @@ export function ScreeningSettingsPanel({
 function ScreeningForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ScreeningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveScreeningSettingsMutation(slug);
 
@@ -226,8 +224,7 @@ function ScreeningForm({
           <legend className={SECTION}>
             {t("screeningSettings.requiredFor")}
           </legend>
-          <select
-            className={CONTROL}
+          <Select
             value={requiredFor}
             onChange={(event) =>
               setRequiredFor(event.target.value as ScreeningRequiredFor)
@@ -238,7 +235,7 @@ function ScreeningForm({
                 {requiredForLabel(value, t)}
               </option>
             ))}
-          </select>
+          </Select>
         </fieldset>
 
         <fieldset className="flex flex-col gap-3">
@@ -283,8 +280,7 @@ function ScreeningForm({
 
         <fieldset className="flex flex-col gap-2">
           <legend className={SECTION}>{t("screeningSettings.maxAge")}</legend>
-          <select
-            className={CONTROL}
+          <Select
             value={maxAge === null ? "off" : String(maxAge)}
             onChange={(event) =>
               setMaxAge(
@@ -302,7 +298,7 @@ function ScreeningForm({
                 {maxAgeLabel(days)}
               </option>
             ))}
-          </select>
+          </Select>
           <p className={HINT}>{t("screeningSettings.maxAgeHint")}</p>
         </fieldset>
 
@@ -313,9 +309,8 @@ function ScreeningForm({
               <label htmlFor="screening-employee-interval" className={LABEL}>
                 {t("screeningSettings.employeeInterval")}
               </label>
-              <select
+              <Select
                 id="screening-employee-interval"
-                className={CONTROL}
                 value={employeeMonths === null ? "off" : String(employeeMonths)}
                 onChange={(event) =>
                   setEmployeeMonths(
@@ -333,15 +328,14 @@ function ScreeningForm({
                     {intervalLabel(months)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="screening-external-interval" className={LABEL}>
                 {t("screeningSettings.externalInterval")}
               </label>
-              <select
+              <Select
                 id="screening-external-interval"
-                className={CONTROL}
                 value={externalMonths === null ? "off" : String(externalMonths)}
                 onChange={(event) =>
                   setExternalMonths(
@@ -359,16 +353,15 @@ function ScreeningForm({
                     {intervalLabel(months)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="screening-recheck-anchor" className={LABEL}>
               {t("screeningSettings.recheckAnchor")}
             </label>
-            <select
+            <Select
               id="screening-recheck-anchor"
-              className={CONTROL}
               value={recheckAnchor}
               onChange={(event) =>
                 setRecheckAnchor(event.target.value as RecheckAnchor)
@@ -380,7 +373,7 @@ function ScreeningForm({
               <option value="checked_at">
                 {t("screeningSettings.recheckAnchorCheckedAt")}
               </option>
-            </select>
+            </Select>
           </div>
         </fieldset>
 

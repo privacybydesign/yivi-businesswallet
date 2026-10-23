@@ -37,7 +37,7 @@ import {
   type MailTemplateProblem,
   type MailTemplateTextField,
 } from "../lib/mail-template";
-import { Button, Card, ConfirmDialog, Input, Table, Tag } from "../ui";
+import { Button, Card, ConfirmDialog, Input, Select, Table, Tag } from "../ui";
 
 const EYEBROW =
   "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
@@ -117,12 +117,12 @@ function FieldProblems({
   field,
   blockIndex,
   blockField,
-}: {
+}: Readonly<{
   problems: readonly MailTemplateProblem[];
   field: MailTemplateTextField | "blocks";
   blockIndex?: number;
   blockField?: MailBlockField;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const mine = problems.filter(
     (problem) =>
@@ -154,10 +154,10 @@ function FieldProblems({
 function VariablePalette({
   variables,
   onInsert,
-}: {
+}: Readonly<{
   variables: readonly MailTemplateVariable[];
   onInsert: (name: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="border-line bg-surface-2 rounded-yivi border p-3">
@@ -193,7 +193,7 @@ function BlockCard({
   onMove,
   onRemove,
   onFocusField,
-}: {
+}: Readonly<{
   block: MailBlock;
   index: number;
   count: number;
@@ -204,7 +204,7 @@ function BlockCard({
   onFocusField: (
     element: HTMLInputElement | HTMLTextAreaElement | null,
   ) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const number = index + 1;
   const fields = MAIL_BLOCK_FIELDS[block.type];
@@ -358,10 +358,10 @@ function toTemplate(draft: Draft): MailTemplate {
 function TemplateEditor({
   slug,
   detail,
-}: {
+}: Readonly<{
   slug: string;
   detail: MailTemplateDetail;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const ref: MailTemplateRef = { kind: detail.kind, locale: detail.locale };
   const save = useUpdateMailTemplateMutation(slug, ref);
@@ -742,11 +742,11 @@ function TemplateRow({
   summary,
   locale,
   onSelect,
-}: {
+}: Readonly<{
   summary: MailTemplateKindSummary;
   locale: MailLocale;
   onSelect: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const cell = summary.locales.find((entry) => entry.locale === locale);
   return (
@@ -778,9 +778,9 @@ function TemplateRow({
 // renders the matrix it is given rather than a list of its own.
 export function EmailTemplatesPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const templates = useMailTemplatesQuery(slug);
   const [locale, setLocale] = useState<MailLocale>(MAIL_LOCALES[0]);
@@ -859,9 +859,9 @@ export function EmailTemplatesPanel({
           <label htmlFor="mail-template-locale" className={EYEBROW}>
             {t("mailTemplates.language")}
           </label>
-          <select
+          <Select
             id="mail-template-locale"
-            className={`${CONTROL} h-9 max-w-[220px]`}
+            className="w-full max-w-[220px]"
             value={locale}
             onChange={(event) => {
               setLocale(event.target.value as MailLocale);
@@ -872,7 +872,7 @@ export function EmailTemplatesPanel({
                 {t(`mailTemplates.locales.${option}`)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
 
         <div className="mt-4">

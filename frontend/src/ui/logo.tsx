@@ -7,10 +7,10 @@ const LOGO_HEIGHT = 22;
 export function Logo({
   src,
   alt,
-}: {
+}: Readonly<{
   src?: string;
   alt?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   if (src) {
     return (
       <img

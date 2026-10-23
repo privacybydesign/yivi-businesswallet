@@ -1,8 +1,10 @@
 // How a hosted proofing page picks its language and hands its subject back
 // once the session settles. Pure, so the rules are unit-tested.
 
-import type { HostedTheme } from "../api/identity-proofing";
+import type { MutationStatus } from "@tanstack/react-query";
+import type { HostedTheme, ProofingProgress } from "../api/identity-proofing";
 import type { OrgTheme } from "../api/theme";
+import { ttlMinutes } from "./identity-proofing";
 import {
   DEFAULT_LANGUAGE,
   isSupportedLanguage,
@@ -50,7 +52,7 @@ export function completedMessage(
   return { type: "proofing.completed", session, status };
 }
 
-// The redirect with the session and its status added, keeping the customer's
+// The redirect with the session and its status added, keeping the redirect's
 // own query. The backend accepted the redirect's origin when the session was
 // created; an unparsable one is undefined, so the page shows its own done screen.
 export function completionRedirect(
@@ -79,9 +81,15 @@ export interface HostedHandBack {
   redirectTo: string | undefined;
 }
 
+// The status of a check that ran out unfinished: the session's time, or the
+// link's before it was started.
+const STATUS_EXPIRED = "expired";
+
 // The hand-back for a settled status, or undefined when there is none: the
 // page hands back once, and a data request in review is not answered yet. A
-// data request's answer shows on the page, so it never redirects away.
+// data request's answer shows on the page, so it never redirects away; nor
+// does a check that ran out, whose page says what to do next (VF5) instead of
+// sending the person back as if it were done.
 export function hostedHandBack({
   sessionId,
   status,
@@ -105,7 +113,7 @@ export function hostedHandBack({
     message,
     post: framed,
     redirectTo:
-      redirectUrl && !dataRequest
+      redirectUrl && !dataRequest && status !== STATUS_EXPIRED
         ? completionRedirect(redirectUrl, message)
         : undefined,
   };
@@ -116,7 +124,7 @@ export interface MessageTarget {
   postMessage(message: unknown, targetOrigin: string): void;
 }
 
-// Posts the completion to each of the customer's origins, never "*": the
+// Posts the completion to each of the org's origins, never "*": the
 // browser delivers it only when the embedding page is on that origin, so no
 // other page learns the outcome.
 export function postCompletion(
@@ -141,18 +149,21 @@ export function originLines(text: string): string[] {
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 // The hosted page's theme: the white-label design in the look the Idem app
-// shows the session in (the customer's own look, else the org's theme),
-// its header as the page's header. Without one, the customer's own colour as
-// the brand colour when it has a valid one. Applied through applyOrgTheme,
-// which keeps text on it readable and drops what is not a valid colour.
+// shows the session in (the proofing look, the flow's own over the org's,
+// else the org's theme), its header as the page's header. The branding's
+// own colour (the flow's, else the org's) is the brand colour when it has a
+// valid one, so a flow's colour shows over a theme's. Applied through
+// applyOrgTheme, which keeps text on it readable and drops what is not a
+// valid colour.
 export function hostedTheme(
   theme: HostedTheme | undefined,
   primaryColor: string,
 ): OrgTheme {
   return {
     configured: true,
-    primaryColor:
-      theme?.primaryColor || (HEX_COLOR.test(primaryColor) ? primaryColor : ""),
+    primaryColor: HEX_COLOR.test(primaryColor)
+      ? primaryColor
+      : (theme?.primaryColor ?? ""),
     accentColor: theme?.secondaryColor ?? "",
     textColor: theme?.textColor ?? "",
     surfaceColor: theme?.surfaceColor ?? "",
@@ -165,5 +176,33 @@ export function hostedTheme(
     topbarColor: theme?.headerColor ?? "",
     fontFamily: theme?.fontFamily ?? "",
     logoUri: "",
+  };
+}
+
+// Whether the decline dialog may close: not while the decline is in flight.
+export function canCloseDecline(status: MutationStatus): boolean {
+  return status !== "pending";
+}
+
+// Why a hosted check ended unfinished, as "This check has ended" says it: a
+// link that was never started ran out before a start; a started one ran out
+// within the lifetime its session was created with, named when the page has
+// it (a session started before the wallet kept it says "in time").
+export type CheckEndReason =
+  | { kind: "notStarted" }
+  | { kind: "timedOut"; minutes: number | undefined };
+
+export function checkEndReason(
+  progress: Pick<ProofingProgress, "started" | "sessionTtlSeconds">,
+): CheckEndReason {
+  if (progress.started !== true) {
+    return { kind: "notStarted" };
+  }
+  return {
+    kind: "timedOut",
+    minutes:
+      progress.sessionTtlSeconds === undefined
+        ? undefined
+        : ttlMinutes(progress.sessionTtlSeconds),
   };
 }

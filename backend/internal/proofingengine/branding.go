@@ -46,7 +46,7 @@ var ErrNoBrandingLogo = errors.New("proofingengine: session has no branding logo
 // BrandingLookup resolves a session's branding from the session itself: the
 // tenant (org) and client reference (the wallet's request) the session was
 // created with. Nothing the app sends picks it, so a session only ever shows
-// the branding of the org, or the org's customer, that requested it.
+// the branding of the org that requested it.
 type BrandingLookup interface {
 	// Branding is nil when the session gets the app's own look.
 	Branding(ctx context.Context, tenantID, clientReference string) (*Branding, error)

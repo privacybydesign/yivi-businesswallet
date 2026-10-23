@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ const (
 	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
 	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
 	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envEudiCredentialScheme        = "EUDI_CREDENTIAL_SCHEME"
 	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
 	envSessionTTL                  = "SESSION_TTL"
 	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
@@ -100,7 +102,7 @@ const (
 
 	// Identity proofing: the wallet's own proofing engine
 	// (internal/proofingengine) runs document + face verification for an org.
-	// Sessions, their evidence and the customer secrets are sealed under
+	// Sessions, their evidence and the webhook secrets are sealed under
 	// IDENTITY_PROOFING_ENCRYPTION_KEY; without it nothing can be sent.
 	envIdentityProofingProvider      = "IDENTITY_PROOFING_PROVIDER"
 	envIdentityProofingEncryptionKey = "IDENTITY_PROOFING_ENCRYPTION_KEY"
@@ -118,8 +120,8 @@ const (
 	// envAddressLookupURL is PDOK's Locatieserver, where the address step
 	// checks a Dutch address against the BAG and suggests addresses from it.
 	envAddressLookupURL = "ADDRESS_LOOKUP_URL"
-	// The Regula Face API: the native face step's liveness and match, and the
-	// Yivi method's face check. REGULA_FACE_API_URL is what the backend calls,
+	// The Regula Face API: the native face step's liveness and match (the Yivi
+	// method runs no face check). REGULA_FACE_API_URL is what the backend calls,
 	// REGULA_FACE_API_PUBLIC_URL what the app runs liveness against (defaults
 	// to the former). Unset leaves face verification unavailable.
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
@@ -349,6 +351,10 @@ const (
 	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
+// eudiCredentialSchemes are the Yivi schemes EUDI_CREDENTIAL_SCHEME may name;
+// empty means the openid4vpverifier default (pbdf-staging).
+var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
+
 type Config struct {
 	DatabaseDSN string
 	LogLevel    string
@@ -359,6 +365,7 @@ type Config struct {
 	EudiIssuerChain             string
 	EudiIntendedUseID           string
 	EudiRegistrationCertificate string
+	EudiCredentialScheme        string // pbdf-staging when empty, pbdf in production
 	SessionCookieSecure         bool
 	SessionTTL                  time.Duration
 	SessionPruneEvery           time.Duration
@@ -462,7 +469,7 @@ type Config struct {
 	// leaves them undecided until they expire.
 	IdentityProofingStubOutcome string
 	// IdentityProofingEncryptionKey seals the engine's sessions and the
-	// customer secrets at rest. Empty means nothing can be sent.
+	// webhook secrets at rest. Empty means nothing can be sent.
 	IdentityProofingEncryptionKey string
 	// RegulaFaceAPIURL/-PublicURL are the Regula Face API as the backend and
 	// as the app reach it; RegulaFaceMatchThreshold the similarity a match
@@ -581,6 +588,13 @@ func Load() (Config, error) {
 	}
 	if intendedUseID == "" && registrationCertificate == "" && verifierURL == defaultEudiVerifierURL {
 		intendedUseID = defaultEudiIntendedUseID
+	}
+
+	// A typo would otherwise only surface when a user logs in: the boot probe's
+	// presentation request does not check the vcts it names.
+	credentialScheme := os.Getenv(envEudiCredentialScheme)
+	if credentialScheme != "" && !slices.Contains(eudiCredentialSchemes, credentialScheme) {
+		return Config{}, fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), credentialScheme)
 	}
 
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
@@ -789,6 +803,7 @@ func Load() (Config, error) {
 		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
 		EudiIntendedUseID:           intendedUseID,
 		EudiRegistrationCertificate: registrationCertificate,
+		EudiCredentialScheme:        credentialScheme,
 		SessionCookieSecure:         cookieSecure,
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,

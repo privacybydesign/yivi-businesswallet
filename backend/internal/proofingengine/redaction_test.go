@@ -57,6 +57,51 @@ func TestUnlocatedBSNWithheld(t *testing.T) {
 	}
 }
 
+// Black out the BSN covers only a document that may print one: a photo of a
+// document known not to be Dutch is released and stored as taken, though the
+// app located no BSN on it. A Dutch document, or one whose issuing state is
+// not known, without a located BSN is still withheld.
+func TestBlurBSNOnlyDutchDocuments(t *testing.T) {
+	photo := checkerboardPNG(t)
+	policy := privacy.RedactionPolicy{BlurBSN: true}
+	cases := []struct {
+		name     string
+		state    string
+		released bool
+	}{
+		{"Belgian", "BEL", true},
+		{"German", "D", true},
+		{"Dutch", dutchIssuingState, false},
+		{"issuing state not known", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := appResultRequest{
+				Document:      &documentInfo{IssuingState: tc.state},
+				DocumentImage: &documentImageInfo{ImageBase64: photo, MimeType: "image/png"},
+			}
+			img, _ := buildResult(session.Session{}, req, nil, nil, privacy.BSNPolicyRetrieve, policy)["documentImage"].(*documentImageInfo)
+			if released := img != nil; released != tc.released {
+				t.Errorf("document photo released = %v, want %v", released, tc.released)
+			}
+			if img != nil && img.ImageBase64 != photo {
+				t.Error("a document photo with no BSN to cover was changed")
+			}
+
+			sess := session.Session{Steps: session.StepEvidence{
+				Document: &session.DocumentStepEvidence{Parsed: session.ParsedMRZ{IssuingState: tc.state}},
+				DocumentPhoto: &session.DocumentPhotoStepEvidence{
+					Front: session.DocumentPhotoSide{Image: photo, MimeType: "image/png"},
+				},
+			}}
+			redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, policy)
+			if stored := sess.Steps.DocumentPhoto.Front.Image; (stored == photo) != tc.released {
+				t.Errorf("document photo stored as taken = %v, want %v", stored == photo, tc.released)
+			}
+		})
+	}
+}
+
 // checkerboardPNG is a base64 PNG whose every pixel differs from its
 // neighbours, so any pixelation changes it.
 func checkerboardPNG(t *testing.T) string {

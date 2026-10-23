@@ -1,33 +1,33 @@
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
   activateProofingFlowVersion,
-  createProofingCustomer,
   createProofingFlow,
   createProofingFlowVersion,
   createProofingRequest,
-  getProofingCustomer,
-  getProofingCustomerFlows,
-  getProofingCustomers,
+  getProofingSettings,
   getProofingFlowVersions,
   getProofingFlows,
   getProofingRequests,
   getProofingStats,
-  setProofingCustomerFlows,
   setProofingFlowSelection,
-  updateProofingCustomer,
+  updateProofingSettings,
   createProofingApiKey,
   getProofingApiKeys,
   getProofingWebhook,
   getProofingWebhookDeliveries,
-  removeProofingCustomer,
   removeProofingWebhook,
   revokeProofingApiKey,
   rotateProofingWebhookSecret,
-  saveProofingCustomerBranding,
+  saveProofingBranding,
   saveProofingWebhook,
   sendProofingWebhookTest,
   getProofingRequestEvents,
@@ -36,31 +36,30 @@ import {
   getHostedProofing,
   decideProofingReview,
   getProofingDataMatches,
-  saveProofingFlowKind,
+  getDataRequestFlows,
   getHostedProofingStatus,
   startHostedProofing,
   declineHostedProofing,
+  getProofingFlowBranding,
   getProofingFlowHosted,
+  saveProofingFlowBranding,
   saveProofingFlowHosted,
   saveProofingFlowDiplomas,
   saveProofingFlowAddress,
   getProofingPause,
   listProofingPauses,
   setPlatformProofingPause,
-  setProofingPause,
   getProofingRequestResult,
   getProofingYiviDisclosure,
   newProofingClaimLink,
   startProofingYivi,
-  submitProofingFaceFrame,
   uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
 } from "./identity-proofing";
 import type {
-  ProofingCustomer,
-  ProofingCustomerFlow,
-  ProofingCustomerUpdate,
+  ProofingSettings,
+  ProofingSettingsUpdate,
   ProofingFlow,
   ProofingFlowSelection,
   ProofingFlowSpec,
@@ -73,7 +72,6 @@ import type {
   ProofingBrandingInput,
   ProofingWebhook,
   WebhookDelivery,
-  ProofingFaceVerdict,
   ProofingClaimLink,
   ProofingApp,
   ProofingYiviDisclosure,
@@ -87,14 +85,16 @@ import type {
   ProofingReviewInput,
   ProofingResult,
   ProofingPause,
+  ProofingFlowBranding,
+  ProofingFlowBrandingInput,
   ProofingFlowHosted,
   DiplomaMode,
   DiplomaVerdict,
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
-  FlowKind,
   ProofingDataMatch,
+  ListedStatus,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -103,6 +103,7 @@ import {
   deliveriesPollInterval,
   isProofingLive,
   progressPollContinues,
+  requestListCapped,
   reviewPollContinues,
 } from "../lib/identity-proofing";
 
@@ -110,11 +111,14 @@ import {
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
+// What waits for a decision changes when a person finishes a data request, which
+// no page of the reviewer is watching: the sidebar's count is re-read now and then.
+const WAITING_REVIEWS_POLL_INTERVAL_MS = 60_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
 // A session in review is decided by a person, or seconds later by its
-// customer's erasure setting, so a verify page re-reads it slowly.
+// org's erasure setting, so a verify page re-reads it slowly.
 const REVIEW_POLL_INTERVAL_MS = 15_000;
 // A mutation whose answer carries a secret (a new API key, a webhook signing
 // secret) is dropped from the cache as soon as nothing shows it, instead of
@@ -130,7 +134,7 @@ export function proofingFlowsQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "flows"];
 }
 
-// Every request list, the org's and each customer's, sits under this key, so
+// Every request list, the org's and each member's, sits under this key, so
 // invalidating it refreshes them all.
 export function proofingRequestsQueryKey(slug: string): readonly string[] {
   return [...proofingQueryKey(slug), "requests"];
@@ -141,29 +145,8 @@ function proofingStatsQueryKey(slug: string): readonly string[] {
   return [...proofingRequestsQueryKey(slug), "stats"];
 }
 
-function customerRequestsQueryKey(
-  slug: string,
-  customerId: string,
-): readonly string[] {
-  return [...proofingRequestsQueryKey(slug), "customer", customerId];
-}
-
-export function proofingCustomersQueryKey(slug: string): readonly string[] {
-  return [...proofingQueryKey(slug), "customers"];
-}
-
-export function proofingCustomerQueryKey(
-  slug: string,
-  customerId: string,
-): readonly string[] {
-  return [...proofingCustomersQueryKey(slug), customerId];
-}
-
-function proofingCustomerFlowsQueryKey(
-  slug: string,
-  customerId: string,
-): readonly string[] {
-  return [...proofingCustomerQueryKey(slug, customerId), "flows"];
+function proofingSettingsQueryKey(slug: string): readonly string[] {
+  return [...proofingQueryKey(slug), "settings"];
 }
 
 export function proofingFlowVersionsQueryKey(
@@ -180,6 +163,19 @@ export function useProofingFlowsQuery(
   return useQuery({
     queryKey: proofingFlowsQueryKey(slug),
     queryFn: ({ signal }) => getProofingFlows(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+// See my data and Delete my data: admin-only, so only read when an admin
+// picks one.
+export function useDataRequestFlowsQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<ProofingFlow[], Error> {
+  return useQuery({
+    queryKey: [...proofingFlowsQueryKey(slug), "data-requests"],
+    queryFn: ({ signal }) => getDataRequestFlows(slug, signal),
     enabled: enabled && slug !== "",
   });
 }
@@ -246,6 +242,44 @@ export function useSaveFlowHostedMutation(
   });
 }
 
+function proofingFlowBrandingQueryKey(
+  slug: string,
+  flowId: string,
+): readonly string[] {
+  return [...proofingFlowsQueryKey(slug), flowId, "branding"];
+}
+
+export function useProofingFlowBrandingQuery(
+  slug: string,
+  flowId: string,
+): UseQueryResult<ProofingFlowBranding, Error> {
+  return useQuery({
+    queryKey: proofingFlowBrandingQueryKey(slug, flowId),
+    queryFn: ({ signal }) => getProofingFlowBranding(slug, flowId, signal),
+    enabled: slug !== "" && flowId !== "",
+  });
+}
+
+export function useSaveFlowBrandingMutation(
+  slug: string,
+  flowId: string,
+): UseMutationResult<ProofingFlowBranding, Error, ProofingFlowBrandingInput> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (input) => saveProofingFlowBranding(slug, flowId, input),
+    // The form shows a failure itself; the global toast would say it twice.
+    meta: { suppressErrorToast: true },
+    onSuccess: (saved) => {
+      toast.success(t("toasts.identityProofingBrandingSaved"));
+      queryClient.setQueryData(
+        proofingFlowBrandingQueryKey(slug, flowId),
+        saved,
+      );
+    },
+  });
+}
+
 // Both change which version of a flow is active, so the flow list and the
 // flow's version history are refetched.
 function invalidateFlow(
@@ -253,10 +287,6 @@ function invalidateFlow(
   slug: string,
 ): void {
   void queryClient.invalidateQueries({ queryKey: proofingFlowsQueryKey(slug) });
-  // Each customer's flow list carries the flows' active version too.
-  void queryClient.invalidateQueries({
-    queryKey: proofingCustomersQueryKey(slug),
-  });
 }
 
 // The flow lists carry each flow's diploma mode, so they are refetched.
@@ -288,17 +318,6 @@ export function useSaveFlowAddressMutation(
   return useMutation({
     mutationFn: ({ flowId, mode }) =>
       saveProofingFlowAddress(slug, flowId, mode),
-    meta: { suppressErrorToast: true },
-    onSuccess: () => invalidateFlow(queryClient, slug),
-  });
-}
-
-export function useSaveFlowKindMutation(
-  slug: string,
-): UseMutationResult<FlowKind, Error, { flowId: string; kind: FlowKind }> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ flowId, kind }) => saveProofingFlowKind(slug, flowId, kind),
     meta: { suppressErrorToast: true },
     onSuccess: () => invalidateFlow(queryClient, slug),
   });
@@ -359,22 +378,89 @@ export function useSetFlowSelectionMutation(
   });
 }
 
-// customerId narrows the list to the requests sent for that customer.
-export function useProofingRequestsQuery(
+// The sessions sent to external people, newest first: on any flow, or on the
+// one flowId names, which the backend narrows to before its cap. Under the
+// requests key, so everything that refreshes the org's requests refreshes
+// these too.
+export function useExternalRequestsQuery(
   slug: string,
-  customerId?: string,
+  flowId = "",
+  enabled = true,
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
-    queryKey: customerId
-      ? customerRequestsQueryKey(slug, customerId)
-      : proofingRequestsQueryKey(slug),
-    queryFn: ({ signal }) => getProofingRequests(slug, { customerId }, signal),
-    enabled: slug !== "" && customerId !== "",
+    queryKey: [...proofingRequestsQueryKey(slug), "external", flowId],
+    queryFn: ({ signal }) =>
+      getProofingRequests(slug, { subjectKind: "external", flowId }, signal),
+    enabled: enabled && slug !== "",
     refetchInterval: (query) =>
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
         : false,
   });
+}
+
+function externalInKey(slug: string, status: ListedStatus): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "external", status];
+}
+
+// The external requests that read in each of the given statuses, one read
+// per status, so the backend's cap counts each on its own: what the to-do
+// lists are built from. While one of them still runs, they are all re-read
+// together, so a check that ends leaves one list for another in one go.
+export function useExternalRequestsInQuery(
+  slug: string,
+  statuses: readonly ListedStatus[],
+): StatusReads {
+  const queryClient = useQueryClient();
+  const running = (): boolean =>
+    statuses.some((status) =>
+      queryClient
+        .getQueryData<ProofingRequest[]>(externalInKey(slug, status))
+        ?.some((r) => isProofingLive(r.status)),
+    );
+  return useQueries({
+    queries: statuses.map((status) => ({
+      queryKey: externalInKey(slug, status),
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getProofingRequests(slug, { subjectKind: "external", status }, signal),
+      enabled: slug !== "",
+      refetchInterval: () => (running() ? REQUESTS_POLL_INTERVAL_MS : false),
+    })),
+    combine: (results) => combineStatusReads(statuses, results),
+  });
+}
+
+interface StatusReads {
+  // Every status's requests, once all landed.
+  data: ProofingRequest[] | undefined;
+  // The statuses whose read hit the backend's cap: more of them may exist
+  // than were read.
+  capped: readonly ListedStatus[];
+  isPending: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+// The reads of statuses, in that order, as one list once every one landed,
+// pending while any is and failed when any did.
+export function combineStatusReads(
+  statuses: readonly ListedStatus[],
+  results: readonly Pick<
+    UseQueryResult<ProofingRequest[], Error>,
+    "data" | "isPending" | "isError" | "error"
+  >[],
+): StatusReads {
+  return {
+    data: results.every((r) => r.data !== undefined)
+      ? results.flatMap((r) => r.data ?? [])
+      : undefined,
+    capped: statuses.filter((_, i) =>
+      requestListCapped(results[i]?.data ?? []),
+    ),
+    isPending: results.some((r) => r.isPending),
+    isError: results.some((r) => r.isError),
+    error: results.find((r) => r.error)?.error ?? null,
+  };
 }
 
 // The requests sent to one member, newest first. Under the requests key, so
@@ -392,6 +478,70 @@ export function useMemberRequestsQuery(
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
         : false,
+  });
+}
+
+// The requests held in review, the longest in review first: what waits for a
+// decision. The backend caps the list after that order, so what it leaves out
+// is the newest. Under the requests key, so a decision refreshes it. A request
+// whose engine session ended is still held here but reads expired: the caller
+// keeps the ones that still read needs_review.
+export function useWaitingReviewsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
+    queryFn: ({ signal }) =>
+      getProofingRequests(slug, { status: "needs_review" }, signal),
+    enabled: options.enabled && slug !== "",
+    refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
+  });
+}
+
+// The data requests that ended, approved or rejected: two reads, each narrowed
+// by the backend before its cap, so a busy org's identity checks never push
+// them off. Under the requests key, so a decision refreshes it.
+export function useClosedDataRequestsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "closed-data"],
+    queryFn: async ({ signal }) => {
+      const [approved, rejected] = await Promise.all(
+        (["approved", "rejected"] as const).map((status) =>
+          getProofingRequests(
+            slug,
+            { status, flowKind: "data_request" },
+            signal,
+          ),
+        ),
+      );
+      return [...approved, ...rejected];
+    },
+    enabled: options.enabled && slug !== "",
+  });
+}
+
+// One request, for its review page. Under the requests key, so a decision
+// refreshes it.
+export function proofingRequestQueryKey(
+  slug: string,
+  requestId: string,
+): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "one", requestId];
+}
+
+export function useProofingRequestQuery(
+  slug: string,
+  requestId: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest, Error> {
+  return useQuery({
+    queryKey: proofingRequestQueryKey(slug, requestId),
+    queryFn: ({ signal }) => getProofingRequest(slug, requestId, signal),
+    enabled: options.enabled && slug !== "" && requestId !== "",
   });
 }
 
@@ -446,221 +596,81 @@ export function useCreateRequestMutation(
   });
 }
 
-export function useProofingCustomersQuery(
+export function useProofingSettingsQuery(
   slug: string,
-): UseQueryResult<ProofingCustomer[], Error> {
+): UseQueryResult<ProofingSettings, Error> {
   return useQuery({
-    queryKey: proofingCustomersQueryKey(slug),
-    queryFn: ({ signal }) => getProofingCustomers(slug, signal),
+    queryKey: proofingSettingsQueryKey(slug),
+    queryFn: ({ signal }) => getProofingSettings(slug, signal),
     enabled: slug !== "",
   });
 }
 
-export function useProofingCustomerQuery(
+// The answer is the org's settings, so it replaces the cached ones.
+export function useUpdateSettingsMutation(
   slug: string,
-  customerId: string,
-): UseQueryResult<ProofingCustomer, Error> {
-  return useQuery({
-    queryKey: proofingCustomerQueryKey(slug, customerId),
-    queryFn: ({ signal }) => getProofingCustomer(slug, customerId, signal),
-    enabled: slug !== "" && customerId !== "",
-  });
-}
-
-export function useCreateCustomerMutation(
-  slug: string,
-): UseMutationResult<ProofingCustomer, Error, string> {
+): UseMutationResult<ProofingSettings, Error, ProofingSettingsUpdate> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: (name) => createProofingCustomer(slug, name),
+    mutationFn: (update) => updateProofingSettings(slug, update),
     meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      toast.success(t("toasts.identityProofingCustomerCreated"));
+    onSuccess: (settings) => {
+      toast.success(t("toasts.identityProofingSettingsSaved"));
+      queryClient.setQueryData(proofingSettingsQueryKey(slug), settings);
+      // A new retention changes what every flow tells its subjects.
       void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
+        queryKey: proofingFlowsQueryKey(slug),
       });
     },
   });
 }
 
-// A new name shows in the list and in the customer's requests; a pause shows
-// in the list and closes the send form.
-export function useUpdateCustomerMutation(
-  slug: string,
-  customerId: string,
-): UseMutationResult<ProofingCustomer, Error, ProofingCustomerUpdate> {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: (update) => updateProofingCustomer(slug, customerId, update),
-    meta: { suppressErrorToast: true },
-    onSuccess: (customer, update) => {
-      toast.success(
-        update.paused !== undefined
-          ? update.paused
-            ? t("toasts.identityProofingCustomerPaused")
-            : t("toasts.identityProofingCustomerResumed")
-          : update.name !== undefined
-            ? t("toasts.identityProofingCustomerRenamed")
-            : t("toasts.identityProofingCustomerSettingsSaved"),
-      );
-      queryClient.setQueryData(
-        proofingCustomerQueryKey(slug, customerId),
-        customer,
-      );
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
-        exact: true,
-      });
-      if (update.name !== undefined) {
-        void queryClient.invalidateQueries({
-          queryKey: proofingRequestsQueryKey(slug),
-        });
-      }
-      // A flow's "kept for N days" is the customer's retention.
-      if (update.dataRetentionDays !== undefined) {
-        void queryClient.invalidateQueries({
-          queryKey: proofingCustomerFlowsQueryKey(slug, customerId),
-        });
-      }
-    },
-  });
+function proofingApiKeysQueryKey(slug: string): readonly string[] {
+  return [...proofingQueryKey(slug), "api-keys"];
 }
 
-export function useProofingCustomerFlowsQuery(
-  slug: string,
-  customerId: string,
-): UseQueryResult<ProofingCustomerFlow[], Error> {
-  return useQuery({
-    queryKey: proofingCustomerFlowsQueryKey(slug, customerId),
-    queryFn: ({ signal }) => getProofingCustomerFlows(slug, customerId, signal),
-    enabled: slug !== "" && customerId !== "",
-  });
-}
-
-// The answer is the customer's flows as an admin sees them, so it replaces the
-// cached list; the customer list shows the new assignment too.
-export function useSetCustomerFlowsMutation(
-  slug: string,
-  customerId: string,
-): UseMutationResult<ProofingCustomerFlow[], Error, ProofingFlowSelection> {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: (selection) =>
-      setProofingCustomerFlows(slug, customerId, selection),
-    meta: { suppressErrorToast: true },
-    onSuccess: (flows) => {
-      toast.success(t("toasts.identityProofingCustomerFlowsSaved"));
-      queryClient.setQueryData(
-        proofingCustomerFlowsQueryKey(slug, customerId),
-        flows,
-      );
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
-        exact: true,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomerQueryKey(slug, customerId),
-        exact: true,
-      });
-    },
-  });
-}
-
-function proofingApiKeysQueryKey(
-  slug: string,
-  customerId: string,
-): readonly string[] {
-  return [...proofingCustomerQueryKey(slug, customerId), "api-keys"];
-}
-
-function proofingWebhookQueryKey(
-  slug: string,
-  customerId: string,
-): readonly string[] {
-  return [...proofingCustomerQueryKey(slug, customerId), "webhook"];
-}
-
-// A removed customer leaves every list it was in, and its sessions go with it.
-export function useRemoveCustomerMutation(
-  slug: string,
-  customerId: string,
-): UseMutationResult<void, Error, void> {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-  return useMutation({
-    mutationFn: () => removeProofingCustomer(slug, customerId),
-    meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      toast.success(t("toasts.identityProofingCustomerRemoved"));
-      queryClient.removeQueries({
-        queryKey: proofingCustomerQueryKey(slug, customerId),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
-        exact: true,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestsQueryKey(slug),
-      });
-    },
-  });
+function proofingWebhookQueryKey(slug: string): readonly string[] {
+  return [...proofingQueryKey(slug), "webhook"];
 }
 
 export function useSaveBrandingMutation(
   slug: string,
-  customerId: string,
-): UseMutationResult<ProofingCustomer, Error, ProofingBrandingInput> {
+): UseMutationResult<ProofingSettings, Error, ProofingBrandingInput> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: (input) =>
-      saveProofingCustomerBranding(slug, customerId, input),
+    mutationFn: (input) => saveProofingBranding(slug, input),
     meta: { suppressErrorToast: true },
-    onSuccess: (customer) => {
+    onSuccess: (settings) => {
       toast.success(t("toasts.identityProofingBrandingSaved"));
-      queryClient.setQueryData(
-        proofingCustomerQueryKey(slug, customerId),
-        customer,
-      );
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
-        exact: true,
-      });
+      queryClient.setQueryData(proofingSettingsQueryKey(slug), settings);
     },
   });
 }
 
 export function useProofingApiKeysQuery(
   slug: string,
-  customerId: string,
 ): UseQueryResult<ProofingApiKey[], Error> {
   return useQuery({
-    queryKey: proofingApiKeysQueryKey(slug, customerId),
-    queryFn: ({ signal }) => getProofingApiKeys(slug, customerId, signal),
-    enabled: slug !== "" && customerId !== "",
+    queryKey: proofingApiKeysQueryKey(slug),
+    queryFn: ({ signal }) => getProofingApiKeys(slug, signal),
+    enabled: slug !== "",
   });
 }
 
 // The secret is in the answer only; the caller shows it once.
 export function useCreateApiKeyMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<CreatedProofingApiKey, Error, { name: string }> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ name }) => createProofingApiKey(slug, customerId, name),
+    mutationFn: ({ name }) => createProofingApiKey(slug, name),
     gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: proofingApiKeysQueryKey(slug, customerId),
-      });
-      // A customer's hasApiKey follows its keys.
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
+        queryKey: proofingApiKeysQueryKey(slug),
       });
     },
   });
@@ -668,21 +678,16 @@ export function useCreateApiKeyMutation(
 
 export function useRevokeApiKeyMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<ProofingApiKey, Error, string> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: (keyId) => revokeProofingApiKey(slug, customerId, keyId),
+    mutationFn: (keyId) => revokeProofingApiKey(slug, keyId),
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.identityProofingApiKeyRevoked"));
       void queryClient.invalidateQueries({
-        queryKey: proofingApiKeysQueryKey(slug, customerId),
-      });
-      // A customer's hasApiKey follows its keys.
-      void queryClient.invalidateQueries({
-        queryKey: proofingCustomersQueryKey(slug),
+        queryKey: proofingApiKeysQueryKey(slug),
       });
     },
   });
@@ -690,52 +695,38 @@ export function useRevokeApiKeyMutation(
 
 export function useProofingWebhookQuery(
   slug: string,
-  customerId: string,
 ): UseQueryResult<ProofingWebhook, Error> {
   return useQuery({
-    queryKey: proofingWebhookQueryKey(slug, customerId),
-    queryFn: ({ signal }) => getProofingWebhook(slug, customerId, signal),
-    enabled: slug !== "" && customerId !== "",
+    queryKey: proofingWebhookQueryKey(slug),
+    queryFn: ({ signal }) => getProofingWebhook(slug, signal),
+    enabled: slug !== "",
   });
 }
 
 export function useWebhookDeliveriesQuery(
   slug: string,
-  customerId: string,
 ): UseQueryResult<WebhookDelivery[], Error> {
   return useQuery({
-    queryKey: [...proofingWebhookQueryKey(slug, customerId), "deliveries"],
-    queryFn: ({ signal }) =>
-      getProofingWebhookDeliveries(slug, customerId, signal),
-    enabled: slug !== "" && customerId !== "",
+    queryKey: [...proofingWebhookQueryKey(slug), "deliveries"],
+    queryFn: ({ signal }) => getProofingWebhookDeliveries(slug, signal),
+    enabled: slug !== "",
     refetchInterval: (query) => deliveriesPollInterval(query.state.data),
   });
 }
 
-// Every webhook change refreshes the endpoint, its deliveries and the
-// customer's health in the lists.
+// Every webhook change refreshes the endpoint and its deliveries.
 function invalidateWebhook(
   queryClient: ReturnType<typeof useQueryClient>,
   slug: string,
-  customerId: string,
 ): void {
   void queryClient.invalidateQueries({
-    queryKey: proofingWebhookQueryKey(slug, customerId),
-  });
-  void queryClient.invalidateQueries({
-    queryKey: proofingCustomerQueryKey(slug, customerId),
-    exact: true,
-  });
-  void queryClient.invalidateQueries({
-    queryKey: proofingCustomersQueryKey(slug),
-    exact: true,
+    queryKey: proofingWebhookQueryKey(slug),
   });
 }
 
 // The answer carries a new endpoint's secret, once.
 export function useSaveWebhookMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<
   ProofingWebhook,
   Error,
@@ -744,57 +735,54 @@ export function useSaveWebhookMutation(
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: (input) => saveProofingWebhook(slug, customerId, input),
+    mutationFn: (input) => saveProofingWebhook(slug, input),
     gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.identityProofingWebhookSaved"));
-      invalidateWebhook(queryClient, slug, customerId);
+      invalidateWebhook(queryClient, slug);
     },
   });
 }
 
 export function useRemoveWebhookMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<void, Error, void> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: () => removeProofingWebhook(slug, customerId),
+    mutationFn: () => removeProofingWebhook(slug),
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.identityProofingWebhookRemoved"));
-      invalidateWebhook(queryClient, slug, customerId);
+      invalidateWebhook(queryClient, slug);
     },
   });
 }
 
 export function useNewWebhookSecretMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<ProofingWebhook, Error, void> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => rotateProofingWebhookSecret(slug, customerId),
+    mutationFn: () => rotateProofingWebhookSecret(slug),
     gcTime: SECRET_MUTATION_GC_TIME_MS,
     meta: { suppressErrorToast: true },
-    onSuccess: () => invalidateWebhook(queryClient, slug, customerId),
+    onSuccess: () => invalidateWebhook(queryClient, slug),
   });
 }
 
 export function useSendWebhookTestMutation(
   slug: string,
-  customerId: string,
 ): UseMutationResult<void, Error, void> {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: () => sendProofingWebhookTest(slug, customerId),
+    mutationFn: () => sendProofingWebhookTest(slug),
     meta: { suppressErrorToast: true },
     onSuccess: () => {
       toast.success(t("toasts.identityProofingWebhookTestQueued"));
-      invalidateWebhook(queryClient, slug, customerId);
+      invalidateWebhook(queryClient, slug);
     },
   });
 }
@@ -834,7 +822,7 @@ export function useProofingDataMatchesQuery(
 // then shows the read. It holds the person's identity and photos, so it is
 // dropped from the cache as soon as no row shows it (gcTime 0), not kept for
 // the default five minutes.
-function proofingRequestResultQueryKey(
+export function proofingRequestResultQueryKey(
   slug: string,
   requestId: string,
 ): readonly string[] {
@@ -877,22 +865,6 @@ export function useProofingPauseQuery(
     queryKey: proofingPauseQueryKey(slug),
     queryFn: ({ signal }) => getProofingPause(slug, signal),
     enabled: slug !== "",
-  });
-}
-
-// Switches the org's proofing off or on; everything proofing refetches, as
-// its routes answer again (or stop).
-export function useSetProofingPauseMutation(
-  slug: string,
-): UseMutationResult<ProofingPause, Error, boolean> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (paused) => setProofingPause(slug, paused),
-    onSuccess: (pause) => {
-      queryClient.setQueryData(proofingPauseQueryKey(slug), pause);
-      void queryClient.invalidateQueries({ queryKey: proofingQueryKey(slug) });
-      void queryClient.invalidateQueries({ queryKey: PROOFING_PAUSES_KEY });
-    },
   });
 }
 
@@ -1000,15 +972,6 @@ export function useYiviDisclosureQuery(
   });
 }
 
-export function useSubmitFaceFrameMutation(
-  target: VerifyTarget,
-): UseMutationResult<ProofingFaceVerdict, Error, string> {
-  return useMutation({
-    mutationFn: (image) => submitProofingFaceFrame(target, image),
-    meta: { suppressErrorToast: true },
-  });
-}
-
 // Checks uploaded diploma extracts; each verdict says what became of a file.
 export function useUploadDiplomasMutation(
   target: VerifyTarget,
@@ -1096,6 +1059,24 @@ export function useDeclineHostedMutation(
   });
 }
 
+export function refreshAfterReviewDecision(
+  queryClient: ReturnType<typeof useQueryClient>,
+  slug: string,
+  requestId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestsQueryKey(slug),
+  });
+  // The result is read once and kept (staleTime Infinity); the decision
+  // changed it, so the one read under review is no longer the outcome. The page
+  // is being left and every read is audited, so it is marked stale and read
+  // again by the next page that opens it, not at once.
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestResultQueryKey(slug, requestId),
+    refetchType: "none",
+  });
+}
+
 // Decides a request under review; the lists (and counts) follow.
 export function useDecideReviewMutation(
   slug: string,
@@ -1105,15 +1086,6 @@ export function useDecideReviewMutation(
   return useMutation({
     mutationFn: (input) => decideProofingReview(slug, requestId, input),
     meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestsQueryKey(slug),
-      });
-      // The result is read once and kept (staleTime Infinity); the decision
-      // changed it, so the one read under review is no longer the outcome.
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestResultQueryKey(slug, requestId),
-      });
-    },
+    onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });
 }

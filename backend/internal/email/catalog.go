@@ -91,7 +91,7 @@ const (
 	varRequesterName  = "requesterName"
 	varProofingURL    = "proofingUrl"
 	varValidMinutes   = "validMinutes"
-	// varSupportContact and varPrivacyURL are the proofing customer's own, and
+	// varSupportContact and varPrivacyURL are the proofing branding's, and
 	// empty for a member's request: their paragraphs are then left out.
 	varSupportContact = "supportContact"
 	varPrivacyURL     = "privacyUrl"

@@ -23,8 +23,8 @@ import (
 )
 
 // The relying-party side, called in-process by internal/proofing: flows and
-// sessions. Errors are pp.ErrNotFound, *pp.RejectedError (status and message)
-// and pp.ErrMethodUnavailable.
+// sessions. Errors are pp.ErrNotFound and *pp.RejectedError (status and
+// message).
 
 // rejected is a refused request.
 func rejected(status int, msg string) error {
@@ -41,7 +41,9 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		RequiredAssuranceLevel: flow.AssuranceLevel(in.RequiredAssuranceLevel),
 		BSNPolicy:              privacyBSN(in.BSNPolicy), KeepFacePhotos: in.KeepFacePhotos, BlurBSN: in.BlurBSN,
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
+		SessionTTL:        time.Duration(in.SessionTTLSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
+		AgeOver: in.AgeOver,
 	}
 	for _, c := range in.RequiredChecks {
 		fd.RequiredChecks = append(fd.RequiredChecks, flow.Check(c))
@@ -56,6 +58,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		fd.AssuranceTiers = append(fd.AssuranceTiers, flow.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
 	}
 	fd.RequestedAttributes = in.RequestedAttributes
+	fd.AttributeReasons = in.AttributeReasons
 	return fd
 }
 
@@ -69,12 +72,13 @@ func toSteps(in []string) []flow.Step {
 
 func toFlow(fd flow.FlowDefinition) pp.Flow {
 	spec := pp.FlowSpec{
-		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd),
+		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd), AttributeReasons: fd.AttributeReasons,
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
-		LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
+		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
+		AgeOver: fd.AgeOver,
 	}
 	for _, st := range fd.Steps {
 		spec.Steps = append(spec.Steps, string(st))
@@ -126,13 +130,19 @@ func isValidation(err error) bool {
 // seconds.
 const maxRetentionOverrideSeconds = int(flow.MaxRetentionOverride / time.Second)
 
+// maxSessionTTLSeconds is flow.MaxSessionTTL in the spec's seconds.
+const maxSessionTTLSeconds = int(flow.MaxSessionTTL / time.Second)
+
 // checkFlowSpec refuses what toDefinition cannot carry over faithfully, and a
-// face provider this server lacks. A retention past the bound is refused on
-// the seconds: converted first, a huge value would wrap to a Duration that
-// flow.Validate accepts.
+// face provider this server lacks. A retention or session lifetime past its
+// bound is refused on the seconds: converted first, a huge value would wrap to
+// a Duration that flow.Validate accepts.
 func (s *Server) checkFlowSpec(in pp.FlowSpec) error {
 	if in.RetentionOverrideSeconds < 0 || in.RetentionOverrideSeconds > maxRetentionOverrideSeconds {
 		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: retentionOverride must be between 0 and %d days", flow.MaxRetentionOverrideDays))
+	}
+	if in.SessionTTLSeconds < 0 || in.SessionTTLSeconds > maxSessionTTLSeconds {
+		return rejected(http.StatusBadRequest, fmt.Sprintf("flow: sessionTtl must be between 0 and %d minutes", flow.MaxSessionTTL/time.Minute))
 	}
 	return s.checkFaceProvider(in)
 }
@@ -229,9 +239,6 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	switch in.Method {
 	case "", pp.MethodIdem:
 	case pp.MethodYivi:
-		if !s.YiviAvailable() {
-			return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", pp.ErrMethodUnavailable)
-		}
 		method, ttl = session.MethodBiometricBoundLogin, s.cfg.BoundLoginTTL
 	default:
 		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s or %s", in.Method, pp.MethodIdem, pp.MethodYivi))
@@ -254,15 +261,15 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	needsReference := flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
 	if method == session.MethodBiometricBoundLogin {
-		// The Yivi method matches a live face against the disclosed photo, with
-		// no liveness and no chip read: it reaches eIDAS low, matches no
-		// reference photo and takes no document photo. The wallet offers it only
-		// where that fits (yiviAppAvailable); the engine refuses the rest too.
+		// The Yivi method is the disclosure alone, with no face check and no chip
+		// read: it reaches eIDAS low, matches no reference photo and takes no
+		// document photo. The wallet offers it only where that fits
+		// (yiviAppAvailable); the engine refuses the rest too.
 		switch {
 		case !flow.MeetsLevel(flow.AssuranceLevelLow, resolvedFlow.RequiredAssuranceLevel):
 			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
 		case needsReference:
-			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method matches the disclosed photo, not a reference photo")
+			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method runs no face check, so it matches no reference photo")
 		case slices.Contains(resolvedFlow.Steps, flow.StepDocumentPhoto):
 			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method takes no document photo")
 		}
@@ -299,7 +306,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", err)
 	}
 	s.auditProofing(sess, eventSessionCreated, nil)
-	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, FlowVersion: sess.FlowVersion}
+	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: ttl, FlowVersion: sess.FlowVersion}
 	if sess.Method == session.MethodNFCPassport && sessionOpenForDevices(sess) == nil {
 		updated, claims, err := s.mintClaimTokens(sess, "create", session.DeviceRoleNative)
 		if err != nil {
@@ -482,12 +489,13 @@ type resultView struct {
 		Disclosure *struct {
 			Source string `json:"source"`
 		} `json:"disclosure"`
-		Photo             *imageView `json:"photo"`
-		Selfie            *imageView `json:"selfie"`
-		ReferencePhoto    *imageView `json:"referencePhoto"`
-		FaceReference     string     `json:"faceReference"`
-		DocumentImage     *imageView `json:"documentImage"`
-		DocumentImageBack *imageView `json:"documentImageBack"`
+		AgeOver           *pp.AgeOver `json:"ageOver"`
+		Photo             *imageView  `json:"photo"`
+		Selfie            *imageView  `json:"selfie"`
+		ReferencePhoto    *imageView  `json:"referencePhoto"`
+		FaceReference     string      `json:"faceReference"`
+		DocumentImage     *imageView  `json:"documentImage"`
+		DocumentImageBack *imageView  `json:"documentImageBack"`
 	} `json:"result"`
 	Devices []struct {
 		Role string `json:"role"`
@@ -623,6 +631,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
 	}
 	out.Evidence = ev
+	out.AgeOver = res.AgeOver
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return out, nil
@@ -692,8 +701,10 @@ var reviewErrorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,64}$`)
 
 var errNotUnderReview = errors.New("the session is not under review")
 
-// DecideReview settles a session in needs_review as the reviewer decided.
-func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
+// DecideReview settles a session in needs_review as the reviewer decided, and
+// drops the face photos it held for the review unless its flow keeps them
+// (dropFacePhotos).
+func (s *Server) DecideReview(ctx context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
 	reason, reviewer := strings.TrimSpace(d.Reason), strings.TrimSpace(d.Reviewer)
 	switch {
 	case d.Approve && d.ErrorCode != "":
@@ -716,6 +727,11 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 	if err != nil {
 		return err
 	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: decide review: %w", err)
+	}
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status != session.StatusNeedsReview {
 			return errNotUnderReview
@@ -728,6 +744,7 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 		// never in the server log, where a free-text reason does not belong.
 		sess.ErrorCode = errorCode
 		sess.Review = &session.ReviewDecision{Reviewer: reviewer, Reason: reason, DecidedAt: now}
+		dropFacePhotos(sess, bsnPolicy, redaction)
 		return nil
 	})
 	switch {
@@ -857,29 +874,28 @@ func (s *Server) DeleteSession(ctx context.Context, t pp.Tenant, id, token strin
 	return nil
 }
 
-// SubmitReference hands the engine the subject's verified OpenID4VP
-// disclosure as a Yivi-method session's reference.
-func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token string, ref pp.Reference) (pp.YiviDisclosure, error) {
-	if !s.YiviAvailable() {
-		return pp.YiviDisclosure{}, fmt.Errorf("proofingengine: submit reference: %w", pp.ErrMethodUnavailable)
+// SetSessionsRetention sets how long the engine keeps the tenant's sessions ids
+// once they ended, in place of what each was created with
+// (SessionInput.Retention); it must be positive. A session already gone is left
+// out.
+func (s *Server) SetSessionsRetention(_ context.Context, t pp.Tenant, ids []string, retention time.Duration) error {
+	if retention < time.Second {
+		return rejected(http.StatusBadRequest, "retention must be at least a second")
 	}
+	if err := s.sessions.SetRetention(t.ID, ids, retention); err != nil {
+		return fmt.Errorf("proofingengine: set session retention: %w", err)
+	}
+	return nil
+}
+
+// SubmitReference hands the engine the subject's verified OpenID4VP
+// disclosure, which decides a Yivi-method session.
+func (s *Server) SubmitReference(ctx context.Context, t pp.Tenant, id, token string, ref pp.Reference) (pp.YiviDisclosure, error) {
 	sess, err := s.session(t, id, token)
 	if err != nil {
 		return pp.YiviDisclosure{}, err
 	}
 	return s.acceptReference(ctx, sess, ref)
-}
-
-// SubmitFaceFrame scores one live camera frame of a Yivi-method session.
-func (s *Server) SubmitFaceFrame(ctx context.Context, token, image string) (pp.FaceVerdict, error) {
-	sess, err := s.sessions.Authenticate(token)
-	if errors.Is(err, session.ErrNotFound) {
-		return pp.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", pp.ErrNotFound)
-	}
-	if err != nil {
-		return pp.FaceVerdict{}, fmt.Errorf("proofingengine: face frame: %w", err)
-	}
-	return s.faceFrame(ctx, sess, image)
 }
 
 func privacyBSN(p string) privacy.BSNPolicy { return privacy.BSNPolicy(p) }

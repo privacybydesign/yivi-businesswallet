@@ -97,11 +97,12 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		req.MrtdEvidence = nfcReq.MrtdEvidence
 		req.Photo = nfcReq.Photo
 		req.Device = nfcReq.Device
-		checks, err := s.verifyMrtdEvidence(req.MrtdEvidence, sess.AAChallenge)
+		checks, err := s.finishChipChecks(sess.Steps.NFC, req.MrtdEvidence, sess.AAChallenge)
 		if err != nil {
 			return sess, err
 		}
 		verifiedChecks = checks
+		req.AgeOver = sess.Steps.NFC.AgeOver
 		if nfcReq.Document != nil && req.Document != nil {
 			// The DG11 extras, and its name over the MRZ's.
 			req.Document.PersonalNumber = firstNonEmpty(nfcReq.Document.PersonalNumber, req.Document.PersonalNumber)
@@ -112,11 +113,14 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		}
 	}
 
-	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
-	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
-
 	achieved := computeEIDASAssuranceLevel(fd, req, verifiedChecks, faceMatchSourceOf(sess))
 	finalStatus, finalErrorCode, reason := sessionOutcome(fd, sess, req, verifiedChecks, achieved, s.cfg.Now())
+
+	// A session that waits for review keeps its face photos until it is
+	// decided (heldForReview); DecideReview applies the flow's policy then.
+	bsnPolicy, redactionPolicy := effectivePrivacyPolicy(fd)
+	redactionPolicy = heldForReview(finalStatus, redactionPolicy)
+	result := buildResult(sess, req, verifiedChecks, fd, bsnPolicy, redactionPolicy)
 
 	snapshotFaceAttempts := faceStepAttempts(sess.Steps.Selfie)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {

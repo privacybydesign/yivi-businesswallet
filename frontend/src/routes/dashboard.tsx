@@ -1,27 +1,33 @@
-import { useNavigate, useParams } from "react-router";
-import { useTranslation } from "react-i18next";
+import { Link, useParams } from "react-router";
+import { Trans, useTranslation } from "react-i18next";
 import { useMeQuery } from "../api/auth.queries";
 import { useOrganizationQuery } from "../api/organization.queries";
+import { useProofingPauseQuery } from "../api/identity-proofing.queries";
+import { DashboardTodo, DashboardWaiting } from "./dashboard-todo";
 import { IdentityBanner } from "./identity-banner";
-import { MemberInsights } from "./member-insights";
+import { VerifyPerson } from "./proofing-send";
 import { VogBanner } from "./vog-banner";
 import { accessMessage } from "../lib/access-message";
 import { needsIdentityBanner } from "../lib/identity-status";
 import { needsVogBanner } from "../lib/screening-status";
 import { greetingKey } from "../lib/greeting";
 import { displayName } from "../lib/name";
-import { Button, Card, Stat, Tag, TopBar } from "../ui";
+import { todoShows } from "../lib/proofing-todo";
+import { Card, TopBar } from "../ui";
 import * as React from "react";
 
 export default function Dashboard(): React.JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { orgSlug } = useParams();
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
   const { data: me } = useMeQuery();
   const org = useOrganizationQuery(slug);
+  const pause = useProofingPauseQuery(slug);
+  const paused = pause.data?.paused === true;
   const isAdmin = org.data?.role === "admin";
+  const canReview = org.data?.canReview === true;
+  const shows = todoShows({ isAdmin, canReview, paused });
   const greeting = t(greetingKey(), { name: me ? displayName(me) : "" });
 
   if (org.isError) {
@@ -43,19 +49,14 @@ export default function Dashboard(): React.JSX.Element {
     <>
       <TopBar
         title={greeting}
-        subtitle={
-          org.isPending
-            ? t("common.loading")
-            : t("dashboard.role", { role: org.data?.role ?? "" })
-        }
         actions={
-          org.data ? (
-            <Tag tone={isAdmin ? "blue" : "default"}>{org.data.role}</Tag>
+          org.data && shows.verify ? (
+            <VerifyPerson slug={slug} isAdmin={isAdmin} />
           ) : undefined
         }
       />
 
-      <div className="flex flex-col gap-6 p-4 sm:p-8">
+      <div className="flex max-w-240 flex-col gap-6 p-4 sm:p-8">
         {org.data && needsIdentityBanner(org.data.identity) && (
           <IdentityBanner
             slug={slug}
@@ -66,67 +67,31 @@ export default function Dashboard(): React.JSX.Element {
         {org.data && needsVogBanner(org.data.vog) && (
           <VogBanner slug={slug} orgName={org.data.name} vog={org.data.vog!} />
         )}
-        {isAdmin && <MemberInsights slug={slug} />}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Stat
-            label={t("dashboard.stats.attestations")}
-            value="0"
-            hint={t("common.comingSoon")}
-            icon="valid"
-          />
-          <Stat
-            label={t("dashboard.stats.documents")}
-            value="0"
-            hint={t("common.comingSoon")}
-            icon="edit"
-          />
-        </div>
-
-        <Card className="p-6">
-          <h2 className="text-[16px] font-semibold">
-            {t("dashboard.details")}
-          </h2>
-          <dl className="mt-3 grid grid-cols-[120px_minmax(0,1fr)] gap-y-2 text-[13.5px] wrap-anywhere">
-            <dt className="text-muted">{t("common.name")}</dt>
-            <dd className="text-ink">{org.data?.name ?? "—"}</dd>
-            <dt className="text-muted">{t("common.slug")}</dt>
-            <dd className="text-ink-soft font-mono">{org.data?.slug ?? "—"}</dd>
-            <dt className="text-muted">{t("dashboard.id")}</dt>
-            <dd className="text-ink-soft font-mono text-[12px]">
-              {org.data?.id ?? "—"}
-            </dd>
-          </dl>
-          {isAdmin && (
-            <div className="mt-4">
-              <Button
-                variant="secondary"
-                icon="arrow_front"
-                onClick={() => void navigate(`/${slug}/members`)}
-              >
-                {t("dashboard.viewMembers")}
-              </Button>
-            </div>
-          )}
-        </Card>
-
         {org.data && (
-          <Card className="p-6">
-            <h2 className="text-[16px] font-semibold">
-              {t("dashboard.wallet.title")}
-            </h2>
-            <dl className="mt-3 grid grid-cols-[140px_minmax(0,1fr)] gap-y-2 text-[13.5px] wrap-anywhere">
-              <dt className="text-muted">{t("dashboard.wallet.kvkNumber")}</dt>
-              <dd className="text-ink-soft font-mono">{org.data.kvkNumber}</dd>
-              <dt className="text-muted">{t("dashboard.wallet.euid")}</dt>
-              <dd className="text-ink-soft font-mono">{org.data.euid}</dd>
-              <dt className="text-muted">{t("dashboard.wallet.address")}</dt>
-              <dd className="text-ink-soft font-mono">
-                {org.data.digitalAddress || t("dashboard.wallet.noAddress")}
-              </dd>
-              <dt className="text-muted">{t("dashboard.wallet.status")}</dt>
-              <dd className="text-ink">{org.data.status}</dd>
-            </dl>
-          </Card>
+          <>
+            <DashboardTodo
+              slug={slug}
+              orgName={org.data.name}
+              isAdmin={isAdmin}
+              canReview={shows.decisions}
+            />
+            <DashboardWaiting slug={slug} canReview={canReview} />
+          </>
+        )}
+        {shows.orgDetails && (
+          <p className="text-ink-soft text-[13px]">
+            <Trans
+              i18nKey="dashboard.orgDetails"
+              components={{
+                settings: (
+                  <Link
+                    to={`/${slug}/settings`}
+                    className="text-link underline"
+                  />
+                ),
+              }}
+            />
+          </p>
         )}
       </div>
     </>

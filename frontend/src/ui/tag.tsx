@@ -22,7 +22,7 @@ export function Tag({
   dot = false,
   title,
   children,
-}: TagProps): React.JSX.Element {
+}: Readonly<TagProps>): React.JSX.Element {
   return (
     <span
       title={title}

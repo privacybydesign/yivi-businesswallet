@@ -78,7 +78,7 @@ export function PlacementEditor({
   signers,
   placements,
   onChange,
-}: PlacementEditorProps): React.JSX.Element {
+}: Readonly<PlacementEditorProps>): React.JSX.Element {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);

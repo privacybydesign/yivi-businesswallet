@@ -18,7 +18,7 @@ import {
 import { useQerdsContactsQuery } from "../api/qerds.queries";
 import { useOrganizationMembersQuery } from "../api/organization.queries";
 import { fullName } from "../lib/name";
-import { Button, Icon, Modal, Outcome } from "../ui";
+import { Button, Icon, Modal, Outcome, Select } from "../ui";
 import { apiErrorCode, control } from "../lib/attestation-form";
 import { Field } from "./attestations-fields";
 
@@ -118,7 +118,7 @@ export function AttestationIssueWizard({
   templates,
   initialTemplate,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const issue = useIssueAttestationMutation(slug);
 
@@ -391,9 +391,9 @@ export function AttestationIssueWizard({
                   : undefined
               }
             >
-              <select
+              <Select
                 id="wizard-contact"
-                className={`${control(attempted && !recipientValid)} h-9`}
+                state={attempted && !recipientValid ? "error" : "ok"}
                 value={contactAddress}
                 onChange={(event) => selectContact(event.target.value)}
               >
@@ -405,7 +405,7 @@ export function AttestationIssueWizard({
                     {contact.name} — {contact.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           )}
         </div>
@@ -449,9 +449,9 @@ export function AttestationIssueWizard({
                   : undefined
               }
             >
-              <select
+              <Select
                 id="wizard-member"
-                className={`${control(attempted && !recipientValid)} h-9`}
+                state={attempted && !recipientValid ? "error" : "ok"}
                 value={memberUserId}
                 onChange={(event) => selectMember(event.target.value)}
               >
@@ -463,7 +463,7 @@ export function AttestationIssueWizard({
                     {fullName(entry)} — {entry.email}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           ) : (
             <Field

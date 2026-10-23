@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import type { TFunction } from "i18next";
@@ -9,7 +16,6 @@ import {
   useProofingProgressQuery,
   useYiviDisclosureQuery,
   useStartProofingYiviMutation,
-  useSubmitFaceFrameMutation,
   useUploadDiplomasMutation,
   useSubmitAddressMutation,
   useAddressLookupQuery,
@@ -18,19 +24,22 @@ import type {
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
+  AttributeReasons,
   DiplomaMode,
   DiplomaVerdict,
-  ProofingCustomer,
+  ProofingBranding,
   HostedDiploma,
-  ProofingFaceVerdict,
+  HostedLegalRetention,
   ProofingApp,
   ProofingMethod,
   ProofingProgress,
+  ProofingYiviStart,
   VerifyTarget,
 } from "../api/identity-proofing";
 import {
+  ATTRIBUTE_AGE_OVER,
+  ATTRIBUTE_DOCUMENT,
   addressLookup,
-  assuranceLevelLabel,
   diplomaRejectionReason,
   diplomaStepDone,
   formatDuration,
@@ -39,6 +48,7 @@ import {
   proofingErrorMessage,
   proofingRejectionReason,
   dataRequestRefusal,
+  reasonIn,
   secondsUntil,
   sessionView,
   verifyErrorMessage,
@@ -46,44 +56,43 @@ import {
 import type { RequestedAttribute } from "../lib/identity-proofing";
 import { useDateFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
+import { legalReasonIn } from "../lib/legal-retention";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
-// The steps a customer's subject goes through to be verified, shared by the
-// on-screen page a member shows (customer-verify) and the hosted page a link
+// The steps an external person goes through to be verified, shared by the
+// on-screen page a member shows (proofing-verify) and the hosted page a link
 // opens (proof): what is collected, the app to use, then that app's session.
 
 const LABEL = "text-ink-soft text-[12px] font-semibold";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
-const CAPTION =
-  "text-muted font-label text-[10.5px] font-medium tracking-[0.08em] uppercase";
 const LINK_BUTTON =
   "rounded-yivi font-display bg-primary text-primary-fg hover:bg-primary-hover inline-flex h-11 items-center justify-center px-[18px] text-[15px] font-semibold";
+const STEP_HEADING = "text-ink text-[22px] leading-[30px] font-bold";
 
 const QR_SIZE = 240;
 const COUNTDOWN_TICK_MS = 1000;
-// A face frame: 640 px wide, JPEG at 0.8, one every 400 ms.
-const FACE_FRAME_WIDTH = 640;
-const FACE_FRAME_QUALITY = 0.8;
-const FACE_FRAME_INTERVAL_MS = 400;
-const FACE_DECISION_PENDING = "pending";
 
-// Who asks: the customer as the steps show it.
-export type VerifyCustomer = Pick<ProofingCustomer, "name" | "branding">;
+// Who asks: the org as the steps show it, with its branding.
+export interface VerifyOrg {
+  name: string;
+  branding: ProofingBranding;
+}
 
 // What the flow collects, as the steps show it.
 export interface VerifyFlowInfo {
-  name: string;
   requestedAttributes?: string[];
-  requiredAssuranceLevel?: string;
+  // Why each item is collected, by item and language; none for a flow saved
+  // before reasons existed.
+  attributeReasons?: AttributeReasons;
   // Whether the subject is asked for their DUO diploma extracts afterwards.
   diplomaMode?: DiplomaMode;
   // Whether the subject is asked for their postal address afterwards.
   addressMode?: AddressMode;
   // The most days the session's data is kept, as the server works it out:
-  // the flow's retention when it sets one, else the customer's.
+  // the flow's retention when it sets one, else the org's.
   retentionDays: number;
 }
 
@@ -95,6 +104,7 @@ const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
 
 const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   dg1: "personal",
+  age_over: "birthdate",
   dg11: "personal",
   dg2: "view",
   chip_checks: "lock",
@@ -108,31 +118,68 @@ const METHOD_ICONS: Record<ProofingMethod, IconName> = {
   idem_app: "phone",
 };
 
+const METHOD_KEYS: Record<ProofingMethod, "yivi" | "idem"> = {
+  yivi_app: "yivi",
+  idem_app: "idem",
+};
+
+// The level of a step's heading: h1 on the hosted page, where the step is
+// what the page is about, h2 under the on-screen page's own title.
+type StepHeadingLevel = "h1" | "h2";
+const StepHeadingLevelContext = createContext<StepHeadingLevel>("h2");
+
+function StepHeading({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>): React.JSX.Element {
+  return useContext(StepHeadingLevelContext) === "h1" ? (
+    <h1 className={STEP_HEADING}>{children}</h1>
+  ) : (
+    <h2 className={STEP_HEADING}>{children}</h2>
+  );
+}
+
+// What is collected. Continue only moves on to the app step: nothing starts
+// until the person taps an app there.
 export function Overview({
-  customer,
+  org,
   flow,
   onContinue,
-  starting,
-  error,
   cancel,
-}: {
-  customer: VerifyCustomer;
+}: Readonly<{
+  org: VerifyOrg;
   flow: VerifyFlowInfo;
   onContinue: () => void;
-  starting: boolean;
-  error?: string;
-  // A way out beside Continue, e.g. back to the customer; none when absent.
+  // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const name = customer.branding.displayName || customer.name;
+}>): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const name = org.branding.displayName || org.name;
   const items: DataDisclosureItem[] = (flow.requestedAttributes ?? [])
     .filter(isRequestedAttribute)
-    .map((value) => ({
-      icon: ATTRIBUTE_ICONS[value],
-      label: t(`identityProofingFlows.attributes.${value}`),
-      detail: t(`customers.onScreen.attributeDetails.${value}`),
-    }));
+    .map((value) => {
+      const reason = reasonIn(flow.attributeReasons?.[value], i18n.language);
+      return {
+        icon: ATTRIBUTE_ICONS[value],
+        label: t(`identityProofingFlows.attributes.${value}`),
+        // The age check withholds the date of birth from the document data.
+        detail:
+          value === ATTRIBUTE_DOCUMENT &&
+          flow.requestedAttributes?.includes(ATTRIBUTE_AGE_OVER)
+            ? t(
+                "identityProofing.onScreen.attributeDetails.dg1WithoutBirthDate",
+              )
+            : t(`identityProofing.onScreen.attributeDetails.${value}`),
+        reason:
+          reason === undefined
+            ? undefined
+            : {
+                label: t("identityProofing.onScreen.overview.why"),
+                text: reason,
+              },
+      };
+    });
   if (flow.addressMode !== undefined && flow.addressMode !== "off") {
     items.push({
       icon: "personal",
@@ -147,51 +194,37 @@ export function Overview({
       detail: t("identityProofing.diplomas.overview.detail"),
     });
   }
-  const { supportContact, privacyUrl } = customer.branding;
+  const { supportContact, privacyUrl } = org.branding;
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("customers.onScreen.overview.heading", { name })}
-        </h2>
+        <StepHeading>
+          {t("identityProofing.onScreen.overview.heading", { name })}
+        </StepHeading>
         <p className={HINT}>
-          {t("customers.onScreen.overview.intro", { name })}
+          {t("identityProofing.onScreen.overview.intro", { name })}
         </p>
       </div>
       {items.length === 0 ? (
-        <p className={HINT}>{t("customers.onScreen.overview.noData")}</p>
+        <p className={HINT}>{t("identityProofing.onScreen.overview.noData")}</p>
       ) : (
-        <DataDisclosure items={items} />
+        <>
+          <DataDisclosure items={items} />
+          {/* "This data" is the list above: with nothing listed there is no
+              data to say anything about. */}
+          <p className={HINT}>
+            {t("identityProofing.onScreen.overview.retention", {
+              count: flow.retentionDays,
+            })}
+          </p>
+        </>
       )}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <div className={CAPTION}>{t("customers.onScreen.overview.flow")}</div>
-          <div className="text-ink mt-1 text-[13px]">{flow.name}</div>
-        </div>
-        <div>
-          <div className={CAPTION}>
-            {t("customers.onScreen.overview.assurance")}
-          </div>
-          <div className="text-ink mt-1 text-[13px]">
-            {flow.requiredAssuranceLevel
-              ? t("customers.flows.eidas", {
-                  level: assuranceLevelLabel(flow.requiredAssuranceLevel, t),
-                })
-              : t("customers.flows.noAssurance")}
-          </div>
-        </div>
-      </div>
-      <p className={HINT}>
-        {t("customers.onScreen.overview.retention", {
-          count: flow.retentionDays,
-        })}
-      </p>
       {(supportContact !== "" || privacyUrl !== "") && (
         <div className="flex flex-col gap-1 text-[13px]">
           {supportContact !== "" && (
             <span className="text-ink-soft">
-              {t("customers.onScreen.overview.support", {
+              {t("identityProofing.onScreen.overview.support", {
                 contact: supportContact,
               })}
             </span>
@@ -203,102 +236,106 @@ export function Overview({
               rel="noreferrer"
               className="text-link font-semibold hover:underline"
             >
-              {t("customers.onScreen.overview.privacy")}
+              {t("identityProofing.onScreen.overview.privacy")}
             </a>
           )}
         </div>
       )}
-      {error && (
-        <p role="alert" className={ERROR}>
-          {error}
-        </p>
-      )}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2.5">
         {cancel}
-        <Button icon="arrow_front" loading={starting} onClick={onContinue}>
-          {t("customers.onScreen.overview.continue")}
+        <Button size="lg" onClick={onContinue}>
+          {t("identityProofing.onScreen.overview.continue")}
         </Button>
       </div>
     </div>
   );
 }
 
+// The app step: tapping an app starts the session in it. With one app
+// (methodChoices) the step still shows, with that app alone.
 export function MethodChoice({
-  method,
-  onChange,
+  methods,
+  picked,
+  onChoose,
   onBack,
-  onContinue,
   starting,
   error,
-}: {
-  method: ProofingMethod;
-  onChange: (method: ProofingMethod) => void;
+}: Readonly<{
+  methods: ProofingMethod[];
+  // The app last tapped: it shows as starting while the session is created.
+  picked: ProofingMethod;
+  onChoose: (method: ProofingMethod) => void;
   onBack: () => void;
-  onContinue: () => void;
   starting: boolean;
   error?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
-  const options: { value: ProofingMethod; key: "yivi" | "idem" }[] = [
-    { value: "yivi_app", key: "yivi" },
-    { value: "idem_app", key: "idem" },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.method.heading")}
-      </h2>
-      <fieldset className="flex flex-col gap-3">
-        <legend className="sr-only">
-          {t("customers.onScreen.method.heading")}
-        </legend>
-        {options.map((option) => {
-          const checked = method === option.value;
+      <StepHeading>{t("identityProofing.onScreen.method.heading")}</StepHeading>
+      <div className="flex flex-col gap-3">
+        {methods.map((value) => {
+          const busy = starting && picked === value;
           return (
-            <label
-              key={option.value}
+            <button
+              key={value}
+              type="button"
+              disabled={starting}
+              aria-busy={busy || undefined}
+              onClick={() => onChoose(value)}
               className={[
-                "rounded-yivi flex cursor-pointer items-start gap-3 border p-4",
-                checked
-                  ? "border-primary bg-highlight"
-                  : "border-line-strong bg-surface",
+                "rounded-yivi border-line-strong bg-surface enabled:hover:bg-surface-3 flex min-h-[88px] w-full cursor-pointer items-center gap-4 border px-5 py-[18px] text-left transition-colors duration-150 disabled:cursor-not-allowed",
+                busy ? "" : "disabled:opacity-50",
               ].join(" ")}
             >
-              <input
-                type="radio"
-                name="proofing-method"
-                value={option.value}
-                checked={checked}
-                onChange={() => onChange(option.value)}
-                className="mt-1"
-              />
-              <span className="bg-tile text-tile-fg rounded-yivi-sm flex h-9 w-9 shrink-0 items-center justify-center">
-                <Icon name={METHOD_ICONS[option.value]} />
+              <span className="bg-tile text-tile-fg rounded-yivi flex h-10 w-10 shrink-0 items-center justify-center">
+                <Icon name={METHOD_ICONS[value]} size={20} />
               </span>
-              <span className="flex flex-col gap-0.5">
-                <span className="text-ink text-[14.5px] font-bold">
-                  {t(`customers.onScreen.method.${option.key}.title`)}
+              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="text-ink text-[16px] font-semibold">
+                  {t(
+                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.title`,
+                  )}
                 </span>
-                <span className="text-ink-soft text-[13px]">
-                  {t(`customers.onScreen.method.${option.key}.detail`)}
+                <span className="text-ink-soft text-[14px] leading-[21px]">
+                  {t(
+                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
+                  )}
                 </span>
               </span>
-            </label>
+              {busy ? (
+                <span
+                  aria-hidden="true"
+                  className="text-ink h-[18px] w-[18px] shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                />
+              ) : (
+                <Icon
+                  name="chevron_right"
+                  size={18}
+                  className="text-ink shrink-0"
+                />
+              )}
+            </button>
           );
         })}
-      </fieldset>
+      </div>
       {error && (
         <p role="alert" className={ERROR}>
           {error}
         </p>
       )}
-      <div className="flex justify-between gap-2">
-        <Button variant="secondary" icon="arrow_back" onClick={onBack}>
-          {t("customers.onScreen.method.back")}
-        </Button>
-        <Button icon="scan_qrcode" loading={starting} onClick={onContinue}>
-          {t("customers.onScreen.method.continue")}
+      <div>
+        {/* Not while a session is created: its success moves the page on
+            to that session, from whichever step is showing. */}
+        <Button
+          variant="secondary"
+          size="lg"
+          icon="arrow_back"
+          disabled={starting}
+          onClick={onBack}
+        >
+          {t("identityProofing.onScreen.method.back")}
         </Button>
       </div>
     </div>
@@ -307,38 +344,66 @@ export function MethodChoice({
 
 // A verify page's current step. When step changes after the first render,
 // focus moves to the step's heading, so a screen reader reads the new step
-// instead of focus dropping to the page.
+// instead of focus dropping to the page. headingLevel is the level of the
+// steps' headings: h1 on a page with no title of its own.
 export function StepRegion({
   step,
+  headingLevel = "h2",
   children,
-}: {
+}: Readonly<{
   step: string;
+  headingLevel?: StepHeadingLevel;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const shown = useRef(step);
   useEffect(() => {
     if (shown.current === step) return;
     shown.current = step;
-    const heading = ref.current?.querySelector<HTMLElement>("h2, h3");
+    const heading = ref.current?.querySelector<HTMLElement>("h1, h2, h3");
     const target = heading ?? ref.current;
     if (heading) heading.tabIndex = -1;
     target?.focus();
   }, [step]);
   return (
-    <div
-      ref={ref}
-      tabIndex={-1}
-      className="flex flex-col gap-6 outline-none [&_h2]:outline-none [&_h3]:outline-none"
-    >
+    <StepHeadingLevelContext.Provider value={headingLevel}>
+      <div
+        ref={ref}
+        tabIndex={-1}
+        className="flex flex-col gap-6 outline-none [&_h1]:outline-none [&_h2]:outline-none [&_h3]:outline-none"
+      >
+        {children}
+      </div>
+    </StepHeadingLevelContext.Provider>
+  );
+}
+
+// What a page shows once its check ran out unfinished: that it ended, that
+// nothing was shared (message), and what the person can do next (children).
+export function CheckEnded({
+  message,
+  children,
+}: Readonly<{
+  message: string;
+  children: React.ReactNode;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <output className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2.5">
+        <StepHeading>{t("identityProofing.onScreen.ended.title")}</StepHeading>
+        <p className="text-ink-soft text-[15px] leading-[23px]">{message}</p>
+      </div>
       {children}
-    </div>
+    </output>
   );
 }
 
 // The running session: the app's QR code and link with a countdown, until
 // the request settles or the session runs out. onRestart, when set, offers a
-// new session after one ended; outcomeActions go under the outcome.
+// new session after one ended; outcomeActions go under the outcome. Once the
+// session or an unstarted link ran out, the page shows renderEnded(progress)
+// instead, and is told through onEnded.
 export function Session({
   target,
   initial,
@@ -347,6 +412,8 @@ export function Session({
   method,
   onRestart,
   outcomeActions,
+  renderEnded,
+  onEnded,
   onSettled,
   diplomaMode = "off",
   diplomas = [],
@@ -354,7 +421,7 @@ export function Session({
   dataRequest = false,
   addressMode = "off",
   onAddressStep,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   initial: ProofingProgress;
   deepLink?: string;
@@ -362,6 +429,8 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
+  renderEnded: (progress: ProofingProgress) => React.ReactNode;
+  onEnded?: () => void;
   // Called with the progress once the session has an outcome, and the subject
   // is done adding diploma extracts when it asks for them; again whenever
   // that outcome changes (a data request's review decided).
@@ -379,7 +448,7 @@ export function Session({
   // diploma step; onAddressStep is told whether it shows.
   addressMode?: AddressMode;
   onAddressStep?: (active: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
@@ -410,6 +479,13 @@ export function Session({
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
+  const over = current.status === "expired" || view === "expired";
+  // Before paint, so the page drops its stepper in the same frame.
+  useLayoutEffect(() => {
+    if (over) {
+      onEnded?.();
+    }
+  }, [over, onEnded]);
   const [link, setLink] = useState(deepLink);
   const fresh = useNewClaimLinkMutation(target);
   const newCode = (
@@ -425,10 +501,10 @@ export function Session({
           })
         }
       >
-        {t("customers.onScreen.scan.newCode")}
+        {t("identityProofing.onScreen.scan.newCode")}
       </Button>
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.newCodeHint")}
+        {t("identityProofing.onScreen.scan.newCodeHint")}
       </p>
       {fresh.isError && (
         <p role="alert" className={`${ERROR} text-center`}>
@@ -457,6 +533,9 @@ export function Session({
       />
     );
   }
+  if (over) {
+    return <>{renderEnded(current)}</>;
+  }
   if (showsOutcome) {
     return (
       <SessionOutcome
@@ -466,33 +545,29 @@ export function Session({
       />
     );
   }
-  if (view === "expired") {
-    return <Expired onRestart={onRestart} />;
-  }
 
-  // The page's own link with the manual "new code": the hosted page's view,
+  // The page's own link, which lasts the session: the hosted page's view,
   // and the on-screen one's when where the phone is cannot be read.
   const manualIdem = link ? (
     <>
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.scan.idemHeading")}
-      </h2>
+      <StepHeading>
+        {t("identityProofing.onScreen.scan.idemHeading")}
+      </StepHeading>
       <QrCode value={link} />
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.idemHint")}
+        {t("identityProofing.onScreen.scan.idemHint")}
       </p>
       <a href={link} className={LINK_BUTTON}>
-        {t("customers.onScreen.scan.openIdem")}
+        {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={secondsLeft} />
-      {newCode}
     </>
   ) : (
     // The link was shown in another window: the app carries on there,
     // unless it was closed and a new code hands the session over.
     <>
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.startedElsewhere")}
+        {t("identityProofing.onScreen.scan.startedElsewhere")}
       </p>
       {newCode}
     </>
@@ -521,7 +596,7 @@ export function Session({
         method === "idem_app" &&
         target.kind === "hosted" && (
           <p className="text-link text-[13px] font-semibold">
-            {t("customers.onScreen.scan.inProgress")}
+            {t("identityProofing.onScreen.scan.inProgress")}
           </p>
         )}
     </div>
@@ -537,12 +612,12 @@ function DiplomaStep({
   until,
   initial,
   onDone,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   until: string;
   initial: HostedDiploma[];
   onDone: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const upload = useUploadDiplomasMutation(target);
@@ -588,9 +663,7 @@ function DiplomaStep({
       </p>
 
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("identityProofing.diplomas.heading")}
-        </h2>
+        <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
         <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
       </div>
 
@@ -812,9 +885,7 @@ function AddressStep({
       </p>
 
       <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("identityProofing.address.heading")}
-        </h2>
+        <StepHeading>{t("identityProofing.address.heading")}</StepHeading>
         <p className={HINT}>{t("identityProofing.address.intro")}</p>
       </div>
 
@@ -965,13 +1036,13 @@ function IdemOnScreen({
   deepLinkExpiresAt,
   sessionSecondsLeft,
   fallback,
-}: {
+}: Readonly<{
   target: Extract<VerifyTarget, { kind: "request" }>;
   deepLink?: string;
   deepLinkExpiresAt?: string;
   sessionSecondsLeft: number;
   fallback: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const app = useProofingAppQuery(target.slug, target.requestId, true);
   const fresh = useNewClaimLinkMutation(target);
@@ -1020,10 +1091,12 @@ function IdemOnScreen({
         <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
           <Icon name="phone" size={24} />
         </span>
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("customers.onScreen.scan.connectedHeading")}
-        </h2>
-        <p className={HINT}>{t("customers.onScreen.scan.connectedHint")}</p>
+        <StepHeading>
+          {t("identityProofing.onScreen.scan.connectedHeading")}
+        </StepHeading>
+        <p className={HINT}>
+          {t("identityProofing.onScreen.scan.connectedHint")}
+        </p>
         <Countdown seconds={sessionSecondsLeft} />
       </div>
     );
@@ -1031,19 +1104,21 @@ function IdemOnScreen({
   const away = state === "away";
   const heading = t(
     away
-      ? "customers.onScreen.scan.awayHeading"
-      : "customers.onScreen.scan.idemHeading",
+      ? "identityProofing.onScreen.scan.awayHeading"
+      : "identityProofing.onScreen.scan.idemHeading",
   );
   const hint = t(
     away
-      ? "customers.onScreen.scan.awayHint"
-      : "customers.onScreen.scan.idemHint",
+      ? "identityProofing.onScreen.scan.awayHint"
+      : "identityProofing.onScreen.scan.idemHint",
   );
   if (!shown) {
     return (
       <div className="flex flex-col items-center gap-4">
-        <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
-        <QrPlaceholder label={t("customers.onScreen.scan.newCodeLoading")} />
+        <StepHeading>{heading}</StepHeading>
+        <QrPlaceholder
+          label={t("identityProofing.onScreen.scan.newCodeLoading")}
+        />
         {fresh.isError && (
           <p className={`${ERROR} text-center`}>
             {proofingErrorMessage(fresh.error, t)}
@@ -1067,48 +1142,59 @@ function IdemQr({
   hint,
   code,
   seconds,
-}: {
+}: Readonly<{
   heading: string;
   hint: string;
   code: IdemCode;
   seconds: number;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-4">
-      <h2 className="text-ink text-[18px] font-bold">{heading}</h2>
+      <StepHeading>{heading}</StepHeading>
       <QrCode value={code.deepLink} />
       <p className={`${HINT} text-center`}>{hint}</p>
       <a href={code.deepLink} className={LINK_BUTTON}>
-        {t("customers.onScreen.scan.openIdem")}
+        {t("identityProofing.onScreen.scan.openIdem")}
       </a>
       <Countdown seconds={seconds} />
     </div>
   );
 }
 
-// The Yivi app's part: start the disclosure, show its QR until the subject
-// has shared, then the face check against the disclosed photo.
+// The Yivi app's part: start the disclosure and show its QR until the subject
+// has shared. The disclosure decides the session: no face check follows.
 function YiviSession({
   target,
   sessionSecondsLeft,
   onRestart,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   sessionSecondsLeft: number;
   onRestart?: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
-  const start = useStartProofingYiviMutation(target);
-  const { mutate } = start;
+  const { mutateAsync } = useStartProofingYiviMutation(target);
+  // The start's own outcome, not the mutation's state: StrictMode's remount
+  // detaches the mutation from this component, which then never hears back.
+  const [start, setStart] = useState<{
+    data?: ProofingYiviStart;
+    error?: Error;
+  }>({});
   // Once per mount: StrictMode runs an effect twice in development, and each
   // run would start a Yivi session of its own.
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    mutate();
-  }, [mutate]);
+    mutateAsync().then(
+      (data) => setStart({ data }),
+      (error: unknown) =>
+        setStart({
+          error: error instanceof Error ? error : new Error(String(error)),
+        }),
+    );
+  }, [mutateAsync]);
   const yiviSecondsLeft = useSecondsLeft(start.data?.expiresAt);
   const secondsLeft = start.data
     ? Math.min(sessionSecondsLeft, yiviSecondsLeft)
@@ -1116,10 +1202,10 @@ function YiviSession({
   // Polling stops once the session has expired: nothing can finish it then.
   const disclosure = useYiviDisclosureQuery(
     target,
-    start.isSuccess && secondsLeft > 0,
+    start.data !== undefined && secondsLeft > 0,
   );
 
-  if (start.isError) {
+  if (start.error) {
     return (
       <Failed
         message={verifyErrorMessage(target, start.error, t)}
@@ -1139,15 +1225,19 @@ function YiviSession({
     if (!disclosure.data.ok) {
       return (
         <Failed
-          message={t("customers.onScreen.yiviEnded", {
+          message={t("identityProofing.onScreen.yiviEnded", {
             reason: yiviEndReason(disclosure.data.code, t),
           })}
           onRestart={onRestart}
         />
       );
     }
+    // The disclosure decided the session: the request's own poll shows the
+    // outcome once it is recorded.
     return (
-      <FaceCheck target={target} stableFrames={disclosure.data.stableFrames} />
+      <output className={`${HINT} block text-center`}>
+        {t("identityProofing.onScreen.yiviShared")}
+      </output>
     );
   }
   if (start.data && secondsLeft === 0) {
@@ -1160,20 +1250,20 @@ function YiviSession({
       : yiviUniversalLink(start.data.walletLink);
   return (
     <>
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.scan.yiviHeading")}
-      </h2>
+      <StepHeading>
+        {t("identityProofing.onScreen.scan.yiviHeading")}
+      </StepHeading>
       {link === undefined ? (
-        <QrPlaceholder label={t("customers.onScreen.scan.starting")} />
+        <QrPlaceholder label={t("identityProofing.onScreen.scan.starting")} />
       ) : (
         <QrCode value={link} />
       )}
       <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.scan.yiviHint")}
+        {t("identityProofing.onScreen.scan.yiviHint")}
       </p>
       {link !== undefined && (
         <a href={link} className={LINK_BUTTON}>
-          {t("customers.onScreen.scan.openYivi")}
+          {t("identityProofing.onScreen.scan.openYivi")}
         </a>
       )}
       {start.data && <Countdown seconds={secondsLeft} />}
@@ -1182,198 +1272,66 @@ function YiviSession({
 }
 
 function yiviEndReason(code: string | undefined, t: TFunction): string {
-  switch (code) {
-    case "photo_missing":
-      return t("customers.onScreen.yiviCodes.photoMissing");
-    case "reference_no_face":
-      return t("customers.onScreen.yiviCodes.referenceNoFace");
-    case "document_not_accepted":
-      return t("customers.onScreen.yiviCodes.documentNotAccepted");
-    default:
-      return code ?? t("identityProofing.errors.generic");
+  if (code === "document_not_accepted") {
+    return t("identityProofing.onScreen.yiviCodes.documentNotAccepted");
   }
+  if (code === "age_not_disclosed") {
+    return t("identityProofing.onScreen.yiviCodes.ageNotDisclosed");
+  }
+  return code ?? t("identityProofing.errors.generic");
 }
 
-// The live face check of a Yivi session: camera frames are sent one at a time
-// until the engine decides. The decision itself lands on the request, which the
-// session polls; this only shows the progress.
-function FaceCheck({
-  target,
-  stableFrames,
-}: {
-  target: VerifyTarget;
-  stableFrames?: number;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // "framed": refused inside an embedding page that did not grant the camera
-  // (its iframe needs allow="camera"), which the subject cannot change there.
-  const [cameraError, setCameraError] = useState<"refused" | "framed">();
-  const [ready, setReady] = useState(false);
-  const [verdict, setVerdict] = useState<ProofingFaceVerdict>();
-  const [frameError, setFrameError] = useState<string>();
-  const submit = useSubmitFaceFrameMutation(target);
-  const { mutateAsync } = submit;
-  const [attempt, setAttempt] = useState(0);
-  const [frameTick, setFrameTick] = useState(0);
-
-  useEffect(() => {
-    let stream: MediaStream | undefined;
-    let cancelled = false;
-    // Started inside a promise so a browser without navigator.mediaDevices
-    // (an insecure context, some in-app browsers) lands in the camera error
-    // below instead of throwing out of the effect.
-    Promise.resolve()
-      .then(() =>
-        navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        }),
-      )
-      .then(async (media) => {
-        if (cancelled) {
-          media.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        stream = media;
-        const video = videoRef.current;
-        if (!video) return;
-        video.srcObject = media;
-        await video.play();
-        setReady(true);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        const framed =
-          error instanceof DOMException &&
-          error.name === "NotAllowedError" &&
-          window.parent !== window;
-        setCameraError(framed ? "framed" : "refused");
-      });
-    return () => {
-      cancelled = true;
-      setReady(false);
-      stream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [attempt]);
-
-  const decided =
-    verdict !== undefined && verdict.decision !== FACE_DECISION_PENDING;
-
-  useEffect(() => {
-    if (!ready || decided || frameError !== undefined) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const frame = captureFrame(videoRef.current);
-      if (frame === undefined) {
-        // No frame yet (the video has no size): try again on the next tick
-        // rather than stopping, which would leave the check waiting forever.
-        setFrameTick((tick) => tick + 1);
-        return;
-      }
-      mutateAsync(frame)
-        .then((next) => {
-          if (!cancelled) setVerdict(next);
-        })
-        .catch((error: unknown) => {
-          if (!cancelled) setFrameError(verifyErrorMessage(target, error, t));
-        });
-    }, FACE_FRAME_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [ready, decided, frameError, verdict, frameTick, mutateAsync, target, t]);
-
-  const total = verdict?.stableFrames ?? stableFrames;
-  const noFace = verdict !== undefined && !verdict.faceDetected;
+// A "delete my data" request the org's legal retention declined: the org's
+// reason in the language of the page, and the date all the data can go.
+function LegalRetentionOutcome({
+  legal,
+  actions,
+}: Readonly<{
+  legal: HostedLegalRetention;
+  actions?: React.ReactNode;
+}>): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const formatDate = useDateFormatter();
   return (
-    <>
-      <h2 className="text-ink text-[18px] font-bold">
-        {t("customers.onScreen.face.heading")}
-      </h2>
-      <p className={`${HINT} text-center`}>
-        {t("customers.onScreen.face.hint")}
-      </p>
-      {cameraError === "framed" ? (
-        <div className="flex flex-col items-center gap-3 text-center">
-          <p role="alert" className={ERROR}>
-            {t("customers.onScreen.face.cameraFramed")}
+    <Outcome
+      tone="error"
+      icon="invalid"
+      title={t("identityProofing.onScreen.outcome.legalRetention.title")}
+      message={legalReasonIn(legal.reason, i18n.language)}
+      action={
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-ink text-[13.5px]">
+            {t("identityProofing.onScreen.outcome.legalRetention.until", {
+              date: formatDate(legal.until),
+            })}
           </p>
-          <a
-            href={window.location.href}
-            target="_blank"
-            rel="noreferrer"
-            className={LINK_BUTTON}
-          >
-            {t("customers.onScreen.face.openInTab")}
-          </a>
+          {actions}
         </div>
-      ) : cameraError === "refused" ? (
-        <Failed
-          message={t("customers.onScreen.face.cameraError")}
-          actionLabel={t("customers.onScreen.face.retry")}
-          onRestart={() => {
-            setCameraError(undefined);
-            setAttempt((a) => a + 1);
-          }}
-        />
-      ) : (
-        <video
-          ref={videoRef}
-          muted
-          playsInline
-          className="rounded-yivi border-line-strong bg-surface-3 aspect-[4/3] w-full max-w-sm -scale-x-100 border object-cover"
-        />
-      )}
-      {frameError !== undefined && (
-        <Failed
-          message={frameError}
-          actionLabel={t("customers.onScreen.face.retry")}
-          onRestart={() => setFrameError(undefined)}
-        />
-      )}
-      <p
-        role="status"
-        className={`text-[13px] ${noFace ? "text-warning-fg" : "text-ink-soft"}`}
-      >
-        {frameError === undefined &&
-          (noFace
-            ? t("customers.onScreen.face.noFace")
-            : total !== undefined &&
-              t("customers.onScreen.face.progress", {
-                count: verdict?.consecutive ?? 0,
-                total,
-              }))}
-      </p>
-    </>
+      }
+    />
   );
-}
-
-// One JPEG frame of the video (unmirrored), or undefined before it has one.
-function captureFrame(video: HTMLVideoElement | null): string | undefined {
-  if (!video || video.videoWidth === 0) return undefined;
-  const canvas = document.createElement("canvas");
-  canvas.width = FACE_FRAME_WIDTH;
-  canvas.height = Math.round(
-    (video.videoHeight / video.videoWidth) * FACE_FRAME_WIDTH,
-  );
-  const context = canvas.getContext("2d");
-  if (!context) return undefined;
-  context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", FACE_FRAME_QUALITY);
 }
 
 function SessionOutcome({
   progress,
   actions,
   dataRequest,
-}: {
+}: Readonly<{
   progress: ProofingProgress;
   actions?: React.ReactNode;
   dataRequest: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
+  // An erasure the legal retention declined says why and until when, before
+  // the refusal any other data request gets.
+  if (progress.status === "rejected" && progress.legalRetention) {
+    return (
+      <LegalRetentionOutcome
+        legal={progress.legalRetention}
+        actions={actions}
+      />
+    );
+  }
   if (
     progress.status === "rejected" &&
     dataRequest &&
@@ -1384,8 +1342,8 @@ function SessionOutcome({
         tone="info"
         role="status"
         icon="invalid"
-        title={t("customers.onScreen.outcome.refused.title")}
-        message={t("customers.onScreen.outcome.refused.message")}
+        title={t("identityProofing.onScreen.outcome.refused.title")}
+        message={t("identityProofing.onScreen.outcome.refused.message")}
         action={actions}
       />
     );
@@ -1397,8 +1355,8 @@ function SessionOutcome({
           tone="success"
           role="status"
           icon="valid"
-          title={t("customers.onScreen.outcome.approved.title")}
-          message={t("customers.onScreen.outcome.approved.message")}
+          title={t("identityProofing.onScreen.outcome.approved.title")}
+          message={t("identityProofing.onScreen.outcome.approved.message")}
           action={actions}
         />
       );
@@ -1408,11 +1366,11 @@ function SessionOutcome({
           tone="error"
           icon="invalid"
           role="alert"
-          title={t("customers.onScreen.outcome.rejected.title")}
+          title={t("identityProofing.onScreen.outcome.rejected.title")}
           message={
             progress.errorCode
               ? proofingRejectionReason(progress.errorCode, t)
-              : t("customers.onScreen.outcome.rejected.message")
+              : t("identityProofing.onScreen.outcome.rejected.message")
           }
           action={actions}
         />
@@ -1423,8 +1381,8 @@ function SessionOutcome({
           tone="info"
           role="status"
           icon="time"
-          title={t("customers.onScreen.outcome.review.title")}
-          message={t("customers.onScreen.outcome.review.message")}
+          title={t("identityProofing.onScreen.outcome.review.title")}
+          message={t("identityProofing.onScreen.outcome.review.message")}
           action={actions}
         />
       );
@@ -1434,8 +1392,8 @@ function SessionOutcome({
           tone="info"
           role="status"
           icon="invalid"
-          title={t("customers.onScreen.outcome.cancelled.title")}
-          message={t("customers.onScreen.outcome.cancelled.message")}
+          title={t("identityProofing.onScreen.outcome.cancelled.title")}
+          message={t("identityProofing.onScreen.outcome.cancelled.message")}
           action={actions}
         />
       );
@@ -1445,22 +1403,27 @@ function SessionOutcome({
           tone="info"
           role="status"
           icon="time"
-          title={t("customers.onScreen.outcome.expired.title")}
-          message={t("customers.onScreen.outcome.expired.message")}
+          title={t("identityProofing.onScreen.outcome.expired.title")}
+          message={t("identityProofing.onScreen.outcome.expired.message")}
           action={actions}
         />
       );
   }
 }
 
-function Expired({ onRestart }: { onRestart?: () => void }): React.JSX.Element {
+function Expired({
+  onRestart,
+}: Readonly<{ onRestart?: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div role="status" className="flex flex-col items-center gap-4">
-      <QrPlaceholder label={t("customers.onScreen.scan.expired")} expired />
+      <QrPlaceholder
+        label={t("identityProofing.onScreen.scan.expired")}
+        expired
+      />
       {onRestart && (
         <Button variant="secondary" icon="scan_qrcode" onClick={onRestart}>
-          {t("customers.onScreen.scan.restart")}
+          {t("identityProofing.onScreen.scan.restart")}
         </Button>
       )}
     </div>
@@ -1471,11 +1434,11 @@ function Failed({
   message,
   actionLabel,
   onRestart,
-}: {
+}: Readonly<{
   message: string;
   actionLabel?: string;
   onRestart?: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-3 text-center">
@@ -1484,20 +1447,22 @@ function Failed({
       </p>
       {onRestart && (
         <Button variant="secondary" onClick={onRestart}>
-          {actionLabel ?? t("customers.onScreen.scan.restart")}
+          {actionLabel ?? t("identityProofing.onScreen.scan.restart")}
         </Button>
       )}
     </div>
   );
 }
 
-function Countdown({ seconds }: { seconds: number }): React.JSX.Element {
+function Countdown({
+  seconds,
+}: Readonly<{ seconds: number }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <p className="text-ink-soft flex items-center gap-1.5 text-[13px]">
       <Icon name="time" />
       <span role="timer" aria-live="off">
-        {t("customers.onScreen.scan.expiresIn", {
+        {t("identityProofing.onScreen.scan.expiresIn", {
           time: formatDuration(seconds),
         })}
       </span>
@@ -1505,7 +1470,7 @@ function Countdown({ seconds }: { seconds: number }): React.JSX.Element {
   );
 }
 
-function QrCode({ value }: { value: string }): React.JSX.Element {
+function QrCode({ value }: Readonly<{ value: string }>): React.JSX.Element {
   const [dataUrl, setDataUrl] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -1537,10 +1502,10 @@ function QrCode({ value }: { value: string }): React.JSX.Element {
 function QrPlaceholder({
   label,
   expired = false,
-}: {
+}: Readonly<{
   label?: string;
   expired?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div
       className="border-line-strong bg-surface rounded-yivi text-muted flex flex-col items-center justify-center gap-2 border px-4 text-center"

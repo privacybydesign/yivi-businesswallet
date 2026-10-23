@@ -3,6 +3,7 @@ package proofingengine
 import (
 	"errors"
 	"log/slog"
+	"maps"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/redact"
@@ -68,6 +69,41 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	sess.Steps.NFC = &nfc
 }
 
+// heldForReview is the redaction a session's result and stored evidence take
+// when it finishes in status: one waiting for review keeps its face photos
+// (the chip's portrait, the selfie, a reference photo) whatever its flow says,
+// for the reviewer to compare. The decision drops them then (dropFacePhotos).
+// The BSN is covered either way.
+func heldForReview(status session.Status, redaction privacy.RedactionPolicy) privacy.RedactionPolicy {
+	if status == session.StatusNeedsReview {
+		redaction.KeepFacePhotos = true
+	}
+	return redaction
+}
+
+// resultFacePhotos are the result keys that carry a face photo (buildResult).
+var resultFacePhotos = []string{"photo", "selfie", "referencePhoto"}
+
+// dropFacePhotos drops the face photos a session held for its review
+// (heldForReview) from its result and its stored evidence, unless its flow
+// keeps them. Its stored evidence is redacted again as at submit, which leaves
+// what was covered then as it is.
+func dropFacePhotos(sess *session.Session, bsnPolicy privacy.BSNPolicy, redaction privacy.RedactionPolicy) {
+	if redaction.KeepFacePhotos {
+		return
+	}
+	if sess.Result != nil {
+		// A copy, not a write through a map the session read before this
+		// update may share, as redactStepsForStorage copies the steps.
+		result := maps.Clone(sess.Result)
+		for _, key := range resultFacePhotos {
+			delete(result, key)
+		}
+		sess.Result = result
+	}
+	redactStepsForStorage(sess, bsnPolicy, redaction)
+}
+
 const (
 	dataGroupMRZ             = "DG1"
 	dataGroupPortrait        = "DG2"
@@ -91,14 +127,17 @@ func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
 }
 
 // coversDocumentBSN reports whether a document photo's printed BSN is
-// covered: under BlurBSN, and under a mask or omit BSN policy unless the
-// document is known not to be Dutch.
+// covered: under BlurBSN or a mask or omit BSN policy, unless the document is
+// known not to be Dutch. Only a Dutch document prints a BSN, so another
+// country's photo has none to cover and is released as taken; a Dutch one, or
+// one whose issuing state is not known, is covered, and withheld where the app
+// did not locate the BSN (coverBSN).
 func coversDocumentBSN(redaction privacy.RedactionPolicy, bsnPolicy privacy.BSNPolicy, issuingState string) bool {
-	if redaction.BlurBSN {
-		return true
+	if issuingState != "" && issuingState != dutchIssuingState {
+		return false
 	}
 	p := bsnPolicy.Effective()
-	return (p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit) && (issuingState == "" || issuingState == dutchIssuingState)
+	return redaction.BlurBSN || p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit
 }
 
 // resultIssuingState is the issuing state of the document a result is built

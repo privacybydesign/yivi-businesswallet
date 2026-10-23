@@ -18,17 +18,16 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 )
 
-// hostedCallLimit holds the hosted page per customer across all its links, as
-// apiCallLimit holds the API, and per API replica. It fits some twenty people
-// at a hosted face check at once: its frames go every 400 ms, its status polls
-// every 2 s.
+// hostedCallLimit holds the hosted page per org across all its links, as
+// apiCallLimit holds the API, and per API replica. A page polls its status and
+// its Yivi disclosure every 2 s, so it fits some fifty people at once.
 var hostedCallLimit = ratelimit.Limit{Burst: 3000, Per: time.Minute}
 
 // hostedSourceLimit holds the hosted page per client address, valid links
-// included, so one source cannot spend a customer's hostedCallLimit. One
-// person's page at its busiest sends some 210 calls a minute: a face frame
-// every 400 ms and the status and Yivi polls every 2 s. This leaves room for
-// a reload, a second tab and a few people behind one NAT.
+// included, so one source cannot spend an org's hostedCallLimit. One
+// person's page at its busiest sends some 60 calls a minute: the status and
+// Yivi polls every 2 s. This leaves room for a reload, a second tab and some
+// people behind one NAT.
 var hostedSourceLimit = ratelimit.Limit{Burst: 600, Per: time.Minute}
 
 // staleLinkLimit holds one link that is no longer live (Request.linkLive):
@@ -42,7 +41,7 @@ const hostedPagePrefix = "/p/"
 const frameNone = "frame-ancestors 'none'"
 
 // PageHeaders sets the hosted page's Content-Security-Policy: only its
-// customer's allowed origins may frame it. An unknown or throttled link, a
+// org's allowed origins may frame it. An unknown or throttled link, a
 // throttled source, or a failed read, may be framed by none; the page counts
 // against its source's hostedSourceLimit, and an unknown link against its
 // authFailureLimit, as limitHosted counts them.
@@ -73,7 +72,7 @@ func (h *Handler) framePolicy(r *http.Request, token string) string {
 	}
 	origins, err := h.service.HostedEmbedOrigins(r.Context(), token)
 	if err != nil {
-		if !errors.Is(err, ErrRequestNotFound) && !errors.Is(err, ErrCustomerNotFound) {
+		if !errors.Is(err, ErrRequestNotFound) && !errors.Is(err, ErrOrgNotFound) {
 			slog.ErrorContext(r.Context(), "proofing: hosted page frame origins", slog.Any("error", err))
 		}
 		return frameNone
@@ -93,7 +92,6 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/yivi/start", h.limitHosted(h.hostedStartYivi))
 	mux.Handle("POST /proof/{token}/claim-link", h.limitHosted(h.hostedClaimLink))
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
-	mux.Handle("POST /proof/{token}/yivi/face", h.limitHosted(h.hostedFaceFrame))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("GET /proof/{token}/address/lookup", h.limitHosted(h.hostedLookUpAddress))
@@ -101,7 +99,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 }
 
 // limitHosted counts a hosted call against its source's hostedSourceLimit
-// and its budget: the customer's hostedCallLimit for a live link, the link's
+// and its budget: the org's hostedCallLimit for a live link, the link's
 // own staleLinkLimit otherwise. An unknown link counts against its source's
 // authFailureLimit.
 func (h *Handler) limitHosted(next respond.HandlerFunc) respond.HandlerFunc {
@@ -153,6 +151,36 @@ type hostedProgressResponse struct {
 	// DataMatchesKept is how many sessions an approved erasure kept, so its
 	// person is not told everything was deleted when it was not.
 	DataMatchesKept *int `json:"dataMatchesKept,omitempty"`
+	// LegalRetention is what the org's legal retention kept of a "delete my
+	// data" request's person: it declined the request, or an approved one left
+	// those sessions; absent otherwise.
+	LegalRetention *hostedLegalRetention `json:"legalRetention,omitempty"`
+	// SessionTTLSeconds is the lifetime the started session was created with,
+	// which a page that ran out names; absent before a start, and for a
+	// session started before the wallet kept it.
+	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
+}
+
+// hostedLegalRetention is what the person is told about the data an erasure
+// left because the law holds it: how many of their sessions, the org's reason
+// in each language the page speaks, and the date from which all of it can be
+// erased.
+type hostedLegalRetention struct {
+	Sessions int       `json:"sessions"`
+	Until    time.Time `json:"until"`
+	Reason   struct {
+		EN string `json:"en"`
+		NL string `json:"nl"`
+	} `json:"reason"`
+}
+
+func newHostedLegalRetention(n *LegalNotice) *hostedLegalRetention {
+	if n == nil {
+		return nil
+	}
+	out := &hostedLegalRetention{Sessions: n.Sessions, Until: n.Until}
+	out.Reason.EN, out.Reason.NL = n.ReasonEN, n.ReasonNL
+	return out
 }
 
 func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
@@ -160,11 +188,16 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	if at := req.SessionExpiresAt(now); at != nil {
 		expires = *at
 	}
+	var ttlSeconds int
+	if req.session != nil {
+		ttlSeconds = int(req.session.TTL / time.Second)
+	}
 	return hostedProgressResponse{
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
+		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
 	}
 }
 
@@ -183,7 +216,7 @@ func openExport(req Request, now time.Time) *time.Time {
 
 type hostedViewResponse struct {
 	hostedProgressResponse
-	// SessionID is the customer's id for the session, handed back on completion.
+	// SessionID is the API's id for the session, handed back on completion.
 	SessionID string `json:"sessionId"`
 	// RedirectURL is where the page sends its subject once settled; absent
 	// shows the page's own done screen. EmbedOrigins are the origins that may
@@ -192,18 +225,22 @@ type hostedViewResponse struct {
 	EmbedOrigins []string `json:"embedOrigins"`
 	// Language is the page's language (en/nl); absent leaves the browser's.
 	// Locales are the languages the flow's page offers; empty is every one.
-	Language string         `json:"language,omitempty"`
-	Locales  []email.Locale `json:"locales"`
-	Customer struct {
+	Language     string         `json:"language,omitempty"`
+	Locales      []email.Locale `json:"locales"`
+	Organization struct {
 		Name              string           `json:"name"`
 		Branding          brandingResponse `json:"branding"`
 		DataRetentionDays int              `json:"dataRetentionDays"`
-	} `json:"customer"`
+	} `json:"organization"`
+	// Flow is what the person is asked for. The flow's name and assurance
+	// level are the org's internal labels and stay out: the token alone opens
+	// this page, and the person's page shows neither.
 	Flow struct {
-		Name                   string   `json:"name"`
-		RequiredAssuranceLevel string   `json:"requiredAssuranceLevel,omitempty"`
-		RequestedAttributes    []string `json:"requestedAttributes"`
-		YiviAvailable          bool     `json:"yiviAvailable"`
+		RequestedAttributes []string `json:"requestedAttributes"`
+		// AttributeReasons is why each requested attribute is collected, by
+		// attribute and language; empty for a flow saved without reasons.
+		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
+		YiviAvailable    bool                         `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -218,13 +255,14 @@ type hostedViewResponse struct {
 	// Diplomas are the extracts the subject added, as the page lists them.
 	Diplomas []hostedDiplomaResponse `json:"diplomas"`
 	// Theme is the look the page takes: the one the Idem app shows the
-	// session in. Absent when neither the org nor the customer set one.
+	// session in, the flow's own branding over the org's. Absent when neither
+	// the proofing branding nor the org's theme set one.
 	Theme *hostedThemeResponse `json:"theme,omitempty"`
 }
 
 // hostedThemeResponse is AppBranding as the hosted page applies it: #rrggbb
 // colours and a CSS font-family list, "" keeping the page's own. The logo is
-// the customer's, already in Customer.Branding.
+// already in Organization.Branding.
 type hostedThemeResponse struct {
 	PrimaryColor   string `json:"primaryColor"`
 	SecondaryColor string `json:"secondaryColor"`
@@ -291,39 +329,43 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
 
-	c := hosted.Customer
-	out.EmbedOrigins = append([]string{}, c.RedirectOrigins...)
-	out.Locales = append([]email.Locale{}, hosted.Settings.Locales...)
-	out.Customer.Name = c.SignedAs()
-	out.Customer.Branding = brandingResponse{
-		DisplayName: c.Branding.DisplayName, PrimaryColor: c.Branding.PrimaryColor,
-		SecondaryColor: c.Branding.SecondaryColor,
-		SupportContact: c.Branding.SupportContact, PrivacyURL: c.Branding.PrivacyURL,
-		HidePoweredBy: c.Branding.HidePoweredBy,
+	st := hosted.Settings
+	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)
+	out.Locales = append([]email.Locale{}, hosted.FlowSettings.Locales...)
+	out.Organization.Name = st.SignedAs()
+	out.Organization.Branding = brandingResponse{
+		DisplayName: st.Branding.DisplayName, PrimaryColor: st.Branding.PrimaryColor,
+		SecondaryColor: st.Branding.SecondaryColor,
+		SupportContact: st.Branding.SupportContact, PrivacyURL: st.Branding.PrivacyURL,
+		HidePoweredBy: st.Branding.HidePoweredBy,
 	}
-	// The logo is the one the theme comes with: the customer's, or the org's
-	// for a customer without white-labeling of its own.
+	// The logo is the one the theme comes with: the flow's own, else the org's
+	// proofing logo, or the org's theme's for an org without white-labeling of
+	// its own.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
 	if err != nil {
 		return fmt.Errorf("proofing: hosted page theme: %w", err)
 	}
 	out.Theme = theme
-	if hasLogo || (h.appBranding == nil && c.Branding.HasLogo) {
-		out.Customer.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), c.UpdatedAt.Unix())
+	if hasLogo || (h.appBranding == nil && st.Branding.HasLogo) {
+		out.Organization.Branding.LogoURI = fmt.Sprintf("/api/v1/proof/%s/logo?v=%d", url.PathEscape(token), st.UpdatedAt.Unix())
 	}
-	out.Customer.DataRetentionDays = c.Settings.DataRetentionDays
+	out.Organization.DataRetentionDays = st.Session.DataRetentionDays
 
 	f := hosted.Flow
-	out.Flow.Name, out.Flow.RequiredAssuranceLevel = f.Name, f.RequiredAssuranceLevel
 	out.Flow.RequestedAttributes = f.RequestedAttributes
 	if out.Flow.RequestedAttributes == nil {
 		out.Flow.RequestedAttributes = []string{}
+	}
+	out.Flow.AttributeReasons = f.AttributeReasons
+	if out.Flow.AttributeReasons == nil {
+		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
-	out.Flow.RetentionDays = subjectRetentionDays(c, hosted.Request.RetentionOverride)
+	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
 
 	diplomas, err := h.service.RequestDiplomas(r.Context(), []uuid.UUID{hosted.Request.ID})
 	if err != nil {
@@ -397,18 +439,18 @@ func (h *Handler) hostedLogo(w http.ResponseWriter, r *http.Request) error {
 }
 
 // hostedLogoOf is the logo the page's theme comes with (see hostedView).
-func (h *Handler) hostedLogoOf(r *http.Request) (CustomerLogo, error) {
+func (h *Handler) hostedLogoOf(r *http.Request) (Logo, error) {
 	token := r.PathValue("token")
 	if h.appBranding == nil {
 		return h.service.HostedLogo(r.Context(), token)
 	}
 	hosted, err := h.service.HostedRequest(r.Context(), token)
 	if err != nil {
-		return CustomerLogo{}, err
+		return Logo{}, err
 	}
 	logo, err := h.appBranding.Logo(r.Context(), hosted.Request.OrganizationID, hosted.Request.ID)
 	if errors.Is(err, ErrNoAppLogo) {
-		return CustomerLogo{}, ErrNoCustomerLogo
+		return Logo{}, ErrNoLogo
 	}
 	return logo, err
 }
@@ -434,17 +476,4 @@ func (h *Handler) hostedClaimLink(w http.ResponseWriter, r *http.Request) error 
 func (h *Handler) hostedYiviDisclosure(w http.ResponseWriter, r *http.Request) error {
 	disclosure, err := h.service.HostedYiviDisclosure(r.Context(), r.PathValue("token"))
 	return writeYiviDisclosure(w, r, disclosure, err)
-}
-
-func (h *Handler) hostedFaceFrame(w http.ResponseWriter, r *http.Request) error {
-	image, err := decodeFaceFrame(w, r)
-	if err != nil {
-		return err
-	}
-	verdict, err := h.service.HostedFaceFrame(r.Context(), r.PathValue("token"), image)
-	if err != nil {
-		return mapError(err)
-	}
-	respond.JSON(w, r, http.StatusOK, newFaceVerdictResponse(verdict))
-	return nil
 }

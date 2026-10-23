@@ -39,10 +39,10 @@ function keyErrorMessage(error: Error, t: TFunction): string {
 export function PostguardApiKeyCard({
   slug,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = usePostguardSettingsQuery(slug);
   const save = useSetPostguardApiKeyMutation(slug);

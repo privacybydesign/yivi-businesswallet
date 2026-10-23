@@ -1,20 +1,33 @@
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
-import { isDataRequest } from "../api/identity-proofing";
+import {
+  DATA_REQUEST_KINDS,
+  MAX_LISTED_REQUESTS,
+} from "../api/identity-proofing";
 import type {
   AddressMode,
   AddressVerification,
+  AttributeReasons,
+  DataRequestKind,
   DiplomaMode,
   FlowKind,
+  ProofingBranding,
   ProofingChannel,
   ProofingFlow,
+  ProofingFlowBranding,
+  ProofingFlowHosted,
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
+  ProofingMethod,
   ProofingRequest,
   RegisterAddress,
+  WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
+import type { OrgTheme } from "../api/theme";
+import { SUPPORTED_LANGUAGES } from "../i18n/language";
+import type { Language } from "../i18n/language";
 import { errorCode } from "./api-error";
 import { auditActorLabel } from "./audit-event";
 import { fullName } from "./name";
@@ -58,7 +71,7 @@ export function progressPollContinues(
 }
 
 // Whether a verify page keeps re-reading a session in review, slowly: a
-// person decides it, or its customer's erasure setting seconds after it got
+// person decides it, or the org's erasure setting seconds after it got
 // there, while the subject may still be watching.
 export function reviewPollContinues(
   progress: { status: string } | undefined,
@@ -111,14 +124,15 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
-//     only for face.match.
+//     only for face.match, on a slider from 0 to 1 that Substantial floors.
 //   - Requested data: each item is available only when the step that produces
 //     it is in the flow, and cleared otherwise; none is forced on.
 //   - Assurance (flow.LevelRequirements): low needs nfc.passive_auth;
-//     substantial also nfc.chip_auth, face.match and face.liveness with Regula.
-//     The level is only a minimum and turns nothing on: a draft whose settings
-//     cannot reach it is refused. High is never reachable. The engine explains
-//     a refusal.
+//     substantial also nfc.chip_auth, face.match (at a threshold of at least
+//     SUBSTANTIAL_FACE_MATCH_FLOOR) and face.liveness with Regula.
+//     Picking a level ticks what it needs and locks it (withAssuranceLevel);
+//     a draft that still cannot reach its level is refused. High is never
+//     reachable. The engine explains a refusal.
 export const STEP_DOCUMENT_CAPTURE = "document_capture";
 export const STEP_NFC_READ = "nfc_read";
 export const STEP_DOCUMENT_PHOTO = "document_photo";
@@ -128,24 +142,40 @@ export const CHECK_CHIP_AUTH = "nfc.chip_auth";
 export const CHECK_FACE_MATCH = "face.match";
 export const CHECK_LIVENESS = "face.liveness";
 
-// The requested data the service's admin page offers, and the step that
-// produces each: the document scan gives the document and holder (dg1), the
-// chip read its extras, photo and check results, the face step its selfie and
-// biometrics.
+// The face match threshold is a similarity from 0 to 1, in steps of 0.01.
+export const FACE_MATCH_MIN = 0;
+export const FACE_MATCH_MAX = 1;
+export const FACE_MATCH_STEP = 0.01;
+// Regula's default (regula.DefaultMatchThreshold): what a flow with no
+// threshold gets, and the lowest one recommended.
+export const FACE_MATCH_RECOMMENDED = 0.75;
+// The lowest threshold a flow requiring Substantial may set
+// (flow.SubstantialMinFaceMatch).
+export const SUBSTANTIAL_FACE_MATCH_FLOOR = 0.75;
+
+// The requested data the service's admin page offers, in the order the editor
+// lists them, and the step that produces each: the document scan gives the
+// document and holder (dg1), the chip read the age check, its extras, photo and
+// check results, the face step its selfie and biometrics.
 export const REQUESTED_ATTRIBUTES = [
   { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
+  { value: "age_over", step: STEP_NFC_READ },
+  { value: "chip_checks", step: STEP_NFC_READ },
+  { value: "biometrics", step: STEP_FACE_VERIFICATION },
   { value: "dg11", step: STEP_NFC_READ },
   { value: "dg2", step: STEP_NFC_READ },
-  { value: "chip_checks", step: STEP_NFC_READ },
-  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
   { value: "selfie", step: STEP_FACE_VERIFICATION },
-  { value: "biometrics", step: STEP_FACE_VERIFICATION },
+  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
 ] as const;
 
 // The requested data of a flow that releases nothing but the outcome
 // (proofingengine.attrOutcomeOnly): an empty list releases everything the
 // steps collect, so a flow with no data ticked sends this instead.
 export const OUTCOME_ONLY = "outcome_only";
+
+// The longest reason a flow gives for an item, in each language
+// (maxAttributeReasonLength).
+export const MAX_ATTRIBUTE_REASON_CHARS = 300;
 
 // The eIDAS levels the proofing engine can claim (flow.LevelRequirements);
 // high is not among them.
@@ -163,7 +193,68 @@ export function assuranceLevelLabel(level: string, t: TFunction): string {
     : level;
 }
 
-export const BSN_POLICIES = ["retrieve", "mask", "omit"] as const;
+// In the order the editor offers them, the one that keeps least first.
+export const BSN_POLICIES = ["omit", "mask", "retrieve"] as const;
+type BsnPolicy = (typeof BSN_POLICIES)[number];
+
+// A new flow leaves the BSN out. A stored flow without a policy is shown as
+// what the proofing engine does with it (an unset policy leaves the BSN out,
+// privacy.DefaultBSNPolicy), so the editor says what the engine does.
+const NEW_FLOW_BSN_POLICY: BsnPolicy = "omit";
+const UNSET_BSN_POLICY: BsnPolicy = "omit";
+
+// The kinds of document the editor lets a flow accept, saved as the proofing
+// engine names them (flow.DocumentKindPassport, DocumentKindIdentityCard,
+// DocumentKindResidencePermit and DocumentTypeDrivingLicence;
+// identity-proofing.test.ts holds the two together). The engine tells a
+// document's kind from its code, issuing state and holder's nationality
+// (flow.DocumentKindOf), and the Yivi app's from its credential, so a
+// residence permit coded ID is not taken for an identity card, and a
+// diplomatic passport (PD) is a passport.
+export const DOCUMENT_KINDS = [
+  "passport",
+  "identity_card",
+  "residence_permit",
+  "drivers_license",
+] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+// The ICAO 9303 document codes earlier editors saved for a kind: "P" for a
+// passport, "I" and "ID" for an identity card. A stored one reads as its
+// kind; any other stored code is kept as it is.
+const DOCUMENT_KIND_CODES: Record<DocumentKind, readonly string[]> = {
+  passport: ["P"],
+  identity_card: ["I", "ID"],
+  residence_permit: [],
+  drivers_license: [],
+};
+
+// The kind a stored document type, or a chip's document code, reads as: a
+// kind by its name in any case (the old editor uppercased them) or one of
+// DOCUMENT_KIND_CODES; undefined for another code.
+export function documentKindOf(type: string): DocumentKind | undefined {
+  const upper = type.toUpperCase();
+  return DOCUMENT_KINDS.find(
+    (kind) =>
+      kind.toUpperCase() === upper || DOCUMENT_KIND_CODES[kind].includes(upper),
+  );
+}
+
+// The kinds a stored list of document types reads as: every kind for an
+// empty one, which accepts any document.
+function storedDocumentKinds(
+  types: readonly string[],
+): ReadonlySet<DocumentKind> {
+  return new Set(
+    DOCUMENT_KINDS.filter(
+      (kind) =>
+        types.length === 0 ||
+        types.some((type) => documentKindOf(type) === kind),
+    ),
+  );
+}
+
+type CountryScope = "any" | "only";
 
 // What verifies the face step; a new flow starts on the first, Regula. The
 // wallet runs no face engine of its own, so there is no "engine", and the
@@ -182,14 +273,17 @@ const YIVI_EIDAS_LEVEL = "low";
 
 // Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
 // photographs the document, which only the Idem app does, matches the face
-// against a customer's reference photo (proofing.NeedsReferencePhoto: a face
+// against the sender's reference photo (proofing.NeedsReferencePhoto: a face
 // step without the chip read, outside the browser), where the Yivi app
 // matches against its credential's photo instead, or requires a level above
-// what a Yivi session reaches.
+// what a Yivi session reaches, or checks an age the Yivi passport and id-card
+// carry no claim for (AGE_OVER_CHOICES).
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   selfieLocation?: string | undefined;
   requiredAssuranceLevel?: string | undefined;
+  requestedAttributes?: readonly string[];
+  ageOver?: number;
 }): boolean {
   const needsReferencePhoto =
     flow.steps.some((step) => FACE_STEPS.includes(step)) &&
@@ -201,14 +295,17 @@ export function yiviAppAvailable(flow: {
   return (
     !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
     !needsReferencePhoto &&
+    (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
+      AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
     levelMet
   );
 }
 
-// "" is the proofing service's default: omit for the BSN policy, off for the
-// covers.
+// "" is no requirement.
 export type Inherit<T extends string> = "" | T;
-export type Tristate = "" | "true" | "false";
+
+// A flow's retention or session lifetime of 0 sets none: the org's applies.
+export const FOLLOW_ORG = 0;
 
 export interface ProofingFlowDraft {
   name: string;
@@ -219,18 +316,32 @@ export interface ProofingFlowDraft {
   chipAuthentication: boolean;
   liveness: boolean;
   faceProvider: FaceProvider;
-  // A decimal 0..1 as typed; "" is pass/fail only.
-  faceMatchThreshold: string;
+  // The face match threshold, 0..1; null sets none, so the deployment's applies.
+  faceMatchThreshold: number | null;
   requestedAttributes: ReadonlySet<string>;
-  // Comma-separated lists as typed; empty accepts any.
-  acceptedDocumentTypes: string;
-  acceptedIssuingCountries: string;
+  // Whole years as typed, the age the age check answers for.
+  ageOver: string;
+  // Why each item is collected. An unticked item keeps what was typed, so
+  // ticking it again brings it back; only the collected ones are saved.
+  attributeReasons: AttributeReasons;
+  // Every kind ticked accepts any document.
+  documentKinds: ReadonlySet<DocumentKind>;
+  // Document codes of a stored version that no kind covers, kept as stored.
+  otherDocumentTypes: readonly string[];
+  // The document types of the version being edited, as stored: sent as they
+  // are while the kinds ticked are the ones they read as. Null for a new flow.
+  storedDocumentTypes: readonly string[] | null;
+  countryScope: CountryScope;
+  // ICAO codes in the order picked; only sent with the scope "only".
+  issuingCountries: readonly string[];
   assuranceLevel: Inherit<AssuranceLevel>;
-  bsnPolicy: Inherit<(typeof BSN_POLICIES)[number]>;
-  keepFacePhotos: Tristate;
-  blurBsn: Tristate;
-  // Whole seconds as typed; "" or 0 is no override.
-  retentionSeconds: string;
+  bsnPolicy: BsnPolicy;
+  blackOutBsn: boolean;
+  keepFacePhotos: boolean;
+  // Whole seconds the flow keeps its finished sessions; 0 follows the org's.
+  retentionSeconds: number;
+  // How long a session of the flow runs; 0 follows the org's.
+  sessionTtlSeconds: number;
   // Settings the service's editor does not show, carried over unchanged from
   // the version being edited.
   carried: Pick<
@@ -261,7 +372,7 @@ export function draftSteps(draft: ProofingFlowDraft): string[] {
 // The draft settings a level needs, as the proofing engine requires them
 // (flow.LevelRequirements): low a chip read whose data verifies; substantial
 // also the copy check and a live face matched by Regula against the chip photo.
-type LevelRequirement = Partial<
+export type LevelRequirement = Partial<
   Pick<
     ProofingFlowDraft,
     | "documentAndChip"
@@ -290,8 +401,67 @@ export function levelRequirement(
   return level === "" ? {} : LEVEL_REQUIREMENTS[level];
 }
 
-// Whether the draft's own settings can reach its required level. The level
-// changes no setting: a draft that cannot reach it is not saved.
+// The lowest face match threshold a level allows; only Substantial floors it.
+export function faceMatchFloor(level: Inherit<AssuranceLevel>): number {
+  return level === "substantial"
+    ? SUBSTANTIAL_FACE_MATCH_FLOOR
+    : FACE_MATCH_MIN;
+}
+
+// The threshold the slider shows: the draft's, else Regula's default.
+export function faceMatchValue(draft: ProofingFlowDraft): number {
+  return draft.faceMatchThreshold ?? FACE_MATCH_RECOMMENDED;
+}
+
+const faceMatchFormats = new Map<string, Intl.NumberFormat>();
+
+// A face match threshold as the editor writes it: two decimals in the reader's
+// locale, and a bare 0 for the start of the scale.
+export function formatFaceMatch(value: number, locale: string): string {
+  if (value === FACE_MATCH_MIN) {
+    return "0";
+  }
+  let format = faceMatchFormats.get(locale);
+  if (format === undefined) {
+    format = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    faceMatchFormats.set(locale, format);
+  }
+  return format.format(value);
+}
+
+// The draft at a level, with what the level needs ticked. The rest stays as it
+// was, so a setting a lower level leaves free keeps its value; a threshold
+// under the level's floor is lifted to it.
+export function withAssuranceLevel(
+  draft: ProofingFlowDraft,
+  level: Inherit<AssuranceLevel>,
+): ProofingFlowDraft {
+  const { faceMatchThreshold } = draft;
+  return {
+    ...draft,
+    ...levelRequirement(level),
+    assuranceLevel: level,
+    faceMatchThreshold:
+      faceMatchThreshold === null
+        ? null
+        : Math.max(faceMatchThreshold, faceMatchFloor(level)),
+  };
+}
+
+// Whether the draft's level needs a setting on, which locks it.
+export function lockedByLevel(
+  draft: ProofingFlowDraft,
+  setting: keyof LevelRequirement,
+): boolean {
+  return levelRequirement(draft.assuranceLevel)[setting] !== undefined;
+}
+
+// Whether the draft's own settings can reach its required level. Picking a
+// level ticks what it needs (withAssuranceLevel); a draft that still cannot
+// reach it is not saved.
 export function reachesAssuranceLevel(draft: ProofingFlowDraft): boolean {
   return Object.entries(levelRequirement(draft.assuranceLevel)).every(
     ([setting, value]) => draft[setting as keyof LevelRequirement] === value,
@@ -307,9 +477,67 @@ export function attributeAvailable(
   return attr !== undefined && draftSteps(draft).includes(attr.step);
 }
 
-// A new flow starts like the service's editor: every step the Idem app runs
-// and every requested data item on, the mandatory checks on. The document
-// photo starts off: the app cannot take it yet.
+// The requested data a draft collects: ticked, with its step in the draft.
+export function collectedAttributes(draft: ProofingFlowDraft): string[] {
+  return REQUESTED_ATTRIBUTES.map((a) => a.value).filter(
+    (value) =>
+      draft.requestedAttributes.has(value) && attributeAvailable(draft, value),
+  );
+}
+
+// The reason a draft gives for an item in a language; "" when there is none.
+export function draftReason(
+  draft: ProofingFlowDraft,
+  attribute: string,
+  locale: string,
+): string {
+  return (draft.attributeReasons[attribute]?.[locale] ?? "").trim();
+}
+
+// The languages of locales a draft gives an item no reason in: the fields the
+// editor marks, each saying which language is missing.
+export function missingReasonLocales<L extends string>(
+  draft: ProofingFlowDraft,
+  attribute: string,
+  locales: readonly L[],
+): L[] {
+  return locales.filter(
+    (locale) => draftReason(draft, attribute, locale) === "",
+  );
+}
+
+// The languages of locales (every supported one when empty) a hosted page
+// cannot offer yet: a flow's active version gives an item it collects no
+// reason in them (proofing.hostedOffersReasons). None for a version saved
+// before reasons existed: it gives none at all and may offer any language.
+export function localesWithoutReasons(
+  flow: {
+    requestedAttributes?: readonly string[];
+    attributeReasons?: AttributeReasons;
+  },
+  locales: readonly string[],
+): Language[] {
+  const reasons = flow.attributeReasons ?? {};
+  if (Object.keys(reasons).length === 0) {
+    return [];
+  }
+  return SUPPORTED_LANGUAGES.filter(
+    (locale) =>
+      (locales.length === 0 || locales.includes(locale)) &&
+      (flow.requestedAttributes ?? []).some(
+        (attribute) =>
+          attribute !== OUTCOME_ONLY &&
+          (reasons[attribute]?.[locale] ?? "").trim() === "",
+      ),
+  );
+}
+
+// A new flow starts with every step the Idem app runs on and the mandatory
+// checks on, and receives nothing but the outcome until an item is ticked
+// (data minimisation; required diplomas tick Name and document details,
+// identityRequired), so it asks no reason yet. The document photo starts off:
+// the app cannot take it yet. It accepts any document, leaves the BSN out,
+// blacks it out on document photos and keeps no face photos.
 export function emptyFlowDraft(): ProofingFlowDraft {
   return {
     name: "",
@@ -319,15 +547,21 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     chipAuthentication: false,
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
-    faceMatchThreshold: "",
-    requestedAttributes: new Set(REQUESTED_ATTRIBUTES.map((a) => a.value)),
-    acceptedDocumentTypes: "",
-    acceptedIssuingCountries: "",
+    faceMatchThreshold: null,
+    requestedAttributes: new Set(),
+    ageOver: String(DEFAULT_AGE_OVER),
+    attributeReasons: {},
+    documentKinds: new Set(DOCUMENT_KINDS),
+    otherDocumentTypes: [],
+    storedDocumentTypes: null,
+    countryScope: "any",
+    issuingCountries: [],
     assuranceLevel: "",
-    bsnPolicy: "",
-    keepFacePhotos: "",
-    blurBsn: "",
-    retentionSeconds: "",
+    bsnPolicy: NEW_FLOW_BSN_POLICY,
+    blackOutBsn: true,
+    keepFacePhotos: false,
+    retentionSeconds: FOLLOW_ORG,
+    sessionTtlSeconds: FOLLOW_ORG,
     carried: {},
   };
 }
@@ -339,18 +573,16 @@ function oneOf<T extends string>(
   return values.includes(value as T) ? (value as T) : "";
 }
 
-function tristate(value: boolean | undefined): Tristate {
-  return value === undefined ? "" : value ? "true" : "false";
-}
-
-// A flow as any list returns it (the org's, or a customer's), without the
-// list's own selection flags: what the editor needs to seed a new version.
+// A flow as any list returns it, without the list's own selection flags: what
+// the editor needs to seed a new version.
 export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 
-// The editor state for a new version of an existing flow, as stored.
+// The editor state for a new version of an existing flow, as stored, with what
+// its level needs ticked.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
-  const threshold = flow.checkThresholds?.[CHECK_FACE_MATCH];
+  const storedTypes = flow.acceptedDocumentTypes ?? [];
+  const storedCountries = flow.acceptedIssuingCountries ?? [];
   const draft: ProofingFlowDraft = {
     name: flow.name,
     documentAndChip:
@@ -361,31 +593,30 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
-    faceMatchThreshold: threshold === undefined ? "" : String(threshold),
+    faceMatchThreshold: flow.checkThresholds?.[CHECK_FACE_MATCH] ?? null,
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
-    acceptedDocumentTypes: (flow.acceptedDocumentTypes ?? []).join(", "),
-    acceptedIssuingCountries: (flow.acceptedIssuingCountries ?? []).join(", "),
+    ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
+    attributeReasons: flow.attributeReasons ?? {},
+    documentKinds: storedDocumentKinds(storedTypes),
+    otherDocumentTypes: storedTypes.filter(
+      (type) => documentKindOf(type) === undefined,
+    ),
+    storedDocumentTypes: storedTypes,
+    countryScope: storedCountries.length === 0 ? "any" : "only",
+    issuingCountries: storedCountries,
     assuranceLevel: oneOf(ASSURANCE_LEVELS, flow.requiredAssuranceLevel),
-    bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy),
-    keepFacePhotos: tristate(flow.keepFacePhotos),
-    blurBsn: tristate(flow.blurBsn),
-    retentionSeconds: flow.retentionOverrideSeconds
-      ? String(flow.retentionOverrideSeconds)
-      : "",
+    bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy) || UNSET_BSN_POLICY,
+    blackOutBsn: flow.blurBsn ?? false,
+    keepFacePhotos: flow.keepFacePhotos ?? false,
+    retentionSeconds: flow.retentionOverrideSeconds ?? FOLLOW_ORG,
+    sessionTtlSeconds: flow.sessionTtlSeconds ?? FOLLOW_ORG,
     carried: {
       legalBasis: flow.legalBasis,
       processingPurpose: flow.processingPurpose,
       assuranceTiers: flow.assuranceTiers,
     },
   };
-  return draft;
-}
-
-function list(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item !== "");
+  return withAssuranceLevel(draft, draft.assuranceLevel);
 }
 
 // A draft the editor cannot send, with the field to fix; null when valid. The
@@ -395,18 +626,20 @@ export type FlowDraftError =
   | "steps"
   | "identity"
   | "assuranceLevel"
+  | "documentTypes"
   | "issuingCountries"
   | "faceMatchThreshold"
-  | "retentionSeconds";
-
-// An issuing country as a flow takes it: three letters (ICAO 9303). Whether
-// a country has the code is the engine's check (flow.ValidIssuingCountry).
-const ISSUING_COUNTRY = /^[A-Z]{3}$/;
+  | "ageOver"
+  | "reasons";
 
 // requiresIdentity is identityRequired for the flow's kind and diplomas.
+// locales are the ones the flow's hosted page offers: every item the draft
+// collects needs a reason in each. A page that names none offers every
+// supported language.
 export function flowDraftError(
   draft: ProofingFlowDraft,
   requiresIdentity = false,
+  locales: readonly string[] = SUPPORTED_LANGUAGES,
 ): FlowDraftError | null {
   if (draft.name.trim() === "") {
     return "name";
@@ -414,43 +647,128 @@ export function flowDraftError(
   if (draftSteps(draft).length === 0) {
     return "steps";
   }
-  if (
-    requiresIdentity &&
-    !(
-      draft.requestedAttributes.has(ATTRIBUTE_DOCUMENT) &&
-      attributeAvailable(draft, ATTRIBUTE_DOCUMENT)
-    )
-  ) {
+  if (requiresIdentity && !draftReadsIdentity(draft)) {
     return "identity";
   }
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
   }
-  if (
-    !list(draft.acceptedIssuingCountries).every((country) =>
-      ISSUING_COUNTRY.test(country.toUpperCase()),
-    )
-  ) {
+  if (draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0) {
+    return "documentTypes";
+  }
+  if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
     return "issuingCountries";
   }
-  if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
-    const value = Number(draft.faceMatchThreshold);
-    if (!Number.isFinite(value) || value < 0 || value > 1) {
+  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
+    const value = draft.faceMatchThreshold;
+    if (
+      !Number.isFinite(value) ||
+      value < faceMatchFloor(draft.assuranceLevel) ||
+      value > FACE_MATCH_MAX
+    ) {
       return "faceMatchThreshold";
     }
   }
-  if (draft.retentionSeconds.trim() !== "") {
-    const seconds = Number(draft.retentionSeconds);
-    if (!Number.isInteger(seconds) || seconds < 0) {
-      return "retentionSeconds";
+  if (ageOverInvalid(draft)) {
+    return "ageOver";
+  }
+
+  const unexplained = collectedAttributes(draft).some(
+    (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
+  );
+  return unexplained ? "reasons" : null;
+}
+
+// Whether draft's age check asks an age the service refuses
+// (flow.validateAgeOver).
+function ageOverInvalid(draft: ProofingFlowDraft): boolean {
+  if (!asksAge(draft)) return false;
+  const age = Number(draft.ageOver);
+  return !Number.isInteger(age) || age < MIN_AGE_OVER || age > MAX_AGE_OVER;
+}
+
+// The document types a draft accepts: as stored while the kinds ticked are
+// the ones the stored list reads as, so an unchanged save sends what the
+// version had; else the kinds ticked and any stored code no kind covers.
+// Every kind ticked and no other code is any document, which an empty list
+// says: a flow listing all four kinds would refuse a document whose kind the
+// engine cannot tell (flow.DocumentKindOf: a foreigner's card coded ID is a
+// residence permit in Belgium, an identity card in Estonia), though it is
+// one of them. The Yivi app's credentials always have a kind, so it accepts
+// either list.
+function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
+  const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
+  const stored = draft.storedDocumentTypes;
+  if (stored !== null) {
+    const storedKinds = storedDocumentKinds(stored);
+    if (
+      ticked.length === storedKinds.size &&
+      ticked.every((kind) => storedKinds.has(kind))
+    ) {
+      return [...stored];
     }
   }
-  return null;
+  if (
+    ticked.length === DOCUMENT_KINDS.length &&
+    draft.otherDocumentTypes.length === 0
+  ) {
+    return [];
+  }
+  return [...ticked, ...draft.otherDocumentTypes];
 }
 
 // The request body for a draft, as the service's editor builds it. Call only
 // on a draft flowDraftError accepts.
 export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
+  const requiredChecks = draftRequiredChecks(draft);
+  const requestedAttributes = collectedAttributes(draft);
+  const spec: ProofingFlowSpec = {
+    ...draft.carried,
+    name: draft.name.trim(),
+    steps: draftSteps(draft),
+    requiredChecks,
+    requestedAttributes:
+      requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
+    acceptedDocumentTypes: acceptedDocumentTypes(draft),
+    acceptedIssuingCountries:
+      draft.countryScope === "only"
+        ? draft.issuingCountries.map((country) => country.toUpperCase())
+        : [],
+    bsnPolicy: draft.bsnPolicy,
+    blurBsn: draft.blackOutBsn,
+    keepFacePhotos: draft.keepFacePhotos,
+  };
+  if (draft.faceVerification) {
+    spec.faceProvider = draft.faceProvider;
+  }
+  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
+    spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
+  }
+
+  const reasons = savedReasons(draft, requestedAttributes);
+  if (Object.keys(reasons).length > 0) {
+    spec.attributeReasons = reasons;
+  }
+
+  if (draft.assuranceLevel !== "") {
+    spec.requiredAssuranceLevel = draft.assuranceLevel;
+  }
+  if (draft.retentionSeconds > 0) {
+    spec.retentionOverrideSeconds = draft.retentionSeconds;
+  }
+  if (draft.sessionTtlSeconds > 0) {
+    spec.sessionTtlSeconds = draft.sessionTtlSeconds;
+  }
+  if (asksAge(draft)) {
+    spec.ageOver = Number(draft.ageOver);
+  }
+  return spec;
+}
+
+// The checks a draft requires: the chip's passive authentication, and chip
+// authentication on top, with the document and chip; the face match, and
+// liveness on top, with the face check.
+function draftRequiredChecks(draft: ProofingFlowDraft): string[] {
   const requiredChecks: string[] = [];
   if (draft.documentAndChip) {
     requiredChecks.push(CHECK_PASSIVE_AUTH);
@@ -464,53 +782,58 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
       requiredChecks.push(CHECK_LIVENESS);
     }
   }
-  const requestedAttributes: string[] = REQUESTED_ATTRIBUTES.map(
-    (a) => a.value,
-  ).filter(
-    (value) =>
-      draft.requestedAttributes.has(value) && attributeAvailable(draft, value),
+  return requiredChecks;
+}
+
+// Whether the draft releases the name and date of birth (readsIdentity): the
+// document data, without the age check, which withholds the date.
+function draftReadsIdentity(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.requestedAttributes.has(ATTRIBUTE_DOCUMENT) &&
+    attributeAvailable(draft, ATTRIBUTE_DOCUMENT) &&
+    !asksAge(draft)
   );
-  const spec: ProofingFlowSpec = {
-    ...draft.carried,
-    name: draft.name.trim(),
-    steps: draftSteps(draft),
-    requiredChecks,
-    requestedAttributes:
-      requestedAttributes.length > 0 ? requestedAttributes : [OUTCOME_ONLY],
-    // Uppercased to match the MRZ's capitals; the engine ignores case for
-    // document types (drivers_license), compares countries exactly.
-    acceptedDocumentTypes: list(draft.acceptedDocumentTypes).map((type) =>
-      type.toUpperCase(),
-    ),
-    acceptedIssuingCountries: list(draft.acceptedIssuingCountries).map(
-      (country) => country.toUpperCase(),
-    ),
-  };
-  if (draft.faceVerification) {
-    spec.faceProvider = draft.faceProvider;
+}
+
+// The draft of a flow that must read the identity (identityRequired): the
+// document data ticked, and the age check, which withholds the date of birth
+// that flow needs, unticked.
+export function withIdentity(draft: ProofingFlowDraft): ProofingFlowDraft {
+  const requestedAttributes = new Set(draft.requestedAttributes);
+  requestedAttributes.add(ATTRIBUTE_DOCUMENT);
+  requestedAttributes.delete(ATTRIBUTE_AGE_OVER);
+  return { ...draft, requestedAttributes };
+}
+
+// Whether the draft releases the age check, which needs an age.
+export function asksAge(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.requestedAttributes.has(ATTRIBUTE_AGE_OVER) &&
+    attributeAvailable(draft, ATTRIBUTE_AGE_OVER)
+  );
+}
+
+// The reasons a draft saves: those it gave for the items it collects, in every
+// language it holds, trimmed.
+function savedReasons(
+  draft: ProofingFlowDraft,
+  collected: readonly string[],
+): AttributeReasons {
+  const saved: AttributeReasons = {};
+  for (const attribute of collected) {
+    const given = Object.keys(draft.attributeReasons[attribute] ?? {}).flatMap(
+      (locale) => {
+        const text = draftReason(draft, attribute, locale);
+        return text === "" ? [] : [[locale, text] as const];
+      },
+    );
+    if (given.length === 0) {
+      continue;
+    }
+
+    saved[attribute] = Object.fromEntries(given);
   }
-  if (draft.faceVerification && draft.faceMatchThreshold.trim() !== "") {
-    spec.checkThresholds = {
-      [CHECK_FACE_MATCH]: Number(draft.faceMatchThreshold),
-    };
-  }
-  if (draft.assuranceLevel !== "") {
-    spec.requiredAssuranceLevel = draft.assuranceLevel;
-  }
-  if (draft.bsnPolicy !== "") {
-    spec.bsnPolicy = draft.bsnPolicy;
-  }
-  if (draft.keepFacePhotos !== "") {
-    spec.keepFacePhotos = draft.keepFacePhotos === "true";
-  }
-  if (draft.blurBsn !== "") {
-    spec.blurBsn = draft.blurBsn === "true";
-  }
-  const retention = Number(draft.retentionSeconds);
-  if (draft.retentionSeconds.trim() !== "" && retention > 0) {
-    spec.retentionOverrideSeconds = retention;
-  }
-  return spec;
+  return saved;
 }
 
 // The flows a member may send a request on, and the one the form starts on:
@@ -522,10 +845,14 @@ export function sendableFlows<T extends { allowed: boolean; default: boolean }>(
   return withInitial(flows.filter((flow) => flow.allowed));
 }
 
-export function assignedFlows<
-  T extends { assigned: boolean; default: boolean },
+// The flows an external person can be sent from the app, and the one the form
+// starts on: the org's default, else the first. The list holds every flow for
+// an admin and only the ones members may use for a member; one that needs the
+// sender's own photo is not completable here (the API sends those).
+export function externalFlows<
+  T extends { completable: boolean; default: boolean },
 >(flows: readonly T[]): { sendable: T[]; initial: T | undefined } {
-  return withInitial(flows.filter((flow) => flow.assigned));
+  return withInitial(flows.filter((flow) => flow.completable));
 }
 
 function withInitial<T extends { default: boolean }>(
@@ -537,6 +864,9 @@ function withInitial<T extends { default: boolean }>(
   };
 }
 
+// The selection an admin edited: the ticked flows members may use, and the
+// default, which is not one of them by necessity. Dirty when it differs from
+// the saved one.
 export function editedFlowSelection(
   flows: readonly { id: string }[],
   ticked: ReadonlySet<string>,
@@ -544,7 +874,7 @@ export function editedFlowSelection(
   saved: ProofingFlowSelection,
 ): { selection: ProofingFlowSelection; dirty: boolean } {
   const flowIds = flows.filter((f) => ticked.has(f.id)).map((f) => f.id);
-  const defaultFlowId = ticked.has(defaultId) ? defaultId : (flowIds[0] ?? "");
+  const defaultFlowId = flows.some((f) => f.id === defaultId) ? defaultId : "";
   const dirty =
     saved.flowIds.length !== flowIds.length ||
     saved.flowIds.some((id) => !ticked.has(id)) ||
@@ -564,6 +894,16 @@ export function requestSubject(request: {
     name,
     verifiedAs: proofed !== "" && proofed !== name ? proofed : undefined,
   };
+}
+
+// Who sent the check: the API token that created it, else the member.
+export function requestedBy(
+  request: { apiKeyName?: string; requestedByName: string },
+  t: TFunction,
+): string {
+  return request.apiKeyName
+    ? t("identityProofing.sessions.viaApiKey", { name: request.apiKeyName })
+    : request.requestedByName;
 }
 
 // The engine's bound on a reviewer's reason, in characters (code points, as
@@ -669,13 +1009,13 @@ export function addressVerificationNote(
 ): string {
   switch (verification) {
     case "verified":
-      return t("customers.sessions.address.verified");
+      return t("identityProofing.sessions.address.verified");
     case "unchecked":
-      return t("customers.sessions.address.unchecked");
+      return t("identityProofing.sessions.address.unchecked");
     case "unsupported":
-      return t("customers.sessions.address.unsupported");
+      return t("identityProofing.sessions.address.unsupported");
     case undefined:
-      return t("customers.sessions.address.declared");
+      return t("identityProofing.sessions.address.declared");
   }
 }
 
@@ -689,15 +1029,15 @@ export function proofingRejectionReason(code: string, t: TFunction): string {
 }
 
 // The copy of every code a session is rejected with: the engine's failed
-// checks and the wallet's own decisions (a review, a lapse, a pause, a legal
-// duty). The test holds it to the backend's codes, both ways.
+// checks, the wallet's own decisions (a lapse, a pause, a legal duty) and what
+// a reviewer found wrong. The person reads it too. The test holds it to the
+// backend's codes, both ways.
 const REJECTION_REASON_KEYS = {
   DOCUMENT_TYPE_NOT_ACCEPTED: "documentTypeNotAccepted",
   DOCUMENT_COUNTRY_NOT_ACCEPTED: "documentCountryNotAccepted",
   FACE_STEP_NOT_COMPLETED: "faceStepNotCompleted",
   FACE_NO_MATCH: "faceNoMatch",
-  REFERENCE_NO_FACE: "referenceNoFace",
-  PHOTO_MISSING: "photoMissing",
+  AGE_NOT_DISCLOSED: "ageNotDisclosed",
   LIVENESS_FAILED: "livenessFailed",
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",
@@ -705,6 +1045,9 @@ const REJECTION_REASON_KEYS = {
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
+  REVIEW_NOT_HOLDER: "reviewNotHolder",
+  REVIEW_ALTERED: "reviewAltered",
+  EVIDENCE_NOT_AS_REQUESTED: "evidenceNotAsRequested",
   REVIEW_LAPSED: "reviewLapsed",
   LEGAL_RETENTION: "legalRetention",
   ORG_PAUSED: "orgPaused",
@@ -718,7 +1061,7 @@ export const PROOFING_REJECTION_CODES = Object.keys(
 
 // Why a data request whose subject did prove who they are was refused: a
 // reviewer refused it, nobody answered it, proofing was paused, or the
-// customer must keep the data. The subject's page then says the request was
+// org must keep the data. The subject's page then says the request was
 // refused, not that they were not verified.
 export type DataRequestRefusal = "reviewer" | "lapsed" | "paused" | "law";
 
@@ -726,6 +1069,9 @@ const DATA_REQUEST_REFUSALS: Partial<
   Record<ProofingRejectionCode, DataRequestRefusal>
 > = {
   MANUAL_REVIEW_REJECTED: "reviewer",
+  REVIEW_NOT_HOLDER: "reviewer",
+  REVIEW_ALTERED: "reviewer",
+  EVIDENCE_NOT_AS_REQUESTED: "reviewer",
   REVIEW_LAPSED: "lapsed",
   ORG_PAUSED: "paused",
   LEGAL_RETENTION: "law",
@@ -741,9 +1087,9 @@ export function dataRequestRefusal(
     : DATA_REQUEST_REFUSALS[errorCode as ProofingRejectionCode];
 }
 
-// The stages a verify page's stepper shows: what is collected, the app (when
-// the subject has a choice), its session, then the address and the diploma
-// upload (when the flow has those steps).
+// The stages a verify page's stepper shows: what is collected, the app, its
+// session, then the address and the diploma upload (when the flow has those
+// steps).
 export type VerifyStage =
   | "overview"
   | "method"
@@ -752,21 +1098,27 @@ export type VerifyStage =
   | "diplomas";
 
 export function verifyStages({
-  appChoice,
   address = false,
   diplomas,
 }: {
-  appChoice: boolean;
   address?: boolean;
   diplomas: boolean;
 }): VerifyStage[] {
   return [
     "overview",
-    ...(appChoice ? (["method"] as const) : []),
+    "method",
     "session",
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
   ];
+}
+
+// The apps a verify page's app step offers: both when the Yivi app can run
+// the flow, else the Idem app alone. Continue always leads to this step, even
+// with one app, because tapping an app is what starts the session: a person
+// (or an admin checking a link) who only reads the first step uses nothing up.
+export function methodChoices(yiviAvailable: boolean): ProofingMethod[] {
+  return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
 }
 
 // The stage a verify page is at: the address or diploma step while it is
@@ -845,24 +1197,161 @@ export function sendableByMail(
 // The document data a flow releases: the holder's name and date of birth.
 export const ATTRIBUTE_DOCUMENT = "dg1";
 
+// The age check: only whether the holder is the flow's age or older, derived
+// from the chip's date of birth (flow.AttributeAgeOver).
+export const ATTRIBUTE_AGE_OVER = "age_over";
+// The age a new age check answers for, and the lowest and highest the service
+// takes (flow.minAgeOver, flow.maxAgeOver).
+const DEFAULT_AGE_OVER = 18;
+const MIN_AGE_OVER = 1;
+const MAX_AGE_OVER = 120;
+// The ages the editor offers: the usual legal limits, as ISO mDL and the EUDI
+// PID name them (age_over_NN), and the ones the Yivi passport and id-card
+// answer (overNN, openid4vpverifier.AgeClaim).
+const AGE_OVER_CHOICES = [12, 16, 18, 21, 65];
+
+// The ages to choose from for a draft: AGE_OVER_CHOICES, plus the draft's own
+// age when a flow was saved with another, so editing it keeps it.
+export function ageOverChoices(draft: ProofingFlowDraft): number[] {
+  const current = Number(draft.ageOver);
+  if (!Number.isInteger(current) || AGE_OVER_CHOICES.includes(current)) {
+    return AGE_OVER_CHOICES;
+  }
+  return [...AGE_OVER_CHOICES, current].sort((a, b) => a - b);
+}
+
+// The age check's answer as a result's identity shows it ("18 or older":
+// Yes or No); none for a flow without the age check.
+export function ageOverFact(
+  identity: { ageOver?: { age: number; over: boolean } } | undefined,
+  t: TFunction,
+): { label: string; value: string } | undefined {
+  const answer = identity?.ageOver;
+  if (answer === undefined) {
+    return undefined;
+  }
+  return {
+    label: t("identityProofing.sessions.identity.ageOver", { age: answer.age }),
+    value: answer.over
+      ? t("identityProofing.sessions.identity.ageOverYes")
+      : t("identityProofing.sessions.identity.ageOverNo"),
+  };
+}
+
 // Whether flow's result carries the holder's name and date of birth (the
-// document data, dg1), which a request for one known person is matched
-// against (proofing.readsIdentity). The service hands a flow back listing
-// what it releases.
+// document data, dg1, without the age check, which withholds the date), which
+// a request for one known person is matched against (proofing.readsIdentity).
+// The service hands a flow back listing what it releases.
 export function readsIdentity(
   flow: { requestedAttributes?: string[] } | undefined,
 ): boolean {
-  return flow?.requestedAttributes?.includes(ATTRIBUTE_DOCUMENT) ?? false;
+  const attributes = flow?.requestedAttributes ?? [];
+  return (
+    attributes.includes(ATTRIBUTE_DOCUMENT) &&
+    !attributes.includes(ATTRIBUTE_AGE_OVER)
+  );
 }
 
-// Whether a flow of kind with diplomas must read the name and date of birth
-// (proofing.identityRequired): a data request's other sessions are found by
-// them, and a required diploma's holder is checked against them.
-export function identityRequired(
-  kind: FlowKind,
-  diplomas: DiplomaMode,
-): boolean {
-  return isDataRequest(kind) || diplomas !== "off";
+// Whether a flow with diplomas must read the name and date of birth
+// (proofing.identityRequired): a required diploma's holder is checked against
+// them.
+export function identityRequired(diplomas: DiplomaMode): boolean {
+  return diplomas !== "off";
+}
+
+// What the Verify a person form sends: an identity check on a flow, or one of
+// the data requests every org offers, on the org's own flow of that kind.
+export type SendKind = "identity" | DataRequestKind;
+
+export const SEND_KINDS: readonly SendKind[] = [
+  "identity",
+  ...DATA_REQUEST_KINDS,
+];
+
+// The send form's flows for kind: the identity flows an external person can be
+// sent from the app (externalFlows), or the org's own flow of a data request
+// kind, none while they load.
+export function sendKindFlows<
+  T extends { completable: boolean; default: boolean; kind?: string },
+>(
+  kind: SendKind,
+  identityFlows: readonly T[],
+  dataRequestFlows: readonly T[] | undefined,
+): { sendable: T[]; initial: T | undefined } {
+  if (kind === "identity") {
+    return externalFlows(identityFlows);
+  }
+  return withInitial(
+    (dataRequestFlows ?? []).filter((flow) => flow.kind === kind),
+  );
+}
+
+// What a request names: its flow, or a data request's kind.
+export function requestTarget(
+  kind: SendKind,
+  flowId: string,
+): { flowId: string } | { flowKind: DataRequestKind } {
+  return kind === "identity" ? { flowId } : { flowKind: kind };
+}
+
+// The on-screen page's query: the flow it runs, or the data request kind,
+// whose flow it reads itself.
+export function verifySearch(kind: SendKind, flowId: string): string {
+  const params: Record<string, string> =
+    kind === "identity" ? { flow: flowId } : { kind };
+  return new URLSearchParams(params).toString();
+}
+
+// The data request kind a query names, if it names one.
+export function dataRequestKindOf(
+  value: string | null,
+): DataRequestKind | undefined {
+  return DATA_REQUEST_KINDS.find((kind) => kind === value);
+}
+
+interface SendFields {
+  email: string;
+  name: string;
+  birthDate: string | undefined;
+  // Only this person may pass: set by its switch, on a flow that reads identity.
+  passing: boolean;
+  // Passing is matched on the name too, so it asks for one whatever the name
+  // switch says.
+  nameShown: boolean;
+  missing: { email: boolean; name: boolean; birthDate: boolean };
+}
+
+// What the Verify a person form sends, and what it still lacks. A field whose
+// switch is off, or whose channel does not use it, sends nothing even if it
+// was filled before; only a mail carries an address.
+export function sendRequestFields(input: {
+  delivery: ProofingChannel;
+  matchable: boolean;
+  nameOn: boolean;
+  passOn: boolean;
+  email: string;
+  name: string;
+  birthDate: string;
+}): SendFields {
+  const passing = input.passOn && input.matchable;
+  const nameShown = input.nameOn || passing;
+  const mailed = input.delivery === "email";
+  const email = mailed ? input.email.trim() : "";
+  const name = nameShown ? input.name.trim() : "";
+  const birthDate = passing ? input.birthDate : undefined;
+
+  return {
+    email,
+    name,
+    birthDate,
+    passing,
+    nameShown,
+    missing: {
+      email: mailed && !email.includes("@"),
+      name: nameShown && name === "",
+      birthDate: passing && input.birthDate === "",
+    },
+  };
 }
 
 // Why an uploaded diploma extract was not kept, from its verdict's reason.
@@ -901,28 +1390,18 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.flowNotAllowed");
     case "member_not_found":
       return t("identityProofing.errors.memberNotFound");
-    case "customer_not_found":
-      return t("identityProofing.errors.customerNotFound");
-    case "customer_exists":
-      return t("identityProofing.errors.customerExists");
-    case "flow_not_assigned":
-      return t("identityProofing.errors.flowNotAssigned");
-    case "customer_paused":
-      return t("identityProofing.errors.customerPaused");
-    case "customer_has_open_reviews":
-      return t("identityProofing.errors.customerHasOpenReviews");
-    case "customer_sessions_left":
-      return t("identityProofing.errors.customerSessionsLeft");
+    case "no_default_flow":
+      return t("identityProofing.errors.noDefaultFlow");
     case "proofing_paused":
       return t("identityProofing.errors.proofingPaused");
-    case "customer_no_api_key":
-      return t("identityProofing.errors.customerNoApiKey");
     case "api_key_not_found":
       return t("identityProofing.errors.apiKeyNotFound");
     case "session_not_found":
       return t("identityProofing.errors.sessionNotFound");
     case "not_under_review":
       return t("identityProofing.errors.notUnderReview");
+    case "own_review":
+      return t("identityProofing.errors.ownReview");
     case "reference_photo_required":
       return t("identityProofing.errors.referencePhotoRequired");
     case "organization_not_found":
@@ -935,12 +1414,12 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.sessionOver");
     case "device_active":
       return t("identityProofing.errors.deviceActive");
-    case "method_unavailable":
-      return t("identityProofing.errors.methodUnavailable");
     case "diplomas_need_page":
       return t("identityProofing.errors.diplomasNeedPage");
     case "hosted_disabled":
       return t("identityProofing.errors.hostedDisabled");
+    case "data_request_flow":
+      return t("identityProofing.errors.dataRequestFlow");
     case "diplomas_closed":
       return t("identityProofing.errors.diplomasClosed");
     case "diplomas_not_asked":
@@ -959,10 +1438,14 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.dataFlowForMember");
     case "export_unavailable":
       return t("identityProofing.errors.exportUnavailable");
+    case "reasons_missing":
+      return t("identityProofing.errors.reasonsMissing");
     // An admin by role whose mandate was withdrawn: the backend refuses every
     // admin call, though the role still shows the admin's tabs.
     case "mandate_withdrawn":
       return t("identityProofing.errors.mandateWithdrawn");
+    case "legal_retention":
+      return t("identityProofing.errors.legalRetention");
     // too_large is a diploma upload's, payload_too_large a branding logo's.
     case "too_large":
     case "payload_too_large":
@@ -996,8 +1479,6 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
       return proofingErrorMessage(error, t);
     case "session_over":
       return t("proofLink.errors.sessionOver");
-    case "method_unavailable":
-      return t("proofLink.errors.methodUnavailable");
     default:
       return t("proofLink.errors.unavailable");
   }
@@ -1020,7 +1501,7 @@ export function verifyErrorMessage(
 const DELIVERY_FIRST_SEND_POLL_MS = 5_000;
 const DELIVERY_RETRY_POLL_MS = 60_000;
 
-// How often a customer's webhook deliveries are re-read: soon while one waits
+// How often the org's webhook deliveries are re-read: soon while one waits
 // for its first send, slowly while one retries, not at all once none is
 // pending.
 export function deliveriesPollInterval(
@@ -1068,7 +1549,7 @@ export function sumProofingStats(
   );
 }
 
-// Stats rows summed per key: per customer, or per flow of one customer.
+// Stats rows summed per key: per flow.
 export function proofingStatsBy<T extends ProofingTotals>(
   rows: readonly T[],
   key: (row: T) => string,
@@ -1079,29 +1560,6 @@ export function proofingStatsBy<T extends ProofingTotals>(
     groups.set(k, [...(groups.get(k) ?? []), row]);
   }
   return new Map([...groups].map(([k, group]) => [k, sumProofingStats(group)]));
-}
-
-export function noProofingSessions(): ProofingTotals {
-  return { ...NO_SESSIONS };
-}
-
-// The share of sessions verified, 0..1; undefined with no sessions, which a
-// percentage cannot express.
-export function verifiedShare(totals: ProofingTotals): number | undefined {
-  return totals.sessions === 0 ? undefined : totals.approved / totals.sessions;
-}
-
-// The customers whose name holds the search, ignoring case and surrounding
-// space; every customer for an empty search.
-export function searchCustomers<T extends { name: string }>(
-  customers: readonly T[],
-  search: string,
-): T[] {
-  const needle = search.trim().toLocaleLowerCase();
-  if (needle === "") {
-    return [...customers];
-  }
-  return customers.filter((c) => c.name.toLocaleLowerCase().includes(needle));
 }
 
 // A requested-data value the wallet has copy for; the backend may add others.
@@ -1131,10 +1589,35 @@ export function isProofingStep(value: string): value is ProofingStep {
   return PROOFING_STEPS.includes(value);
 }
 
-// The Sessions tab's filters: every session, or one outcome; "review" is the
-// review queue. Pending and in progress show under "all" only.
+// A flow version's steps in words, in the order the app runs them; a step the
+// wallet has no copy for shows as it is.
+export function flowStepLabels(
+  flow: {
+    steps: readonly string[];
+    diplomaMode?: DiplomaMode;
+    addressMode?: AddressMode;
+  },
+  t: TFunction,
+): string[] {
+  const labels = flow.steps.map((step) =>
+    isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
+  );
+  // The wallet's own steps, after the app's: given in the browser.
+  if (flow.addressMode === "required") {
+    labels.push(t("identityProofingFlows.steps.address"));
+  }
+  if (flow.diplomaMode === "required") {
+    labels.push(t("identityProofingFlows.steps.diploma_upload"));
+  }
+  return labels;
+}
+
+// The people lists' filters: every session, or one outcome; "review" is the
+// review queue and "in_progress" a session its subject has not finished.
+// Cancelled sessions show under "all" only.
 export const SESSION_FILTERS = [
   "all",
+  "in_progress",
   "review",
   "verified",
   "failed",
@@ -1142,18 +1625,22 @@ export const SESSION_FILTERS = [
 ] as const;
 export type SessionFilter = (typeof SESSION_FILTERS)[number];
 
-const FILTER_STATUS: Record<Exclude<SessionFilter, "all">, string> = {
-  review: "needs_review",
-  verified: "approved",
-  failed: "rejected",
-  expired: "expired",
+const FILTER_STATUSES: Record<
+  Exclude<SessionFilter, "all">,
+  readonly string[]
+> = {
+  in_progress: ["pending", "in_progress"],
+  review: ["needs_review"],
+  verified: ["approved"],
+  failed: ["rejected"],
+  expired: ["expired"],
 };
 
 export function matchesSessionFilter(
   status: string,
   filter: SessionFilter,
 ): boolean {
-  return filter === "all" || FILTER_STATUS[filter] === status;
+  return filter === "all" || FILTER_STATUSES[filter].includes(status);
 }
 
 export function sessionFilterCounts(
@@ -1163,11 +1650,99 @@ export function sessionFilterCounts(
     requests.filter((r) => matchesSessionFilter(r.status, filter)).length;
   return {
     all: requests.length,
+    in_progress: count("in_progress"),
     review: count("review"),
     verified: count("verified"),
     failed: count("failed"),
     expired: count("expired"),
   };
+}
+
+// Whether a request list is as long as one list read returns: it may then have
+// been cut off, so a count read from it is only a lower bound.
+export function requestListCapped(requests: readonly unknown[]): boolean {
+  return requests.length >= MAX_LISTED_REQUESTS;
+}
+
+// A count read from a request list, for display: the number, or the number
+// with a "+" when the list may have been cut off, as "200+" for all of them.
+export function listedCount(
+  count: number,
+  capped: boolean,
+  t: TFunction,
+): string {
+  return capped
+    ? t("identityProofing.requests.atLeast", { count })
+    : String(count);
+}
+
+// Whose retention a people list states: the org's across every flow, the one
+// flow's it is narrowed to, or none for a flow the caller cannot read (a
+// member's, on a flow no longer offered to members), rather than the org's,
+// which may not be that flow's.
+export type RetentionOf<F> =
+  | { kind: "org" }
+  | { kind: "flow"; flow: F }
+  | { kind: "unknown" };
+
+export function peopleRetentionOf<F extends { id: string }>(
+  flowId: string,
+  flows: readonly F[] | undefined,
+): RetentionOf<F> {
+  if (flowId === "") return { kind: "org" };
+  const flow = flows?.find((f) => f.id === flowId);
+  return flow ? { kind: "flow", flow } : { kind: "unknown" };
+}
+
+// The flows requests were sent on, by name: what a flow filter offers. The
+// requests are newest first and each keeps the name its flow had when it was
+// sent, so the first one seen names the flow as it is now.
+export function requestFlows(
+  requests: readonly { flowId: string; flowName: string }[],
+): { id: string; name: string }[] {
+  const names = new Map<string, string>();
+  for (const r of requests) {
+    if (!names.has(r.flowId)) {
+      names.set(r.flowId, r.flowName);
+    }
+  }
+
+  return [...names]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const SECONDS_PER_DAY = 86_400;
+
+// How many days after a check ends a flow's personal data is purged: the flow's
+// own retention when it sets one, else the org's.
+export function flowPurgeDays(
+  flow: { retentionOverrideSeconds?: number },
+  settings: { dataRetentionDays: number },
+): number {
+  const override = flow.retentionOverrideSeconds ?? 0;
+  return override > 0
+    ? Math.ceil(override / SECONDS_PER_DAY)
+    : settings.dataRetentionDays;
+}
+
+// The days a flow may keep its finished sessions, besides following the org's
+// retention (0).
+const FLOW_RETENTION_DAYS = [1, 30, 90] as const;
+
+// The retentions a flow's picker offers, in seconds. A flow whose own is none
+// of the offered days keeps it as a choice, so opening it changes nothing.
+export function retentionChoices(current: number): number[] {
+  const offered = FLOW_RETENTION_DAYS.map((days) => days * SECONDS_PER_DAY);
+  const own = current > 0 && !offered.includes(current) ? [current] : [];
+  return [FOLLOW_ORG, ...[...offered, ...own].sort((a, b) => a - b)];
+}
+
+// Seconds as whole days; undefined for a part of a day.
+export function wholeDays(seconds: number): number | undefined {
+  return seconds % SECONDS_PER_DAY === 0
+    ? seconds / SECONDS_PER_DAY
+    : undefined;
 }
 
 const MS_PER_SECOND = 1000;
@@ -1216,11 +1791,10 @@ export function shortRequestId(id: string): string {
   return id.replaceAll("-", "").slice(0, SHORT_ID_LENGTH);
 }
 
-// The session settings an admin may pick for a customer, mirroring
-// SessionTTLOptions and DataRetentionDayOptions in backend/internal/proofing
-// (identity-proofing.test.ts holds the two together).
+// The session lifetimes a flow may set, mirroring SessionTTLOptions in
+// backend/internal/proofing (identity-proofing.test.ts holds the two
+// together).
 export const SESSION_TTL_OPTIONS_SECONDS = [120, 300, 600] as const;
-export const DATA_RETENTION_DAY_OPTIONS = [7, 30, 90, 180, 365] as const;
 
 const SECONDS_IN_MINUTE = 60;
 
@@ -1228,27 +1802,52 @@ export function ttlMinutes(seconds: number): number {
   return Math.round(seconds / SECONDS_IN_MINUTE);
 }
 
-// How a customer reads in the lists: paused, or active and needing attention
-// because its webhook endpoint is failing, not set up without a live API key,
-// or plainly active.
-export type CustomerDisplayStatus =
-  | "active"
-  | "paused"
-  | "needs_attention"
-  | "setup_needed";
+const MAIL_ADDRESS = /^[^\s@]+@[^\s@]+$/;
+const MAILTO_SCHEME = "mailto:";
+const WEB_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
 
-export function customerDisplayStatus(customer: {
-  status: string;
-  webhook: { state: string };
-  hasApiKey: boolean;
-}): CustomerDisplayStatus {
-  if (customer.status === "paused") {
-    return "paused";
+interface SupportLink {
+  href: string;
+  kind: "mail" | "web";
+}
+
+// Where a support contact leads: a mail address opens the mail app and a web
+// address its page. Anything else (a phone number, opening hours) is text.
+export function supportContactLink(contact: string): SupportLink | undefined {
+  const value = contact.trim();
+
+  // Not URL.canParse: Safari 16 lacks it.
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
   }
-  if (!customer.hasApiKey) {
-    return "setup_needed";
+
+  // Before the mail test: a /@handle path or user@host matches MAIL_ADDRESS.
+  if (url && WEB_PROTOCOLS.has(url.protocol)) {
+    return { href: url.href, kind: "web" };
   }
-  return customer.webhook.state === "failing" ? "needs_attention" : "active";
+
+  const address = value.toLowerCase().startsWith(MAILTO_SCHEME)
+    ? value.slice(MAILTO_SCHEME.length)
+    : value;
+
+  return MAIL_ADDRESS.test(address)
+    ? { href: `${MAILTO_SCHEME}${address}`, kind: "mail" }
+    : undefined;
+}
+
+// How long a mailed session runs on a flow: its own lifetime, else the
+// organisation's, which is unknown until the settings are read.
+export function mailLifetimeMinutes(
+  flow: Pick<ProofingFlow, "sessionTtlSeconds"> | undefined,
+  orgSeconds: number | undefined,
+): number | undefined {
+  const own = flow?.sessionTtlSeconds ?? FOLLOW_ORG;
+  const seconds = own === FOLLOW_ORG ? orgSeconds : own;
+
+  return seconds === undefined ? undefined : ttlMinutes(seconds);
 }
 
 // A delivery answered 2xx.
@@ -1257,6 +1856,134 @@ const HTTP_STATUS_CLASS_DIVISOR = 100;
 
 export function isSuccessStatus(code: number): boolean {
   return Math.floor(code / HTTP_STATUS_CLASS_DIVISOR) === HTTP_SUCCESS_CLASS;
+}
+
+// The deliveries to the org's own endpoint. Those to the wallet's default
+// endpoint carry no endpointUrl and are the wallet's, not the org's software.
+export function ownEndpointDeliveries(
+  deliveries: readonly WebhookDelivery[],
+): WebhookDelivery[] {
+  return deliveries.filter((d) => d.endpointUrl !== undefined);
+}
+
+// The branding a flow's mail and hosted page wear: its own fields where it is
+// custom and set them, else the org's. "Powered by" stays the org's. Mirrors
+// Branding.over in backend/internal/proofing/flow_branding.go.
+export function effectiveBranding(
+  org: ProofingBranding,
+  own: ProofingFlowBranding,
+): ProofingBranding {
+  if (!own.custom) {
+    return org;
+  }
+  return {
+    ...org,
+    displayName: own.displayName || org.displayName,
+    primaryColor: own.primaryColor || org.primaryColor,
+    supportContact: own.supportContact || org.supportContact,
+    privacyUrl: own.privacyUrl || org.privacyUrl,
+    logoUri: own.logoUri || org.logoUri,
+  };
+}
+
+// Whether saving a flow's Branding tab deletes branding of its own: it was
+// custom and goes back to the organisation's, its fields and logo included.
+export function dropsOwnBranding(
+  saved: ProofingFlowBranding,
+  custom: boolean,
+): boolean {
+  return saved.custom && !custom;
+}
+
+// The fields that give a branding a look of its own in the Idem app: a colour
+// or the font. A name, logo, support contact or privacy link alone do not.
+const APP_LOOK_FIELDS = [
+  "primaryColor",
+  "secondaryColor",
+  "textColor",
+  "surfaceColor",
+  "borderColor",
+  "linkColor",
+  "successColor",
+  "warningColor",
+  "errorColor",
+  "topbarColor",
+  "fontFamily",
+] as const satisfies readonly (keyof ProofingBranding)[];
+
+// What the Idem app shows a person outside the org of a flow's branding (see
+// effectiveBranding): the name its mail signs with, its colour, the app's
+// header and the logo; "" keeps the app's own. A branding with a look of its
+// own is shown as it is; otherwise the org's theme, with the branding's logo
+// when it has one. Mirrors AppBrandingResolver and whiteLabeled in
+// backend/internal/proofing/app_branding.go.
+export interface AppLook {
+  name: string;
+  primaryColor: string;
+  headerColor: string;
+  logoUri: string;
+}
+
+export function appLook(
+  branding: ProofingBranding,
+  theme: Pick<OrgTheme, "primaryColor" | "topbarColor" | "logoUri">,
+  orgName: string,
+): AppLook {
+  const name = branding.displayName || orgName;
+  if (APP_LOOK_FIELDS.some((field) => branding[field] !== "")) {
+    return {
+      name,
+      primaryColor: branding.primaryColor,
+      headerColor: branding.topbarColor,
+      logoUri: branding.logoUri,
+    };
+  }
+  return {
+    name,
+    primaryColor: theme.primaryColor,
+    headerColor: theme.topbarColor,
+    logoUri: branding.logoUri || theme.logoUri,
+  };
+}
+
+// The languages a hosted page form shows ticked: none saved is every one.
+export function selectedLocales(saved: readonly string[]): string[] {
+  return saved.length === 0 ? [...SUPPORTED_LANGUAGES] : [...saved];
+}
+
+// Every language ticked is saved as none, so a language added later is offered
+// too.
+export function savedLocales(selected: readonly string[]): string[] {
+  return selected.length === SUPPORTED_LANGUAGES.length ? [] : [...selected];
+}
+
+// A flow's Hosted page form as saved: Cancel goes back to it.
+export function hostedDraft(saved: ProofingFlowHosted): ProofingFlowHosted {
+  return { ...saved, locales: selectedLocales(saved.locales) };
+}
+
+// Whether the Hosted page form holds a change from what is saved.
+export function hostedDraftDirty(
+  draft: ProofingFlowHosted,
+  saved: ProofingFlowHosted,
+): boolean {
+  const seed = hostedDraft(saved);
+  return (
+    draft.enabled !== seed.enabled ||
+    draft.completion !== seed.completion ||
+    draft.locales.join() !== seed.locales.join()
+  );
+}
+
+// The reason an item is collected, in the language the person reads: "nl-NL"
+// reads Dutch. None when the flow gives none in it, so the page says nothing
+// rather than something in a language the person may not read.
+export function reasonIn(
+  reasons: Readonly<Record<string, string>> | undefined,
+  language: string,
+): string | undefined {
+  const text = reasons?.[language.split("-")[0].toLowerCase()]?.trim();
+  return text === "" ? undefined : text;
 }
 
 // The text colour readable on a #rrggbb fill (WCAG relative luminance): the
@@ -1275,6 +2002,11 @@ const HEX_PAIR = 2;
 
 export function isHexColor(value: string): boolean {
   return HEX_COLOR.test(value);
+}
+
+// A colour field that holds something and not a #rrggbb; empty falls back.
+export function isInvalidColor(value: string): boolean {
+  return value !== "" && !isHexColor(value);
 }
 
 export function readableTextOn(hex: string): "#ffffff" | "#000000" {
@@ -1332,7 +2064,7 @@ export function sessionEventDetail(
     parts.push(proofingMethodLabel(fields.method, t));
   }
   if (typeof fields.eidasLevel === "string" && fields.eidasLevel !== "") {
-    parts.push(t("customers.flows.eidas", { level: fields.eidasLevel }));
+    parts.push(t("identityProofing.flows.eidas", { level: fields.eidasLevel }));
   }
   if (typeof fields.errorCode === "string" && fields.errorCode !== "") {
     parts.push(proofingRejectionReason(fields.errorCode, t));
@@ -1345,59 +2077,45 @@ export function sessionEventDetail(
   return parts;
 }
 
-// What the send form does with its fields: the flow it sends (a pick no longer
-// sendable falls back to the default), how (a flow that asks for diplomas or
-// the address cannot be mailed, so it runs on screen), whether it checks for one person (a
-// flow reading name and date of birth, given a date of birth), and which
-// fields still block it.
+// What the send form does with the flow and channel it is given: the flow it
+// sends (a pick no longer sendable falls back to the default), how (a flow that
+// asks for diplomas or the address cannot be mailed, so it runs on screen; one
+// whose "Allow sending this flow as a link" switch is off is neither mailed nor
+// a link, so it runs on screen too) and whether it can check for one person (a
+// flow reading name and date of birth). sendRequestFields has what the fields
+// send and lack.
 export function sendFormDecision<
   F extends {
     id: string;
     diplomaMode?: DiplomaMode;
     addressMode?: AddressMode;
     requestedAttributes?: string[];
+    hostedEnabled?: boolean;
   },
 >(input: {
   sendable: readonly F[];
   initial: F | undefined;
   picked: string;
   channel: ProofingChannel;
-  email: string;
-  name: string;
-  birthDate: string;
 }): {
   flowId: string;
+  linkable: boolean;
   mailable: boolean;
   matchable: boolean;
-  expectedBirthDate: string;
   delivery: ProofingChannel;
-  emailMissing: boolean;
-  nameMissing: boolean;
 } {
   const flowId = input.sendable.some((f) => f.id === input.picked)
     ? input.picked
     : (input.initial?.id ?? "");
   const flow = input.sendable.find((f) => f.id === flowId);
+  const linkable = flow?.hostedEnabled ?? true;
   const mailable = sendableByMail(flow);
   const matchable = readsIdentity(flow);
-  const expectedBirthDate = matchable ? input.birthDate : "";
   const delivery: ProofingChannel =
-    input.channel === "email" && !mailable ? "on_screen" : input.channel;
-  // Only a mail needs an address; one given must still be one.
-  const emailMissing =
-    delivery === "email"
-      ? !input.email.includes("@")
-      : input.email.trim() !== "" && !input.email.includes("@");
-  const nameMissing = expectedBirthDate !== "" && input.name.trim() === "";
-  return {
-    flowId,
-    mailable,
-    matchable,
-    expectedBirthDate,
-    delivery,
-    emailMissing,
-    nameMissing,
-  };
+    !linkable || (input.channel === "email" && !mailable)
+      ? "on_screen"
+      : input.channel;
+  return { flowId, linkable, mailable, matchable, delivery };
 }
 
 // Whether a session's row shows its verified identity to this reader: an
@@ -1436,9 +2154,9 @@ export function imageSource(image: ProofingImage): string {
   return `data:${image.mimeType};base64,${image.data}`;
 }
 
-// Who a session timeline event names as its actor: the member, the customer's
-// API key for a request it created, a non-user actor's label, or the system;
-// null when the event's detail already says who.
+// Who a session timeline event names as its actor: the member, the API key for
+// a request it created, a non-user actor's label, or the system; null when the
+// event's detail already says who.
 export function timelineActor(
   event: AuditEvent,
   request: Pick<ProofingRequest, "apiKeyName">,
@@ -1449,7 +2167,9 @@ export function timelineActor(
     return fullName(event.actor);
   }
   if (event.action === "identity_proofing.requested" && request.apiKeyName) {
-    return t("customers.sessions.viaApiKey", { name: request.apiKeyName });
+    return t("identityProofing.sessions.viaApiKey", {
+      name: request.apiKeyName,
+    });
   }
   const label = auditActorLabel(event.actorLabel, t);
   if (label) return label;

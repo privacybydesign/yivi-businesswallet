@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  canCloseDecline,
+  checkEndReason,
   completedMessage,
   completionRedirect,
   hostedHandBack,
@@ -36,7 +38,7 @@ describe("hostedLanguage", () => {
 describe("completionRedirect", () => {
   const done = completedMessage("ps_abc", "approved");
 
-  it("adds the session and status, keeping the customer's query", () => {
+  it("adds the session and status, keeping the redirect's query", () => {
     expect(completionRedirect("https://portal.example/done?ref=42", done)).toBe(
       "https://portal.example/done?ref=42&session=ps_abc&status=approved",
     );
@@ -93,6 +95,20 @@ describe("hostedHandBack", () => {
     expect(handBack?.redirectTo).toBeDefined();
   });
 
+  // "This check has ended" says what to do next: a redirect would replace
+  // it at once, as if the check were done.
+  it("keeps a check that ran out on its own page, telling an embedder", () => {
+    const handBack = hostedHandBack({
+      ...settled,
+      status: "expired",
+      framed: true,
+      redirectUrl,
+    });
+    expect(handBack?.redirectTo).toBeUndefined();
+    expect(handBack?.post).toBe(true);
+    expect(handBack?.message.status).toBe("expired");
+  });
+
   it("stays on the page for an unusable redirect", () => {
     expect(
       hostedHandBack({ ...settled, redirectUrl: "javascript:alert(1)" })
@@ -126,7 +142,7 @@ describe("hostedHandBack", () => {
 });
 
 describe("postCompletion", () => {
-  it("posts only to the customer's origins, never to any origin", () => {
+  it("posts only to the org's origins, never to any origin", () => {
     const posted: [unknown, string][] = [];
     const parent: MessageTarget = {
       postMessage: (message, origin) => posted.push([message, origin]),
@@ -165,7 +181,7 @@ describe("originLines", () => {
 });
 
 describe("hostedTheme", () => {
-  it("brands the page in the customer's colour only", () => {
+  it("brands the page in the org's colour only", () => {
     const theme = hostedTheme(undefined, "#0a7c59");
     expect(theme.primaryColor).toBe("#0a7c59");
     expect(theme.accentColor).toBe("");
@@ -200,5 +216,58 @@ describe("hostedTheme", () => {
     expect(theme.accentColor).toBe("#5412c7");
     expect(theme.topbarColor).toBe("#101e1e");
     expect(theme.surfaceColor).toBe("#fbfbfc");
+  });
+
+  it("puts the branding's own colour, a flow's, over the session's theme", () => {
+    const sessionTheme = {
+      primaryColor: "#036bd2",
+      secondaryColor: "#5412c7",
+      textColor: "",
+      surfaceColor: "",
+      borderColor: "",
+      linkColor: "",
+      successColor: "",
+      warningColor: "",
+      errorColor: "",
+      headerColor: "#101e1e",
+      fontFamily: "",
+    };
+    const theme = hostedTheme(sessionTheme, "#22337a");
+    expect(theme.primaryColor).toBe("#22337a");
+    expect(theme.accentColor).toBe("#5412c7");
+    expect(theme.topbarColor).toBe("#101e1e");
+    expect(hostedTheme(sessionTheme, "red").primaryColor).toBe("#036bd2");
+  });
+});
+
+describe("canCloseDecline", () => {
+  it("keeps the dialog open while the decline is in flight", () => {
+    expect(canCloseDecline("pending")).toBe(false);
+  });
+
+  it("closes it before the decline and after it failed", () => {
+    expect(canCloseDecline("idle")).toBe(true);
+    expect(canCloseDecline("error")).toBe(true);
+  });
+});
+
+describe("checkEndReason", () => {
+  it("names the lifetime the started session ran with", () => {
+    expect(checkEndReason({ started: true, sessionTtlSeconds: 120 })).toEqual({
+      kind: "timedOut",
+      minutes: 2,
+    });
+  });
+
+  it("says in time for a session started before its lifetime was kept", () => {
+    expect(checkEndReason({ started: true })).toEqual({
+      kind: "timedOut",
+      minutes: undefined,
+    });
+  });
+
+  it("says a link that ran out was never started", () => {
+    expect(checkEndReason({ started: false })).toEqual({ kind: "notStarted" });
+    expect(checkEndReason({})).toEqual({ kind: "notStarted" });
   });
 });

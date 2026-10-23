@@ -13,20 +13,22 @@ import (
 )
 
 // faceOnlyFlow matches the face without reading the chip: each session
-// carries the customer's own photo of the person.
+// carries the sender's own photo of the person.
 var faceOnlyFlow = withFaceProvider(testFlow("f-face", "Face only", []string{"face_verification"}, selfieLocationNative), faceProviderRegula)
 
-// jpegPhoto is a reference photo as a customer sends it: base64 of bytes that
-// sniff as a JPEG.
+// jpegPhoto is a reference photo as an API caller sends it: base64 of bytes
+// that sniff as a JPEG.
 var jpegPhoto = base64.StdEncoding.EncodeToString(append([]byte{0xff, 0xd8, 0xff, 0xe0}, []byte("a face")...))
 
-// withFaceOnlyFlow adds faceOnlyFlow to the org and assigns it to initech.
-func (f fixture) withFaceOnlyFlow() Customer {
+// withFaceOnlyFlow adds faceOnlyFlow to the org.
+func (f fixture) withFaceOnlyFlow() {
 	f.ips.flows = append(f.ips.flows, faceOnlyFlow)
-	c := f.customers.byID[initech.ID]
-	c.Flows = FlowSelection{FlowIDs: append(c.Flows.FlowIDs, faceOnlyFlow.ID), DefaultFlowID: c.Flows.DefaultFlowID}
-	f.customers.byID[initech.ID] = c
-	return c
+}
+
+// withAgeCheck is f checking the holder is age or older.
+func withAgeCheck(f proofingprovider.Flow, age int) proofingprovider.Flow {
+	f.RequestedAttributes, f.AgeOver = []string{attributeDocument, attributeAgeOver}, age
+	return f
 }
 
 // withRequiredLevel is f requiring the eIDAS level.
@@ -37,7 +39,7 @@ func withRequiredLevel(f proofingprovider.Flow, level string) proofingprovider.F
 
 func (f fixture) sendWithPhoto(flowID, photo string, channel Channel) (Sent, error) {
 	return f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
-		NewRequest{CustomerID: &initech.ID, SubjectEmail: "dibran@example.org", FlowID: flowID, ReferencePhoto: photo, Channel: channel})
+		NewRequest{SubjectEmail: "dibran@example.org", FlowID: flowID, ReferencePhoto: photo, Channel: channel})
 }
 
 func TestNeedsReferencePhoto(t *testing.T) {
@@ -54,12 +56,14 @@ func TestNeedsReferencePhoto(t *testing.T) {
 		"requires low":         {withRequiredLevel(appFlow, eidasLow), false, true, true},
 		"requires substantial": {withRequiredLevel(appFlow, eidasSubstantial), false, true, false},
 		"requires high":        {withRequiredLevel(appFlow, eidasHigh), false, true, false},
+		"checks 18 or older":   {withAgeCheck(appFlow, 18), false, true, true},
+		"checks 17 or older":   {withAgeCheck(appFlow, 17), false, true, false},
 	} {
 		if got := flowNeedsReferencePhoto(tc.flow); got != tc.needs {
 			t.Errorf("%s: flowNeedsReferencePhoto = %v, want %v", name, got, tc.needs)
 		}
-		if got := customerCompletable(tc.flow); got != tc.completes {
-			t.Errorf("%s: customerCompletable = %v, want %v", name, got, tc.completes)
+		if got := externalCompletable(tc.flow); got != tc.completes {
+			t.Errorf("%s: externalCompletable = %v, want %v", name, got, tc.completes)
 		}
 		if got := yiviAppAvailable(tc.flow); got != tc.yiviOffers {
 			t.Errorf("%s: yiviAppAvailable = %v, want %v", name, got, tc.yiviOffers)
@@ -125,9 +129,8 @@ func TestMembersCannotUseFaceOnly(t *testing.T) {
 	if !errors.Is(err, ErrFlowNotCompletable) {
 		t.Errorf("ConfigureFlows = %v, want ErrFlowNotCompletable", err)
 	}
-	if _, err := f.svc.AssignCustomerFlows(context.Background(), testOrg, initech.ID,
-		FlowSelection{FlowIDs: []string{faceOnlyFlow.ID}, DefaultFlowID: faceOnlyFlow.ID}); err != nil {
-		t.Errorf("AssignCustomerFlows = %v, want a customer may be assigned it", err)
+	if err := f.svc.ConfigureFlows(context.Background(), testOrg, FlowSelection{DefaultFlowID: faceOnlyFlow.ID}); err != nil {
+		t.Errorf("ConfigureFlows(default) = %v, want it the default of what an API key sends", err)
 	}
 }
 

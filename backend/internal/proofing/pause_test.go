@@ -37,17 +37,12 @@ func (f *fakePauses) List(context.Context) ([]OrgPause, error) {
 	return out, nil
 }
 
-func (f *fakePauses) Set(ctx context.Context, orgID uuid.UUID, level PauseLevel, state PauseState, _ *uuid.UUID) (OrgPause, error) {
+func (f *fakePauses) Set(ctx context.Context, orgID uuid.UUID, state PauseState, _ *uuid.UUID) (OrgPause, error) {
 	p, _ := f.Get(ctx, orgID)
-	var at *time.Time
+	p.PlatformPausedAt = nil
 	if state == PauseOn {
 		now := time.Now()
-		at = &now
-	}
-	if level == PausePlatform {
-		p.PlatformPausedAt = at
-	} else {
-		p.OrgPausedAt = at
+		p.PlatformPausedAt = &now
 	}
 	f.byOrg[orgID] = p
 	return p, nil
@@ -59,33 +54,27 @@ func withPauses(f fixture) *fakePauses {
 	return pauses
 }
 
-func TestPauseLevelsLiftOwnOnly(t *testing.T) {
+func TestPauseStopsUntilResumed(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
 	ctx := context.Background()
 	if err := f.svc.checkActive(ctx, testOrg.ID); err != nil {
 		t.Fatalf("never paused: %v, want active", err)
 	}
-	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PausePlatform, PauseOn, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PauseOrganization, PauseOff, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.checkActive(ctx, testOrg.ID); !errors.Is(err, ErrProofingPaused) {
-		t.Errorf("platform pause, org switched on: %v, want ErrProofingPaused", err)
-	}
-	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PausePlatform, PauseOff, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PauseOrganization, PauseOn, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.svc.checkActive(ctx, testOrg.ID); !errors.Is(err, ErrProofingPaused) {
-		t.Errorf("org switched off: %v, want ErrProofingPaused", err)
+		t.Errorf("paused: %v, want ErrProofingPaused", err)
 	}
 	if err := f.svc.checkActive(ctx, uuid.New()); err != nil {
 		t.Errorf("another org: %v, want active", err)
+	}
+	if _, err := f.svc.SetProofingPaused(ctx, testOrg.ID, PauseOff, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.checkActive(ctx, testOrg.ID); err != nil {
+		t.Errorf("resumed: %v, want active", err)
 	}
 }
 
@@ -95,7 +84,7 @@ func TestPausedOrgHostedLinkStartsNothing(t *testing.T) {
 	f := newFixture()
 	_, token := f.sendHosted(t)
 	withPauses(f)
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PausePlatform, PauseOn, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.svc.HostedRequest(context.Background(), token); err != nil {
@@ -115,7 +104,7 @@ func TestPausedOrgHostedLinkStartsNothing(t *testing.T) {
 func TestPausedOrgKeepsItsRoutes(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOrganization, PauseOn, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatal(err)
 	}
 	asAdmin := func(next http.Handler) http.Handler {
@@ -144,7 +133,7 @@ func TestPausedOrgKeepsItsRoutes(t *testing.T) {
 
 // Pausing the org first rejects each review it has open, ORG_PAUSED with its
 // reason: a paused org can decide nothing.
-func TestOrgPauseRejectsOpenReviews(t *testing.T) {
+func TestPauseRejectsOpenReviews(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
 	f.send(t)
@@ -152,29 +141,12 @@ func TestOrgPauseRejectsOpenReviews(t *testing.T) {
 	if req := f.reconcile(t); req.Status != StatusNeedsReview {
 		t.Fatalf("status = %s, want needs_review", req.Status)
 	}
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOrganization, PauseOn, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatalf("SetProofingPaused: %v", err)
 	}
 	if len(f.ips.decisions) != 1 || f.ips.decisions[0].Approve || f.ips.decisions[0].ErrorCode != ErrorOrgPaused ||
 		f.ips.decisions[0].Reason != orgPausedReason {
 		t.Errorf("decisions = %+v; want one rejection with ORG_PAUSED and its reason", f.ips.decisions)
-	}
-}
-
-// A customer with a session waiting for review cannot be paused until it is
-// decided.
-func TestCustomerPauseWaitsReviews(t *testing.T) {
-	f := newFixture()
-	f.sendForCustomer(t, "anna@example.org", "")
-	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
-	if req := f.reconcile(t); req.Status != StatusNeedsReview {
-		t.Fatalf("status = %s, want needs_review", req.Status)
-	}
-	if _, err := f.svc.SetCustomerStatus(context.Background(), testOrg.ID, initech.ID, CustomerPaused); !errors.Is(err, ErrCustomerHasOpenReviews) {
-		t.Errorf("pause with an open review = %v, want %v", err, ErrCustomerHasOpenReviews)
-	}
-	if _, err := f.svc.SetCustomerStatus(context.Background(), testOrg.ID, initech.ID, CustomerActive); err != nil {
-		t.Errorf("resume = %v, want it allowed", err)
 	}
 }
 
@@ -189,7 +161,7 @@ func TestPauseRefusedIfRejectFails(t *testing.T) {
 		t.Fatalf("status = %s, want needs_review", req.Status)
 	}
 	f.ips.decideErr = errors.New("engine down")
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOrganization, PauseOn, nil); err == nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err == nil {
 		t.Fatal("pause with a review it could not reject went ahead")
 	}
 	if p, _ := pauses.Get(context.Background(), testOrg.ID); p.Paused() {
@@ -203,7 +175,7 @@ func TestPausedOrgRejectsNewReview(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
 	f.send(t)
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PausePlatform, PauseOn, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatalf("SetProofingPaused: %v", err)
 	}
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
@@ -222,7 +194,7 @@ func TestSweepRejectsPausedReview(t *testing.T) {
 	f := newFixture()
 	withPauses(f)
 	f.send(t)
-	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOrganization, PauseOn, nil); err != nil {
+	if _, err := f.svc.SetProofingPaused(context.Background(), testOrg.ID, PauseOn, nil); err != nil {
 		t.Fatalf("SetProofingPaused: %v", err)
 	}
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}

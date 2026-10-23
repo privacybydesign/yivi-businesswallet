@@ -75,6 +75,9 @@ export type OwnVogState = z.infer<typeof ownVogStateSchema>;
 
 export const organizationDetailSchema = organizationSchema.extend({
   role: z.string(),
+  // Whether the caller decides identity checks and data requests: an admin, or
+  // a member an admin gave the reviewer right.
+  canReview: z.boolean(),
   // Absent for a platform admin who is not a member of the org.
   identity: ownIdentityStateSchema.optional(),
   vog: ownVogStateSchema.optional(),
@@ -133,6 +136,7 @@ export const memberSchema = z.object({
   departmentId: z.string().nullable(),
   departmentName: z.string().nullable(),
   phone: z.string().nullable(),
+  canReview: z.boolean(),
   verified: z.boolean(),
   identityVerifiedAt: z.string().nullable(),
   identityRequestedBy: z.string().nullable(),
@@ -160,6 +164,7 @@ export const memberListEntrySchema = z.object({
   expiresAt: z.string().nullable(),
   invitedBy: z.string().nullable(),
   phone: z.string().nullable(),
+  canReview: z.boolean(),
   verified: z.boolean(),
   identityVerifiedAt: z.string().nullable(),
   ...memberIdentityFields,
@@ -468,6 +473,24 @@ export function updateMemberType(
     {
       schema: memberSchema,
       method: "PATCH",
+      body: input,
+      signal,
+    },
+  );
+}
+
+// Gives a member the reviewer right or takes it away. Admin only.
+export function setMemberReviewRight(
+  slug: string,
+  userId: string,
+  input: { canReview: boolean },
+  signal?: AbortSignal,
+): Promise<Member> {
+  return request(
+    `/api/v1/orgs/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}/review-right`,
+    {
+      schema: memberSchema,
+      method: "PUT",
       body: input,
       signal,
     },
@@ -800,7 +823,7 @@ export const auditEventSchema = z.object({
   targetId: z.string(),
   metadata: z.record(z.string(), z.unknown()),
   actor: auditActorSchema.nullable(),
-  // A non-user actor, e.g. `api_key:<prefix>` for a customer API key.
+  // A non-user actor, e.g. `api_key:<prefix>` for an API key.
   actorLabel: z.string().nullable().optional(),
   // Set for an ordinary member: actor, target id and metadata are withheld,
   // so who acted, on whom and what changed is visible to admins only.

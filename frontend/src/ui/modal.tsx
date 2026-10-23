@@ -29,7 +29,7 @@ export function Modal({
   footer,
   wide = false,
   dismissible = true,
-}: ModalProps): React.JSX.Element {
+}: Readonly<ModalProps>): React.JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
   const dismiss = modalDismissal({ dismissible, onClose });
 
@@ -105,7 +105,7 @@ export function Modal({
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
-          <div className="border-line flex items-center justify-end gap-2 border-t px-5 py-3.5">
+          <div className="border-line flex flex-wrap items-center justify-end gap-2 border-t px-5 py-3.5">
             {footer}
           </div>
         )}

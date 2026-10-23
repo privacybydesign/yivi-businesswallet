@@ -2,7 +2,6 @@ package proofingengine
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,8 +13,6 @@ import (
 
 // memSessions is an in-memory session.Interface: Update works on a copy and
 // stores it only when fn succeeds, as the Postgres store's transaction does.
-// The Yivi state is copied too, so a caller's snapshot never shares it with
-// the stored row, as a row read from Postgres does not.
 type memSessions struct {
 	mu   sync.Mutex
 	byID map[string]session.Session
@@ -28,7 +25,7 @@ type memSessions struct {
 func newMemSessions(sessions ...session.Session) *memSessions {
 	m := &memSessions{byID: map[string]session.Session{}, writes: map[string]int{}}
 	for _, s := range sessions {
-		m.byID[s.ID] = copyYivi(s)
+		m.byID[s.ID] = s
 	}
 	return m
 }
@@ -36,7 +33,7 @@ func newMemSessions(sessions ...session.Session) *memSessions {
 func (m *memSessions) Create(sess session.Session) (session.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.byID[sess.ID] = copyYivi(sess)
+	m.byID[sess.ID] = sess
 	return sess, nil
 }
 
@@ -57,17 +54,7 @@ func (m *memSessions) Get(_, id string) (session.Session, error) {
 	if !ok {
 		return session.Session{}, session.ErrNotFound
 	}
-	return copyYivi(sess), nil
-}
-
-// copyYivi is sess with its own copy of the Yivi state.
-func copyYivi(sess session.Session) session.Session {
-	if sess.Yivi != nil {
-		st := *sess.Yivi
-		st.FrameHashes = slices.Clone(st.FrameHashes)
-		sess.Yivi = &st
-	}
-	return sess
+	return sess, nil
 }
 
 func (m *memSessions) Authenticate(token string) (session.Session, error) {
@@ -100,19 +87,33 @@ func (m *memSessions) Update(_, id string, fn func(*session.Session) error) (ses
 	if !ok {
 		return session.Session{}, session.ErrNotFound
 	}
-	sess := copyYivi(stored)
+	sess := stored
 	if err := fn(&sess); err != nil {
 		return session.Session{}, err
 	}
 	m.byID[id] = sess
 	m.writes[id]++
-	return copyYivi(sess), nil
+	return sess, nil
 }
 
 func (m *memSessions) Delete(_, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.byID, id)
+	return nil
+}
+
+func (m *memSessions) SetRetention(_ string, ids []string, retention time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range ids {
+		sess, ok := m.byID[id]
+		if !ok {
+			continue
+		}
+		sess.RetentionOverride = retention
+		m.byID[id] = sess
+	}
 	return nil
 }
 

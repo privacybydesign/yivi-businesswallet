@@ -33,15 +33,19 @@ type Client struct {
 	issuerChain             string
 	intendedUseID           string
 	registrationCertificate string
+	vcts                    vcts
 	http                    *http.Client
 }
 
-func New(baseURL, issuerChain, intendedUseID, registrationCertificate string, httpClient *http.Client) *Client {
+// credentialScheme is the Yivi scheme the requested credentials come from
+// (defaultCredentialScheme when empty).
+func New(baseURL, issuerChain, intendedUseID, registrationCertificate, credentialScheme string, httpClient *http.Client) *Client {
 	return &Client{
 		baseURL:                 strings.TrimRight(baseURL, "/"),
 		issuerChain:             issuerChain,
 		intendedUseID:           intendedUseID,
 		registrationCertificate: registrationCertificate,
+		vcts:                    vctsFor(credentialScheme),
 		http:                    httpClient,
 	}
 }
@@ -65,7 +69,7 @@ type startRequest struct {
 // aspect-flag claims are chosen per org - see queryFor); every other scope
 // ignores it.
 func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...string) (Session, error) {
-	return c.start(ctx, queryFor(scope, claims))
+	return c.start(ctx, c.vcts.queryFor(scope, claims))
 }
 
 // StartQuery creates a presentation request for a runtime-built single-credential
@@ -162,6 +166,7 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 		ByCredential:     parseDisclosuresByCredential(vt.VPToken),
 		IdentityIssuedAt: identityIssuedAt(vt.VPToken),
 		ExpiresAt:        expiresAtByCredential(vt.VPToken),
+		vcts:             c.vcts,
 	}, nil
 }
 

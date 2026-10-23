@@ -261,7 +261,7 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 
 		data := sessionEventData(req, req.Status)
 		data[webhookAddressKey] = addr
-		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionAddressAdded, &req.ID, data)
+		return enqueueRequestWebhook(ctx, q, req, EventSessionAddressAdded, data)
 	})
 	if err != nil {
 		return false, err
@@ -309,8 +309,8 @@ func (s *Service) FlowAddress(ctx context.Context, org Org, flowID string) (Addr
 	return s.flowAddress(ctx, org.ID, flowID)
 }
 
-// SaveFlowAddress sets one of the org's flows' AddressMode. Requests already
-// sent keep the mode they were sent with.
+// SaveFlowAddress sets one of the org's flows' AddressMode, not a data request
+// flow's. Requests already sent keep the mode they were sent with.
 func (s *Service) SaveFlowAddress(ctx context.Context, org Org, flowID string, mode AddressMode) (AddressMode, error) {
 	if s.flowAddressSettings == nil {
 		return "", errors.New("proofing: no address settings store configured")
@@ -319,6 +319,9 @@ func (s *Service) SaveFlowAddress(ctx context.Context, org Org, flowID string, m
 		return "", fmt.Errorf("%w: address is off or required", ErrInvalidInput)
 	}
 	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
+		return "", err
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return "", err
 	}
 	return s.flowAddressSettings.Save(ctx, org.ID, flowID, mode)

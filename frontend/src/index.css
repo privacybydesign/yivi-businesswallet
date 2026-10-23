@@ -127,6 +127,7 @@
   /* Communicating */
   --yb-success: #00973a;
   --yb-success-bg: #e3f4e9;
+  --yb-success-fg: #1e6b3a;
   --yb-warning: #eba73b;
   --yb-warning-fg: #8a5d17;
   --yb-warning-bg: #fbefd8;
@@ -228,6 +229,7 @@
 
   --yb-success: #6ad28c;
   --yb-success-bg: #10321e;
+  --yb-success-fg: #6ad28c;
   --yb-warning: #eba73b;
   --yb-warning-fg: #eba73b;
   --yb-warning-bg: #3a2e14;
@@ -306,6 +308,7 @@
 
   --yb-success: #1f6b4c;
   --yb-success-bg: #e9f9f1;
+  --yb-success-fg: #1f6b4c;
   --yb-error: #b42335;
   --yb-error-bg: #fbeaec;
 
@@ -338,6 +341,7 @@
 
   --color-success: var(--yb-success);
   --color-success-bg: var(--yb-success-bg);
+  --color-success-fg: var(--yb-success-fg);
   --color-warning: var(--yb-warning);
   --color-warning-fg: var(--yb-warning-fg);
   --color-warning-bg: var(--yb-warning-bg);
@@ -502,5 +506,63 @@
     .mesh-wave::after {
       animation: none;
     }
+  }
+}
+
+/* --------- Face match slider ---------
+   The flow editor's threshold (routes/flow-editor-threshold.tsx) draws its own
+   track and fill; the native range input on top is transparent apart from its
+   thumb, so keyboard, touch and screen reader behaviour stay the browser's.
+   The thumb's 20px is THUMB_SIZE there, which places the track and the scale. */
+@layer components {
+  .threshold-range {
+    --thumb: var(--yb-ink);
+    appearance: none;
+    height: 28px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .threshold-range[data-warn] {
+    --thumb: var(--yb-warning-fg);
+  }
+
+  .threshold-range:focus-visible {
+    outline: 2px solid var(--yb-ink);
+    outline-offset: 2px;
+    border-radius: var(--yb-radius-sm);
+  }
+
+  .threshold-range::-webkit-slider-runnable-track {
+    height: 28px;
+    background: transparent;
+  }
+
+  .threshold-range::-moz-range-track {
+    height: 28px;
+    background: transparent;
+  }
+
+  .threshold-range::-webkit-slider-thumb {
+    appearance: none;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    margin-top: 4px;
+    border: 2px solid var(--thumb);
+    border-radius: 50%;
+    background: var(--yb-surface);
+    box-shadow: var(--yb-shadow);
+  }
+
+  .threshold-range::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--thumb);
+    border-radius: 50%;
+    background: var(--yb-surface);
+    box-shadow: var(--yb-shadow);
   }
 }

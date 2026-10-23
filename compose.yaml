@@ -68,6 +68,7 @@ services:
       EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
       EUDI_INTENDED_USE_ID: ${EUDI_INTENDED_USE_ID:-}
       EUDI_REGISTRATION_CERTIFICATE: ${EUDI_REGISTRATION_CERTIFICATE:-}
+      EUDI_CREDENTIAL_SCHEME: ${EUDI_CREDENTIAL_SCHEME:-}
       # Public base URL of the frontend, used to build claim links in outbound
       # e-mail / QERDS credential-offer messages.
       APP_BASE_URL: ${APP_BASE_URL:-}
@@ -106,7 +107,7 @@ services:
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
       # Identity proofing runs in the backend's own engine (`engine`, the
       # default) or the in-memory `stub`. The encryption key (hex 32 bytes)
-      # seals the sessions' evidence and the customer secrets at rest.
+      # seals the sessions' evidence and the webhook secrets at rest.
       IDENTITY_PROOFING_PROVIDER: ${IDENTITY_PROOFING_PROVIDER:-}
       IDENTITY_PROOFING_ENCRYPTION_KEY: ${IDENTITY_PROOFING_ENCRYPTION_KEY:-}
       # Makes every `stub` session decide (approved, rejected or needs_review).

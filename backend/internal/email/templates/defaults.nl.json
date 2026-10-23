@@ -35,6 +35,7 @@
     "membership.declined": "Uitnodiging geweigerd",
     "membership.revoked": "Lidmaatschap ingetrokken",
     "membership.role_changed": "Rol gewijzigd",
+    "membership.review_changed": "Recht om te beoordelen gewijzigd",
     "membership.expired": "Uitnodiging verlopen",
     "membership.identity_requested": "Identificatie aangevraagd",
     "membership.identity_reverified": "Identiteit opnieuw bevestigd",

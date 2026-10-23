@@ -191,7 +191,15 @@ type LevelRequirement struct {
 	Level        AssuranceLevel
 	Checks       []Check
 	FaceProvider FaceProvider
+	// MinFaceMatch is the lowest face match threshold a flow requiring Level may
+	// set; 0 puts no floor under it.
+	MinFaceMatch float64
 }
+
+// SubstantialMinFaceMatch is Regula's default face match threshold, which
+// Substantial has always used: eIDAS sets no face match score, so this floor is
+// our own.
+const SubstantialMinFaceMatch = 0.75
 
 // LevelRequirements is every level this service can claim, lowest first.
 // High is absent: no check computed here is certified anti-spoofing.
@@ -207,6 +215,7 @@ var LevelRequirements = []LevelRequirement{
 		Level:        AssuranceLevelSubstantial,
 		Checks:       []Check{CheckNFCPassiveAuth, CheckNFCChipAuth, CheckFaceMatch, CheckFaceLiveness},
 		FaceProvider: FaceProviderRegula,
+		MinFaceMatch: SubstantialMinFaceMatch,
 	},
 }
 
@@ -288,6 +297,15 @@ type FlowDefinition struct {
 	// releases the outcome only. A stored version's former
 	// RequestedAttributesConfigured key is ignored.
 	RequestedAttributes []string `json:"RequestedAttributes"`
+	// AgeOver is the age, in years, AttributeAgeOver answers for: set exactly
+	// when that attribute is requested.
+	AgeOver int `json:"AgeOver"`
+	// AttributeReasons is why each requested attribute is collected, by
+	// attribute and then language, as the person reads it before they start. A
+	// version saved before reasons existed has none; which languages the
+	// reasons must cover is the wallet's to check, as it holds the hosted
+	// page's languages.
+	AttributeReasons map[string]map[string]string `json:"AttributeReasons"`
 	// SelfieLocation is who runs the face step (empty is the browser); Validate
 	// refuses it without a face step.
 	SelfieLocation StepLocation `json:"SelfieLocation"`
@@ -317,7 +335,9 @@ type FlowDefinition struct {
 	// check listed scores as failed.
 	RequiredChecks []Check `json:"RequiredChecks"`
 	// CheckThresholds are minimum scores for listed checks; only CheckFaceMatch
-	// has a score. A check without one is pass/fail.
+	// has a score. A check without one is pass/fail. The face match's replaces
+	// the deployment's threshold, and a flow requiring Substantial may not set
+	// it under SubstantialMinFaceMatch.
 	CheckThresholds map[Check]float64 `json:"CheckThresholds"`
 	// RequiredAssuranceLevel is the minimum eIDAS level a session must achieve
 	// to be approved (MeetsLevel); empty requires none. It changes no step, no
@@ -334,6 +354,10 @@ type FlowDefinition struct {
 	// kept, replacing the customer's retention and the engine default. A session
 	// stamps it at creation, so a later edit does not change it.
 	RetentionOverride time.Duration `json:"RetentionOverride"`
+	// SessionTTL, when set, is how long a session of this flow runs, replacing
+	// the org's session lifetime. The wallet reads it when it creates a session;
+	// the engine only keeps it.
+	SessionTTL time.Duration `json:"SessionTTL"`
 	// AssuranceTiers override DefaultAssuranceTiers: the percentage-of-checks
 	// ladder a session's achieved score maps onto, as opposed to the eIDAS level
 	// RequiredAssuranceLevel demands. Empty uses the default.
@@ -398,10 +422,26 @@ const MaxRetentionOverride = MaxRetentionOverrideDays * day
 // MaxRetentionOverrideDays is MaxRetentionOverride in days.
 const MaxRetentionOverrideDays = 365
 
+// MaxSessionTTL is the longest a flow's session may run: the engine's own cap
+// on any session (Config.SessionMaxLifetime). It also keeps the override
+// within a Duration.
+const MaxSessionTTL = 15 * time.Minute
+
 // DocumentTypeDrivingLicence is an EU driving licence's document type, which
 // has no MRZ document code; the app reports it at document_capture. The
 // engine verifies Dutch licences only (mrtdverify.DrivingLicenceIssuingState).
 const DocumentTypeDrivingLicence = "drivers_license"
+
+// AttributeAgeOver is the requested attribute that releases only whether the
+// holder is AgeOver or older, derived from the chip's date of birth.
+const AttributeAgeOver = "age_over"
+
+// minAgeOver and maxAgeOver are the lowest and highest age a flow can ask the
+// holder to be over.
+const (
+	minAgeOver = 1
+	maxAgeOver = 120
+)
 
 // DocumentTypeEUDrivingLicence is the other spelling of an EU driving
 // licence: mrtdEvidence's documentType for a licence chip.
@@ -611,15 +651,36 @@ func validate(fd FlowDefinition) error {
 	if fd.RetentionOverride < 0 || fd.RetentionOverride > MaxRetentionOverride {
 		return fmt.Errorf("flow: retentionOverride must be between 0 and %d days", MaxRetentionOverride/day)
 	}
+	if fd.SessionTTL < 0 || fd.SessionTTL > MaxSessionTTL {
+		return fmt.Errorf("flow: sessionTtl must be between 0 and %d minutes", MaxSessionTTL/time.Minute)
+	}
 
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {
 		return err
 	}
+	return validateAgeOver(fd, seenSteps)
+}
+
+// validateAgeOver refuses AttributeAgeOver without the chip read it is derived
+// from or an age to answer for, and an age without the attribute.
+func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
+	if !slices.Contains(fd.RequestedAttributes, AttributeAgeOver) {
+		if fd.AgeOver != 0 {
+			return fmt.Errorf("flow: ageOver set without %q in requestedAttributes", AttributeAgeOver)
+		}
+		return nil
+	}
+	if !seenSteps[StepNFCRead] {
+		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
+	}
+	if fd.AgeOver < minAgeOver || fd.AgeOver > maxAgeOver {
+		return fmt.Errorf("flow: ageOver must be between %d and %d", minAgeOver, maxAgeOver)
+	}
 	return nil
 }
 
-// validateRequiredLevel rejects a RequiredAssuranceLevel fd's checks and face
-// provider cannot reach (see LevelRequirements).
+// validateRequiredLevel rejects a RequiredAssuranceLevel fd's checks, face
+// provider and face match threshold cannot reach (see LevelRequirements).
 func validateRequiredLevel(fd FlowDefinition, seenChecks map[Check]bool) error {
 	if fd.RequiredAssuranceLevel == "" {
 		return nil
@@ -635,6 +696,9 @@ func validateRequiredLevel(fd FlowDefinition, seenChecks map[Check]bool) error {
 	}
 	if req.FaceProvider != "" && fd.FaceProvider != req.FaceProvider {
 		return fmt.Errorf("flow: requiredAssuranceLevel %q requires faceProvider %q", req.Level, req.FaceProvider)
+	}
+	if threshold, ok := fd.CheckThresholds[CheckFaceMatch]; ok && threshold < req.MinFaceMatch {
+		return fmt.Errorf("flow: requiredAssuranceLevel %q requires a face match threshold of at least %.2f", req.Level, req.MinFaceMatch)
 	}
 	return nil
 }

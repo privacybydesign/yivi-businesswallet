@@ -51,7 +51,7 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		defer regulaFaceVerifier{client: s.cfg.Regula}.Release(r.Context(), sess, live)
 	}
 	provider := s.faceProviderFor(resolvedFlow)
-	verifier, ok := s.faceVerifier(provider)
+	verifier, ok := s.faceVerifier(provider, resolvedFlow)
 	if !ok {
 		writeFaceProviderUnavailable(w)
 		return

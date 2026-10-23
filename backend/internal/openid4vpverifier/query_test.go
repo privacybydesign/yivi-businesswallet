@@ -28,7 +28,7 @@ func TestStartQueryAsksForOneCredentialWithAllClaims(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "", "", "", srv.Client())
+	c := New(srv.URL, "", "", "", "", srv.Client())
 	sess, err := c.StartQuery(context.Background(), Query{VCT: "nl.nijmegen.apv.standplaatsvergunning", Claims: []string{"vergunningnummer", "markt"}})
 	if err != nil {
 		t.Fatalf("StartQuery: %v", err)
@@ -62,7 +62,7 @@ func TestStartQueryAsksForOneCredentialWithAllClaims(t *testing.T) {
 }
 
 func TestStartQueryRefusesEmptyQuery(t *testing.T) {
-	c := New("http://verifier.invalid", "", "", "", http.DefaultClient)
+	c := New("http://verifier.invalid", "", "", "", "", http.DefaultClient)
 	if _, err := c.StartQuery(context.Background(), Query{VCT: "nl.x", Claims: nil}); err == nil {
 		t.Error("expected an error for a query without claims")
 	}
@@ -91,7 +91,7 @@ func TestResultReadsQueryClaimsAndExpiry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "", "", "", srv.Client())
+	c := New(srv.URL, "", "", "", "", srv.Client())
 	p, err := c.Result(context.Background(), "tx-1")
 	if err != nil {
 		t.Fatalf("Result: %v", err)

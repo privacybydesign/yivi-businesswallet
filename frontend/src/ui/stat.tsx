@@ -16,7 +16,7 @@ export function Stat({
   value,
   hint,
   icon,
-}: StatProps): React.JSX.Element {
+}: Readonly<StatProps>): React.JSX.Element {
   return (
     <Card className="px-4 py-3.5">
       <div className="flex items-center justify-between">

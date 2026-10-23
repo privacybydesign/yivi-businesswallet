@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   message: string;
   // Label for the confirm action button (translated by the caller).
   confirmLabel: string;
+  // Label for the cancel button (translated by the caller); "Cancel" when absent.
+  cancelLabel?: string;
   // Confirm button style; defaults to the destructive variant since most
   // confirmations gate a delete.
   confirmVariant?: "primary" | "danger";
@@ -27,12 +29,13 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
+  cancelLabel,
   confirmVariant = "danger",
   onConfirm,
   onClose,
   busy = false,
   error,
-}: ConfirmDialogProps): React.JSX.Element {
+}: Readonly<ConfirmDialogProps>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Modal
@@ -42,7 +45,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose}>
-            {t("common.cancel")}
+            {cancelLabel ?? t("common.cancel")}
           </Button>
           <Button
             variant={confirmVariant}

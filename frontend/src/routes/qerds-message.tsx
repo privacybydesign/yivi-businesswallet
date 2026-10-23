@@ -57,13 +57,13 @@ function OfferCard({
   senderAddress,
   rawBody,
   t,
-}: {
+}: Readonly<{
   slug: string;
   offer: QerdsCredentialOffer;
   senderAddress: string;
   rawBody: string;
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const credentialName =
     offer.credentialName || t("attestations.offers.unnamedCredential");
   const sender = offer.senderOrgName || senderAddress;
@@ -131,12 +131,12 @@ function DetailRow({
   value,
   mono,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   mono?: boolean;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -157,11 +157,11 @@ function EvidenceItem({
   evidence,
   dateFormatter,
   t,
-}: {
+}: Readonly<{
   evidence: QerdsEvidence;
   dateFormatter: Intl.DateTimeFormat;
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <li className="flex gap-3">
       <span className="text-valid inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--color-valid)_14%,transparent)]">
@@ -197,12 +197,12 @@ function AttachmentsCard({
   messageId,
   attachments,
   t,
-}: {
+}: Readonly<{
   slug: string;
   messageId: string;
   attachments: QerdsAttachment[];
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
   async function download(attachment: QerdsAttachment): Promise<void> {

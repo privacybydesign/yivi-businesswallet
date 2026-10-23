@@ -55,8 +55,13 @@ func selfieOnlyFlow() *flow.FlowDefinition {
 
 // liveRegulaMatch is a live face Regula matched against the chip's portrait.
 func liveRegulaMatch() appResultRequest {
+	return liveRegulaScore(0.9)
+}
+
+// liveRegulaScore is a live face Regula matched with the given similarity.
+func liveRegulaScore(score float64) appResultRequest {
 	return appResultRequest{Biometrics: &biometricsInfo{
-		FaceVerified: ptr(true), LivenessResult: "passed", Engine: faceProviderRegula,
+		FaceMatchScore: &score, FaceVerified: ptr(true), LivenessResult: "passed", Engine: faceProviderRegula,
 	}}
 }
 
@@ -107,6 +112,12 @@ func TestEIDASAssuranceLevel(t *testing.T) {
 	noLivenessResult := liveRegulaMatch()
 	noLivenessResult.Biometrics.Engine, noLivenessResult.Biometrics.LivenessResult = "iris", ""
 
+	noScore := liveRegulaMatch()
+	noScore.Biometrics.FaceMatchScore = nil
+
+	lowThreshold := substantialFlow(flow.AssuranceLevelLow)
+	lowThreshold.CheckThresholds = map[flow.Check]float64{flow.CheckFaceMatch: 0.6}
+
 	for _, tc := range []struct {
 		name   string
 		fd     *flow.FlowDefinition
@@ -129,6 +140,12 @@ func TestEIDASAssuranceLevel(t *testing.T) {
 		{"liveness failed", substantialFlow(""), notLiveButMatched, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
 		{"face not by Regula", substantialFlow(""), onDevice, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
 		{"face not against the chip", substantialFlow(""), liveRegulaMatch(), verifiedChip(), matchedRelyingPartyPhoto, flow.AssuranceLevelLow},
+		// A flow may match below the Substantial floor, but a face under it
+		// reaches no more than low.
+		{"flow threshold under the floor, score under it", lowThreshold, liveRegulaScore(0.65), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"flow threshold under the floor, score at it", lowThreshold, liveRegulaScore(flow.SubstantialMinFaceMatch), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelSubstantial},
+		{"no flow threshold, score under the floor", substantialFlow(""), liveRegulaScore(0.65), verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
+		{"match without a score", substantialFlow(""), noScore, verifiedChip(), matchedChipPortrait, flow.AssuranceLevelLow},
 		// The level follows the evidence produced, not the flow's checkbox: a
 		// liveness result that passed counts even when face.liveness is not
 		// listed, and an engine that reports no liveness leaves it not

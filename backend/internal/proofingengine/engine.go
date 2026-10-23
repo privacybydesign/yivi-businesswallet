@@ -77,13 +77,15 @@ type Config struct {
 	// time.Now. A test sets it to read a fixture document while it was valid.
 	Now func() time.Time
 
-	// Regula verifies a native face step (and the Yivi method's face check)
-	// against the Regula Face API; nil leaves both unavailable.
+	// Regula verifies a native face step against the Regula Face API; nil
+	// leaves it unavailable.
 	Regula RegulaClient
 	// RegulaSweeps queues each session's Regula tag for deletion once it ends.
 	RegulaSweeps regulasweep.Queue
 	// RegulaFaceAPIPublicURL is the Face API the app runs liveness against;
-	// RegulaFaceMatchThreshold the similarity a match must reach.
+	// RegulaFaceMatchThreshold the similarity a match must reach, unless the
+	// flow sets its own; a flow's required level may raise it
+	// (faceMatchThreshold).
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
 
@@ -91,12 +93,8 @@ type Config struct {
 	// (mrtdverify.LoadCertPool); nil trusts no licence.
 	DrivingLicenceCertPool cms.CertPool
 
-	// BoundLoginTTL is a Yivi-method session's default lifetime;
-	// BoundLoginStableFrames the consecutive matching frames that approve
-	// it, BoundLoginMaxAttempts the usable frames before it is rejected.
-	BoundLoginTTL          time.Duration
-	BoundLoginStableFrames int
-	BoundLoginMaxAttempts  int
+	// BoundLoginTTL is a Yivi-method session's default lifetime.
+	BoundLoginTTL time.Duration
 
 	// DeviceTrail records which devices took part in a session in the org's
 	// audit log (deviceTrailEvents); nil keeps the trail in the server log only.
@@ -179,8 +177,6 @@ func DefaultConfig() Config {
 		HandoverLimit:            ratelimit.Limit{Burst: 20, Per: time.Minute},
 		RegulaFaceMatchThreshold: regula.DefaultMatchThreshold,
 		BoundLoginTTL:            5 * time.Minute,
-		BoundLoginStableFrames:   3,
-		BoundLoginMaxAttempts:    40,
 	}
 }
 
@@ -250,12 +246,6 @@ func New(cfg Config, sessions session.Interface, flows flow.Store, tenants Tenan
 	}
 	if cfg.DrivingLicenceCertPool == nil {
 		cfg.DrivingLicenceCertPool = &cms.GenericCertPool{}
-	}
-	if cfg.BoundLoginStableFrames <= 0 {
-		cfg.BoundLoginStableFrames = 1
-	}
-	if cfg.BoundLoginMaxAttempts < cfg.BoundLoginStableFrames {
-		cfg.BoundLoginMaxAttempts = cfg.BoundLoginStableFrames
 	}
 	if cfg.BoundLoginTTL <= 0 {
 		cfg.BoundLoginTTL = cfg.SessionCreateTTL

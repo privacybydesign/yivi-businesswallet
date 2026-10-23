@@ -185,7 +185,7 @@ function ProofingPauseCell({
   pause,
   loaded,
   failed,
-}: {
+}: Readonly<{
   orgId: string;
   orgName: string;
   pause: ProofingPause | undefined;
@@ -193,7 +193,7 @@ function ProofingPauseCell({
   // while it loads, or when it failed, its state is not known.
   loaded: boolean;
   failed: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const set = useSetPlatformPauseMutation();
   // Pausing stops a whole organisation's proofing, so it is confirmed first.
@@ -206,7 +206,6 @@ function ProofingPauseCell({
     );
   }
   const byPlatform = pause?.platformPausedAt !== undefined;
-  const byOrganization = pause?.orgPausedAt !== undefined;
 
   return (
     <div
@@ -221,10 +220,6 @@ function ProofingPauseCell({
                 name: pause.platformPausedBy.name,
               })
             : t("identityProofing.pause.pausedByPlatformAdmin")}
-        </Tag>
-      ) : byOrganization ? (
-        <Tag tone="default">
-          {t("identityProofing.pause.pausedByOrganization")}
         </Tag>
       ) : (
         <Tag tone="green">{t("identityProofing.pause.active")}</Tag>
