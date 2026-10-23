@@ -36,7 +36,7 @@ export function Select({
   className = "w-full",
   children,
   ...rest
-}: SelectProps): React.JSX.Element {
+}: Readonly<SelectProps>): React.JSX.Element {
   return (
     <div className={`relative ${className}`}>
       <select

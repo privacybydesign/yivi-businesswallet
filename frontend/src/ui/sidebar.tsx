@@ -152,10 +152,10 @@ const NAV_ICON_SIZE = 16;
 function CountBadge({
   count,
   capped = false,
-}: {
+}: Readonly<{
   count: number;
   capped?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <span className="bg-ink text-surface ml-auto min-w-5 rounded-full px-1.5 text-center text-[11.5px] leading-5">
@@ -197,7 +197,7 @@ export function Sidebar({
   onNavigate,
   brandLogoUri,
   brandName,
-}: SidebarProps): React.JSX.Element {
+}: Readonly<SidebarProps>): React.JSX.Element {
   const { t } = useTranslation();
   const matches = useMatches();
   const { pathname } = useLocation();

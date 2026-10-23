@@ -9,6 +9,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - `isolatedModules` + bundler resolution — no `const enum`, no namespace tricks.
 - No `any`. Prefer `unknown` + narrowing guard. Never `as any` to silence the compiler.
 - Explicit return types on exported functions and component prop types.
+- **Component props are read-only** (SonarCloud S6759): an inline props type is `}: Readonly<{ … }>`, a named one is wrapped where it is used (`}: Readonly<ButtonProps>`). `sonarjs/prefer-read-only-props` fails lint on one that is not, but it misses a component whose every `return` is a ternary and one whose props type is a union (`Avatar`), so those keep the form by hand.
 
 ## Imports
 

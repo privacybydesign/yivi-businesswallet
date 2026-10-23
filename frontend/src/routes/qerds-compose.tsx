@@ -88,13 +88,13 @@ function Field({
   required,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={FIELD_LABEL}>

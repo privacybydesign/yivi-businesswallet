@@ -21,7 +21,7 @@ export function StatusText({
   tone = "default",
   title,
   children,
-}: StatusTextProps): React.JSX.Element {
+}: Readonly<StatusTextProps>): React.JSX.Element {
   return (
     <span title={title} className={`whitespace-nowrap ${TONE_CLASSES[tone]}`}>
       {children}

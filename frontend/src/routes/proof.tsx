@@ -112,10 +112,10 @@ function initialStep(page: HostedProofing): Step {
 function HostedFlow({
   token,
   page,
-}: {
+}: Readonly<{
   token: string;
   page: HostedProofing;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
@@ -329,12 +329,12 @@ function DeclineConfirm({
   decline,
   onClose,
   onDeclined,
-}: {
+}: Readonly<{
   organization: string;
   decline: ReturnType<typeof useDeclineHostedMutation>;
   onClose: () => void;
   onDeclined: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <ConfirmDialog
@@ -366,11 +366,11 @@ function HostedCheckEnded({
   name,
   contact,
   reason,
-}: {
+}: Readonly<{
   name: string;
   contact: string;
   reason: CheckEndReason;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const link = supportContactLink(contact);
   // The page can be framed, and a plain link would replace it inside the frame.
@@ -422,12 +422,12 @@ function DataRequestOutcome({
   organization,
   kind,
   progress,
-}: {
+}: Readonly<{
   token: string;
   organization: string;
   kind: DataKind;
   progress: ProofingProgress;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const formatDate = useDateFormatter();

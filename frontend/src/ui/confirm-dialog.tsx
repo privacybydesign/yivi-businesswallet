@@ -35,7 +35,7 @@ export function ConfirmDialog({
   onClose,
   busy = false,
   error,
-}: ConfirmDialogProps): React.JSX.Element {
+}: Readonly<ConfirmDialogProps>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Modal

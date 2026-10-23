@@ -121,10 +121,10 @@ function configFingerprint(s: ProvisioningSettings): string {
 function ProvisioningForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: ProvisioningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateProvisioningSettingsMutation(slug);
 
@@ -339,10 +339,10 @@ function skipCounts(result: ProvisioningSyncResult): [string, number][] {
 function SyncCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProvisioningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const sync = useRunProvisioningSyncMutation(slug);
@@ -455,9 +455,9 @@ function EntraGuidanceCard(): React.JSX.Element {
 // and gated on admin, so the panel only owns the settings query and its forms.
 export function ProvisioningSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProvisioningSettingsQuery(slug, true);
 

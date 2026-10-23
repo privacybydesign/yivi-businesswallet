@@ -64,10 +64,10 @@ function testError(error: Error, t: TFunction): string {
 function SmtpForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: EmailSettingsData;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateEmailSettingsMutation(slug);
 
@@ -338,7 +338,7 @@ function SmtpForm({
   );
 }
 
-function TestForm({ slug }: { slug: string }): React.JSX.Element {
+function TestForm({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendTestEmailMutation(slug);
   const [testTo, setTestTo] = useState("");
@@ -394,9 +394,9 @@ function TestForm({ slug }: { slug: string }): React.JSX.Element {
 // gated on admin, so the panel only owns the settings query and its forms.
 export function EmailSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useEmailSettingsQuery(slug, true);
 

@@ -83,10 +83,10 @@ function providerKindLabel(id: string, t: TFunction): string {
 function ConfigForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: CscSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateCscSettingsMutation(slug);
 
@@ -242,10 +242,10 @@ function ConfigForm({
 function TestCard({
   slug,
   ready,
-}: {
+}: Readonly<{
   slug: string;
   ready: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useTestCscConnectionMutation(slug);
 
@@ -294,9 +294,9 @@ function TestCard({
 // and its forms.
 export function CscSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useCscSettingsQuery(slug, true);
 

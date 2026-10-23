@@ -22,7 +22,7 @@ interface DataDisclosureProps {
 // strings. Used to make identity read-out transparent before the user scans.
 export function DataDisclosure({
   items,
-}: DataDisclosureProps): React.JSX.Element {
+}: Readonly<DataDisclosureProps>): React.JSX.Element {
   return (
     <ul className="flex flex-col gap-3">
       {items.map((item) => (

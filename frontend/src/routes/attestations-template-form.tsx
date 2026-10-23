@@ -106,7 +106,7 @@ export function AttestationTemplateForm({
   schemas,
   keys,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const isEdit = template !== undefined;
   const create = useCreateAttestationTemplateMutation(slug);

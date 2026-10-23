@@ -36,7 +36,7 @@ export function IdentityDisclosure({
   sessionUrl,
   onToken,
   onAborted,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<DisclosurePhase>("starting");
   const [qrDataUrl, setQrDataUrl] = useState("");

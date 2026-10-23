@@ -10,9 +10,9 @@ const NOTICE_ICON_SIZE = 18;
 // admin paused it, and only they resume it.
 export function ProofingPausedNotice({
   pause,
-}: {
+}: Readonly<{
   pause: ProofingPause;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (

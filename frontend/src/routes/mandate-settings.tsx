@@ -106,7 +106,7 @@ function Field({
   hint,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
@@ -115,7 +115,7 @@ function Field({
     "aria-describedby"?: string;
     "aria-invalid"?: boolean;
   }>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : "", error ? errorId : ""]
@@ -150,10 +150,10 @@ function Field({
 function GrantMandateDialog({
   slug,
   onClose,
-}: {
+}: Readonly<{
   slug: string;
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const members = useOrganizationMembersQuery(
     slug,
@@ -376,12 +376,12 @@ function RevokeMandateDialog({
   mandate,
   cascade,
   onClose,
-}: {
+}: Readonly<{
   slug: string;
   mandate: Mandate;
   cascade: Mandate[];
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const revoke = useRevokeMandateMutation(slug);
 
@@ -543,7 +543,9 @@ function RevokeMandateDialog({
   );
 }
 
-export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
+export function MandateSettings({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const mandates = useMandatesQuery(slug);
   const authority = useMandateAuthorityQuery(slug);

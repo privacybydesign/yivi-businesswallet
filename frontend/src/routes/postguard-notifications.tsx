@@ -28,10 +28,10 @@ const OPTIONS = [
 export function PostguardNotificationsCard({
   slug,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = usePostguardSettingsQuery(slug);
   const save = useSetPostguardNotificationsMutation(slug);

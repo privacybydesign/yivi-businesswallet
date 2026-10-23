@@ -87,9 +87,9 @@ function colorsFromSettings(settings: OrgTheme): Colors {
 
 export function ThemeSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const theme = useOrgThemeQuery(slug);
 
@@ -129,14 +129,14 @@ export function ColorField({
   onChange,
   onClear,
   clearLabel,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   fallback: string;
   onChange: (next: string) => void;
   onClear: () => void;
   clearLabel: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const active = HEX_PATTERN.test(value);
   // Hex is case-insensitive; normalise to lower case so the native colour
   // picker (which only accepts lower-case #rrggbb) round-trips a saved value.
@@ -172,10 +172,10 @@ export function ColorField({
 function ThemeForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: OrgTheme;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateOrgThemeMutation(slug);
 

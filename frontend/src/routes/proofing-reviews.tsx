@@ -119,11 +119,11 @@ function ReviewTabs({
   active,
   counts,
   capped,
-}: {
+}: Readonly<{
   active: ReviewTab;
   counts: ReturnType<typeof reviewCounts>;
   capped: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const countOf: Record<ReviewTab, number | undefined> = {
     all: counts.all,
@@ -170,12 +170,12 @@ function WaitingTable({
   requests,
   pending,
   error,
-}: {
+}: Readonly<{
   slug: string;
   requests: ProofingRequest[];
   pending: boolean;
   error: Error | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   // The one line the table shows instead of rows, if any.
   let state: string | undefined;
@@ -234,10 +234,10 @@ function provenLine(request: ProofingRequest, t: TFunction): string {
 function PersonCell({
   request,
   children,
-}: {
+}: Readonly<{
   request: ProofingRequest;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const name = personName(request, t);
   return (
@@ -252,9 +252,9 @@ function PersonCell({
 
 function WhatCell({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (isDataRequest(request.flowKind)) {
     return (
@@ -274,10 +274,10 @@ function WhatCell({
 function WaitingRow({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const formatDay = useDayMonthFormatter();
@@ -319,7 +319,7 @@ function WaitingRow({
 
 // The data requests that ended, read as such: no identity check takes their
 // place under the list's cap.
-function ClosedTable({ slug }: { slug: string }): React.JSX.Element {
+function ClosedTable({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useClosedDataRequestsQuery(slug, { enabled: true });
   const closed = closedRequests(requests.data ?? []);
@@ -367,10 +367,10 @@ function ClosedTable({ slug }: { slug: string }): React.JSX.Element {
 function ClosedRow({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const approved = request.status === "approved";

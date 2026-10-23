@@ -23,7 +23,7 @@ export function OptionRow({
   hint,
   lock,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   checked: boolean;
   disabled?: boolean;
@@ -31,7 +31,7 @@ export function OptionRow({
   hint?: string;
   lock?: OptionLock;
   onChange?: (checked: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const hintId = `${id}-hint`;
   const lockId = `${id}-lock`;
   const locked = lock !== undefined;
@@ -80,11 +80,11 @@ export function Section({
   title,
   hint,
   children,
-}: {
+}: Readonly<{
   title: string;
   hint: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <section className="border-line flex flex-col gap-4 border-t px-6 py-5">
       <div className="flex flex-col gap-1">

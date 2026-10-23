@@ -131,11 +131,11 @@ export function PeopleList({
   slug,
   isAdmin,
   flow,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
   flow?: ProofingFlow;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [flowFilter, setFlowFilter] = useState("");
   const scope: PeopleScope = flow ? "flow" : "all";
@@ -303,7 +303,7 @@ function SessionRow({
   expanded,
   onToggle,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
   isAdmin: boolean;
@@ -312,7 +312,7 @@ function SessionRow({
   expanded: boolean;
   onToggle: () => void;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
@@ -598,9 +598,9 @@ function SessionAddress({
 // approved one that requires them, that none came.
 function DiplomaNote({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (request.diplomas.length > 0) {
     return (
@@ -627,9 +627,9 @@ function DiplomaNote({
 // number duo.nl/diplomacontrole checks.
 function SessionDiplomas({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
@@ -680,9 +680,9 @@ function SessionDiplomas({
 // from the engine when an admin opens the row, audited each time.
 function IdentityRows({
   result,
-}: {
+}: Readonly<{
   result: UseQueryResult<ProofingResult, Error>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const check = (value: string | undefined): string => {
     if (value === undefined || value === "") {
@@ -787,9 +787,9 @@ function IdentityRows({
 // is blurred until a member reveals it.
 function IdentityPhotos({
   result,
-}: {
+}: Readonly<{
   result: ProofingResult;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const photos = [
     { key: "photo", image: result.photo },
@@ -823,10 +823,10 @@ const REVEAL_ICON_SIZE = 16;
 function RevealablePhoto({
   image,
   label,
-}: {
+}: Readonly<{
   image: ProofingImage;
   label: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
@@ -874,10 +874,10 @@ function RevealablePhoto({
 function SessionTimeline({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
   const formatWhen = useWhenFormatter();

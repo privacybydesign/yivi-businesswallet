@@ -150,13 +150,13 @@ function VerifyFlow({
   settings,
   flow,
   subject,
-}: {
+}: Readonly<{
   slug: string;
   org: VerifyOrg;
   settings: ProofingSettings;
   flow: ProofingFlow;
   subject: VerifyState;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
   const [method, setMethod] = useState<ProofingMethod>("idem_app");

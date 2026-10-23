@@ -41,10 +41,10 @@ interface Item {
 function ItemRows({
   items,
   className,
-}: {
+}: Readonly<{
   items: Item[];
   className: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <ul>
       {items.map((item) => (
@@ -71,12 +71,12 @@ export function DashboardTodo({
   orgName,
   isAdmin,
   canReview,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   isAdmin: boolean;
   canReview: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const insights = useMemberInsightsQuery(slug, isAdmin);
   const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
@@ -162,10 +162,10 @@ export function DashboardTodo({
 export function DashboardWaiting({
   slug,
   canReview,
-}: {
+}: Readonly<{
   slug: string;
   canReview: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useExternalRequestsInQuery(
     slug,

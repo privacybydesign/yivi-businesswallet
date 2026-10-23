@@ -25,10 +25,10 @@ const ERROR = "text-error text-[12px]";
 export function MemberProofing({
   slug,
   userId,
-}: {
+}: Readonly<{
   slug: string;
   userId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const flows = useProofingFlowsQuery(slug);

@@ -31,9 +31,9 @@ function isKnownStatus(
 
 export function OrgProfileSettings({
   org,
-}: {
+}: Readonly<{
   org: OrganizationDetail;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
@@ -49,7 +49,9 @@ export function OrgProfileSettings({
   );
 }
 
-function OrgNameCard({ org }: { org: OrganizationDetail }): React.JSX.Element {
+function OrgNameCard({
+  org,
+}: Readonly<{ org: OrganizationDetail }>): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateOrganizationMutation(org.slug);
   const [editing, setEditing] = useState(false);
@@ -159,9 +161,9 @@ function OrgNameCard({ org }: { org: OrganizationDetail }): React.JSX.Element {
 
 function BusinessWalletCard({
   org,
-}: {
+}: Readonly<{
   org: OrganizationDetail;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (

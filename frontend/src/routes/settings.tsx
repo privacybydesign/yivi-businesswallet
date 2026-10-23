@@ -158,11 +158,11 @@ function SettingsPanel({
   tab,
   slug,
   org,
-}: {
+}: Readonly<{
   tab: SettingsTab;
   slug: string;
   org: OrganizationDetail;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   switch (tab) {
     case "org":
       return <OrgProfileSettings org={org} />;

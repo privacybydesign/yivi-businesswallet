@@ -73,14 +73,14 @@ export function FlowEditor({
   onDone,
   onSaved,
   note,
-}: {
+}: Readonly<{
   slug: string;
   mode: EditorMode;
   onDone: () => void;
   onSaved?: (flow: ProofingFlow) => void;
   // Shown under the heading, e.g. that a shared flow changes for everyone.
   note?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
@@ -354,11 +354,11 @@ function LevelOption({
   choice,
   selected,
   onSelect,
-}: {
+}: Readonly<{
   choice: LevelChoice;
   selected: boolean;
   onSelect: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (

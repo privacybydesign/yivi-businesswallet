@@ -82,10 +82,10 @@ export default function IdentityProofingFlows(): React.JSX.Element {
 function FlowsTable({
   slug,
   flows,
-}: {
+}: Readonly<{
   slug: string;
   flows: ProofingFlow[];
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSetFlowSelectionMutation(slug);
   const stats = useProofingStatsQuery(slug);
@@ -263,7 +263,9 @@ function FlowsTable({
 
 // See my data and Delete my data are not in the list: every org offers them,
 // and they are set in Settings › Data and privacy, not edited as flows.
-function DataRequestsNote({ slug }: { slug: string }): React.JSX.Element {
+function DataRequestsNote({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (

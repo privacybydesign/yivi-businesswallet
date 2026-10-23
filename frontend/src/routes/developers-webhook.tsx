@@ -32,7 +32,9 @@ const SECRET_MASK = "••••••••••••••••";
 
 // Where the org's session results go: one endpoint the org hosts, for all its
 // flows, with the deliveries made to it. Without one, no event reaches the org.
-export function WebhookSection({ slug }: { slug: string }): React.JSX.Element {
+export function WebhookSection({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const webhook = useProofingWebhookQuery(slug);
   const [editing, setEditing] = useState(false);
@@ -89,12 +91,12 @@ function EndpointForm({
   webhook,
   onCancel,
   onSaved,
-}: {
+}: Readonly<{
   slug: string;
   webhook: ProofingWebhook;
   onCancel?: () => void;
   onSaved: (saved: ProofingWebhook) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveWebhookMutation(slug);
   const [url, setUrl] = useState(webhook.url ?? "");
@@ -189,9 +191,9 @@ function EndpointForm({
 // Sessions, through the API and in the audit log.
 function DefaultEndpointCard({
   onCustomize,
-}: {
+}: Readonly<{
   onCustomize: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Card>
@@ -220,12 +222,12 @@ function EndpointCard({
   webhook,
   onEdit,
   onRotated,
-}: {
+}: Readonly<{
   slug: string;
   webhook: ProofingWebhook;
   onEdit: () => void;
   onRotated: (secret: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendWebhookTestMutation(slug);
   const rotate = useNewWebhookSecretMutation(slug);
@@ -356,7 +358,9 @@ function EndpointCard({
   );
 }
 
-function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
+function DeliveriesCard({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const deliveries = useWebhookDeliveriesQuery(slug);
   const formatWhen = useWhenFormatter();
@@ -408,9 +412,9 @@ function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
 
 function DeliveryStatus({
   delivery,
-}: {
+}: Readonly<{
   delivery: WebhookDelivery;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const code = delivery.lastStatusCode;
   if (delivery.status === "pending" && delivery.attempts === 0) {

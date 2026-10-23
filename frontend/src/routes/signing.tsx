@@ -278,10 +278,10 @@ export default function Signing(): React.JSX.Element {
 function ActiveRequestCard({
   slug,
   requestId,
-}: {
+}: Readonly<{
   slug: string;
   requestId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const me = useMeQuery();
   const request = useSigningRequestQuery(slug, requestId, me.data?.id);
@@ -343,9 +343,9 @@ function ActiveRequestCard({
 // terminal counterpart to requestCompleted/requestFailed above.
 function DeclinedNotice({
   request,
-}: {
+}: Readonly<{
   request: SigningRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const decliner = (request.signers ?? []).find(
     (s) => s.status === SIGNER_STATUS.declined,
@@ -371,9 +371,9 @@ function DeclinedNotice({
 // who signed from outside the organisation is part of reading a co-signed document.
 function SignerList({
   request,
-}: {
+}: Readonly<{
   request: SigningRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const signers = request.signers ?? [];
   return (
@@ -408,11 +408,11 @@ function ToSignTab({
   slug,
   isLinked,
   onGoLink,
-}: {
+}: Readonly<{
   slug: string;
   isLinked: boolean;
   onGoLink: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const pending = usePendingSigningRequestsQuery(slug);
   const start = useStartSignRequestMutation(slug);
@@ -560,12 +560,12 @@ function Segmented<T extends string>({
   value,
   onChange,
   ariaLabel,
-}: {
+}: Readonly<{
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
   ariaLabel: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const currentIndex = Math.max(
     options.findIndex((o) => o.value === value),
@@ -623,12 +623,12 @@ function WizardStepRail({
   current,
   reachable,
   onStep,
-}: {
+}: Readonly<{
   steps: string[];
   current: number;
   reachable: boolean[];
   onStep: (index: number) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <ol className="flex items-center overflow-x-auto">
       {steps.map((label, index) => {
@@ -699,7 +699,7 @@ function ChannelCard({
   tabIndex,
   onKeyDown,
   innerRef,
-}: {
+}: Readonly<{
   selected: boolean;
   title: string;
   description: string;
@@ -707,7 +707,7 @@ function ChannelCard({
   tabIndex: number;
   onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
   innerRef: (el: HTMLButtonElement | null) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <button
       ref={innerRef}
@@ -752,10 +752,10 @@ const WIZARD_STEP_COUNT = 4;
 function NewRequestTab({
   slug,
   onCreated,
-}: {
+}: Readonly<{
   slug: string;
   onCreated: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const members = useOrganizationMembersQuery(
     slug,
@@ -1485,11 +1485,11 @@ function CredentialTab({
   slug,
   credential,
   isLinked,
-}: {
+}: Readonly<{
   slug: string;
   credential: ReturnType<typeof useSigningCredentialQuery>;
   isLinked: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const link = useLinkSigningCredentialMutation(slug);
 

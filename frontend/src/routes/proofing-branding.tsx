@@ -76,10 +76,10 @@ function draftFrom(settings: ProofingSettings): Draft {
 export function BrandingPanel({
   slug,
   orgName,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
 
@@ -103,11 +103,11 @@ function BrandingTab({
   slug,
   orgName,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveBrandingMutation(slug);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(settings));
@@ -247,10 +247,10 @@ function BrandingTab({
 function WhiteLabelFields({
   draft,
   onChange,
-}: {
+}: Readonly<{
   draft: Draft;
   onChange: (patch: Partial<Draft>) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-5 px-6 pb-5">

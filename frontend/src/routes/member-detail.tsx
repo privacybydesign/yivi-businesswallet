@@ -51,11 +51,11 @@ function DetailRow({
   label,
   value,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -77,13 +77,13 @@ function TimelineItem({
   formatWhen,
   t,
   isLast,
-}: {
+}: Readonly<{
   event: AuditEvent;
   dateFormatter: Intl.DateTimeFormat;
   formatWhen: (iso: string) => string;
   t: TFunction;
   isLast: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const visual = auditVisual(event.action);
   const subject = auditSubject(event, dateFormatter, t);
   return (

@@ -25,12 +25,12 @@ export function ReviewSection({
   title,
   hint,
   children,
-}: {
+}: Readonly<{
   id: string;
   title: string;
   hint?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <Card className={REVIEW_SECTION} aria-labelledby={id} role="region">
       <div className="flex flex-col gap-1">
@@ -47,9 +47,9 @@ export function ReviewSection({
 // Term and value pairs, as the review pages show what a person proved.
 export function ReviewFacts({
   rows,
-}: {
+}: Readonly<{
   rows: readonly { label: string; value: string }[];
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <dl className="grid gap-x-4 gap-y-2.5 text-[13.5px] sm:grid-cols-[10rem_1fr]">
       {rows.map(({ label, value }) => (
@@ -65,9 +65,9 @@ export function ReviewFacts({
 // Says a request no longer waits: its page stays readable after the decision.
 export function ClosedNote({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const key =
     request.status === "approved" || request.status === "rejected"
@@ -80,7 +80,9 @@ export function ClosedNote({
   );
 }
 
-export function BackToReviews({ to }: { to: string }): React.JSX.Element {
+export function BackToReviews({
+  to,
+}: Readonly<{ to: string }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Link

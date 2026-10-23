@@ -66,10 +66,10 @@ const SUBMIT_KEYS = {
 export function IdentityCheckReview({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const me = useMeQuery();
@@ -142,7 +142,9 @@ function WhyItWaits(): React.JSX.Element {
 type Result = ReturnType<typeof useProofingRequestResultQuery>;
 
 // The rows of a section that reads the result, or why they are not there.
-function ResultState({ result }: { result: Result }): React.JSX.Element | null {
+function ResultState({
+  result,
+}: Readonly<{ result: Result }>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (result.isPending && result.fetchStatus === "idle") return null;
   if (result.isPending) {
@@ -158,7 +160,9 @@ function ResultState({ result }: { result: Result }): React.JSX.Element | null {
   return null;
 }
 
-function AutomaticChecks({ result }: { result: Result }): React.JSX.Element {
+function AutomaticChecks({
+  result,
+}: Readonly<{ result: Result }>): React.JSX.Element {
   const { t } = useTranslation();
   const checks = automaticChecks(result.data?.evidence.at(0));
   return (
@@ -191,7 +195,9 @@ function AutomaticChecks({ result }: { result: Result }): React.JSX.Element {
   );
 }
 
-function CheckOutcome({ check }: { check: AutomaticCheck }): React.JSX.Element {
+function CheckOutcome({
+  check,
+}: Readonly<{ check: AutomaticCheck }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatPercent = usePercentFormatter();
   if (check.score !== undefined) {
@@ -208,10 +214,10 @@ function CheckOutcome({ check }: { check: AutomaticCheck }): React.JSX.Element {
 function ChipData({
   request,
   result,
-}: {
+}: Readonly<{
   request: ProofingRequest;
   result: Result;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const { identity } = result.data ?? {};
   const evidence = result.data?.evidence.at(0);
@@ -275,10 +281,10 @@ function ChipData({
 function OwnReviewNote({
   slug,
   own,
-}: {
+}: Readonly<{
   slug: string;
   own: OwnReview;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="border-line bg-surface rounded-yivi shadow-card flex min-w-72 flex-[0_1_21rem] flex-col gap-4 border p-5">
@@ -298,11 +304,11 @@ function CheckDecision({
   slug,
   request,
   name,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
   name: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const decide = useDecideReviewMutation(slug, request.id);

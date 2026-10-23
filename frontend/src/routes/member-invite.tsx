@@ -123,14 +123,14 @@ function Field({
   error,
   className,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   className?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className={["flex flex-col gap-1", className ?? ""].join(" ")}>
       <label htmlFor={id} className={FIELD_LABEL}>
@@ -161,9 +161,9 @@ function Field({
 // this invitation. Only natural-person templates can be auto-issued to a member.
 function OnboardingAttestationsCard({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const onboarding = useOnboardingAttestationsQuery(slug);
   const templates = useAttestationTemplatesQuery(slug);

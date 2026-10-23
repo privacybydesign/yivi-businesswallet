@@ -20,7 +20,7 @@ export function TaskSection({
   hint,
   action,
   children,
-}: TaskSectionProps): React.JSX.Element {
+}: Readonly<TaskSectionProps>): React.JSX.Element {
   const headingId = useId();
   return (
     <Card role="region" aria-labelledby={headingId}>
@@ -55,7 +55,7 @@ export function TaskRow({
   title,
   detail,
   aside,
-}: TaskRowProps): React.JSX.Element {
+}: Readonly<TaskRowProps>): React.JSX.Element {
   return (
     <li className="border-line flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4">
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -70,9 +70,9 @@ export function TaskRow({
 // What a section says when it holds nothing.
 export function TaskEmpty({
   children,
-}: {
+}: Readonly<{
   children: ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <p className="border-line text-ink-soft border-t px-5 pt-3.5 pb-[18px] text-[14px]">
       {children}

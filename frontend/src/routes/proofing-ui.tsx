@@ -45,11 +45,11 @@ export function BrandMark({
   name: orgName,
   branding,
   size = "md",
-}: {
+}: Readonly<{
   name: string;
   branding: Pick<ProofingBranding, "displayName" | "primaryColor" | "logoUri">;
   size?: keyof typeof MARK_SIZES;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const name = branding.displayName || orgName;
   const [failed, setFailed] = useState(false);
   if (branding.logoUri && !failed) {
@@ -79,11 +79,11 @@ export function InitialMark({
   name,
   color,
   className,
-}: {
+}: Readonly<{
   name: string;
   color: string;
   className: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <span
       aria-hidden="true"
@@ -100,10 +100,10 @@ export function InitialMark({
 export function ResultText({
   request,
   compact = false,
-}: {
+}: Readonly<{
   request: Pick<ProofingRequest, "status" | "errorCode">;
   compact?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const label = proofingStatusLabel(request.status, t);
   const reason =
@@ -127,9 +127,9 @@ export function ResultText({
 // How the org's webhook endpoint answers, in a few words.
 export function WebhookStateText({
   webhook,
-}: {
+}: Readonly<{
   webhook: WebhookHealth;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const since = webhook.failingSince ? formatWhen(webhook.failingSince) : "—";
@@ -173,7 +173,7 @@ export function SecretReveal({
   doneLabel,
   link,
   onClose,
-}: {
+}: Readonly<{
   title: string;
   hint: string;
   secret: string;
@@ -185,7 +185,7 @@ export function SecretReveal({
   // beside the close button.
   link?: { openLabel: string; newTabNote: string };
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);

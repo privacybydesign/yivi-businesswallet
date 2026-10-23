@@ -70,9 +70,9 @@ function parseExtraCodes(raw: string): string[] | null {
 
 export function ScreeningSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useScreeningSettingsQuery(slug, true);
 
@@ -100,10 +100,10 @@ export function ScreeningSettingsPanel({
 function ScreeningForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ScreeningSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveScreeningSettingsMutation(slug);
 

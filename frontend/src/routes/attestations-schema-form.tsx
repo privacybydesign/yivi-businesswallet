@@ -98,7 +98,7 @@ export function AttestationSchemaForm({
   slug,
   schema,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const isEdit = schema !== undefined;
   const create = useCreateAttestationSchemaMutation(slug);
@@ -643,12 +643,12 @@ function TranslationList({
   onChange,
   textLabel,
   textPlaceholder,
-}: {
+}: Readonly<{
   entries: Translation[];
   onChange: (next: Translation[]) => void;
   textLabel: string;
   textPlaceholder: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   function update(index: number, patch: Partial<Translation>): void {

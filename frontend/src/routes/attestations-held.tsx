@@ -281,14 +281,14 @@ function StatusBanner({
   isAdmin,
   now,
   formatDate,
-}: {
+}: Readonly<{
   slug: string;
   credential: HeldAttestationClaims;
   status: HeldStatus;
   isAdmin: boolean;
   now: Date;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const recheck = useRecheckHeldMutation(slug, credential.id);
   const look = BANNER_LOOK[status];
@@ -380,10 +380,10 @@ function bannerText(
 function CardHeader({
   title,
   meta,
-}: {
+}: Readonly<{
   title: string;
   meta?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="border-line flex items-baseline gap-2 border-b px-5 py-4">
       <h2 className={CARD_TITLE}>{title}</h2>
@@ -394,9 +394,9 @@ function CardHeader({
 
 function AttributesCard({
   credential,
-}: {
+}: Readonly<{
   credential: HeldAttestationClaims;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Card>
@@ -447,10 +447,10 @@ function AttributesCard({
 function HistoryCard({
   slug,
   credential,
-}: {
+}: Readonly<{
   slug: string;
   credential: HeldAttestationClaims;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const history = useHeldHistoryQuery(slug, credential.id);
   const formatWhen = useWhenFormatter();
@@ -560,13 +560,13 @@ function ProvenanceCard({
   status,
   formatDate,
   formatWhen,
-}: {
+}: Readonly<{
   credential: HeldAttestationClaims;
   orgName: string;
   status: HeldStatus;
   formatDate: (iso: string) => string;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const expiresAt =
     heldExpiryAt(credential) === null ? undefined : credential.expiresAt;
@@ -641,13 +641,13 @@ function ChecksCard({
   now,
   formatDate,
   formatWhen,
-}: {
+}: Readonly<{
   credential: HeldAttestationClaims;
   status: HeldStatus;
   now: Date;
   formatDate: (iso: string) => string;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   // A seeded demo credential never went through the receive-time checks.
   const verified = credential.source !== "bootstrap";

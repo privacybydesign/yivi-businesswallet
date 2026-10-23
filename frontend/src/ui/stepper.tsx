@@ -14,7 +14,10 @@ interface StepperProps {
 // Stepper renders a horizontal progress indicator: a numbered circle per step,
 // connected by lines, with the label beneath each circle. Presentational only —
 // it takes already-translated labels (translation happens at the route level).
-export function Stepper({ steps, current }: StepperProps): React.JSX.Element {
+export function Stepper({
+  steps,
+  current,
+}: Readonly<StepperProps>): React.JSX.Element {
   return (
     <ol className="flex items-start">
       {steps.map((label, index) => {

@@ -685,10 +685,10 @@ export default function Members(): React.JSX.Element {
 function IdentityTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag
@@ -706,10 +706,10 @@ function IdentityTag({
 function VogTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag

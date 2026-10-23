@@ -118,7 +118,7 @@ export function AttestationIssueWizard({
   templates,
   initialTemplate,
   onClose,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   const { t } = useTranslation();
   const issue = useIssueAttestationMutation(slug);
 

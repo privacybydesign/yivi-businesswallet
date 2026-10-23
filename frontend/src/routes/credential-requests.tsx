@@ -177,10 +177,10 @@ export default function CredentialRequests(): React.JSX.Element {
 function MessageCard({
   message,
   error = false,
-}: {
+}: Readonly<{
   message: string;
   error?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <Card className="p-6">
       <p className={`${error ? "text-error" : "text-ink-soft"} text-[14px]`}>
@@ -195,12 +195,12 @@ function IncomingTab({
   requests,
   pending,
   error,
-}: {
+}: Readonly<{
   slug: string;
   requests: IncomingRequest[];
   pending: boolean;
   error: Error | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const approve = useApproveIncomingRequestMutation(slug);
@@ -330,11 +330,11 @@ function SentTab({
   requests,
   pending,
   error,
-}: {
+}: Readonly<{
   requests: OutboundRequest[];
   pending: boolean;
   error: Error | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (error) {
     return (
@@ -361,9 +361,9 @@ function SentTab({
 
 function SentCard({
   request,
-}: {
+}: Readonly<{
   request: OutboundRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const statusLabels: Record<OutboundRequest["status"], string> = {
@@ -462,12 +462,12 @@ function RequestForm({
   orgName,
   onClose,
   onSent,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   onClose: () => void;
   onSent: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const addresses = useQerdsAddressesQuery(slug);
   const contacts = useQerdsContactsQuery(slug);

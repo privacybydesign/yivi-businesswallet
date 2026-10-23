@@ -56,11 +56,11 @@ function Rows({
   query,
   empty,
   rows,
-}: {
+}: Readonly<{
   query: { isError: boolean; isPending: boolean; error: Error | null };
   empty: string;
   rows: React.ReactElement[];
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (query.isError) {
     return (
@@ -136,11 +136,11 @@ function OverviewLists({
   slug,
   isAdmin,
   canReview,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
   canReview: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const requests = useExternalRequestsInQuery(
     slug,
     todoStatuses({ canReview, finished: true }),
@@ -161,7 +161,9 @@ type StatusReads = ReturnType<typeof useExternalRequestsInQuery>;
 
 // What the reader decides, the longest waiting first: an admin's and a
 // reviewer's, who see what waits in the whole org.
-function DecisionSection({ slug }: { slug: string }): React.JSX.Element {
+function DecisionSection({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const waiting = useWaitingReviewsQuery(slug, { enabled: true });
@@ -235,10 +237,10 @@ function personPath(slug: string, request: ProofingRequest): string {
 function PersonName({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const name = requestSubject(request).name;
   return (
@@ -267,11 +269,11 @@ function WaitingSection({
   slug,
   requests,
   canReview,
-}: {
+}: Readonly<{
   slug: string;
   requests: StatusReads;
   canReview: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const waiting = waitingForOthers(requests.data ?? [], { canReview });
@@ -323,10 +325,10 @@ function WaitingSection({
 function FinishedSection({
   slug,
   requests,
-}: {
+}: Readonly<{
   slug: string;
   requests: StatusReads;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const finished = finishedChecks(requests.data ?? []);
@@ -362,7 +364,9 @@ function FinishedSection({
 }
 
 // The counts of the last 30 days, in one line.
-function LastMonth({ slug }: { slug: string }): React.JSX.Element | null {
+function LastMonth({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element | null {
   const { t } = useTranslation();
   const stats = useProofingStatsQuery(slug);
   if (!stats.data) {
@@ -387,7 +391,9 @@ function LastMonth({ slug }: { slug: string }): React.JSX.Element | null {
 
 // The org's webhook endpoint, while it is failing, with what waits for it: the
 // one thing on this page an admin has to act on besides the lists.
-function WebhookAlert({ slug }: { slug: string }): React.JSX.Element | null {
+function WebhookAlert({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const webhook = useProofingWebhookQuery(slug);

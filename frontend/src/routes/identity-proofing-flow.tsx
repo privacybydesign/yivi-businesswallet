@@ -115,10 +115,10 @@ export default function IdentityProofingFlow(): React.JSX.Element {
 function FlowView({
   slug,
   flow,
-}: {
+}: Readonly<{
   slug: string;
   flow: ProofingFlow;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   // The same list the People tab shows, narrowed to the flow by the backend.
   const people = useExternalRequestsQuery(slug, flow.id);
@@ -266,7 +266,9 @@ function FlowView({
 }
 
 // A flow version's steps and checks in a line, in words.
-function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
+function FlowSummary({
+  flow,
+}: Readonly<{ flow: ProofingFlow }>): React.JSX.Element {
   const { t } = useTranslation();
   const checks = (flow.requiredChecks ?? []).map((check) => {
     const key = CHECK_LABELS[check];
@@ -283,10 +285,10 @@ function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
 function VersionHistory({
   slug,
   flowId,
-}: {
+}: Readonly<{
   slug: string;
   flowId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const versions = useProofingFlowVersionsQuery(slug, flowId, true);

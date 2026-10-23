@@ -54,7 +54,7 @@ export function Button({
   type = "button",
   disabled,
   ...rest
-}: ButtonProps): React.JSX.Element {
+}: Readonly<ButtonProps>): React.JSX.Element {
   return (
     <button
       type={type}

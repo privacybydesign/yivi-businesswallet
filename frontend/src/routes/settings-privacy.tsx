@@ -55,9 +55,9 @@ function erasureHintId(handling: ErasureHandling): string {
 // its person back.
 export function PrivacySettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
 
@@ -86,10 +86,10 @@ export function PrivacySettingsPanel({
 function DataRequestsCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateSettingsMutation(slug);
   const legal = settings.legalRetention;
@@ -180,10 +180,10 @@ function DataRequestsCard({
 function LegalRetentionCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateSettingsMutation(slug);
   const saved = settings.legalRetention;
@@ -416,10 +416,10 @@ function lossCopy(
 function RedirectOriginsCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateSettingsMutation(slug);
   const saved = settings.allowedRedirectOrigins.join("\n");
@@ -481,13 +481,13 @@ function ReasonField({
   value,
   invalid,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   value: string;
   invalid: boolean;
   onChange: (value: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-ink-soft text-[13px]">
@@ -509,10 +509,10 @@ function ReasonField({
 function Changes({
   months,
   className,
-}: {
+}: Readonly<{
   months: number;
   className: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const period = legalPeriodLabel(months, t);
   return (

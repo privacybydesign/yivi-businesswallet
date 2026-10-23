@@ -130,9 +130,9 @@ const StepHeadingLevelContext = createContext<StepHeadingLevel>("h2");
 
 function StepHeading({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return useContext(StepHeadingLevelContext) === "h1" ? (
     <h1 className={STEP_HEADING}>{children}</h1>
   ) : (
@@ -147,13 +147,13 @@ export function Overview({
   flow,
   onContinue,
   cancel,
-}: {
+}: Readonly<{
   org: VerifyOrg;
   flow: VerifyFlowInfo;
   onContinue: () => void;
   // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const name = org.branding.displayName || org.name;
   const items: DataDisclosureItem[] = (flow.requestedAttributes ?? [])
@@ -260,7 +260,7 @@ export function MethodChoice({
   onBack,
   starting,
   error,
-}: {
+}: Readonly<{
   methods: ProofingMethod[];
   // The app last tapped: it shows as starting while the session is created.
   picked: ProofingMethod;
@@ -268,7 +268,7 @@ export function MethodChoice({
   onBack: () => void;
   starting: boolean;
   error?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
@@ -350,11 +350,11 @@ export function StepRegion({
   step,
   headingLevel = "h2",
   children,
-}: {
+}: Readonly<{
   step: string;
   headingLevel?: StepHeadingLevel;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const shown = useRef(step);
   useEffect(() => {
@@ -383,10 +383,10 @@ export function StepRegion({
 export function CheckEnded({
   message,
   children,
-}: {
+}: Readonly<{
   message: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <output className="flex flex-col gap-6">
@@ -421,7 +421,7 @@ export function Session({
   dataRequest = false,
   addressMode = "off",
   onAddressStep,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   initial: ProofingProgress;
   deepLink?: string;
@@ -448,7 +448,7 @@ export function Session({
   // diploma step; onAddressStep is told whether it shows.
   addressMode?: AddressMode;
   onAddressStep?: (active: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
@@ -612,12 +612,12 @@ function DiplomaStep({
   until,
   initial,
   onDone,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   until: string;
   initial: HostedDiploma[];
   onDone: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const upload = useUploadDiplomasMutation(target);
@@ -1036,13 +1036,13 @@ function IdemOnScreen({
   deepLinkExpiresAt,
   sessionSecondsLeft,
   fallback,
-}: {
+}: Readonly<{
   target: Extract<VerifyTarget, { kind: "request" }>;
   deepLink?: string;
   deepLinkExpiresAt?: string;
   sessionSecondsLeft: number;
   fallback: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const app = useProofingAppQuery(target.slug, target.requestId, true);
   const fresh = useNewClaimLinkMutation(target);
@@ -1142,12 +1142,12 @@ function IdemQr({
   hint,
   code,
   seconds,
-}: {
+}: Readonly<{
   heading: string;
   hint: string;
   code: IdemCode;
   seconds: number;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-4">
@@ -1168,11 +1168,11 @@ function YiviSession({
   target,
   sessionSecondsLeft,
   onRestart,
-}: {
+}: Readonly<{
   target: VerifyTarget;
   sessionSecondsLeft: number;
   onRestart?: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const { mutateAsync } = useStartProofingYiviMutation(target);
   // The start's own outcome, not the mutation's state: StrictMode's remount
@@ -1286,10 +1286,10 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
 function LegalRetentionOutcome({
   legal,
   actions,
-}: {
+}: Readonly<{
   legal: HostedLegalRetention;
   actions?: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const formatDate = useDateFormatter();
   return (
@@ -1316,11 +1316,11 @@ function SessionOutcome({
   progress,
   actions,
   dataRequest,
-}: {
+}: Readonly<{
   progress: ProofingProgress;
   actions?: React.ReactNode;
   dataRequest: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   // An erasure the legal retention declined says why and until when, before
   // the refusal any other data request gets.
@@ -1411,7 +1411,9 @@ function SessionOutcome({
   }
 }
 
-function Expired({ onRestart }: { onRestart?: () => void }): React.JSX.Element {
+function Expired({
+  onRestart,
+}: Readonly<{ onRestart?: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div role="status" className="flex flex-col items-center gap-4">
@@ -1432,11 +1434,11 @@ function Failed({
   message,
   actionLabel,
   onRestart,
-}: {
+}: Readonly<{
   message: string;
   actionLabel?: string;
   onRestart?: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center gap-3 text-center">
@@ -1452,7 +1454,9 @@ function Failed({
   );
 }
 
-function Countdown({ seconds }: { seconds: number }): React.JSX.Element {
+function Countdown({
+  seconds,
+}: Readonly<{ seconds: number }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <p className="text-ink-soft flex items-center gap-1.5 text-[13px]">
@@ -1466,7 +1470,7 @@ function Countdown({ seconds }: { seconds: number }): React.JSX.Element {
   );
 }
 
-function QrCode({ value }: { value: string }): React.JSX.Element {
+function QrCode({ value }: Readonly<{ value: string }>): React.JSX.Element {
   const [dataUrl, setDataUrl] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -1498,10 +1502,10 @@ function QrCode({ value }: { value: string }): React.JSX.Element {
 function QrPlaceholder({
   label,
   expired = false,
-}: {
+}: Readonly<{
   label?: string;
   expired?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div
       className="border-line-strong bg-surface rounded-yivi text-muted flex flex-col items-center justify-center gap-2 border px-4 text-center"

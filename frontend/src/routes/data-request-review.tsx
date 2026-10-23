@@ -62,9 +62,9 @@ type DataRequestKind = "data_access" | "data_erasure";
 // erasure, in the sessions list.
 export function DataRequestNote({
   request,
-}: {
+}: Readonly<{
   request: Pick<ProofingRequest, "flowKind">;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (!isDataRequest(request.flowKind)) {
     return null;
@@ -84,11 +84,11 @@ export function DataRequestReview({
   slug,
   kind,
   request,
-}: {
+}: Readonly<{
   slug: string;
   kind: DataRequestKind;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const formatDay = useDayMonthFormatter();
@@ -137,12 +137,12 @@ function ReviewBody({
   kind,
   request,
   matches,
-}: {
+}: Readonly<{
   slug: string;
   kind: DataRequestKind;
   request: ProofingRequest;
   matches: ProofingDataMatch[];
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const waiting = request.status === "needs_review";
   const readable =
@@ -219,10 +219,10 @@ function ReviewBody({
 function WhoAsks({
   request,
   result,
-}: {
+}: Readonly<{
   request: ProofingRequest;
   result: UseQueryResult<ProofingResult, Error>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const none = "—";
   const { identity } = result.data ?? {};
@@ -292,10 +292,10 @@ interface MatchSelection {
 function MatchList({
   matches,
   selection,
-}: {
+}: Readonly<{
   matches: ProofingDataMatch[];
   selection?: MatchSelection;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (matches.length === 0) {
     return (
@@ -344,10 +344,10 @@ const LEVEL_TONES = {
 function MatchRow({
   match,
   selection,
-}: {
+}: Readonly<{
   match: ProofingDataMatch;
   selection?: MatchSelection;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const checkboxId = `data-match-${match.requestId}`;
@@ -412,9 +412,9 @@ function MatchRow({
 
 function MatchDecision({
   match,
-}: {
+}: Readonly<{
   match: ProofingDataMatch;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (match.purgedAt) {
     return (
@@ -440,10 +440,10 @@ function MatchDecision({
 function ClosedAside({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex min-w-72 flex-[0_1_21rem] flex-col gap-4">
       {request.status === "approved" && request.dataExportUntil && (
@@ -466,13 +466,13 @@ function DataDecision({
   request,
   ticked,
   kept,
-}: {
+}: Readonly<{
   slug: string;
   kind: DataRequestKind;
   request: ProofingRequest;
   ticked: string[];
   kept: number;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const decide = useDecideReviewMutation(slug, request.id);
@@ -633,11 +633,11 @@ function Download({
   slug,
   requestId,
   until,
-}: {
+}: Readonly<{
   slug: string;
   requestId: string;
   until: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const closed = useHasPassed(until);

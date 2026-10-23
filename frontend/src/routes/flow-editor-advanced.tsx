@@ -75,7 +75,7 @@ interface AdvancedSettingsProps {
 
 // Everything under Advanced settings, grouped by the question it answers.
 export function AdvancedSettings(
-  props: AdvancedSettingsProps,
+  props: Readonly<AdvancedSettingsProps>,
 ): React.JSX.Element {
   const { draft, update, settings, locales, error } = props;
 
@@ -132,9 +132,8 @@ function StepsSection({
   onAddress,
   addressError,
   error,
-}: Omit<
-  AdvancedSettingsProps,
-  "requiresIdentity" | "locales"
+}: Readonly<
+  Omit<AdvancedSettingsProps, "requiresIdentity" | "locales">
 >): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
@@ -240,11 +239,11 @@ function DocumentsSection({
   draft,
   update,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const choices = useMemo(
     () => issuingCountryChoices(i18n.language, t),
@@ -385,13 +384,13 @@ function ReceiveSection({
   requiresIdentity,
   locales,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   requiresIdentity: boolean;
   locales: readonly Language[];
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   function setReason(value: string, locale: string, text: string): void {
@@ -502,11 +501,11 @@ function MinimumAge({
   draft,
   update,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
@@ -547,14 +546,14 @@ function ReasonField({
   text,
   missing,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   locale: Language;
   required: boolean;
   text: string;
   missing: boolean;
   onChange: (text: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const language = t(`common.languageName.${locale}`);
   const errorId = `${id}-error`;
@@ -594,10 +593,10 @@ function ReasonField({
 function ChecksSection({
   draft,
   update,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   // A check its step always runs is locked on with the step, whatever the level.
@@ -669,11 +668,11 @@ function PrivacySection({
   draft,
   update,
   settings,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   settings: ProofingSettings | undefined;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const orgDays = settings?.dataRetentionDays;
 

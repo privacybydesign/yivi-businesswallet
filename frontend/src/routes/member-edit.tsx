@@ -32,11 +32,11 @@ function EditForm({
   slug,
   member,
   departments,
-}: {
+}: Readonly<{
   slug: string;
   member: Member;
   departments: Department[];
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const update = useUpdateMemberMutation(slug);

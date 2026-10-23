@@ -12,11 +12,11 @@ export function IdentityBanner({
   slug,
   orgName,
   identity,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   identity: OwnIdentityState;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const mint = useMintOwnReidentifyLinkMutation(slug);

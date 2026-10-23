@@ -44,11 +44,11 @@ export function FlowHostedSettings({
   slug,
   flow,
   onOpenCheck,
-}: {
+}: Readonly<{
   slug: string;
   flow: ProofingFlow;
   onOpenCheck: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingFlowHostedQuery(slug, flow.id);
 
@@ -78,12 +78,12 @@ function HostedForm({
   flow,
   saved,
   onOpenCheck,
-}: {
+}: Readonly<{
   slug: string;
   flow: ProofingFlow;
   saved: ProofingFlowHosted;
   onOpenCheck: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const save = useSaveFlowHostedMutation(slug, flow.id);
   const [draft, setDraft] = useState(() => hostedDraft(saved));
@@ -282,10 +282,10 @@ function HostedForm({
 function HostedPreview({
   slug,
   flow,
-}: {
+}: Readonly<{
   slug: string;
   flow: ProofingFlow;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const org = useOrganizationQuery(slug);
   const settings = useProofingSettingsQuery(slug);

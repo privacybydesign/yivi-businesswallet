@@ -40,9 +40,9 @@ function parseReminderDays(raw: string): number[] | null {
 
 export function IdentitySettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useIdentitySettingsQuery(slug, true);
 
@@ -70,10 +70,10 @@ export function IdentitySettingsPanel({
 function IdentityForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: IdentitySettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveIdentitySettingsMutation(slug);
 
