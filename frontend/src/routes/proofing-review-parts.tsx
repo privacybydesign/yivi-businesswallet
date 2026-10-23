@@ -74,12 +74,9 @@ export function ClosedNote({
       ? request.status
       : "other";
   return (
-    <p
-      role="status"
-      className="border-line bg-surface-2 text-ink rounded-yivi border px-4 py-3 text-[13.5px]"
-    >
+    <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
       {t(`identityProofing.reviews.notWaiting.${key}`)}
-    </p>
+    </output>
   );
 }
 

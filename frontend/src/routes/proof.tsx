@@ -100,6 +100,15 @@ export default function Proof(): React.JSX.Element {
   );
 }
 
+// The step a hosted page opens on: a link started before (another tab, a
+// reload) goes straight to its session.
+function initialStep(page: HostedProofing): Step {
+  if (page.started || !isProofingLive(page.status)) {
+    return "session";
+  }
+  return "overview";
+}
+
 function HostedFlow({
   token,
   page,
@@ -116,10 +125,7 @@ function HostedFlow({
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
-  // A link started before (another tab, a reload) goes straight to its session.
-  const [step, setStep] = useState<Step>(
-    page.started || !isProofingLive(page.status) ? "session" : "overview",
-  );
+  const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(
     page.method === "yivi_app" ? "yivi_app" : "idem_app",
   );
@@ -198,6 +204,21 @@ function HostedFlow({
   const stage = currentStage({ step, inAddress, inDiplomas });
   const showsEnded =
     step === "session" && (sessionEnded || page.status === "expired");
+  let outcomeActions: React.ReactNode;
+  if (redirecting) {
+    outcomeActions = (
+      <output className={`${HINT} block`}>{t("proofLink.redirecting")}</output>
+    );
+  } else if (dataRequest) {
+    outcomeActions = (
+      <DataRequestOutcome
+        token={token}
+        organization={organization.name}
+        kind={flow.kind as DataKind}
+        progress={settled ?? page}
+      />
+    );
+  }
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -246,38 +267,14 @@ function HostedFlow({
             />
           )}
           {confirmDecline && (
-            <ConfirmDialog
-              title={t("proofLink.declineConfirm.title")}
-              message={t("proofLink.declineConfirm.message", {
-                organization: organization.name,
-              })}
-              confirmLabel={t("proofLink.declineConfirm.confirm")}
-              cancelLabel={t("proofLink.declineConfirm.back")}
-              busy={decline.isPending}
-              error={
-                decline.isError
-                  ? hostedErrorMessage(decline.error, t)
-                  : undefined
-              }
-              onClose={() => {
-                // Closing resets the mutation, which drops the onSuccess below
-                // that moves the page on, though the server cancels the link
-                // all the same.
-                if (!canCloseDecline(decline.status)) {
-                  return;
-                }
-
+            <DeclineConfirm
+              organization={organization.name}
+              decline={decline}
+              onClose={() => setConfirmDecline(false)}
+              onDeclined={() => {
                 setConfirmDecline(false);
-                decline.reset();
+                setStep("session");
               }}
-              onConfirm={() =>
-                decline.mutate(undefined, {
-                  onSuccess: () => {
-                    setConfirmDecline(false);
-                    setStep("session");
-                  },
-                })
-              }
             />
           )}
           {step === "method" && (
@@ -314,20 +311,7 @@ function HostedFlow({
               onEnded={onEnded}
               onSettled={settle}
               dataRequest={dataRequest}
-              outcomeActions={
-                redirecting ? (
-                  <p role="status" className={HINT}>
-                    {t("proofLink.redirecting")}
-                  </p>
-                ) : dataRequest ? (
-                  <DataRequestOutcome
-                    token={token}
-                    organization={organization.name}
-                    kind={flow.kind as DataKind}
-                    progress={settled ?? page}
-                  />
-                ) : undefined
-              }
+              outcomeActions={outcomeActions}
             />
           )}
         </StepRegion>
@@ -337,6 +321,43 @@ function HostedFlow({
 }
 
 type DataKind = Exclude<FlowKind, "identity">;
+
+// Asks the person to confirm declining, which cancels the link. It cannot be
+// closed while the decline runs.
+function DeclineConfirm({
+  organization,
+  decline,
+  onClose,
+  onDeclined,
+}: {
+  organization: string;
+  decline: ReturnType<typeof useDeclineHostedMutation>;
+  onClose: () => void;
+  onDeclined: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <ConfirmDialog
+      title={t("proofLink.declineConfirm.title")}
+      message={t("proofLink.declineConfirm.message", { organization })}
+      confirmLabel={t("proofLink.declineConfirm.confirm")}
+      cancelLabel={t("proofLink.declineConfirm.back")}
+      busy={decline.isPending}
+      error={decline.isError ? hostedErrorMessage(decline.error, t) : undefined}
+      onClose={() => {
+        // Closing resets the mutation, which drops the onSuccess below that
+        // moves the page on, though the server cancels the link all the same.
+        if (!canCloseDecline(decline.status)) {
+          return;
+        }
+
+        onClose();
+        decline.reset();
+      }}
+      onConfirm={() => decline.mutate(undefined, { onSuccess: onDeclined })}
+    />
+  );
+}
 
 // What the person sees once the check ran out (VF5): nothing was shared, and
 // who to ask for a new link. It stays on screen: a check that ran out is not

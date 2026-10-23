@@ -232,6 +232,8 @@ function WhoAsks({
     t(`identityProofing.reviews.dataRequest.who.${part}`),
   );
   const provenWith = [document, how.join(", ")].filter(Boolean).join(" · ");
+  // An identity not read yet: a disabled read is not loading.
+  const loading = result.isPending && result.fetchStatus !== "idle";
 
   return (
     <ReviewSection
@@ -239,13 +241,13 @@ function WhoAsks({
       title={t("identityProofing.reviews.dataRequest.who.title")}
       hint={t("identityProofing.sessions.identity.audited")}
     >
-      {result.isPending && result.fetchStatus !== "idle" ? (
-        <p className={REVIEW_HINT}>{t("common.loading")}</p>
-      ) : result.isError ? (
+      {loading && <p className={REVIEW_HINT}>{t("common.loading")}</p>}
+      {result.isError && (
         <p role="alert" className={REVIEW_ERROR}>
           {proofingErrorMessage(result.error, t)}
         </p>
-      ) : (
+      )}
+      {!loading && !result.isError && (
         <ReviewFacts
           rows={[
             {

@@ -898,7 +898,7 @@ export function requestSubject(request: {
 
 // Who sent the check: the API token that created it, else the member.
 export function requestedBy(
-  request: { apiKeyName?: string | undefined; requestedByName: string },
+  request: { apiKeyName?: string; requestedByName: string },
   t: TFunction,
 ): string {
   return request.apiKeyName

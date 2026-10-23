@@ -53,6 +53,17 @@ const SELECT_CLASS =
   "rounded-yivi border-line-strong bg-surface text-ink h-10 w-full appearance-none border pr-10 pl-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
 const CHEVRON_SIZE = 12;
 const WARNING_ICON_SIZE = 18;
+// The tag colour of an automatic check's outcome.
+const OUTCOME_TONES = {
+  passed: "green",
+  failed: "red",
+  notPerformed: "default",
+} as const;
+// The submit button's label per decision, before one is picked too.
+const SUBMIT_KEYS = {
+  approve: "approveSubmit",
+  reject: "rejectSubmit",
+} as const;
 
 // An identity check that waits for a person: why, what the engine checked by
 // itself, what the chip holds, and the decision.
@@ -192,15 +203,7 @@ function CheckOutcome({ check }: { check: AutomaticCheck }): React.JSX.Element {
   }
   const outcome = check.outcome ?? "notPerformed";
   return (
-    <Tag
-      tone={
-        outcome === "passed"
-          ? "green"
-          : outcome === "failed"
-            ? "red"
-            : "default"
-      }
-    >
+    <Tag tone={OUTCOME_TONES[outcome]}>
       {t(`identityProofing.reviews.check.auto.${outcome}`)}
     </Tag>
   );
@@ -337,11 +340,7 @@ function CheckDecision({
   }
 
   const submitKey =
-    draft.choice === "approve"
-      ? "approveSubmit"
-      : draft.choice === "reject"
-        ? "rejectSubmit"
-        : "submit";
+    draft.choice === undefined ? "submit" : SUBMIT_KEYS[draft.choice];
 
   return (
     <form

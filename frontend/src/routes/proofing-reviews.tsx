@@ -161,6 +161,15 @@ function WaitingTable({
   error: Error | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  // The one line the table shows instead of rows, if any.
+  let state: string | undefined;
+  if (pending) {
+    state = t("common.loading");
+  } else if (error) {
+    state = proofingErrorMessage(error, t);
+  } else if (requests.length === 0) {
+    state = t("identityProofing.reviews.empty");
+  }
   return (
     <Table>
       <Table.Head>
@@ -181,22 +190,12 @@ function WaitingTable({
         </Table.HeaderCell>
       </Table.Head>
       <Table.Body>
-        {pending ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {t("common.loading")}
-          </Table.State>
-        ) : error ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {proofingErrorMessage(error, t)}
-          </Table.State>
-        ) : requests.length === 0 ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {t("identityProofing.reviews.empty")}
-          </Table.State>
-        ) : (
+        {state === undefined ? (
           requests.map((request) => (
             <WaitingRow key={request.id} slug={slug} request={request} />
           ))
+        ) : (
+          <Table.State colSpan={REVIEW_COLUMNS}>{state}</Table.State>
         )}
       </Table.Body>
     </Table>
@@ -308,6 +307,15 @@ function ClosedTable({ slug }: { slug: string }): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useClosedDataRequestsQuery(slug, { enabled: true });
   const closed = closedRequests(requests.data ?? []);
+  // The one line the table shows instead of rows, if any.
+  let state: string | undefined;
+  if (requests.isPending) {
+    state = t("common.loading");
+  } else if (requests.isError) {
+    state = proofingErrorMessage(requests.error, t);
+  } else if (closed.length === 0) {
+    state = t("identityProofing.reviews.emptyClosed");
+  }
   return (
     <Table>
       <Table.Head>
@@ -328,22 +336,12 @@ function ClosedTable({ slug }: { slug: string }): React.JSX.Element {
         </Table.HeaderCell>
       </Table.Head>
       <Table.Body>
-        {requests.isPending ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {t("common.loading")}
-          </Table.State>
-        ) : requests.isError ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {proofingErrorMessage(requests.error, t)}
-          </Table.State>
-        ) : closed.length === 0 ? (
-          <Table.State colSpan={REVIEW_COLUMNS}>
-            {t("identityProofing.reviews.emptyClosed")}
-          </Table.State>
-        ) : (
+        {state === undefined ? (
           closed.map((request) => (
             <ClosedRow key={request.id} slug={slug} request={request} />
           ))
+        ) : (
+          <Table.State colSpan={REVIEW_COLUMNS}>{state}</Table.State>
         )}
       </Table.Body>
     </Table>
