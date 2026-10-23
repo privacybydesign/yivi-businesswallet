@@ -87,11 +87,8 @@ func parseStatement(pages []string) (*Statement, error) {
 	formCode := false
 	for _, page := range pages {
 		pageLines := splitLines(page)
-		for i, l := range pageLines {
-			if reFormCode.MatchString(l) {
-				formCode = true
-				pageLines[i] = strings.TrimSpace(reFormCode.ReplaceAllString(l, ""))
-			}
+		if stripFormCode(pageLines) {
+			formCode = true
 		}
 
 		pageFoot, err := pageFooter(pageLines)
@@ -103,11 +100,7 @@ func parseStatement(pages []string) (*Statement, error) {
 		}
 
 		foot = &pageFoot
-		for _, l := range pageLines {
-			if l != "" && l != foot.holder && l != foot.dates && l != footerTitle && !rePageNumber.MatchString(l) {
-				lines = append(lines, l)
-			}
-		}
+		lines = append(lines, bodyLines(pageLines, pageFoot)...)
 	}
 	if foot == nil || !formCode {
 		return nil, fmt.Errorf("%w: no UWV form code or holder", ErrNotAStatement)
@@ -123,6 +116,30 @@ func parseStatement(pages []string) (*Statement, error) {
 	}
 	st.Relations = relations
 	return st, nil
+}
+
+// stripFormCode removes the form code from the lines that print it, and
+// reports whether any did.
+func stripFormCode(lines []string) bool {
+	found := false
+	for i, l := range lines {
+		if reFormCode.MatchString(l) {
+			found = true
+			lines[i] = strings.TrimSpace(reFormCode.ReplaceAllString(l, ""))
+		}
+	}
+	return found
+}
+
+// bodyLines drops the page's footer, title and page number.
+func bodyLines(lines []string, foot footer) []string {
+	var body []string
+	for _, l := range lines {
+		if l != "" && l != foot.holder && l != foot.dates && l != footerTitle && !rePageNumber.MatchString(l) {
+			body = append(body, l)
+		}
+	}
+	return body
 }
 
 func splitLines(page string) []string {

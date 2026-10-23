@@ -65,6 +65,20 @@ function levelOf(choice: LevelChoice): AssuranceLevel | "" {
   return choice === "none" ? "" : choice;
 }
 
+// Saves a setting that changed, then runs next; an unchanged one goes
+// straight to next.
+function saveIfChanged(
+  changed: boolean,
+  save: (onSuccess: () => void) => void,
+  next: () => void,
+): void {
+  if (!changed) {
+    next();
+    return;
+  }
+  save(next);
+}
+
 export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 
 // The flow editor: onDone closes it (after a save or a cancel), onSaved gets
@@ -152,7 +166,7 @@ export function FlowEditor({
     }
   }
 
-  function submit(event: React.FormEvent): void {
+  function submit(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setTouched(true);
     if (invalid !== null) {
@@ -170,33 +184,25 @@ export function FlowEditor({
     // The diploma mode, the address, then the employment, each only when it
     // changed.
     const saveSettings = (flowId: string, then: () => void): void => {
-      const employmentThen = (): void => {
-        if (employment === savedEmployment) {
-          then();
-          return;
-        }
-        saveEmployment.mutate(
-          { flowId, mode: employment },
-          { onSuccess: then },
+      const employmentThen = (): void =>
+        saveIfChanged(
+          employment !== savedEmployment,
+          (onSuccess) =>
+            saveEmployment.mutate({ flowId, mode: employment }, { onSuccess }),
+          then,
         );
-      };
-      const addressThen = (): void => {
-        if (address === savedAddress) {
-          employmentThen();
-          return;
-        }
-        saveAddress.mutate(
-          { flowId, mode: address },
-          { onSuccess: employmentThen },
+      const addressThen = (): void =>
+        saveIfChanged(
+          address !== savedAddress,
+          (onSuccess) =>
+            saveAddress.mutate({ flowId, mode: address }, { onSuccess }),
+          employmentThen,
         );
-      };
-      if (diplomas === savedDiplomas) {
-        addressThen();
-        return;
-      }
-      saveDiplomas.mutate(
-        { flowId, mode: diplomas },
-        { onSuccess: addressThen },
+      saveIfChanged(
+        diplomas !== savedDiplomas,
+        (onSuccess) =>
+          saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess }),
+        addressThen,
       );
     };
     const saveSpec = (then: (flow: ProofingFlow) => void): void => {

@@ -384,24 +384,18 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 	var photoCT []byte
 	var photoMime *string
 	if in.ReferencePhoto != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
 		var err error
-		if photoCT, err = s.cipher.Encrypt([]byte(in.ReferencePhoto.Base64)); err != nil {
-			return Request{}, fmt.Errorf("proofing: encrypt reference photo org %s: %w", in.OrgID, err)
+		if photoCT, err = s.encryptText("reference photo org "+in.OrgID.String(), in.ReferencePhoto.Base64); err != nil {
+			return Request{}, err
 		}
 		photoMime = &in.ReferencePhoto.MimeType
 	}
 
 	var birthDateCT []byte
 	if in.Subject.BirthDate != "" {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
 		var err error
-		if birthDateCT, err = s.cipher.Encrypt([]byte(in.Subject.BirthDate)); err != nil {
-			return Request{}, fmt.Errorf("proofing: encrypt expected birth date org %s: %w", in.OrgID, err)
+		if birthDateCT, err = s.encryptText("expected birth date org "+in.OrgID.String(), in.Subject.BirthDate); err != nil {
+			return Request{}, err
 		}
 	}
 
@@ -436,36 +430,6 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			return err
 		}
 
-		fields := withAuditSubject(map[string]any{
-			"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
-			"channel": string(in.Channel),
-		}, in.Subject.Name, in.Subject.Email)
-		if in.Diplomas.asked() {
-			fields["diplomas"] = string(in.Diplomas)
-		}
-		if in.Address.asked() {
-			fields["address"] = string(in.Address)
-		}
-		if in.Employment.asked() {
-			fields["employment"] = string(in.Employment)
-		}
-		if birthDateCT != nil {
-			fields["expectsSubject"] = true
-		}
-		if photoCT != nil {
-			fields["referencePhoto"] = true
-		}
-		fields = withMethod(fields, in.Method)
-		if in.Subject.UserID != nil {
-			fields["subjectUserId"] = in.Subject.UserID.String()
-		}
-		if in.Subject.Kind == SubjectExternal {
-			fields["external"] = true
-		}
-		if in.APIKeyID != nil {
-			fields["apiKeyId"] = in.APIKeyID.String()
-		}
-
 		// A hosted link lapses unstarted at link_expires_at: wake the deadline job.
 		if in.LinkTokenHash != nil {
 			if err := database.Notify(ctx, q, SessionChannel); err != nil {
@@ -475,12 +439,58 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
-			audit.Created(fields))
+			audit.Created(in.auditFields(birthDateCT != nil, photoCT != nil)))
 	})
 	if err != nil {
 		return Request{}, err
 	}
 	return s.get(ctx, in.ID)
+}
+
+// encryptText seals one text column of a request; what names it and its owner.
+func (s *RequestStore) encryptText(what, plain string) ([]byte, error) {
+	if s.cipher == nil {
+		return nil, ErrNoEncryptionKey
+	}
+	sealed, err := s.cipher.Encrypt([]byte(plain))
+	if err != nil {
+		return nil, fmt.Errorf("proofing: encrypt %s: %w", what, err)
+	}
+	return sealed, nil
+}
+
+// auditFields is what identity_proofing.requested records of in: whether it
+// expects a subject and holds a reference photo, never the values.
+func (in NewStoredRequest) auditFields(expectsSubject, referencePhoto bool) map[string]any {
+	fields := withAuditSubject(map[string]any{
+		"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
+		"channel": string(in.Channel),
+	}, in.Subject.Name, in.Subject.Email)
+	if in.Diplomas.asked() {
+		fields["diplomas"] = string(in.Diplomas)
+	}
+	if in.Address.asked() {
+		fields["address"] = string(in.Address)
+	}
+	if in.Employment.asked() {
+		fields["employment"] = string(in.Employment)
+	}
+	if expectsSubject {
+		fields["expectsSubject"] = true
+	}
+	if referencePhoto {
+		fields["referencePhoto"] = true
+	}
+	fields = withMethod(fields, in.Method)
+	for key, id := range map[string]*uuid.UUID{"subjectUserId": in.Subject.UserID, "apiKeyId": in.APIKeyID} {
+		if id != nil {
+			fields[key] = id.String()
+		}
+	}
+	if in.Subject.Kind == SubjectExternal {
+		fields["external"] = true
+	}
+	return fields
 }
 
 // ReferencePhoto is the reference photo a hosted request holds until its
@@ -595,36 +605,15 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 		if err != nil {
 			return fmt.Errorf("proofing: lapse links: %w", err)
 		}
-		var reqs []Request
-		for rows.Next() {
-			req, err := s.scanRequest(rows)
-			if err != nil {
-				rows.Close()
-				return fmt.Errorf("proofing: scan lapsed link: %w", err)
-			}
-			reqs = append(reqs, req)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		reqs, err := s.collectRequests(rows)
+		if err != nil {
 			return fmt.Errorf("proofing: lapse links: %w", err)
 		}
-		ids := make([]uuid.UUID, 0, len(reqs))
-		for _, req := range reqs {
-			ids = append(ids, req.ID)
-		}
-		if err := refreshPurgeAt(ctx, q, ids...); err != nil {
+		if err := refreshPurgeAt(ctx, q, endedIDs...); err != nil {
 			return err
 		}
 		for _, req := range reqs {
-			if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
-				audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-				audit.Updated(
-					req.auditFields(map[string]any{"status": string(req.Status)}),
-					req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
-				return err
-			}
-			if err := enqueueRequestWebhook(ctx, q, req, EventSessionExpired,
-				sessionEventData(req, StatusExpired)); err != nil {
+			if err := s.recordLinkLapsed(ctx, q, req); err != nil {
 				return err
 			}
 		}
@@ -632,6 +621,32 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 		return nil
 	})
 	return ended, err
+}
+
+// collectRequests scans every row of rows and closes them.
+func (s *RequestStore) collectRequests(rows pgx.Rows) ([]Request, error) {
+	defer rows.Close()
+	var reqs []Request
+	for rows.Next() {
+		req, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs, rows.Err()
+}
+
+// recordLinkLapsed audits and sends the end of req, whose link lapsed unstarted.
+func (s *RequestStore) recordLinkLapsed(ctx context.Context, q database.Querier, req Request) error {
+	if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+		audit.Updated(
+			req.auditFields(map[string]any{"status": string(req.Status)}),
+			req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
+		return err
+	}
+	return enqueueRequestWebhook(ctx, q, req, EventSessionExpired, sessionEventData(req, StatusExpired))
 }
 
 // NextDeadline is the earliest session cap or open link's lapse after now;
@@ -1209,27 +1224,8 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_matches WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge matches request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_match_checks WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge match checks request %s: %w", req.ID, err)
-		}
-		if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
-			req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
-			return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
-		}
-		// A retry with one of these keys then runs as a new call: the session
-		// it named is erased.
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
-			WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, webhookPersonalKeys); err != nil {
-			return fmt.Errorf("proofing: purge webhook diplomas, address and employment request %s: %w", req.ID, err)
+		if err := purgeRequestRecords(ctx, q, req); err != nil {
+			return err
 		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
@@ -1239,6 +1235,33 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 		return enqueueRequestWebhook(ctx, q, req, EventSessionPurged,
 			sessionEventData(req, req.Status))
 	})
+}
+
+// purgeRequestRecords erases what other tables hold of req's personal data.
+func purgeRequestRecords(ctx context.Context, q database.Querier, req Request) error {
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_matches WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge matches request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_match_checks WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge match checks request %s: %w", req.ID, err)
+	}
+	if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
+		req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
+		return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
+	}
+	// A retry with one of these keys then runs as a new call: the session
+	// it named is erased.
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
+		WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, webhookPersonalKeys); err != nil {
+		return fmt.Errorf("proofing: purge webhook diplomas, address and employment request %s: %w", req.ID, err)
+	}
+	return nil
 }
 
 // errCancelSessionMoved is a cancel of a request read before a session was
@@ -1338,10 +1361,10 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		after := outcomeAuditFields(status, res)
 		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
+			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
+				req.auditFields(outcomeAuditFields(status, res)))); err != nil {
 			return err
 		}
 		event, ok := outcomeEvents[status]

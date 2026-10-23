@@ -31,7 +31,6 @@ const hostedPage = {
   started: false,
   addressGiven: false,
   employmentGiven: false,
-  employmentGiven: false,
   sessionId: "ps_b7k2mq4xz6rt3vnw5hc2jd7fae",
   embedOrigins: [],
   locales: [],

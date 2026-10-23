@@ -39,7 +39,7 @@ func TestCheck(t *testing.T) {
 	}
 	someoneElse := *statement
 	someoneElse.Surname = "Jansen"
-	now := date("15-10-2026").Add(StatementMaxAge)
+	now := date("15-10-2026").Add(statementMaxAge)
 
 	cases := []struct {
 		name       string

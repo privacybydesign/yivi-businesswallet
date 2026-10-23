@@ -20,13 +20,13 @@ const (
 	// ReasonHolder is a statement about someone else than the person who
 	// proved their identity.
 	ReasonHolder = "holder_mismatch"
-	// ReasonStale is a statement UWV made longer than StatementMaxAge ago.
+	// ReasonStale is a statement UWV made longer than statementMaxAge ago.
 	ReasonStale = "stale"
 )
 
-// StatementMaxAge is how old a statement may be: an older one says little
+// statementMaxAge is how old a statement may be: an older one says little
 // about the holder's employment now.
-const StatementMaxAge = 30 * 24 * time.Hour
+const statementMaxAge = 30 * 24 * time.Hour
 
 // Outcome is the verdict on one statement. Statement is set whenever the
 // seal verified and the file parsed; Reason is empty for an accepted one.
@@ -90,7 +90,7 @@ func (c *Checker) Check(ctx context.Context, pdf []byte, holder diploma.Person) 
 	switch {
 	case !diploma.MatchInitials(st.Initials, st.Surname, st.DateOfBirth.Format(time.DateOnly), holder).Matched:
 		out.Reason = ReasonHolder
-	case c.now().Sub(st.Date) > StatementMaxAge:
+	case c.now().Sub(st.Date) > statementMaxAge:
 		out.Reason = ReasonStale
 	}
 	return out, nil

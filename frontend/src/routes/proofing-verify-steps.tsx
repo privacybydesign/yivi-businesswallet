@@ -615,13 +615,14 @@ export function Session({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      {method === "yivi_app" ? (
+      {method === "yivi_app" && (
         <YiviSession
           target={target}
           sessionSecondsLeft={secondsLeft}
           onRestart={onRestart}
         />
-      ) : target.kind === "request" ? (
+      )}
+      {method !== "yivi_app" && target.kind === "request" && (
         <IdemOnScreen
           target={target}
           deepLink={deepLink}
@@ -629,9 +630,8 @@ export function Session({
           sessionSecondsLeft={secondsLeft}
           fallback={manualIdem}
         />
-      ) : (
-        manualIdem
       )}
+      {method !== "yivi_app" && target.kind !== "request" && manualIdem}
       {current.status === "in_progress" &&
         method === "idem_app" &&
         target.kind === "hosted" && (
@@ -691,12 +691,17 @@ function DiplomaStep({
     });
   }
 
+  let diplomaUploadLabel: string = t("identityProofing.diplomas.chooseAnother");
+  if (upload.isPending) {
+    diplomaUploadLabel = t("identityProofing.diplomas.checking");
+  } else if (held.length === 0) {
+    diplomaUploadLabel = t("identityProofing.diplomas.choose");
+  }
+
   return (
     <div className="flex w-full flex-col gap-5">
       {/* Mounted throughout, so each upload's verdicts are announced. */}
-      <p role="status" className="sr-only">
-        {announced}
-      </p>
+      <output className="sr-only">{announced}</output>
       <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
         <Icon name="valid" className="text-success shrink-0" />
         {t("identityProofing.diplomas.identityDone")}
@@ -797,11 +802,7 @@ function DiplomaStep({
             loading={upload.isPending}
             onClick={() => fileInput.current?.click()}
           >
-            {upload.isPending
-              ? t("identityProofing.diplomas.checking")
-              : held.length === 0
-                ? t("identityProofing.diplomas.choose")
-                : t("identityProofing.diplomas.chooseAnother")}
+            {diplomaUploadLabel}
           </Button>
           {upload.isError && (
             <p role="alert" className={ERROR}>
@@ -870,6 +871,15 @@ function EmploymentStep({
     });
   }
 
+  let employmentUploadLabel: string = t(
+    "identityProofing.employment.chooseAgain",
+  );
+  if (upload.isPending) {
+    employmentUploadLabel = t("identityProofing.employment.checking");
+  } else if (refused === undefined) {
+    employmentUploadLabel = t("identityProofing.employment.choose");
+  }
+
   return (
     <div className="flex w-full flex-col gap-5">
       <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
@@ -912,7 +922,8 @@ function EmploymentStep({
 
       {kept !== undefined && (
         <div
-          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3"
         >
           <Icon name="valid" className="text-success mt-0.5 shrink-0" />
@@ -991,11 +1002,7 @@ function EmploymentStep({
             loading={upload.isPending}
             onClick={() => fileInput.current?.click()}
           >
-            {upload.isPending
-              ? t("identityProofing.employment.checking")
-              : refused === undefined
-                ? t("identityProofing.employment.choose")
-                : t("identityProofing.employment.chooseAgain")}
+            {employmentUploadLabel}
           </Button>
           {upload.isError && (
             <p role="alert" className={ERROR}>
@@ -1088,7 +1095,7 @@ function AddressStep({
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
 
-  function save(event: React.FormEvent): void {
+  function save(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setTouched(true);
     if (missing.length > 0) return;
@@ -1644,7 +1651,11 @@ function Expired({
 }: Readonly<{ onRestart?: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <div role="status" className="flex flex-col items-center gap-4">
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="flex flex-col items-center gap-4"
+    >
       <QrPlaceholder
         label={t("identityProofing.onScreen.scan.expired")}
         expired

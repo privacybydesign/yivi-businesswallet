@@ -235,7 +235,7 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 
 		data := sessionEventData(req, req.Status)
 		data[webhookEmploymentKey] = emp
-		return enqueueWebhook(ctx, q, req.OrganizationID, EventSessionEmploymentAdded, &req.ID, data)
+		return enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data)
 	})
 	if err != nil {
 		return false, err

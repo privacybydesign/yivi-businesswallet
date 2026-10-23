@@ -393,6 +393,21 @@ func TestLoadEmploymentDefaultUWV(t *testing.T) {
 	}
 }
 
+// The pinned roots hold no root UWV's seal chains to, so pinning them under
+// the real UWV check would reject every statement: it fails the boot instead.
+func TestLoadRejectsPinnedTrustForUWV(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envDiplomaTrustSource: DiplomaTrustPinned}); err == nil {
+		t.Error("pinned trust with the UWV check loaded, want an error")
+	}
+	stub, err := loadWith(t, map[string]string{
+		envDiplomaTrustSource: DiplomaTrustPinned, envEmploymentValidatorProvider: ProviderStub,
+		envDevMode: "true", envAppBaseURL: localStack,
+	})
+	if err != nil || stub.DiplomaTrustSource != DiplomaTrustPinned {
+		t.Errorf("pinned trust with the stub = %q, %v; want %q", stub.DiplomaTrustSource, err, DiplomaTrustPinned)
+	}
+}
+
 // The online revocation check is on unless switched off: off, only the
 // revocation information embedded in an extract counts.
 func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
