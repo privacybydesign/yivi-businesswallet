@@ -8,6 +8,7 @@ import {
 } from "../api/identity-proofing.queries";
 import {
   ERASURE_HANDLINGS,
+  type ErasureHandling,
   type ProofingSettings,
 } from "../api/identity-proofing";
 import { originLines } from "../lib/hosted-completion";
@@ -23,7 +24,6 @@ import {
   legalPeriodLabel,
   legalRetentionLoss,
 } from "../lib/legal-retention";
-import type { ErasureHandling } from "../api/identity-proofing";
 import type {
   LegalRetentionDraft,
   LegalRetentionLoss,
