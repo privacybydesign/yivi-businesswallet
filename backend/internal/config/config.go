@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ const (
 	envEudiIssuerChain             = "EUDI_ISSUER_CHAIN"
 	envEudiIntendedUseID           = "EUDI_INTENDED_USE_ID"
 	envEudiRegistrationCertificate = "EUDI_REGISTRATION_CERTIFICATE"
+	envEudiCredentialScheme        = "EUDI_CREDENTIAL_SCHEME"
 	envSessionCookieSecure         = "SESSION_COOKIE_SECURE"
 	envSessionTTL                  = "SESSION_TTL"
 	envSessionPruneEvery           = "SESSION_PRUNE_INTERVAL"
@@ -342,6 +344,10 @@ const (
 	defaultQerdsDomibusAction      = "TC1Leg1"
 )
 
+// eudiCredentialSchemes are the Yivi schemes EUDI_CREDENTIAL_SCHEME may name;
+// empty means the openid4vpverifier default (pbdf-staging).
+var eudiCredentialSchemes = []string{"pbdf-staging", "pbdf"}
+
 type Config struct {
 	DatabaseDSN string
 	LogLevel    string
@@ -352,6 +358,7 @@ type Config struct {
 	EudiIssuerChain             string
 	EudiIntendedUseID           string
 	EudiRegistrationCertificate string
+	EudiCredentialScheme        string // pbdf-staging when empty, pbdf in production
 	SessionCookieSecure         bool
 	SessionTTL                  time.Duration
 	SessionPruneEvery           time.Duration
@@ -572,6 +579,13 @@ func Load() (Config, error) {
 		intendedUseID = defaultEudiIntendedUseID
 	}
 
+	// A typo would otherwise only surface when a user logs in: the boot probe's
+	// presentation request does not check the vcts it names.
+	credentialScheme := os.Getenv(envEudiCredentialScheme)
+	if credentialScheme != "" && !slices.Contains(eudiCredentialSchemes, credentialScheme) {
+		return Config{}, fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), credentialScheme)
+	}
+
 	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
 	if err != nil {
 		return Config{}, err
@@ -773,6 +787,7 @@ func Load() (Config, error) {
 		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
 		EudiIntendedUseID:           intendedUseID,
 		EudiRegistrationCertificate: registrationCertificate,
+		EudiCredentialScheme:        credentialScheme,
 		SessionCookieSecure:         cookieSecure,
 		SessionTTL:                  sessionTTL,
 		SessionPruneEvery:           sessionPruneEvery,

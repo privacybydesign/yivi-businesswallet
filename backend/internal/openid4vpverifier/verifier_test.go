@@ -76,15 +76,58 @@ func TestStringifyNonStringClaim(t *testing.T) {
 	}
 }
 
+var stagingVCTs = vctsFor(defaultCredentialScheme)
+
+func TestVCTsFollowTheScheme(t *testing.T) {
+	if got := vctsFor("pbdf"); got.passport != "pbdf.pbdf.passport" || got.email != "pbdf.sidn-pbdf.email" {
+		t.Errorf("vctsFor(pbdf) = %+v", got)
+	}
+	if vctsFor("") != stagingVCTs {
+		t.Error("an empty scheme should fall back to the default (staging)")
+	}
+}
+
+// The scheme set at New reaches both the start request and the credential
+// Result names.
+func TestClientUsesTheConfiguredScheme(t *testing.T) {
+	var started startRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"vp_token":{"idcard":["jwt~~"]}}`))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&started)
+		_, _ = w.Write([]byte(`{"transaction_id":"tx","client_id":"cid","request_uri":"https://verifier.example/req"}`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "", "1", "", "pbdf", srv.Client())
+	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
+		t.Fatalf("StartPresentation: %v", err)
+	}
+	if got := started.DCQLQuery.Credentials[0].Meta.VctValues; !slices.Equal(got, []string{"pbdf.sidn-pbdf.email"}) {
+		t.Errorf("login vct_values = %v, want the pbdf email credential", got)
+	}
+
+	p, err := client.Result(context.Background(), "tx")
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if doc, ok := p.Document(); !ok || doc.Credential != "pbdf.pbdf.idcard" {
+		t.Errorf("Document() = %+v, %v, want the pbdf id-card", doc, ok)
+	}
+}
+
 func TestLoginQueryIsEmailOnly(t *testing.T) {
-	q := loginQuery()
+	q := stagingVCTs.loginQuery()
 	if len(q.Credentials) != 1 || q.Credentials[0].ID != "email" {
 		t.Fatalf("login query should request only email, got %+v", q.Credentials)
 	}
 }
 
 func TestIdentityQueryDocuments(t *testing.T) {
-	q := identityQuery()
+	q := stagingVCTs.identityQuery()
 	if len(q.Credentials) != 5 {
 		t.Fatalf("credentials = %d, want 5 (passport, idcard, residencepermit, email, phone)", len(q.Credentials))
 	}
@@ -95,16 +138,16 @@ func TestIdentityQueryDocuments(t *testing.T) {
 }
 
 func TestQueryForScope(t *testing.T) {
-	if got := len(queryFor(ScopeLogin, nil).Credentials); got != 1 {
+	if got := len(stagingVCTs.queryFor(ScopeLogin, nil).Credentials); got != 1 {
 		t.Errorf("ScopeLogin credentials = %d, want 1", got)
 	}
-	if got := len(queryFor(ScopeIdentity, nil).Credentials); got != 5 {
+	if got := len(stagingVCTs.queryFor(ScopeIdentity, nil).Credentials); got != 5 {
 		t.Errorf("ScopeIdentity credentials = %d, want 5", got)
 	}
-	if got := len(queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
+	if got := len(stagingVCTs.queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
 		t.Errorf("ScopeVog claims = %d, want 7 (5 core fields + 2 requested aspects)", got)
 	}
-	combined := queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
+	combined := stagingVCTs.queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
 	if got := len(combined.Credentials); got != 6 {
 		t.Errorf("ScopeIdentityVog credentials = %d, want 6 (identity's 5 + vog)", got)
 	}
@@ -122,7 +165,7 @@ func TestQueryForScope(t *testing.T) {
 // Proofing asks for the passport, id-card or residence permit, with no email
 // or phone, and its photo only when the caller asks it.
 func TestProofingQueryAsksPhotoOnlyWhenAsked(t *testing.T) {
-	q := queryFor(ScopeProofing, nil)
+	q := stagingVCTs.queryFor(ScopeProofing, nil)
 	if len(q.Credentials) != 3 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 3 {
 		t.Fatalf("proofing query = %+v, want passport OR idcard OR residencepermit only", q)
 	}
@@ -134,7 +177,7 @@ func TestProofingQueryAsksPhotoOnlyWhenAsked(t *testing.T) {
 			t.Errorf("%s asks for the photo unasked: %+v", c.ID, c.Claims)
 		}
 	}
-	for _, c := range queryFor(ScopeProofing, []string{ClaimPhoto}).Credentials {
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, []string{ClaimPhoto}).Credentials {
 		if !asksPhoto(c) {
 			t.Errorf("%s does not ask for the photo: %+v", c.ID, c.Claims)
 		}
@@ -154,13 +197,13 @@ func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
 	has := func(c dcqlCredential, name string) bool {
 		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == name })
 	}
-	for _, c := range queryFor(ScopeProofing, []string{claim}).Credentials {
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, []string{claim}).Credentials {
 		if !has(c, claim) || has(c, ClaimDateOfBirth) {
 			t.Errorf("%s claims = %+v, want over18 without dateOfBirth", c.ID, c.Claims)
 		}
 	}
 
-	for _, c := range queryFor(ScopeProofing, nil).Credentials {
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, nil).Credentials {
 		if !has(c, ClaimDateOfBirth) {
 			t.Errorf("%s without an age check does not ask the date of birth", c.ID)
 		}
@@ -173,15 +216,15 @@ func TestDocumentPrefersPassport(t *testing.T) {
 		credIDPassport: {ClaimGivenNames: "Passport"},
 	}}
 	doc, ok := p.Document()
-	if !ok || doc.Credential != vctPassport || doc.Claims[ClaimGivenNames] != "Passport" {
+	if !ok || doc.Credential != stagingVCTs.passport || doc.Claims[ClaimGivenNames] != "Passport" {
 		t.Fatalf("Document() = %+v, %v", doc, ok)
 	}
 	idcard, ok := Presentation{ByCredential: map[string]map[string]string{credIDIDCard: {}}}.Document()
-	if !ok || idcard.Credential != vctIDCard {
+	if !ok || idcard.Credential != stagingVCTs.idCard {
 		t.Fatalf("id-card Document() = %+v, %v", idcard, ok)
 	}
 	permit, ok := Presentation{ByCredential: map[string]map[string]string{credIDResidencePermit: {}}}.Document()
-	if !ok || permit.Credential != vctResidencePermit {
+	if !ok || permit.Credential != stagingVCTs.residencePermit {
 		t.Fatalf("residence permit Document() = %+v, %v", permit, ok)
 	}
 	if _, ok := (Presentation{ByCredential: map[string]map[string]string{credIDEmail: {}}}).Document(); ok {
@@ -237,7 +280,7 @@ func startBody(t *testing.T, intendedUseID, registrationCertificate string) map[
 	}))
 	defer srv.Close()
 
-	client := New(srv.URL, "", intendedUseID, registrationCertificate, srv.Client())
+	client := New(srv.URL, "", intendedUseID, registrationCertificate, "", srv.Client())
 	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
 		t.Fatalf("StartPresentation: %v", err)
 	}
@@ -296,7 +339,7 @@ func TestStartPresentationAsksForAGetRequestURI(t *testing.T) {
 // issuerJWT builds an SD-JWT VC issuer-signed JWT whose payload carries iat.
 func issuerJWT(t *testing.T, issuedAt int64) string {
 	t.Helper()
-	payload, err := json.Marshal(map[string]any{"vct": vctPassport, "iat": issuedAt})
+	payload, err := json.Marshal(map[string]any{"vct": stagingVCTs.passport, "iat": issuedAt})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}

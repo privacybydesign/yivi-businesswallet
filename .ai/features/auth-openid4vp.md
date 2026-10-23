@@ -128,6 +128,10 @@ PID-only demo intent); whether a wallet enforces it at presentation is untested 
 Format `dc+sd-jwt`, identified by `vct_values`, claims by `path`. From the demo's presets
 (`verifiers.ts:34-307`), the schemes we use (staging):
 
+The `pbdf-staging.` prefix is `EUDI_CREDENTIAL_SCHEME`: `pbdf-staging` (default) or `pbdf`
+in production, which `config.Load` enforces. `openid4vpverifier.vctsFor` builds every vct
+below from it, so on prod they read `pbdf.pbdf.passport`, `pbdf.sidn-pbdf.email` and so on.
+
 | Purpose | vct | claims |
 |---|---|---|
 | Identity (passport) | `pbdf-staging.pbdf.passport` | firstName, lastName, dateOfBirth, nationality, gender, documentNumber, dateOfExpiry |

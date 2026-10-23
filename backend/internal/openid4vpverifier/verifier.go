@@ -85,6 +85,9 @@ type Presentation struct {
 	// the member-reidentification feature); zero when the presentation carried no
 	// identity credential or its `iat` could not be read.
 	IdentityIssuedAt time.Time
+	// vcts names Document's credential; zero (a hand-built value) means
+	// defaultCredentialScheme's.
+	vcts vcts
 }
 
 // identityCredentialIDs are the credentials an identity disclosure draws on.
@@ -111,7 +114,11 @@ type IdentityDocument struct {
 // Document returns the passport, id-card or residence permit the presentation
 // disclosed, in that order of preference; false when it carried none.
 func (p Presentation) Document() (IdentityDocument, bool) {
-	for _, c := range [...]struct{ id, vct string }{{credIDPassport, vctPassport}, {credIDIDCard, vctIDCard}, {credIDResidencePermit, vctResidencePermit}} {
+	v := p.vcts
+	if v == (vcts{}) {
+		v = vctsFor(defaultCredentialScheme)
+	}
+	for _, c := range [...]struct{ id, vct string }{{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}} {
 		if claims, ok := p.ByCredential[c.id]; ok {
 			return IdentityDocument{Credential: c.vct, Claims: claims}, true
 		}

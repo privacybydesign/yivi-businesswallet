@@ -528,6 +528,7 @@ func run() error {
 		cfg.EudiIssuerChain,
 		cfg.EudiIntendedUseID,
 		cfg.EudiRegistrationCertificate,
+		cfg.EudiCredentialScheme,
 		&http.Client{Timeout: verifierHTTPTimeout},
 	)
 

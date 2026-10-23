@@ -236,6 +236,28 @@ func TestLoadKeepsConfiguredRegistrationCertificate(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsTheCredentialSchemes(t *testing.T) {
+	for _, scheme := range eudiCredentialSchemes {
+		cfg, err := loadWith(t, map[string]string{envEudiCredentialScheme: scheme})
+		if err != nil {
+			t.Fatalf("Load(%s): %v", scheme, err)
+		}
+		if cfg.EudiCredentialScheme != scheme {
+			t.Errorf("credential scheme = %q, want %q", cfg.EudiCredentialScheme, scheme)
+		}
+	}
+}
+
+func TestLoadRejectsAnUnknownCredentialScheme(t *testing.T) {
+	_, err := loadWith(t, map[string]string{envEudiCredentialScheme: "pbdf-stagign"})
+	if err == nil {
+		t.Fatal("Load accepted a misspelt credential scheme")
+	}
+	if !strings.Contains(err.Error(), envEudiCredentialScheme) {
+		t.Errorf("error %q does not name %s", err, envEudiCredentialScheme)
+	}
+}
+
 func TestLoadRejectsBothEudiCredentials(t *testing.T) {
 	_, err := loadWith(t, map[string]string{
 		envEudiIntendedUseID:           "1",

@@ -33,15 +33,19 @@ type Client struct {
 	issuerChain             string
 	intendedUseID           string
 	registrationCertificate string
+	vcts                    vcts
 	http                    *http.Client
 }
 
-func New(baseURL, issuerChain, intendedUseID, registrationCertificate string, httpClient *http.Client) *Client {
+// credentialScheme is the Yivi scheme the requested credentials come from
+// (defaultCredentialScheme when empty).
+func New(baseURL, issuerChain, intendedUseID, registrationCertificate, credentialScheme string, httpClient *http.Client) *Client {
 	return &Client{
 		baseURL:                 strings.TrimRight(baseURL, "/"),
 		issuerChain:             issuerChain,
 		intendedUseID:           intendedUseID,
 		registrationCertificate: registrationCertificate,
+		vcts:                    vctsFor(credentialScheme),
 		http:                    httpClient,
 	}
 }
@@ -71,7 +75,7 @@ func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...s
 	}
 	body, err := json.Marshal(startRequest{
 		Type:                    "vp_token",
-		DCQLQuery:               queryFor(scope, claims),
+		DCQLQuery:               c.vcts.queryFor(scope, claims),
 		Nonce:                   nonce,
 		JARMode:                 "by_reference",
 		RequestURIMethod:        requestURIMethodGet,
@@ -147,6 +151,7 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 		Claims:           parseDisclosures(vt.VPToken),
 		ByCredential:     parseDisclosuresByCredential(vt.VPToken),
 		IdentityIssuedAt: identityIssuedAt(vt.VPToken),
+		vcts:             c.vcts,
 	}, nil
 }
 
