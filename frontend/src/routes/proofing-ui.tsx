@@ -15,7 +15,7 @@ import {
   proofingStatusTone,
   readableTextOn,
 } from "../lib/identity-proofing";
-import { Button, Modal, Tag } from "../ui";
+import { Button, Modal, StatusText } from "../ui";
 
 const MARK_SIZES = {
   md: "h-8 w-8 text-[13px] rounded-md",
@@ -45,11 +45,11 @@ export function BrandMark({
   name: orgName,
   branding,
   size = "md",
-}: {
+}: Readonly<{
   name: string;
   branding: Pick<ProofingBranding, "displayName" | "primaryColor" | "logoUri">;
   size?: keyof typeof MARK_SIZES;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const name = branding.displayName || orgName;
   const [failed, setFailed] = useState(false);
   if (branding.logoUri && !failed) {
@@ -79,11 +79,11 @@ export function InitialMark({
   name,
   color,
   className,
-}: {
+}: Readonly<{
   name: string;
   color: string;
   className: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <span
       aria-hidden="true"
@@ -97,37 +97,39 @@ export function InitialMark({
 
 // A session's result; a failed one names why, which is what a member acts on.
 // compact leaves the reason to the tooltip, for a narrow column.
-export function ResultTag({
+export function ResultText({
   request,
   compact = false,
-}: {
+}: Readonly<{
   request: Pick<ProofingRequest, "status" | "errorCode">;
   compact?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const label = proofingStatusLabel(request.status, t);
   const reason =
     request.status === "rejected" && request.errorCode
       ? proofingRejectionReason(request.errorCode, t)
       : undefined;
+  // A session still under way is plain text: it is neither good nor bad yet.
+  const status = proofingStatusTone(request.status);
   return (
-    <Tag tone={proofingStatusTone(request.status)} dot title={reason}>
+    <StatusText tone={status === "blue" ? "default" : status} title={reason}>
       {reason && !compact
         ? t("identityProofing.sessions.failedBecause", {
             status: label,
             reason,
           })
         : label}
-    </Tag>
+    </StatusText>
   );
 }
 
 // How the org's webhook endpoint answers, in a few words.
 export function WebhookStateText({
   webhook,
-}: {
+}: Readonly<{
   webhook: WebhookHealth;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const since = webhook.failingSince ? formatWhen(webhook.failingSince) : "—";
@@ -171,7 +173,7 @@ export function SecretReveal({
   doneLabel,
   link,
   onClose,
-}: {
+}: Readonly<{
   title: string;
   hint: string;
   secret: string;
@@ -183,7 +185,7 @@ export function SecretReveal({
   // beside the close button.
   link?: { openLabel: string; newTabNote: string };
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);

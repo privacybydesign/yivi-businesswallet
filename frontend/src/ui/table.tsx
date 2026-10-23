@@ -10,10 +10,10 @@ export type SortDir = "asc" | "desc";
 export function Table({
   children,
   className,
-}: {
+}: Readonly<{
   children: ReactNode;
   className?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     // Wide tables scroll horizontally within their container on small screens
     // instead of forcing the whole page to overflow.
@@ -30,7 +30,9 @@ export function Table({
   );
 }
 
-function Head({ children }: { children: ReactNode }): React.JSX.Element {
+function Head({
+  children,
+}: Readonly<{ children: ReactNode }>): React.JSX.Element {
   return (
     <thead>
       <tr>{children}</tr>
@@ -55,7 +57,7 @@ function HeaderCell({
   sortDir,
   onSort,
   ...rest
-}: HeaderCellProps): React.JSX.Element {
+}: Readonly<HeaderCellProps>): React.JSX.Element {
   const classes = [TH_CLASS, className ?? ""].join(" ");
 
   if (!onSort) {
@@ -91,7 +93,9 @@ function HeaderCell({
   );
 }
 
-function Body({ children }: { children: ReactNode }): React.JSX.Element {
+function Body({
+  children,
+}: Readonly<{ children: ReactNode }>): React.JSX.Element {
   return <tbody>{children}</tbody>;
 }
 
@@ -99,7 +103,7 @@ function Row({
   children,
   className,
   ...rest
-}: HTMLAttributes<HTMLTableRowElement>): React.JSX.Element {
+}: Readonly<HTMLAttributes<HTMLTableRowElement>>): React.JSX.Element {
   return (
     <tr className={className} {...rest}>
       {children}
@@ -118,7 +122,7 @@ function Cell({
   className,
   scope,
   ...rest
-}: CellProps): React.JSX.Element {
+}: Readonly<CellProps>): React.JSX.Element {
   const classes = [TD_CLASS, className ?? ""].join(" ");
   if (scope) {
     return (
@@ -139,10 +143,10 @@ function Cell({
 function State({
   colSpan,
   children,
-}: {
+}: Readonly<{
   colSpan: number;
   children: ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <tr>
       <td className="text-ink-soft px-3.5 py-3" colSpan={colSpan}>

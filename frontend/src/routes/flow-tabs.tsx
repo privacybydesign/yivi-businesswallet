@@ -13,14 +13,14 @@ export function FlowTabs<T extends string>({
   active,
   onSelect,
   panelId,
-}: {
+}: Readonly<{
   idPrefix: string;
   label: string;
   tabs: readonly { key: T; label: React.ReactNode }[];
   active: T;
   onSelect: (tab: T) => void;
   panelId: (tab: T) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   // On the focused tab, as the tablist itself takes no focus.
   function onKeyDown(e: React.KeyboardEvent): void {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
@@ -74,14 +74,14 @@ export function FlowTabPanel({
   hidden,
   className,
   children,
-}: {
+}: Readonly<{
   idPrefix: string;
   tab: string;
   id: string;
   hidden?: boolean;
   className: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div
       id={id}

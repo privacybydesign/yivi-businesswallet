@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -54,6 +55,38 @@ func TestStandardFlowSpecMeetsStandard(t *testing.T) {
 	weak := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{stepDocumentCapture, stepNFCRead}, RequestedAttributes: []string{attributeDocument}}}
 	if meetsStandard(weak) {
 		t.Error("a flow without face check or level meets the standard; want not")
+	}
+}
+
+// A standard flow tells the person why it collects each item, in every
+// language its hosted page offers, as an admin's flow must (withReasons); one
+// made before reasons existed falls short of the standard, so it gets them.
+func TestStandardFlowSpecGivesEveryReason(t *testing.T) {
+	for _, kind := range standardKinds {
+		spec, err := withReasons(standardFlowSpec(kind), DefaultFlowHosted())
+		if err != nil {
+			t.Fatalf("%s: withReasons: %v", kind, err)
+		}
+		for _, attribute := range spec.RequestedAttributes {
+			for _, locale := range email.Locales() {
+				if spec.AttributeReasons[attribute][string(locale)] == "" {
+					t.Errorf("%s gives %s no reason in %s", kind, attribute, locale)
+				}
+			}
+		}
+		spec.AttributeReasons[attributeDocument][string(email.LocaleNL)] = "changed"
+		if standardFlowSpec(kind).AttributeReasons[attributeDocument][string(email.LocaleNL)] == "changed" {
+			t.Errorf("%s: a change to one spec's reasons reached the next", kind)
+		}
+
+		unexplained, err := normalizeFlow(standardFlowSpec(kind))
+		if err != nil {
+			t.Fatalf("%s: normalizeFlow: %v", kind, err)
+		}
+		unexplained.AttributeReasons = nil
+		if meetsStandard(proofingprovider.Flow{FlowSpec: unexplained}) {
+			t.Errorf("%s without reasons meets the standard; want not", kind)
+		}
 	}
 }
 

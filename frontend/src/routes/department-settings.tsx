@@ -37,9 +37,9 @@ function departmentError(error: Error, t: TFunction): string {
 
 export function DepartmentSettings({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const departments = useOrganizationDepartmentsQuery(slug);
   const create = useCreateDepartmentMutation(slug);

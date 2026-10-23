@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"time"
 
@@ -161,6 +162,77 @@ var (
 	// learns their name and that they are of age, never their date of birth
 	// (the age check withholds it from dg1).
 	cmAttributes = []string{"dg1", flow.AttributeAgeOver, "chip_checks", "biometrics"}
+	// cmReasons are what the person reads under each of them.
+	cmReasons = map[string]map[string]string{
+		"dg1": {
+			"en": "To put your name on the ticket.",
+			"nl": "Voor je naam op het ticket.",
+		},
+		flow.AttributeAgeOver: {
+			"en": "To check you are 18 or older.",
+			"nl": "Om te controleren dat je 18 of ouder bent.",
+		},
+		"chip_checks": {
+			"en": "To make sure your document is real.",
+			"nl": "Om te controleren dat je document echt is.",
+		},
+		"biometrics": {
+			"en": "To make sure the ticket goes to the document's holder.",
+			"nl": "Om te controleren dat het ticket naar de houder van het document gaat.",
+		},
+	}
+)
+
+// demoReasons are why a demo flow collects each item it can, in each language
+// a hosted page offers: what its person reads under the item, and what the
+// flow editor asks for before it saves, so a demo flow's first edit does not
+// ask for them. A flow without its own reasons gets these for what it collects.
+var demoReasons = map[string]map[string]string{
+	"dg1": {
+		"en": "To know who you are: your name, date of birth and the document you used.",
+		"nl": "Om te weten wie je bent: je naam, geboortedatum en het document dat je gebruikte.",
+	},
+	"dg11": {
+		"en": "To record the extra details on your document's chip, such as your place of birth.",
+		"nl": "Om de extra gegevens op de chip van je document vast te leggen, zoals je geboorteplaats.",
+	},
+	"dg2": {
+		"en": "To keep the photo from your document's chip with the check.",
+		"nl": "Om de foto van de chip van je document bij de controle te bewaren.",
+	},
+	"chip_checks": {
+		"en": "To make sure your document is real.",
+		"nl": "Om te controleren dat je document echt is.",
+	},
+	"document_image": {
+		"en": "To keep a picture of your document with the check.",
+		"nl": "Om een afbeelding van je document bij de controle te bewaren.",
+	},
+	"selfie": {
+		"en": "To keep the photo taken of you with the check.",
+		"nl": "Om de foto die van je is gemaakt bij de controle te bewaren.",
+	},
+	"biometrics": {
+		"en": "To make sure you are the holder of the document.",
+		"nl": "Om te controleren dat jij de houder van het document bent.",
+	},
+}
+
+// reasonsFor is demoReasons for attributes.
+func reasonsFor(attributes ...string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(attributes))
+	for _, attribute := range attributes {
+		out[attribute] = maps.Clone(demoReasons[attribute])
+	}
+	return out
+}
+
+// chipAndFaceAttributes and faceOnlyAttributes are what the engine releases for
+// chipAndFaceSteps and faceOnlySteps: a flow that lists none releases
+// everything its steps collect.
+var (
+	chipAndFaceAttributes = []string{"dg1", "document_image", "dg11", "dg2", "chip_checks", "selfie", "biometrics"}
+	faceOnlyAttributes    = []string{"selfie", "biometrics"}
 )
 
 // demoRetentionDays and shortRetentionDays are how long a demo org's flows
@@ -185,6 +257,7 @@ func chipAndFace(name string, basis privacy.LegalBasis, purpose string) flow.Flo
 		Name: name, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
 		FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
 		RequiredAssuranceLevel: flow.AssuranceLevelSubstantial, LegalBasis: basis, ProcessingPurpose: purpose,
+		AttributeReasons: reasonsFor(chipAndFaceAttributes...),
 	}
 }
 
@@ -227,6 +300,7 @@ var demoProofingOrgs = []demoProofingOrg{
 				Name: flowASRAccountChange, Steps: faceOnlySteps, SelfieLocation: flow.LocationNative,
 				FaceProvider: flow.FaceProviderRegula, RequiredChecks: faceChecks,
 				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Wijziging van het rekeningnummer op de polis",
+				AttributeReasons: reasonsFor(faceOnlyAttributes...),
 			}},
 		},
 		theme: asrTheme,
@@ -250,7 +324,7 @@ var demoProofingOrgs = []demoProofingOrg{
 			{def: flow.FlowDefinition{
 				Name: flowCMAgeCheck, Steps: chipAndFaceSteps, SelfieLocation: flow.LocationNative,
 				FaceProvider: flow.FaceProviderRegula, RequiredChecks: substantialChecks,
-				RequestedAttributes: cmAttributes, AgeOver: cmAgeOver,
+				RequestedAttributes: cmAttributes, AgeOver: cmAgeOver, AttributeReasons: cmReasons,
 				LegalBasis: privacy.LegalBasisContract, ProcessingPurpose: "Leeftijdscontrole bij aankoop ticket",
 			}},
 		},

@@ -33,7 +33,7 @@ import {
   validateCredentialRequest,
 } from "../lib/credential-request";
 import { useWhenFormatter } from "../lib/format-when";
-import { Button, Card, ConfirmDialog, Modal, Tag, TopBar } from "../ui";
+import { Button, Card, ConfirmDialog, Modal, Select, Tag, TopBar } from "../ui";
 
 const ADMIN_ROLE = "admin";
 const FORM_ID = "credential-request-form";
@@ -177,10 +177,10 @@ export default function CredentialRequests(): React.JSX.Element {
 function MessageCard({
   message,
   error = false,
-}: {
+}: Readonly<{
   message: string;
   error?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <Card className="p-6">
       <p className={`${error ? "text-error" : "text-ink-soft"} text-[14px]`}>
@@ -195,12 +195,12 @@ function IncomingTab({
   requests,
   pending,
   error,
-}: {
+}: Readonly<{
   slug: string;
   requests: IncomingRequest[];
   pending: boolean;
   error: Error | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const approve = useApproveIncomingRequestMutation(slug);
@@ -330,11 +330,11 @@ function SentTab({
   requests,
   pending,
   error,
-}: {
+}: Readonly<{
   requests: OutboundRequest[];
   pending: boolean;
   error: Error | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (error) {
     return (
@@ -361,9 +361,9 @@ function SentTab({
 
 function SentCard({
   request,
-}: {
+}: Readonly<{
   request: OutboundRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const statusLabels: Record<OutboundRequest["status"], string> = {
@@ -462,12 +462,12 @@ function RequestForm({
   orgName,
   onClose,
   onSent,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   onClose: () => void;
   onSent: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const addresses = useQerdsAddressesQuery(slug);
   const contacts = useQerdsContactsQuery(slug);
@@ -527,9 +527,8 @@ function RequestForm({
             <label htmlFor="credential-request-from" className={FIELD_LABEL}>
               {t("credentialRequests.form.from")}
             </label>
-            <select
+            <Select
               id="credential-request-from"
-              className={`${control("ok")} h-9`}
               value={from}
               onChange={(event) => setFrom(event.target.value)}
             >
@@ -541,7 +540,7 @@ function RequestForm({
                   {address.address}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
 

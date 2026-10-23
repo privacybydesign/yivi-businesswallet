@@ -3,7 +3,7 @@ import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
 import type { HeldAttestationClaims } from "./api/attestations";
-import type { ProofingFlow } from "./api/identity-proofing";
+import type { ProofingFlow, ProofingRequest } from "./api/identity-proofing";
 import { credentialDisplayName } from "./lib/credential-display";
 import {
   organizationMemberQueryKey,
@@ -11,7 +11,11 @@ import {
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
 import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
-import { proofingFlowsQueryKey } from "./api/identity-proofing.queries";
+import {
+  proofingFlowsQueryKey,
+  proofingRequestQueryKey,
+} from "./api/identity-proofing.queries";
+import { personName } from "./lib/proofing-reviews";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -33,6 +37,8 @@ import IdentityProofingFlows from "./routes/identity-proofing-flows";
 import IdentityProofingOverview from "./routes/identity-proofing-overview";
 import ProofingVerify from "./routes/proofing-verify";
 import ProofingPeople from "./routes/proofing-people";
+import ProofingReviews from "./routes/proofing-reviews";
+import ProofingReview from "./routes/proofing-review";
 import Developers from "./routes/developers";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
@@ -91,6 +97,19 @@ const identityProofingFlowCrumb: RouteHandle = {
 };
 const proofingPeopleCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofing.people.title"),
+};
+const proofingReviewsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.reviews.title"),
+};
+const proofingReviewCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const request = queryClient.getQueryData<ProofingRequest>(
+      proofingRequestQueryKey(params.orgSlug ?? "", params.requestId ?? ""),
+    );
+    return request
+      ? personName(request, t)
+      : t("identityProofing.reviews.title");
+  },
 };
 const developersCrumb: RouteHandle = {
   crumb: ({ t }) => t("identityProofing.developers.title"),
@@ -244,6 +263,18 @@ export const router = createBrowserRouter([
                         path: "people",
                         Component: ProofingPeople,
                         handle: proofingPeopleCrumb,
+                      },
+                      {
+                        path: "reviews",
+                        handle: proofingReviewsCrumb,
+                        children: [
+                          { index: true, Component: ProofingReviews },
+                          {
+                            path: ":requestId",
+                            Component: ProofingReview,
+                            handle: proofingReviewCrumb,
+                          },
+                        ],
                       },
                       {
                         path: "developers",

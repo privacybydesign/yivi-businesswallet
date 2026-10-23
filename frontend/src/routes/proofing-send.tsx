@@ -20,8 +20,7 @@ import {
   verifySearch,
 } from "../lib/identity-proofing";
 import type { SendKind } from "../lib/identity-proofing";
-import { Button, Input, Modal } from "../ui";
-import { ChevronSelect } from "./flow-editor-parts";
+import { Button, Input, Modal, Select } from "../ui";
 import { SecretReveal } from "./proofing-ui";
 
 const LABEL = "text-ink text-[14px] font-semibold";
@@ -44,11 +43,11 @@ export function VerifyPerson({
   slug,
   isAdmin,
   flowId,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
   flowId?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [sending, setSending] = useState(false);
   const [link, setLink] = useState<string>();
@@ -96,13 +95,13 @@ function SendModal({
   startFlowId,
   onClose,
   onLink,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
   startFlowId?: string;
   onClose: () => void;
   onLink: (url: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const flows = useProofingFlowsQuery(slug);
 
@@ -161,7 +160,7 @@ function SendForm({
   onSent,
   onLink,
   onCancel,
-}: {
+}: Readonly<{
   slug: string;
   flows: ProofingFlow[];
   isAdmin: boolean;
@@ -169,7 +168,7 @@ function SendForm({
   onSent: () => void;
   onLink: (url: string) => void;
   onCancel: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const create = useCreateRequestMutation(slug);
   const settings = useProofingSettingsQuery(slug);
@@ -340,17 +339,17 @@ function SendForm({
             <label htmlFor="proofing-subject-flow" className={LABEL}>
               {t("identityProofing.send.flow")}
             </label>
-            <ChevronSelect
+            <Select
               id="proofing-subject-flow"
               value={flowId}
-              onChange={setPicked}
+              onChange={(event) => setPicked(event.target.value)}
             >
               {sendable.map((flow) => (
                 <option key={flow.id} value={flow.id}>
                   {flow.name}
                 </option>
               ))}
-            </ChevronSelect>
+            </Select>
           </div>
         )}
         {flowPending && (
@@ -401,11 +400,11 @@ function NoFlowsDialog({
   photoOnly,
   isAdmin,
   onClose,
-}: {
+}: Readonly<{
   photoOnly: boolean;
   isAdmin: boolean;
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   let reason: string = t("identityProofing.send.noFlowsMember");
   if (photoOnly) {
@@ -436,7 +435,7 @@ function DeliveryFieldset({
   showEmailError,
   onChannel,
   onEmail,
-}: {
+}: Readonly<{
   channels: typeof SEND_CHANNELS;
   delivery: ProofingChannel;
   linkable: boolean;
@@ -446,7 +445,7 @@ function DeliveryFieldset({
   showEmailError: boolean;
   onChannel: (channel: ProofingChannel) => void;
   onEmail: (email: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <fieldset className="flex flex-col gap-2.5">
@@ -524,7 +523,7 @@ function SubjectFields({
   onPassOn,
   onName,
   onBirthDate,
-}: {
+}: Readonly<{
   nameShown: boolean;
   passing: boolean;
   matchable: boolean;
@@ -536,7 +535,7 @@ function SubjectFields({
   onPassOn: (on: boolean) => void;
   onName: (name: string) => void;
   onBirthDate: (birthDate: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="border-line flex flex-col gap-4 border-t pt-4.5">
@@ -626,7 +625,7 @@ function OptionCard({
   disabled = false,
   onSelect,
   footer,
-}: {
+}: Readonly<{
   name: string;
   value: string;
   title: string;
@@ -635,7 +634,7 @@ function OptionCard({
   disabled?: boolean;
   onSelect: () => void;
   footer?: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const titleId = useId();
   const hintId = useId();
 
@@ -683,14 +682,14 @@ function SwitchRow({
   hint,
   note,
   onChange,
-}: {
+}: Readonly<{
   checked: boolean;
   disabled?: boolean;
   title: string;
   hint: string;
   note?: string;
   onChange: (checked: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const titleId = useId();
   const hintId = useId();
   const noteId = useId();

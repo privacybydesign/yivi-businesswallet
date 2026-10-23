@@ -29,7 +29,7 @@ export function Modal({
   footer,
   wide = false,
   dismissible = true,
-}: ModalProps): React.JSX.Element {
+}: Readonly<ModalProps>): React.JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
   const dismiss = modalDismissal({ dismissible, onClose });
 

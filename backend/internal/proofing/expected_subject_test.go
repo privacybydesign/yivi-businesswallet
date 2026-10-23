@@ -147,7 +147,7 @@ func TestMismatchHidesIdentity(t *testing.T) {
 		t.Fatalf("code = %q, want %s", req.ErrorCode, errorIdentityMismatch)
 	}
 	f.requests.stored.Status, f.requests.stored.ErrorCode = StatusRejected, errorIdentityMismatch
-	_, identity, err := f.svc.AdminRequestResult(context.Background(), testOrg.ID, sent.Request.ID)
+	_, identity, err := f.svc.AdminRequestResult(context.Background(), testOrg.ID, sent.Request.ID, ReviewScopeAll)
 	if err != nil {
 		t.Fatalf("AdminRequestResult: %v", err)
 	}

@@ -17,7 +17,7 @@ export function Card({
   children,
   className,
   ...rest
-}: CardProps): React.JSX.Element {
+}: Readonly<CardProps>): React.JSX.Element {
   return (
     <div
       className={[

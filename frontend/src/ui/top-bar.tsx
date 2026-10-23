@@ -22,7 +22,7 @@ export function TopBar({
   actions,
   leading,
   badges,
-}: TopBarProps): React.JSX.Element {
+}: Readonly<TopBarProps>): React.JSX.Element {
   const { t } = useTranslation();
   const nav = useMobileNav();
   return (

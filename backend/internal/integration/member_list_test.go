@@ -27,6 +27,7 @@ type memberEntry struct {
 	DepartmentName       *string    `json:"departmentName"`
 	ExpiresAt            *time.Time `json:"expiresAt"`
 	InvitedBy            *uuid.UUID `json:"invitedBy"`
+	CanReview            bool       `json:"canReview"`
 	Verified             bool       `json:"verified"`
 	IdentityVerifiedAt   *time.Time `json:"identityVerifiedAt"`
 	IdentityDueAt        *time.Time `json:"identityDueAt"`

@@ -61,7 +61,7 @@ export function BrandingFields({
   fallbackColor = FALLBACK_PREVIEW_COLOR,
   placeholders,
   children,
-}: {
+}: Readonly<{
   idPrefix: string;
   draft: BrandingDraft;
   onChange: (patch: Partial<BrandingDraft>) => void;
@@ -76,7 +76,7 @@ export function BrandingFields({
     privacy: string;
   };
   children?: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -208,7 +208,7 @@ export function ColorField({
   placeholder,
   value,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint: string;
@@ -216,7 +216,7 @@ export function ColorField({
   placeholder: string;
   value: string;
   onChange: (value: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const invalid = isInvalidColor(value);
   return (
@@ -277,7 +277,9 @@ interface MailPreviewProps {
 
 // A sketch of the proofing mail with the draft branding, under its caption:
 // what the subject sees before they scan.
-export function MailPreview(props: MailPreviewProps): React.JSX.Element {
+export function MailPreview(
+  props: Readonly<MailPreviewProps>,
+): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div>
@@ -296,7 +298,7 @@ export function MailPreviewCard({
   logoUri,
   supportContact,
   privacyUrl,
-}: MailPreviewProps): React.JSX.Element {
+}: Readonly<MailPreviewProps>): React.JSX.Element {
   const { t } = useTranslation();
   const fill = color || FALLBACK_PREVIEW_COLOR;
   const onFill = readableTextOn(fill);

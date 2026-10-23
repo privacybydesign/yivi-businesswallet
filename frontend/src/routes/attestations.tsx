@@ -53,6 +53,7 @@ import {
   ConfirmDialog,
   Icon,
   Input,
+  Select,
   Table,
   Tag,
   TopBar,
@@ -296,7 +297,9 @@ const TAB_LABEL_KEYS = {
   schemas: "attestations.tabs.schemas",
 } as const;
 
-function ErrorCard({ message }: { message: string }): React.JSX.Element {
+function ErrorCard({
+  message,
+}: Readonly<{ message: string }>): React.JSX.Element {
   return (
     <Card className="p-6">
       <p className="text-error text-[14px]">{message}</p>
@@ -312,7 +315,7 @@ function TemplatesTab({
   error,
   onIssue,
   onEdit,
-}: {
+}: Readonly<{
   slug: string;
   templates: AttestationTemplate[];
   schemaLogos: Map<string, string>;
@@ -320,7 +323,7 @@ function TemplatesTab({
   error: Error | null;
   onIssue: (template: AttestationTemplate) => void;
   onEdit: (template: AttestationTemplate) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteAttestationTemplateMutation(slug);
   const [pendingDelete, setPendingDelete] =
@@ -462,14 +465,14 @@ function IssuedTab({
   error,
   isAdmin,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   rows: IssuedAttestation[];
   pending: boolean;
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const revoke = useRevokeIssuedAttestationMutation(slug);
   const cancel = useCancelIssuedAttestationMutation(slug);
@@ -562,10 +565,6 @@ function IssuedTab({
   );
 }
 
-// Toolbar control: the source filter dropdown shares the app's form-control styling.
-const FILTER_SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
-
 // The credential offers waiting on the organization. An offer that arrived over
 // QERDS is not in the wallet yet — accepting is what redeems it, declining leaves
 // it unredeemed for good. Renders nothing when there is nothing to decide, so the
@@ -576,13 +575,13 @@ function OffersSection({
   error,
   isAdmin,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   offers: CredentialOffer[];
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const accept = useAcceptCredentialOfferMutation(slug);
   const decline = useDeclineCredentialOfferMutation(slug);
@@ -716,14 +715,14 @@ function HeldTab({
   error,
   isAdmin,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   rows: HeldAttestation[];
   pending: boolean;
   error: Error | null;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatDate = useDateFormatter();
   const remove = useDeleteHeldAttestationMutation(slug);
@@ -852,8 +851,8 @@ function HeldTab({
             );
           })}
         </div>
-        <select
-          className={FILTER_SELECT_CLASS}
+        <Select
+          className="w-auto"
           value={source}
           aria-label={t("attestations.held.filters.source")}
           onChange={(event) => setFilter("source", event.target.value)}
@@ -864,7 +863,7 @@ function HeldTab({
               {heldSourceLabel(value, t)}
             </option>
           ))}
-        </select>
+        </Select>
         {filtered && (
           <Button variant="ghost" size="sm" onClick={resetView}>
             {t("attestations.held.reset")}
@@ -958,11 +957,11 @@ function HeldSection({
   title,
   count,
   children,
-}: {
+}: Readonly<{
   title: string;
   count: number;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <section className="flex flex-col gap-3">
@@ -1017,7 +1016,7 @@ function AttentionRow({
   isAdmin,
   formatDate,
   onDelete,
-}: {
+}: Readonly<{
   slug: string;
   credential: HeldAttestation;
   status: Exclude<HeldStatus, "valid">;
@@ -1025,7 +1024,7 @@ function AttentionRow({
   isAdmin: boolean;
   formatDate: (iso: string) => string;
   onDelete: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
   const look = ATTENTION_LOOK[status];
@@ -1109,14 +1108,14 @@ function ValidCard({
   formatWhen,
   formatDate,
   onDelete,
-}: {
+}: Readonly<{
   slug: string;
   credential: HeldAttestation;
   isAdmin: boolean;
   formatWhen: (iso: string) => string;
   formatDate: (iso: string) => string;
   onDelete: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const name = credential.displayName || credentialDisplayName(credential.vct);
   const expiresAt =
@@ -1197,14 +1196,14 @@ function SchemasTab({
   error,
   onCreate,
   onEdit,
-}: {
+}: Readonly<{
   slug: string;
   schemas: AttestationSchema[];
   pending: boolean;
   error: Error | null;
   onCreate: () => void;
   onEdit: (schema: AttestationSchema) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const remove = useDeleteAttestationSchemaMutation(slug);
   const [pendingDelete, setPendingDelete] = useState<AttestationSchema | null>(

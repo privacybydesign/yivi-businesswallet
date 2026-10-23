@@ -177,6 +177,33 @@ func TestDataRequestStore(t *testing.T) {
 		t.Fatalf("erasure Candidates = %+v, %v; want the session and the decided access request", candidates, err)
 	}
 
+	// A check a reviewer rejected still holds whoever proofed it: each of the
+	// reviewer's codes leaves it a candidate.
+	rejected := map[uuid.UUID]bool{}
+	for i, code := range reviewerRejectCodes {
+		sid := "s-reviewed-" + strconv.Itoa(i)
+		reviewed := newDataRequest(t, requests, orgID, sam, FlowIdentity, sid)
+		if err := requests.RecordOutcome(ctx, reviewed, sid, StatusRejected,
+			proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: code}); err != nil {
+			t.Fatalf("RecordOutcome %s: %v", code, err)
+		}
+		if err := data.RecordIdentityKey(ctx, reviewed, anna); err != nil {
+			t.Fatalf("RecordIdentityKey %s: %v", code, err)
+		}
+		rejected[reviewed.ID] = true
+	}
+	later := newDataRequest(t, requests, orgID, sam, FlowDataAccess, "s-later")
+	candidates, err = data.Candidates(ctx, later, anna)
+	if err != nil {
+		t.Fatalf("Candidates after the reviews: %v", err)
+	}
+	for _, c := range candidates {
+		delete(rejected, c.ID)
+	}
+	if len(rejected) != 0 {
+		t.Errorf("Candidates = %+v; want every check a reviewer rejected among them, missing %v", candidates, rejected)
+	}
+
 	// A purge drops the key with the rest of the personal data.
 	if other, err = requests.Get(ctx, orgID, other.ID); err != nil {
 		t.Fatalf("Get other: %v", err)
@@ -295,8 +322,52 @@ func TestDataRequestUnfinishedCandidates(t *testing.T) {
 	}
 }
 
+// A data request's review lapses a calendar month after it went to review,
+// the "Answer by" the Reviews page shows: 16 Oct is answered by 16 Nov, 1 Feb by
+// 1 Mar (not 3 Mar, 30 days on), 31 Jan by the end of February.
+func TestDataRequestReviewLapsesOnTheCalendar(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	erasure := newDataRequest(t, requests, orgID, sam, FlowDataErasure, "s1")
+	if err := requests.RecordOutcome(ctx, erasure, "s1", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
+		t.Fatalf("RecordOutcome review: %v", err)
+	}
+	at := func(s string) time.Time {
+		t.Helper()
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for proven, want := range map[string]string{
+		"2026-10-16T14:40:00Z": "2026-11-16T14:40:00Z",
+		"2027-02-01T09:00:00Z": "2027-03-01T09:00:00Z",
+		"2027-01-31T09:00:00Z": "2027-02-28T09:00:00Z",
+		"2028-01-31T09:00:00Z": "2028-02-29T09:00:00Z",
+		"2027-03-31T23:30:00Z": "2027-04-30T23:30:00Z",
+	} {
+		if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = $2 WHERE id = $1`,
+			erasure.ID, at(proven)); err != nil {
+			t.Fatalf("set when it went to review: %v", err)
+		}
+		// A raw write: the store would set purge_at in the same transaction.
+		if err := refreshPurgeAt(ctx, pool, erasure.ID); err != nil {
+			t.Fatalf("refresh purge time: %v", err)
+		}
+		got, err := requests.Get(ctx, orgID, erasure.ID)
+		if err != nil || got.PurgeAt == nil || !got.PurgeAt.Equal(at(want)) {
+			t.Errorf("in review since %s: purge at %v, %v; want %s", proven, got.PurgeAt, err, want)
+		}
+	}
+}
+
 // A data request left in review comes up for purge a month after it went to
-// review (30 days, purge_at), not before, and can then be rejected there.
+// review (purge_at), not before, and can then be rejected there.
 func TestDataRequestReviewLapses(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
@@ -310,10 +381,11 @@ func TestDataRequestReviewLapses(t *testing.T) {
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
 		t.Fatalf("RecordOutcome review: %v", err)
 	}
-	inReviewFor := func(days int) {
+	// In review for a month, give or take a minute.
+	inReviewFor := func(offset string) {
 		t.Helper()
-		if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - make_interval(days => $2)
-			WHERE id = $1`, erasure.ID, days); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests
+			SET completed_at = now() - interval '1 month' + $2::interval WHERE id = $1`, erasure.ID, offset); err != nil {
 			t.Fatalf("age the review: %v", err)
 		}
 		// A raw write: the store would set purge_at in the same transaction.
@@ -322,14 +394,14 @@ func TestDataRequestReviewLapses(t *testing.T) {
 		}
 	}
 
-	inReviewFor(29)
+	inReviewFor("1 minute")
 	if due, err := requests.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
-		t.Fatalf("purge due after 29 days in review = %+v, %v; want none", due, err)
+		t.Fatalf("purge due a minute before a month in review = %+v, %v; want none", due, err)
 	}
-	inReviewFor(31)
+	inReviewFor("-1 minute")
 	due, err := requests.ListPurgeDue(ctx, 10)
 	if err != nil || len(due) != 1 || due[0].ID != erasure.ID || due[0].Status != StatusNeedsReview {
-		t.Fatalf("purge due after 31 days in review = %+v, %v; want the request, still in review", due, err)
+		t.Fatalf("purge due a minute after a month in review = %+v, %v; want the request, still in review", due, err)
 	}
 	if err := requests.RecordOutcome(ctx, due[0], "s1", StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed}); err != nil {

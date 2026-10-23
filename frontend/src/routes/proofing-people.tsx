@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useDecideReviewMutation,
   useExternalRequestsQuery,
   useProofingRequestEventsQuery,
   useProofingFlowsQuery,
@@ -27,6 +26,7 @@ import {
   auditVisual,
 } from "../lib/audit-event";
 import { useWhenFormatter } from "../lib/format-when";
+import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   addressVerificationNote,
@@ -36,8 +36,6 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
-  REVIEW_REASON_MAX_CHARS,
-  reviewReasonTooLong,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -46,6 +44,7 @@ import {
   peopleRetentionOf,
   requestFlows,
   requestListCapped,
+  requestedBy,
   sessionDurationSeconds,
   sessionFilterCounts,
   shortRequestId,
@@ -53,20 +52,18 @@ import {
   isCheckOutcome,
   showsSessionIdentity,
   timelineActor,
+  ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Button, Card, Icon, Table, Tag, TopBar } from "../ui";
-import { ResultTag } from "./proofing-ui";
-import { DataRequestPanel, DataRequestTag } from "./data-request-review";
+import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
+import { ResultText } from "./proofing-ui";
+import { DataRequestNote } from "./data-request-review";
+import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
 
 const HINT = "text-ink-soft text-[12px]";
 const ERROR = "text-error text-[12.5px]";
 const LABEL = "text-ink text-[13px] font-semibold";
-// Mirrors the Input base so the filters read as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink h-9 appearance-none border pr-10 pl-4 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3";
-const CHEVRON_SIZE = 12;
 // Person, result, app, started and the details button; the flow and who
 // requested it come on top.
 const BASE_COLUMNS = 5;
@@ -134,11 +131,11 @@ export function PeopleList({
   slug,
   isAdmin,
   flow,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
   flow?: ProofingFlow;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [flowFilter, setFlowFilter] = useState("");
   const scope: PeopleScope = flow ? "flow" : "all";
@@ -176,60 +173,46 @@ export function PeopleList({
               <label htmlFor="people-flow-filter" className={LABEL}>
                 {t("identityProofing.requests.flow")}
               </label>
-              <div className="relative min-w-0 flex-1 sm:flex-none">
-                <select
-                  id="people-flow-filter"
-                  value={flowFilter}
-                  onChange={(event) => setFlowFilter(event.target.value)}
-                  className={`${SELECT_CLASS} w-full sm:w-64`}
-                >
-                  <option value="">
-                    {t("identityProofing.people.allFlows")}
+              <Select
+                id="people-flow-filter"
+                value={flowFilter}
+                onChange={(event) => setFlowFilter(event.target.value)}
+                className="min-w-0 flex-1 sm:w-64 sm:flex-none"
+              >
+                <option value="">
+                  {t("identityProofing.people.allFlows")}
+                </option>
+                {requestFlows(everyone.data ?? []).map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
                   </option>
-                  {requestFlows(everyone.data ?? []).map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-                <Icon
-                  name="chevron_down"
-                  size={CHEVRON_SIZE}
-                  className="pointer-events-none absolute top-3 right-4"
-                />
-              </div>
+                ))}
+              </Select>
             </div>
           )}
           <div className="flex items-center gap-2.5">
             <label htmlFor="people-result-filter" className={LABEL}>
               {t("identityProofing.sessions.result")}
             </label>
-            <div className="relative min-w-0 flex-1 sm:flex-none">
-              <select
-                id="people-result-filter"
-                value={filter}
-                onChange={(event) =>
-                  setFilter(
-                    SESSION_FILTERS.find((key) => key === event.target.value) ??
-                      "all",
-                  )
-                }
-                className={`${SELECT_CLASS} w-full sm:w-56`}
-              >
-                {SESSION_FILTERS.map((key) => (
-                  <option key={key} value={key}>
-                    {t(`identityProofing.sessions.filters.${key}`, {
-                      number: listedCount(counts[key], capped, t),
-                    })}
-                  </option>
-                ))}
-              </select>
-              <Icon
-                name="chevron_down"
-                size={CHEVRON_SIZE}
-                className="pointer-events-none absolute top-3 right-4"
-              />
-            </div>
+            <Select
+              id="people-result-filter"
+              value={filter}
+              onChange={(event) =>
+                setFilter(
+                  SESSION_FILTERS.find((key) => key === event.target.value) ??
+                    "all",
+                )
+              }
+              className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+            >
+              {SESSION_FILTERS.map((key) => (
+                <option key={key} value={key}>
+                  {t(`identityProofing.sessions.filters.${key}`, {
+                    number: listedCount(counts[key], capped, t),
+                  })}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         {settings.data && retentionOf.kind !== "unknown" && (
@@ -311,13 +294,6 @@ export function PeopleList({
   );
 }
 
-// Who sent the check: the API token that created it, else the member.
-function requestedBy(request: ProofingRequest, t: TFunction): string {
-  return request.apiKeyName
-    ? t("identityProofing.sessions.viaApiKey", { name: request.apiKeyName })
-    : request.requestedByName;
-}
-
 function SessionRow({
   slug,
   request,
@@ -327,7 +303,7 @@ function SessionRow({
   expanded,
   onToggle,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
   isAdmin: boolean;
@@ -336,7 +312,7 @@ function SessionRow({
   expanded: boolean;
   onToggle: () => void;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
@@ -386,10 +362,10 @@ function SessionRow({
         </Table.Cell>
         {scope === "all" && <Table.Cell>{request.flowName}</Table.Cell>}
         <Table.Cell>
-          <ResultTag request={request} compact />{" "}
-          <AddressTag request={request} />
-          <DiplomaTag request={request} />
-          <DataRequestTag request={request} />
+          <ResultText request={request} compact />
+          <AddressNote request={request} />
+          <DiplomaNote request={request} />
+          <DataRequestNote request={request} />
         </Table.Cell>
         <Table.Cell className="text-ink-soft whitespace-nowrap">
           {proofingMethodLabel(request.method, t)}
@@ -540,11 +516,23 @@ function SessionRow({
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
-            {isAdmin && dataRequest && (
-              <DataRequestPanel slug={slug} request={request} />
-            )}
-            {isAdmin && !dataRequest && request.status === "needs_review" && (
-              <ReviewDecision slug={slug} requestId={request.id} />
+            {isAdmin && (dataRequest || request.status === "needs_review") && (
+              <div className="border-line mt-4 border-t pt-4">
+                <Link
+                  to={reviewPath(slug, request.id)}
+                  className={
+                    request.status === "needs_review"
+                      ? PRIMARY_LINK
+                      : SECONDARY_LINK
+                  }
+                >
+                  {t(
+                    request.status === "needs_review"
+                      ? "identityProofing.reviews.review"
+                      : "identityProofing.reviews.view",
+                  )}
+                </Link>
+              </div>
             )}
           </td>
         </tr>
@@ -554,7 +542,7 @@ function SessionRow({
 }
 
 // For an approved session that requires the address, that none was entered.
-function AddressTag({
+function AddressNote({
   request,
 }: Readonly<{
   request: ProofingRequest;
@@ -567,7 +555,11 @@ function AddressTag({
     request.purgedAt === undefined
   ) {
     return (
-      <Tag tone="amber">{t("identityProofing.sessions.address.missing")}</Tag>
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.address.missing")}
+        </StatusText>
+      </div>
     );
   }
   return null;
@@ -604,24 +596,28 @@ function SessionAddress({
 
 // Whether a session that asks for diplomas holds any: how many, or, for an
 // approved one that requires them, that none came.
-function DiplomaTag({
+function DiplomaNote({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (request.diplomas.length > 0) {
     return (
-      <Tag tone="blue">
+      <div className={HINT}>
         {t("identityProofing.sessions.diplomas.tag", {
           count: request.diplomas.length,
         })}
-      </Tag>
+      </div>
     );
   }
   if (request.diplomaMode === "required" && request.status === "approved") {
     return (
-      <Tag tone="amber">{t("identityProofing.sessions.diplomas.missing")}</Tag>
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.diplomas.missing")}
+        </StatusText>
+      </div>
     );
   }
   return null;
@@ -631,9 +627,9 @@ function DiplomaTag({
 // number duo.nl/diplomacontrole checks.
 function SessionDiplomas({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
@@ -679,101 +675,14 @@ function SessionDiplomas({
   );
 }
 
-// An administrator's decision on a session under review: approve or reject,
-// always with a reason, which the audit log keeps.
-function ReviewDecision({
-  slug,
-  requestId,
-}: {
-  slug: string;
-  requestId: string;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const decide = useDecideReviewMutation(slug, requestId);
-  const [reason, setReason] = useState("");
-  const [touched, setTouched] = useState(false);
-  const missing = reason.trim() === "";
-  const tooLong = reviewReasonTooLong(reason);
-  const fieldId = `review-reason-${requestId}`;
-
-  function submit(decision: "approve" | "reject"): void {
-    setTouched(true);
-    if (missing || tooLong) return;
-    decide.mutate({ decision, reason: reason.trim() });
-  }
-
-  return (
-    <div className="border-line mt-4 flex flex-col gap-2 border-t pt-4">
-      <h3 className="text-ink text-[14px] font-bold">
-        {t("identityProofing.sessions.review.title")}
-      </h3>
-      <p className="text-ink-soft text-[13px]">
-        {t("identityProofing.sessions.review.hint")}
-      </p>
-      <label
-        htmlFor={fieldId}
-        className="text-ink-soft text-[12px] font-semibold"
-      >
-        {t("identityProofing.sessions.review.reason")}
-      </label>
-      <textarea
-        id={fieldId}
-        value={reason}
-        aria-invalid={(touched && missing) || tooLong}
-        placeholder={t("identityProofing.sessions.review.reasonPlaceholder")}
-        onChange={(event) => setReason(event.target.value)}
-        className="rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-16 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3"
-      />
-      {touched && missing && (
-        <p className="text-error text-[12.5px]">
-          {t("identityProofing.sessions.review.reasonRequired")}
-        </p>
-      )}
-      {tooLong && (
-        <p className="text-error text-[12.5px]">
-          {t("identityProofing.sessions.review.reasonTooLong", {
-            max: REVIEW_REASON_MAX_CHARS,
-          })}
-        </p>
-      )}
-      {decide.isError && (
-        <p role="alert" className="text-error text-[12.5px]">
-          {proofingErrorMessage(decide.error, t)}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          icon="valid"
-          loading={decide.isPending && decide.variables?.decision === "approve"}
-          disabled={decide.isPending}
-          onClick={() => submit("approve")}
-        >
-          {t("identityProofing.sessions.review.approve")}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          icon="invalid"
-          loading={decide.isPending && decide.variables?.decision === "reject"}
-          disabled={decide.isPending}
-          onClick={() => submit("reject")}
-        >
-          {t("identityProofing.sessions.review.reject")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // The checks the engine reports, in words; an unknown value shows as it is.
 // A settled session's verified identity, as rows of its detail list: read
 // from the engine when an admin opens the row, audited each time.
 function IdentityRows({
   result,
-}: {
+}: Readonly<{
   result: UseQueryResult<ProofingResult, Error>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const check = (value: string | undefined): string => {
     if (value === undefined || value === "") {
@@ -802,6 +711,7 @@ function IdentityRows({
     );
   }
   const { identity } = result.data;
+  const ageOver = ageOverFact(identity, t);
   const evidence = result.data.evidence.at(0);
   return (
     <>
@@ -823,18 +733,10 @@ function IdentityRows({
             {t("identityProofing.sessions.identity.nationality")}
           </dt>
           <dd>{identity.nationality || "—"}</dd>
-          {identity.ageOver && (
+          {ageOver && (
             <>
-              <dt className="text-muted">
-                {t("identityProofing.sessions.identity.ageOver", {
-                  age: identity.ageOver.age,
-                })}
-              </dt>
-              <dd>
-                {identity.ageOver.over
-                  ? t("identityProofing.sessions.identity.ageOverYes")
-                  : t("identityProofing.sessions.identity.ageOverNo")}
-              </dd>
+              <dt className="text-muted">{ageOver.label}</dt>
+              <dd>{ageOver.value}</dd>
             </>
           )}
         </>
@@ -885,9 +787,9 @@ function IdentityRows({
 // is blurred until a member reveals it.
 function IdentityPhotos({
   result,
-}: {
+}: Readonly<{
   result: ProofingResult;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const photos = [
     { key: "photo", image: result.photo },
@@ -921,10 +823,10 @@ const REVEAL_ICON_SIZE = 16;
 function RevealablePhoto({
   image,
   label,
-}: {
+}: Readonly<{
   image: ProofingImage;
   label: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
@@ -972,10 +874,10 @@ function RevealablePhoto({
 function SessionTimeline({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
   const formatWhen = useWhenFormatter();

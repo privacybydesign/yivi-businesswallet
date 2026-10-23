@@ -46,10 +46,10 @@ function generateKey(): string {
 export function PostguardEncryptionKeyCard({
   slug,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const settings = usePostguardSettingsQuery(slug);

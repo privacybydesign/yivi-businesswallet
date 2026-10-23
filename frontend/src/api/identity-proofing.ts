@@ -118,6 +118,15 @@ const hostedDiplomaSchema = proofingDiplomaSchema.pick({
 
 export type HostedDiploma = z.infer<typeof hostedDiplomaSchema>;
 
+// Why each requested item is collected, by item and then language: what the
+// person reads before they start.
+const attributeReasonsSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.string()),
+);
+
+export type AttributeReasons = z.infer<typeof attributeReasonsSchema>;
+
 // A flow version as the proofing service stores it. The id is stable across
 // versions; exactly one version is active, the one new requests run.
 const proofingFlowSchema = z.object({
@@ -128,6 +137,8 @@ const proofingFlowSchema = z.object({
   steps: z.array(z.string()),
   requestedAttributes: z.array(z.string()).optional(),
   ageOver: z.number().optional(),
+  // Absent for a version saved before reasons existed.
+  attributeReasons: attributeReasonsSchema.optional(),
   selfieLocation: z.string().optional(),
   // "regula", "engine", or absent for the proofing service's default.
   faceProvider: z.string().optional(),
@@ -177,6 +188,9 @@ export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
 
 const proofingRequestSchema = z.object({
   id: z.string(),
+  // The member who sent it; absent for one the API created, and once that
+  // member's account is gone.
+  requestedById: z.string().optional(),
   requestedByName: z.string(),
   // Set for a request the org's software created with one of its keys.
   apiKeyName: z.string().optional(),
@@ -246,6 +260,7 @@ export interface ProofingFlowSpec {
   steps: string[];
   requestedAttributes?: string[];
   ageOver?: number;
+  attributeReasons?: AttributeReasons;
   faceProvider?: string;
   acceptedDocumentTypes?: string[];
   acceptedIssuingCountries?: string[];
@@ -732,15 +747,29 @@ export function getProofingStats(
 // been cut off, so a count read from it is only a lower bound.
 export const MAX_LISTED_REQUESTS = 200;
 
+// The statuses a request reads in, each one a list can be narrowed to: an
+// unfinished request whose link or session lapsed reads expired.
+export type ListedStatus =
+  | "pending"
+  | "in_progress"
+  | "needs_review"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
 // The org's requests, newest first and capped by the backend after the
 // narrowing: to those sent to one member, to those sent to members or to
-// external people, and to those sent on one flow.
+// external people, to those sent on one flow, to those that read in one status
+// (in review: the longest in review first), or to the data requests.
 export function getProofingRequests(
   slug: string,
   filter: {
     subjectUserId?: string;
     subjectKind?: "member" | "external";
     flowId?: string;
+    status?: ListedStatus;
+    flowKind?: "data_request";
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -748,6 +777,8 @@ export function getProofingRequests(
   if (filter.subjectUserId) params.set("subjectUserId", filter.subjectUserId);
   if (filter.subjectKind) params.set("subjectKind", filter.subjectKind);
   if (filter.flowId) params.set("flowId", filter.flowId);
+  if (filter.status) params.set("status", filter.status);
+  if (filter.flowKind) params.set("flowKind", filter.flowKind);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -1153,6 +1184,10 @@ export interface ProofingProgress {
   addressUntil?: string;
   // What the law kept of an erasure, on a hosted link.
   legalRetention?: HostedLegalRetention;
+  // A hosted link's: whether its session was started, and the lifetime it
+  // was created with.
+  started?: boolean;
+  sessionTtlSeconds?: number;
 }
 
 export function startProofingYivi(
@@ -1244,6 +1279,10 @@ const hostedProgressSchema = z.object({
   method: z.string().optional(),
   linkExpiresAt: z.string(),
   started: z.boolean(),
+  // The lifetime the started session was created with, which the page names
+  // when it ends unfinished; absent before a start, and for a session started
+  // before the wallet kept it.
+  sessionTtlSeconds: z.number().optional(),
   // Until when the subject can add a diploma extract; absent while they cannot.
   diplomasUntil: z.string().optional(),
   // Until when the subject can enter their address; absent while they cannot,
@@ -1300,6 +1339,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   // the org's internal labels.
   flow: z.object({
     requestedAttributes: z.array(z.string()),
+    // Empty for a flow saved without reasons.
+    attributeReasons: attributeReasonsSchema,
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,
@@ -1434,11 +1475,14 @@ export async function submitProofingAddress(
 }
 
 // An administrator's decision on a request under review; reason is required.
+// errorCode names what a reviewer found wrong (REJECT_REASONS;
+// MANUAL_REVIEW_REJECTED when absent).
 // requestIds are a data request's matched sessions an approval takes (every
 // match when absent).
 export interface ProofingReviewInput {
   decision: "approve" | "reject";
   reason: string;
+  errorCode?: string;
   requestIds?: string[];
 }
 

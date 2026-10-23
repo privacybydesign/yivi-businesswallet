@@ -18,10 +18,10 @@ const ACTION_CLASSES =
 export function WscaActivationNotice({
   slug,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   isAdmin: boolean;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const status = useWscaStatusQuery(slug, isAdmin);
 

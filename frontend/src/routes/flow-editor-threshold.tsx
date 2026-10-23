@@ -54,10 +54,10 @@ function along(value: number): string {
 export function FaceMatchThreshold({
   draft,
   update,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const [tip, setTip] = useState<TipState>("auto");
   const tipGroup = useRef<HTMLSpanElement>(null);

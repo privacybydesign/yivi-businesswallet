@@ -34,6 +34,7 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 		}
 
 		role := RoleAdmin
+		right := ReviewRightNone
 		platformAdmin := h.admins.Has(u.Email)
 		if !platformAdmin {
 			m, err := h.store.GetMembership(ctx, u.ID, org.ID)
@@ -47,6 +48,7 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 				return
 			}
 			role = m.Role
+			right = m.ReviewRight()
 		}
 
 		authority, err := h.store.ResolveAuthority(ctx, org.ID, u.ID)
@@ -57,7 +59,7 @@ func (h *Handler) Authorize(next http.Handler) http.Handler {
 		}
 		authority.PlatformAdmin = platformAdmin
 
-		ctx = contextWithAuthority(contextWithRole(contextWithOrg(ctx, org), role), authority)
+		ctx = contextWithReviewRight(contextWithAuthority(contextWithRole(contextWithOrg(ctx, org), role), authority), right)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -79,6 +81,22 @@ func RequireOrgAdmin(next http.Handler) http.Handler {
 		if AuthorityFromContext(ctx).Withdrawn() {
 			respond.Error(w, r, http.StatusForbidden, "mandate_withdrawn",
 				"your mandate for this organization is no longer active")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireReviewer gates deciding identity checks and data requests: an admin, on
+// the same terms as RequireOrgAdmin, or a member with the reviewer right.
+func RequireReviewer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsAdmin(r.Context()) {
+			RequireOrgAdmin(next).ServeHTTP(w, r)
+			return
+		}
+		if !MayReview(r.Context()) {
+			respond.Error(w, r, http.StatusForbidden, "forbidden", "forbidden")
 			return
 		}
 		next.ServeHTTP(w, r)

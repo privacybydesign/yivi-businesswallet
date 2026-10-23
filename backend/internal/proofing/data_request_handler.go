@@ -44,7 +44,7 @@ func (h *Handler) dataMatches(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	req, matches, err := h.service.DataMatches(r.Context(), orgFromRequest(r).ID, id)
+	req, matches, err := h.service.DataMatches(r.Context(), orgFromRequest(r).ID, id, reviewScope(r.Context()))
 	if err != nil {
 		return mapError(err)
 	}
@@ -178,7 +178,7 @@ func (h *Handler) adminDataExport(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
 	}
-	export, err := h.service.AdminDataExport(r.Context(), orgFromRequest(r).ID, id)
+	export, err := h.service.AdminDataExport(r.Context(), orgFromRequest(r).ID, id, reviewScope(r.Context()))
 	return writeDataExport(w, r, export, err)
 }
 

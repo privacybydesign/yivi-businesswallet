@@ -21,11 +21,13 @@ import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { erasureLeft, legalReasonIn } from "../lib/legal-retention";
 import {
   canCloseDecline,
+  checkEndReason,
   hostedHandBack,
   hostedLanguage,
   hostedTheme,
   postCompletion,
 } from "../lib/hosted-completion";
+import type { CheckEndReason } from "../lib/hosted-completion";
 import { applyOrgTheme, clearOrgTheme } from "../lib/theme";
 import {
   currentStage,
@@ -33,11 +35,13 @@ import {
   hostedErrorMessage,
   isProofingLive,
   methodChoices,
+  supportContactLink,
   verifyStages,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
+  CheckEnded,
   MethodChoice,
   Overview,
   Session,
@@ -64,8 +68,10 @@ export default function Proof(): React.JSX.Element {
   const page = useHostedProofingQuery(token);
 
   return (
-    <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-xl">
+    // The card sits at the top, 80 px down, on every step, as VF1 to VF5
+    // draw it; "Powered by Yivi" follows it.
+    <div className="bg-surface-2 flex min-h-screen flex-col items-center px-4 pt-20 pb-10">
+      <div className="flex w-full max-w-[560px] flex-col gap-5">
         {/* Data first: a background refetch that fails (the tab regaining
             focus on return from the Idem app) keeps the page it already has
             rather than replacing the session with an error card. */}
@@ -73,7 +79,7 @@ export default function Proof(): React.JSX.Element {
           <>
             <HostedFlow token={token} page={page.data} />
             {!page.data.organization.branding.hidePoweredBy && (
-              <p className="text-muted mt-4 text-center text-[12px]">
+              <p className="text-muted text-center text-[12.5px]">
                 {t("proofLink.poweredBy")}
               </p>
             )}
@@ -94,13 +100,22 @@ export default function Proof(): React.JSX.Element {
   );
 }
 
+// The step a hosted page opens on: a link started before (another tab, a
+// reload) goes straight to its session.
+function initialStep(page: HostedProofing): Step {
+  if (page.started || !isProofingLive(page.status)) {
+    return "session";
+  }
+  return "overview";
+}
+
 function HostedFlow({
   token,
   page,
-}: {
+}: Readonly<{
   token: string;
   page: HostedProofing;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
@@ -110,14 +125,13 @@ function HostedFlow({
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
-  // A link started before (another tab, a reload) goes straight to its session.
-  const [step, setStep] = useState<Step>(
-    page.started || !isProofingLive(page.status) ? "session" : "overview",
-  );
+  const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(
     page.method === "yivi_app" ? "yivi_app" : "idem_app",
   );
   const [started, setStarted] = useState<HostedStart>();
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const onEnded = useCallback(() => setSessionEnded(true), []);
   const start = useStartHostedMutation(token);
   const decline = useDeclineHostedMutation(token);
   const [confirmDecline, setConfirmDecline] = useState(false);
@@ -188,6 +202,23 @@ function HostedFlow({
     ? hostedErrorMessage(start.error, t)
     : undefined;
   const stage = currentStage({ step, inAddress, inDiplomas });
+  const showsEnded =
+    step === "session" && (sessionEnded || page.status === "expired");
+  let outcomeActions: React.ReactNode;
+  if (redirecting) {
+    outcomeActions = (
+      <output className={`${HINT} block`}>{t("proofLink.redirecting")}</output>
+    );
+  } else if (dataRequest) {
+    outcomeActions = (
+      <DataRequestOutcome
+        token={token}
+        organization={organization.name}
+        kind={flow.kind as DataKind}
+        progress={settled ?? page}
+      />
+    );
+  }
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -209,10 +240,12 @@ function HostedFlow({
             })}
           </p>
         )}
-        <Stepper
-          steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-          current={stages.indexOf(stage)}
-        />
+        {!showsEnded && (
+          <Stepper
+            steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
+            current={stages.indexOf(stage)}
+          />
+        )}
         <StepRegion step={stage} headingLevel="h1">
           {step === "overview" && (
             <Overview
@@ -234,38 +267,14 @@ function HostedFlow({
             />
           )}
           {confirmDecline && (
-            <ConfirmDialog
-              title={t("proofLink.declineConfirm.title")}
-              message={t("proofLink.declineConfirm.message", {
-                organization: organization.name,
-              })}
-              confirmLabel={t("proofLink.declineConfirm.confirm")}
-              cancelLabel={t("proofLink.declineConfirm.back")}
-              busy={decline.isPending}
-              error={
-                decline.isError
-                  ? hostedErrorMessage(decline.error, t)
-                  : undefined
-              }
-              onClose={() => {
-                // Closing resets the mutation, which drops the onSuccess below
-                // that moves the page on, though the server cancels the link
-                // all the same.
-                if (!canCloseDecline(decline.status)) {
-                  return;
-                }
-
+            <DeclineConfirm
+              organization={organization.name}
+              decline={decline}
+              onClose={() => setConfirmDecline(false)}
+              onDeclined={() => {
                 setConfirmDecline(false);
-                decline.reset();
+                setStep("session");
               }}
-              onConfirm={() =>
-                decline.mutate(undefined, {
-                  onSuccess: () => {
-                    setConfirmDecline(false);
-                    setStep("session");
-                  },
-                })
-              }
             />
           )}
           {step === "method" && (
@@ -292,22 +301,17 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
+              renderEnded={(progress) => (
+                <HostedCheckEnded
+                  name={organization.name}
+                  contact={organization.branding.supportContact}
+                  reason={checkEndReason(progress)}
+                />
+              )}
+              onEnded={onEnded}
               onSettled={settle}
               dataRequest={dataRequest}
-              outcomeActions={
-                redirecting ? (
-                  <p role="status" className={HINT}>
-                    {t("proofLink.redirecting")}
-                  </p>
-                ) : dataRequest ? (
-                  <DataRequestOutcome
-                    token={token}
-                    organization={organization.name}
-                    kind={flow.kind as DataKind}
-                    progress={settled ?? page}
-                  />
-                ) : undefined
-              }
+              outcomeActions={outcomeActions}
             />
           )}
         </StepRegion>
@@ -317,6 +321,95 @@ function HostedFlow({
 }
 
 type DataKind = Exclude<FlowKind, "identity">;
+
+// Asks the person to confirm declining, which cancels the link. It cannot be
+// closed while the decline runs.
+function DeclineConfirm({
+  organization,
+  decline,
+  onClose,
+  onDeclined,
+}: Readonly<{
+  organization: string;
+  decline: ReturnType<typeof useDeclineHostedMutation>;
+  onClose: () => void;
+  onDeclined: () => void;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <ConfirmDialog
+      title={t("proofLink.declineConfirm.title")}
+      message={t("proofLink.declineConfirm.message", { organization })}
+      confirmLabel={t("proofLink.declineConfirm.confirm")}
+      cancelLabel={t("proofLink.declineConfirm.back")}
+      busy={decline.isPending}
+      error={decline.isError ? hostedErrorMessage(decline.error, t) : undefined}
+      onClose={() => {
+        // Closing resets the mutation, which drops the onSuccess below that
+        // moves the page on, though the server cancels the link all the same.
+        if (!canCloseDecline(decline.status)) {
+          return;
+        }
+
+        onClose();
+        decline.reset();
+      }}
+      onConfirm={() => decline.mutate(undefined, { onSuccess: onDeclined })}
+    />
+  );
+}
+
+// What the person sees once the check ran out (VF5): nothing was shared, and
+// who to ask for a new link. It stays on screen: a check that ran out is not
+// handed back by redirect (hostedHandBack).
+function HostedCheckEnded({
+  name,
+  contact,
+  reason,
+}: Readonly<{
+  name: string;
+  contact: string;
+  reason: CheckEndReason;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const link = supportContactLink(contact);
+  // The page can be framed, and a plain link would replace it inside the frame.
+  const newTab = link?.kind === "web";
+  let message: string;
+  if (reason.kind === "notStarted") {
+    message = t("proofLink.ended.notStarted", { name });
+  } else if (reason.minutes === undefined) {
+    message = t("proofLink.ended.timedOut", { name });
+  } else {
+    message = t("proofLink.ended.started", { name, count: reason.minutes });
+  }
+  return (
+    <CheckEnded message={message}>
+      <div className="rounded-yivi bg-surface-2 flex flex-col gap-2 p-4">
+        <span className="text-ink font-semibold">
+          {t("proofLink.ended.retryTitle")}
+        </span>
+        <span className={`${HINT} text-[14px]`}>
+          {t("proofLink.ended.retryHint", { name })}
+        </span>
+        {link !== undefined ? (
+          <a
+            href={link.href}
+            target={newTab ? "_blank" : undefined}
+            rel={newTab ? "noreferrer" : undefined}
+            className="text-link font-semibold hover:underline"
+          >
+            {contact}
+          </a>
+        ) : (
+          contact !== "" && (
+            <span className="text-ink font-semibold">{contact}</span>
+          )
+        )}
+      </div>
+    </CheckEnded>
+  );
+}
 
 // What a data request's person sees once their identity check settled: that
 // the request awaits the org's review, its outcome, and an approved "see
@@ -329,12 +422,12 @@ function DataRequestOutcome({
   organization,
   kind,
   progress,
-}: {
+}: Readonly<{
   token: string;
   organization: string;
   kind: DataKind;
   progress: ProofingProgress;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const formatDate = useDateFormatter();

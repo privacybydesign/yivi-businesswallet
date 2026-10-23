@@ -27,9 +27,9 @@ const NEW_KEY_HINT = "proofing-api-key-name-hint";
 // not listed: it no longer does anything, and the audit log keeps the record.
 export function ApiTokensSection({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const keys = useProofingApiKeysQuery(slug);
   const formatDate = useDateFormatter();
@@ -166,11 +166,11 @@ function NewKeyModal({
   slug,
   onClose,
   onCreated,
-}: {
+}: Readonly<{
   slug: string;
   onClose: () => void;
   onCreated: (key: CreatedProofingApiKey) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const create = useCreateApiKeyMutation(slug);
   const [name, setName] = useState("");

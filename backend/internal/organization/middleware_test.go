@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -96,6 +97,10 @@ func (f fakeRepo) UpdateMemberType(context.Context, uuid.UUID, uuid.UUID, string
 	return Member{}, nil
 }
 
+func (f fakeRepo) SetReviewRight(context.Context, uuid.UUID, uuid.UUID, ReviewRight) (Member, error) {
+	return Member{}, nil
+}
+
 func (f fakeRepo) RequestIdentification(context.Context, uuid.UUID, []uuid.UUID, uuid.UUID, string) ([]RequestedMember, error) {
 	return nil, nil
 }
@@ -149,6 +154,7 @@ func authorizeWith(repo repository, admins auth.PlatformAdmins, email user.Email
 		gotAuthority = AuthorityFromContext(r.Context())
 		_ = OrgFromContext(r.Context())
 		w.Header().Set("X-Role", gotRole)
+		w.Header().Set("X-May-Review", strconv.FormatBool(MayReview(r.Context())))
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -172,6 +178,26 @@ func TestAuthorize(t *testing.T) {
 		}
 		if got := rec.Header().Get("X-Role"); got != RoleMember {
 			t.Errorf("role = %q, want %q", got, RoleMember)
+		}
+	})
+
+	t.Run("the reviewer right reaches the handler", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			membership Membership
+			want       string
+		}{
+			{"a member with it may review", Membership{Role: RoleMember, CanReview: true}, "true"},
+			{"a member without it may not", Membership{Role: RoleMember}, "false"},
+			{"an admin may without it", Membership{Role: RoleAdmin}, "true"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rec, _ := authorizeWith(fakeRepo{org: org, membership: tt.membership}, auth.PlatformAdmins{}, "user@example.com")
+				if got := rec.Header().Get("X-May-Review"); got != tt.want {
+					t.Errorf("may review = %q, want %q", got, tt.want)
+				}
+			})
 		}
 	})
 
@@ -294,6 +320,46 @@ func TestRequireOrgAdmin(t *testing.T) {
 			rec := httptest.NewRecorder()
 
 			RequireOrgAdmin(next).ServeHTTP(rec, req)
+
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequireReviewer(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	tests := []struct {
+		name      string
+		role      string
+		right     ReviewRight
+		authority Authority
+		want      int
+	}{
+		{"member with the right passes", RoleMember, ReviewRightGranted, Authority{}, http.StatusOK},
+		{"member without the right is forbidden", RoleMember, ReviewRightNone, Authority{}, http.StatusForbidden},
+		{"no role and no right is forbidden", "", "", Authority{}, http.StatusForbidden},
+		{"admin passes without the right", RoleAdmin, ReviewRightNone, Authority{}, http.StatusOK},
+		{
+			// The right is a member's: an admin stays an admin, and an admin whose
+			// mandate is gone is refused whatever the column says.
+			name:      "admin whose mandate is withdrawn is forbidden even with the right",
+			role:      RoleAdmin,
+			right:     ReviewRightGranted,
+			authority: Authority{Granted: 1},
+			want:      http.StatusForbidden,
+		},
+		{"admin with an active mandate passes", RoleAdmin, ReviewRightNone, Authority{Granted: 1, Mandated: true}, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			ctx := contextWithReviewRight(contextWithAuthority(contextWithRole(req.Context(), tt.role), tt.authority), tt.right)
+			rec := httptest.NewRecorder()
+
+			RequireReviewer(next).ServeHTTP(rec, req.WithContext(ctx))
 
 			if rec.Code != tt.want {
 				t.Errorf("status = %d, want %d", rec.Code, tt.want)

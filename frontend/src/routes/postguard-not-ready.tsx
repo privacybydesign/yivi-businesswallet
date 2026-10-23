@@ -7,10 +7,10 @@ import * as React from "react";
 export function PostguardNotReady({
   reason,
   isAdmin,
-}: {
+}: Readonly<{
   reason: "unconfigured" | "deploymentOff";
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const deploymentOff = reason === "deploymentOff";
 

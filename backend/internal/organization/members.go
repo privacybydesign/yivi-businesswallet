@@ -128,19 +128,27 @@ func (h *Handler) member(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	member.AvatarURI = user.AvatarURL(MemberAvatarPath(org.Slug, member.UserID), member.HasAvatar, member.AvatarUpdatedAt)
-	lookahead, err := h.identityLookaheadDays(r.Context(), org.ID)
+	member, err = h.withStatuses(r.Context(), org.ID, member)
 	if err != nil {
-		return fmt.Errorf("resolving identity lookahead: %w", err)
+		return err
 	}
-	screeningSettings, err := h.store.GetScreeningSettings(r.Context(), org.ID)
-	if err != nil {
-		return fmt.Errorf("resolving screening settings: %w", err)
-	}
-	now := time.Now()
-	member = member.withIdentityStatus(now, lookahead)
-	member = member.withVogStatus(screeningSettings, now)
 	respond.JSON(w, r, http.StatusOK, member)
 	return nil
+}
+
+// withStatuses decorates a Member with the identity and screening status the
+// org's settings derive for it, as the member page reads them.
+func (h *Handler) withStatuses(ctx context.Context, orgID uuid.UUID, member Member) (Member, error) {
+	lookahead, err := h.identityLookaheadDays(ctx, orgID)
+	if err != nil {
+		return Member{}, fmt.Errorf("resolving identity lookahead: %w", err)
+	}
+	screeningSettings, err := h.store.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		return Member{}, fmt.Errorf("resolving screening settings: %w", err)
+	}
+	now := time.Now()
+	return member.withIdentityStatus(now, lookahead).withVogStatus(screeningSettings, now), nil
 }
 
 // memberAvatar streams a member's portrait photo. Reachable to the same org

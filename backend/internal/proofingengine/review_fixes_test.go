@@ -343,3 +343,26 @@ func TestStopWaitingAnswersPolls(t *testing.T) {
 		t.Fatal("the poll still waits after StopWaiting")
 	}
 }
+
+// A session reports the lifetime it was given: the one asked for, within the
+// engine's bounds.
+func TestCreateSessionReportsTTL(t *testing.T) {
+	fd := flow.FlowDefinition{ID: "flow", Version: 1, Name: "Chip", Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}}
+	cfg := DefaultConfig()
+	for asked, want := range map[time.Duration]time.Duration{
+		0:                          cfg.SessionCreateTTL,
+		5 * time.Minute:            5 * time.Minute,
+		time.Second:                cfg.SessionMinTTL,
+		2 * cfg.SessionMaxLifetime: cfg.SessionMaxLifetime,
+		cfg.SessionMaxLifetime + 1: cfg.SessionMaxLifetime,
+	} {
+		s := New(cfg, newMemSessions(), singleFlow{fd: fd}, nil, nil)
+		sess, err := s.CreateSession(context.Background(), pp.Tenant{ID: "org"}, pp.SessionInput{FlowID: "flow", TTL: asked})
+		if err != nil {
+			t.Fatalf("CreateSession(%v): %v", asked, err)
+		}
+		if sess.TTL != want {
+			t.Errorf("CreateSession(%v).TTL = %v, want %v", asked, sess.TTL, want)
+		}
+	}
+}

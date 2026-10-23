@@ -21,18 +21,18 @@ func TestAdminRequestResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrResultNotReady) {
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrResultNotReady) {
 		t.Errorf("AdminRequestResult while pending = %v, want %v", err, ErrResultNotReady)
 	}
 	f.requests.stored.Status = StatusApproved
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
-	_, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID)
+	_, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
 	if err != nil || identity.FamilyName != "Jansen" || f.requests.resultReads != 1 {
 		t.Fatalf("AdminRequestResult = %+v, %v (%d audited); want IPS's identity, audited", identity, err, f.requests.resultReads)
 	}
 
 	f.requests.stored.SubjectKind = SubjectMember
-	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID); !errors.Is(err, ErrRequestNotFound) {
+	if _, _, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("AdminRequestResult on a member's request = %v, want %v", err, ErrRequestNotFound)
 	}
 	if f.requests.resultReads != 1 {
@@ -59,5 +59,10 @@ func TestAPIResultAgeOver(t *testing.T) {
 	identity.Status = proofingprovider.StatusRejected
 	if out := newAPIResultResponse(req, identity, time.Now()); out.Identity != nil {
 		t.Errorf("rejected identity = %+v, want none", out.Identity)
+	}
+
+	// A check waiting for review shows its reviewer the same identity.
+	if got := newAPIIdentity(identity); got.AgeOver == nil || *got.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
+		t.Errorf("identity in review = %+v, want ageOver 18, over", got)
 	}
 }

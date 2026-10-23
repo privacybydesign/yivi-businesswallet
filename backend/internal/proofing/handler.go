@@ -1,10 +1,12 @@
 package proofing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -84,6 +86,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	admin := func(next http.Handler) http.Handler {
 		return h.requireUser(h.authorize(organization.RequireOrgAdmin(next)))
 	}
+	// reviewer admits an admin and a member an admin gave the reviewer right.
+	reviewer := func(next http.Handler) http.Handler {
+		return h.requireUser(h.authorize(organization.RequireReviewer(next)))
+	}
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows", member(respond.HandlerFunc(h.listFlows)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows", admin(respond.HandlerFunc(h.createFlow)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.listFlowVersions)))
@@ -112,10 +118,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", admin(respond.HandlerFunc(h.decideReview)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", admin(respond.HandlerFunc(h.requestResult)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", admin(respond.HandlerFunc(h.dataMatches)))
-	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", admin(respond.HandlerFunc(h.adminDataExport)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-export", reviewer(respond.HandlerFunc(h.adminDataExport)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/settings", member(respond.HandlerFunc(h.getSettings)))
 	mux.Handle("PATCH /orgs/{slug}/identity-proofing/settings", admin(respond.HandlerFunc(h.updateSettings)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/settings/branding", admin(respond.HandlerFunc(h.saveBranding)))
@@ -294,7 +300,11 @@ func (h *Handler) activateFlowVersion(w http.ResponseWriter, r *http.Request) er
 }
 
 type requestResponse struct {
-	ID              uuid.UUID  `json:"id"`
+	ID uuid.UUID `json:"id"`
+	// RequestedByID is the member who sent it: absent for one the API created,
+	// and once the member's user is gone. A reviewer does not decide a check
+	// they sent (ErrOwnReview).
+	RequestedByID   *uuid.UUID `json:"requestedById,omitempty"`
 	RequestedByName string     `json:"requestedByName"`
 	APIKeyName      string     `json:"apiKeyName,omitempty"`
 	SubjectUserID   *uuid.UUID `json:"subjectUserId,omitempty"`
@@ -354,7 +364,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req),
-		ID: req.ID, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
+		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
@@ -365,33 +375,27 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	}
 }
 
+// flowKindDataRequest is ?flowKind='s one value: the data requests, of either
+// kind.
+const flowKindDataRequest = "data_request"
+
 // listRequests shows an admin every request of the org and a member the ones they
 // sent; ?subjectUserId= narrows either to the ones proofing one member,
-// ?subjectKind= to those sent to members or to external people, and ?flowId= to
-// those sent on one flow.
+// ?subjectKind= to those sent to members or to external people, ?flowId= to
+// those sent on one flow, ?status= to those that read in one status, expired
+// and cancelled included, and ?flowKind=data_request to the data requests. A
+// member with the reviewer right also sees the org's requests for a list
+// ReviewScopeReviews holds whole: those waiting for review and the data
+// requests (listsEveryRequest).
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	var filter RequestFilter
-	if !organization.ActsAsAdmin(r.Context()) {
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
+	if !listsEveryRequest(r.Context(), filter) {
 		id := auth.UserFromContext(r.Context()).ID
 		filter.RequestedBy = &id
-	}
-	if raw := r.URL.Query().Get("subjectUserId"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid subject user id"}
-		}
-		filter.SubjectUserID = &id
-	}
-	if raw := r.URL.Query().Get("subjectKind"); raw != "" {
-		kind := SubjectKind(raw)
-		if kind != SubjectMember && kind != SubjectExternal {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "subjectKind must be member or external"}
-		}
-		filter.SubjectKind = &kind
-	}
-	if raw := r.URL.Query().Get("flowId"); raw != "" {
-		filter.FlowID = &raw
 	}
 	reqs, err := h.service.Requests(r.Context(), org.ID, filter)
 	if err != nil {
@@ -412,6 +416,67 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// requestFilterFrom reads a request list's filter from its query, refusing a
+// value it does not know.
+func requestFilterFrom(query url.Values) (RequestFilter, error) {
+	var filter RequestFilter
+	if raw := query.Get("subjectUserId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid subject user id"}
+		}
+		filter.SubjectUserID = &id
+	}
+	if raw := query.Get("subjectKind"); raw != "" {
+		kind := SubjectKind(raw)
+		if kind != SubjectMember && kind != SubjectExternal {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "subjectKind must be member or external"}
+		}
+		filter.SubjectKind = &kind
+	}
+	if raw := query.Get("flowId"); raw != "" {
+		filter.FlowID = &raw
+	}
+	if raw := query.Get("status"); raw != "" {
+		status := Status(raw)
+		if !status.known() {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, needs_review, approved, rejected, expired or cancelled"}
+		}
+		filter.Status = &status
+	}
+	if raw := query.Get("flowKind"); raw != "" {
+		if raw != flowKindDataRequest {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "flowKind must be " + flowKindDataRequest}
+		}
+		filter.DataRequests = true
+	}
+	return filter, nil
+}
+
+// listsEveryRequest reports whether the caller lists the org's requests whoever
+// sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
+// whole, the requests waiting for review (?status=needs_review) or the data
+// requests (?flowKind=data_request). Any other list is the ones they sent.
+func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
+	if organization.ActsAsAdmin(ctx) {
+		return true
+	}
+	if !organization.MayReview(ctx) {
+		return false
+	}
+	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview)
+}
+
+// reviewScope is the requests the caller reaches on a review route, which
+// RequireReviewer let them onto: an admin every one, a member with the reviewer
+// right what the Reviews page shows.
+func reviewScope(ctx context.Context) ReviewScope {
+	if organization.ActsAsAdmin(ctx) {
+		return ReviewScopeAll
+	}
+	return ReviewScopeReviews
 }
 
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
@@ -438,13 +503,24 @@ func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	return id, &caller, nil
 }
 
+// mayOpen reports whether a caller who is not an admin opens req: one they sent,
+// or as a reviewer one the Reviews page shows (ReviewScopeReviews).
+func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
+	if req.RequestedBy != nil && *req.RequestedBy == caller {
+		return true
+	}
+	return organization.MayReview(ctx) && ReviewScopeReviews.reaches(req)
+}
+
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
 func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	id, requestedBy, err := sentRequestTarget(r)
 	if err != nil {
 		return err
 	}
-	req, err := h.service.Request(r.Context(), orgFromRequest(r).ID, id, requestedBy)
+	req, err := h.service.RequestIf(r.Context(), orgFromRequest(r).ID, id, func(req Request) bool {
+		return requestedBy == nil || mayOpen(r.Context(), req, *requestedBy)
+	})
 	if err != nil {
 		return mapError(err)
 	}
@@ -456,7 +532,7 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// reviewDecisionRequest is an admin's decision on a request under review:
+// reviewDecisionRequest is a reviewer's decision on a request under review:
 // decision "approve" or "reject", a required reason, and for a rejection an
 // optional errorCode.
 type reviewDecisionRequest struct {
@@ -480,9 +556,12 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	if body.Decision != "approve" && body.Decision != "reject" {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is approve or reject"}
 	}
-	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id,
-		string(auth.UserFromContext(r.Context()).Email),
-		ReviewInput{Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs})
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id, string(caller.Email),
+		ReviewInput{
+			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
+			ReviewerID: caller.ID, Scope: reviewScope(r.Context()),
+		})
 	if err != nil {
 		return mapError(err)
 	}
@@ -721,6 +800,8 @@ func mapError(err error) error {
 		return nil
 	case errors.Is(err, ErrInvalidInput):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
+	case errors.Is(err, ErrReasonsMissing):
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}
 	case errors.Is(err, ErrNoEncryptionKey):
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}
 	case errors.Is(err, ErrFlowNotFound):
@@ -753,6 +834,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
 	case errors.Is(err, ErrNotUnderReview):
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
+	case errors.Is(err, ErrOwnReview):
+		return &respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}
 	case errors.Is(err, ErrLinkStarted):
 		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
 	case errors.Is(err, ErrDiplomasNotAsked):

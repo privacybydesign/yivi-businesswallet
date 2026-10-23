@@ -185,7 +185,7 @@ function ProofingPauseCell({
   pause,
   loaded,
   failed,
-}: {
+}: Readonly<{
   orgId: string;
   orgName: string;
   pause: ProofingPause | undefined;
@@ -193,7 +193,7 @@ function ProofingPauseCell({
   // while it loads, or when it failed, its state is not known.
   loaded: boolean;
   failed: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const set = useSetPlatformPauseMutation();
   // Pausing stops a whole organisation's proofing, so it is confirmed first.

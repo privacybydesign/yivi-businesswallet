@@ -299,6 +299,17 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
+// known reports a status a request can read in (Request.EffectiveStatus),
+// stored or derived.
+func (s Status) known() bool {
+	switch s {
+	case StatusPending, StatusInProgress, StatusApproved, StatusRejected, StatusNeedsReview,
+		StatusExpired, StatusCancelled:
+		return true
+	}
+	return false
+}
+
 // Settled reports an outcome the engine has already decided at least once. needs_review
 // is settled for the recipient (nothing left for them to do) but still reconciled.
 func (s Status) Settled() bool {
@@ -419,6 +430,9 @@ type ipsSession struct {
 	Token string
 	// ExpiresAt is the engine's hard cap for the session: past it, it is certainly over.
 	ExpiresAt time.Time
+	// TTL is the lifetime the session was created with; 0 for one created
+	// before the wallet kept it.
+	TTL time.Duration
 	// EndedAt is when the wallet saw the session end without an outcome (expired
 	// or cancelled in the engine); nil while it may still run or decide.
 	EndedAt *time.Time
@@ -559,6 +573,15 @@ type RequestFilter struct {
 	// FlowID narrows to the requests sent on one flow, any version; the list's
 	// cap then counts only those.
 	FlowID *string
+	// Status narrows to the requests that read in that status
+	// (Request.EffectiveStatus), expired and cancelled included: a pending
+	// request whose link lapsed matches expired, not pending. The list's cap
+	// then counts only those. Those in review are listed oldest in review
+	// first, so the cap leaves out the newest, not the most overdue.
+	Status *Status
+	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
+	// the list's cap then counts only those.
+	DataRequests bool
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

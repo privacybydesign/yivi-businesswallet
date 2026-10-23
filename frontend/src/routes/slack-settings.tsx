@@ -70,10 +70,10 @@ function testError(error: Error, t: TFunction): string {
 function WebhookForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: SlackSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateSlackSettingsMutation(slug);
 
@@ -190,10 +190,10 @@ function WebhookForm({
 function TestCard({
   slug,
   ready,
-}: {
+}: Readonly<{
   slug: string;
   ready: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendSlackTestMutation(slug);
 
@@ -233,9 +233,9 @@ function TestCard({
 // gated on admin, so the panel only owns the settings query and its forms.
 export function SlackSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useSlackSettingsQuery(slug, true);
 
