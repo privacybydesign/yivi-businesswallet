@@ -27,10 +27,10 @@ const COLUMN_COUNT = 6;
 export function SigningHistoryPanel({
   slug,
   enabled,
-}: {
+}: Readonly<{
   slug: string;
   enabled: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const history = useSigningRequestsQuery(slug, enabled);
   const requests = history.data?.pages.flatMap((p) => p.requests ?? []) ?? [];
@@ -169,7 +169,9 @@ export function SigningHistoryPanel({
   );
 }
 
-function RecipientCell({ req }: { req: SigningRequest }): React.JSX.Element {
+function RecipientCell({
+  req,
+}: Readonly<{ req: SigningRequest }>): React.JSX.Element {
   const { t } = useTranslation();
   if (req.recipientChannel === RECIPIENT_CHANNEL.none) {
     return <span className="text-ink-soft text-[12.5px]">—</span>;
@@ -186,7 +188,9 @@ function RecipientCell({ req }: { req: SigningRequest }): React.JSX.Element {
   );
 }
 
-function StatusCell({ req }: { req: SigningRequest }): React.JSX.Element {
+function StatusCell({
+  req,
+}: Readonly<{ req: SigningRequest }>): React.JSX.Element {
   const { t } = useTranslation();
   const statusTone =
     req.status === SIGNING_STATUS.completed

@@ -15,12 +15,9 @@ import {
   sendableByMail,
   sendableFlows,
 } from "../lib/identity-proofing";
-import { Button, Tag } from "../ui";
+import { Button, Select, Tag } from "../ui";
 
 const ERROR = "text-error text-[12px]";
-// Mirrors the Input base so the flow select reads as the same field.
-const SELECT_CLASS =
-  "rounded-yivi border-line-strong bg-surface text-ink w-full border px-3 text-[13.5px] transition-colors outline-none focus:border-ink focus:ring-ink/10 focus:ring-3 h-9 disabled:opacity-60";
 
 // Identity proofing for one member, on their detail page: a flow picker over
 // the flows an admin made available to members, a button that mails the member
@@ -28,10 +25,10 @@ const SELECT_CLASS =
 export function MemberProofing({
   slug,
   userId,
-}: {
+}: Readonly<{
   slug: string;
   userId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const flows = useProofingFlowsQuery(slug);
@@ -61,9 +58,8 @@ export function MemberProofing({
       <label htmlFor={selectId} className="text-ink-soft text-[12px]">
         {t("memberDetail.proofing.flow")}
       </label>
-      <select
+      <Select
         id={selectId}
-        className={SELECT_CLASS}
         value={flowId}
         disabled={flows.isPending || sendable.length === 0}
         onChange={(event) => setPicked(event.target.value)}
@@ -73,7 +69,7 @@ export function MemberProofing({
             {flow.name}
           </option>
         ))}
-      </select>
+      </Select>
       <Button
         variant="secondary"
         icon="scan_qrcode"

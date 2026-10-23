@@ -38,7 +38,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(r.assurance_level, ''), COALESCE(r.eidas_level, ''), COALESCE(r.error_code, ''),
 	r.created_at, r.updated_at, r.completed_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
-	r.subject_user_id, COALESCE(r.flow_version, 0),
+	COALESCE(r.ips_session_ttl_seconds, 0), r.subject_user_id, COALESCE(r.flow_version, 0),
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
@@ -55,9 +55,26 @@ const purgeAtColumn = `CASE WHEN r.cancelled_at IS NULL AND r.ips_session_ended_
 		AND r.status IN ('pending', 'in_progress') AND COALESCE(r.ips_session_expires_at, r.link_expires_at) > now()
 		THEN NULL ELSE r.purge_at END`
 
-// dataRequestReviewDays is how long a data request may wait in review: GDPR
-// Art. 12(3)'s month to answer. Its purge comes up then (lapseReview).
-const dataRequestReviewDays = 30
+// effectiveStatusColumn is Request.EffectiveStatus in SQL, at the database's
+// now(): what a list narrowed by status matches, so that its cap counts only
+// the requests that read in that status, and an unfinished one whose link or
+// session lapsed is not taken for a running one.
+// TestRequestListByEffectiveStatus holds the two to each other.
+const effectiveStatusColumn = `CASE
+		WHEN r.cancelled_at IS NOT NULL THEN 'cancelled'
+		WHEN r.link_token_hash IS NOT NULL AND r.ips_session_id IS NULL AND r.purged_at IS NULL
+			AND r.status = 'pending' AND r.link_expires_at > now() THEN r.status
+		WHEN r.status IN ('pending', 'in_progress') AND NOT COALESCE(r.ips_session_id IS NOT NULL
+			AND r.ips_session_ended_at IS NULL AND r.ips_session_expires_at > now(), false) THEN 'expired'
+		WHEN r.status = 'needs_review' AND r.ips_session_id IS NOT NULL
+			AND r.ips_session_ended_at IS NOT NULL THEN 'expired'
+		ELSE r.status END`
+
+// dataRequestReviewMonths is how long a data request may wait in review: GDPR
+// Art. 12(3)'s month to answer, a calendar month from when the person was proven
+// (completed_at): 16 Oct to 16 Nov, 31 Jan to the end of February. Its purge
+// comes up then (lapseReview), the "Answer by" the Reviews page shows.
+const dataRequestReviewMonths = 1
 
 // settledAt is when an external request ended, for what is counted from it:
 // cancelled, its session ended, decided, or else its running session's or
@@ -80,8 +97,8 @@ const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
 		THEN ` + settledAt + ` + make_interval(months => st.legal_retention_months) END`
 
 // setPurgeAt stores purge_at on the requests r its WHERE (appended, over $1)
-// selects; $2 is dataRequestReviewDays, $3 proofedNameRetention in seconds and
-// $4 defaultDataRetentionDays. It is the one rule for when a request is
+// selects; $2 is dataRequestReviewMonths, $3 proofedNameRetention in seconds
+// and $4 defaultDataRetentionDays. It is the one rule for when a request is
 // purged, so ListPurgeDue reads an index instead of computing it for every
 // unpurged row:
 //   - its retention (its flow's override, else for an external person's the
@@ -95,7 +112,9 @@ const legalHeldUntil = `CASE WHEN ` + legalHeld + ` AND r.purged_at IS NULL
 //     retention is never zero. An identity review counts as settled when it
 //     went there: undecided, it is kept no longer than a decided one, the
 //     most its subject was told.
-//   - a data request in review: dataRequestReviewDays after it went there.
+//   - a data request in review: dataRequestReviewMonths after it went there,
+//     counted on the calendar in UTC, so the day does not hang on the
+//     database session's time zone.
 //   - an approved erasure: when it was decided. Its decision purges it at
 //     once; this is the retry when that purge failed.
 //
@@ -113,7 +132,7 @@ const setPurgeAt = `UPDATE identity_proofing_requests r SET purge_at = LEAST(
 				+ (SELECT make_interval(months => st.legal_retention_months) FROM identity_proofing_settings st
 					WHERE st.organization_id = r.organization_id) END),
 		CASE WHEN r.status = 'needs_review' AND r.flow_kind IN ('data_access', 'data_erasure')
-			THEN r.completed_at + make_interval(days => $2) END,
+			THEN (r.completed_at AT TIME ZONE 'UTC' + make_interval(months => $2)) AT TIME ZONE 'UTC' END,
 		CASE WHEN r.status = 'approved' AND r.flow_kind = 'data_erasure' THEN r.completed_at END)
 	WHERE `
 
@@ -126,7 +145,7 @@ func refreshPurgeAt(ctx context.Context, q database.Querier, ids ...uuid.UUID) e
 	if len(ids) == 0 {
 		return nil
 	}
-	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewDays, proofedNameRetention.Seconds(),
+	if _, err := q.Exec(ctx, setPurgeAt+`r.id = ANY($1)`, ids, dataRequestReviewMonths, proofedNameRetention.Seconds(),
 		defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time requests %v: %w", ids, err)
 	}
@@ -147,7 +166,7 @@ func refreshOrgPurgeAt(ctx context.Context, q database.Querier, id uuid.UUID) er
 		return fmt.Errorf("proofing: lock requests org %s: %w", id, err)
 	}
 	if _, err := q.Exec(ctx, setPurgeAt+`r.organization_id = $1 AND r.subject_kind = 'external' AND r.purged_at IS NULL`,
-		id, dataRequestReviewDays, proofedNameRetention.Seconds(), defaultDataRetentionDays); err != nil {
+		id, dataRequestReviewMonths, proofedNameRetention.Seconds(), defaultDataRetentionDays); err != nil {
 		return fmt.Errorf("proofing: set purge time org %s: %w", id, err)
 	}
 	return nil
@@ -208,13 +227,14 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var sessionID *string
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
+	var sessionTTLSeconds int
 	var nameCT, birthDateCT, addressCT []byte
 	var retentionDays, legalMonths, overrideSeconds, heldSessions *int
 	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
-		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &r.SubjectUserID, &r.FlowVersion,
+		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
@@ -253,7 +273,10 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		if err != nil {
 			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt session token request %s: %w", r.ID, err)}
 		}
-		r.session = &ipsSession{ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt}
+		r.session = &ipsSession{
+			ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt,
+			TTL: time.Duration(sessionTTLSeconds) * time.Second,
+		}
 		if sessionExpiresAt != nil {
 			r.session.ExpiresAt = *sessionExpiresAt
 		}
@@ -803,15 +826,25 @@ func (s *RequestStore) get(ctx context.Context, id uuid.UUID) (Request, error) {
 	return req, nil
 }
 
-// List returns the org's requests, newest first, narrowed by filter.
+// List returns the org's requests, newest first, narrowed by filter; those in
+// review (filter.Status) the longest in review first, as the Reviews page
+// shows them, so its cap leaves out the newest.
 func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error) {
+	order := `r.created_at DESC`
+	if filter.Status != nil && *filter.Status == StatusNeedsReview {
+		// When it went to review (completed_at), as waitingSince on the page.
+		order = `COALESCE(r.completed_at, r.created_at), r.created_at`
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
 			AND ($5::text IS NULL OR r.subject_kind = $5)
 			AND ($6::text IS NULL OR r.flow_id = $6)
-		ORDER BY r.created_at DESC LIMIT $3`
-	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind, filter.FlowID)
+			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
+			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
+		ORDER BY ` + order + ` LIMIT $3`
+	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
+		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure))
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
@@ -876,11 +909,13 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
 				ips_session_id = $2, ips_session_token_ciphertext = $3, ips_session_expires_at = $4,
+				ips_session_ttl_seconds = NULLIF($7, 0),
 				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = COALESCE(NULLIF($6, ''), method),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, updated_at = now()
 			WHERE id = $1 AND ips_session_id IS NULL AND status = 'pending'
 				AND purged_at IS NULL AND cancelled_at IS NULL AND ips_session_ended_at IS NULL`
-		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion, string(req.Method))
+		tag, err := q.Exec(ctx, update, req.ID, sess.ID, tokenCT, sess.ExpiresAt, sess.FlowVersion, string(req.Method),
+			int(sess.TTL/time.Second))
 		if err != nil {
 			return fmt.Errorf("proofing: attach session request %s: %w", req.ID, err)
 		}

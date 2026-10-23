@@ -6,9 +6,9 @@ tenant under the org's own id, with no provisioning step. Flows are the org's
 main object: an org has one set of flows with one default, one set of settings,
 one set of API keys and one webhook endpoint, and no customers (§1). The
 sidebar's "Identity proofing" section holds up to three pages under
-`/{org}/identity-proofing`: **Overview** (the last 30 days' external sessions
-counted, the newest ones, the org's flows with their sessions, and an alert
-for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
+`/{org}/identity-proofing`: **Overview** (a to-do list: **Waiting for your
+decision**, **Waiting for the person**, **Recently finished**, one line with the last 30
+days' counts, and an alert for a failing webhook) and, admin-only, **Flows** (a table of the org's flows
 with the people each identified in 30 days, the default flow and which flows
 members may use; a flow opens to its own page, `/{org}/identity-proofing/flows/{flowId}`,
 with **People** and **Versions** tabs, **Edit flow** (tabs **Check**, **Branding**
@@ -88,8 +88,10 @@ guard every externally supplied URL goes through),
 `frontend/src/routes/identity-proofing-flows.tsx` (admin: the flows table),
 `flow-editor.tsx` + `flow-editor-advanced.tsx` + `flow-editor-parts.tsx` (the
 flow editor), `frontend/src/lib/issuing-countries.ts` (its country list),
-`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table, its
-details and review), `proofing-send.tsx` (the Verify a person dialog),
+`identity-proofing-flow.tsx` (a flow's page: People and Versions), `frontend/src/routes/proofing-people.tsx` (the people table and its
+details; a row in review links to its review page), `proofing-reviews.tsx` (the
+Reviews page), `proofing-review.tsx` + `identity-check-review.tsx` +
+`data-request-review.tsx` (the review pages, §9), `proofing-send.tsx` (the Verify a person dialog),
 `proofing-verify.tsx` (the on-screen check), `proofing-ui.tsx` (marks and
 tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `routes/proof.tsx` (the hosted link, §7), `pause*.go` (§8), `flow_hosted*.go` +
@@ -172,7 +174,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
 - **Face photos are not kept by default.** The document portrait (DG2, or a
   disclosed credential's), the selfie and the sender's reference photo
   leave the result and the stored evidence once the face match is done
-  (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A flow
+  (`redactStepsForStorage`, `buildResult`); the match's verdicts stay. A
+  session that finishes in review keeps them until it is decided, for the
+  reviewer to compare (`heldForReview`); `DecideReview` drops them then
+  (`dropFacePhotos`). A flow
   sets `KeepFacePhotos` for an org that must keep them, for its
   retention. Covering a face instead was dropped: a mosaic or blur can still
   be matched against candidate photos, and a flat cover holds nothing. The
@@ -330,10 +335,38 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - It decides no outcome: an approved minor is approved with `over: false`;
       the relying party decides.
     - Off in a new flow, never in a flow without a list (`attributesForSteps`).
-    - Reaches the public API and admin result as `identity.ageOver`, and a
-      person's row details in the people table ("18 or older: Yes/No"), on a
-      flow's People tab and on All people. The Idem app's consent screen
-      names the age from the app session view's `ageOver`.
+    - A collected item like any other: it needs its reason in each offered
+      language (`withReasons`), the editor asks for it under the item, and
+      the person reads it as "Why: ..." under the age check. The CM seed flow
+      gives "To check you are 18 or older." and keeps `dg1`'s reason to the
+      name on the ticket.
+    - Reaches the public API and admin result as `identity.ageOver` (the
+      reviewer's read of a check in review too, `newAPIIdentity`), a person's
+      row details in the people table ("18 or older: Yes/No"), on a flow's
+      People tab and on All people, and an identity check's review page, under
+      the nationality (`ageOverFact`). The Idem app's consent screen names the
+      age from the app session view's `ageOver`.
+  - **Reasons.** Every item a flow lists, other than `outcome_only`, has a
+    reason, required in each language the flow's hosted page offers (§7, every
+    supported one until an admin sets them), and the person reads it under the
+    item as "Why: ...", in the page's language. A version stores them as
+    `attributeReasons` (item, then language, at most
+    `maxAttributeReasonLength` characters each). `Service.CreateFlow` and
+    `EditFlow` check them against the hosted languages (`withReasons`, 400
+    `invalid_input`); the engine only stores them, as the languages are the
+    wallet's. The editor shows a field per supported language under each
+    ticked item: required in the offered languages, optional in the others,
+    so a reason can be written before the Hosted page tab offers its language.
+    A flow saved before reasons existed keeps working: its page shows no "Why"
+    line, and the editor asks for the reasons at the next save. The Hosted page
+    tab (`SaveFlowHosted` → `hostedOffersReasons`) refuses to offer a language
+    the active version gives an item no reason in, 400 `reasons_missing`, and
+    says so beside the languages with a way to the Check tab; a version saved
+    before reasons gives none and may offer any language. Activating an older
+    version is not checked. A save that lists no items (the engine reads that
+    as everything its steps collect) is not checked; the editor always lists
+    them. The seeded demo flows give reasons in en and nl for everything they
+    collect (`seed.demoReasons`).
   - Countries: `acceptedIssuingCountries` takes 3-letter ICAO 9303 codes only,
     and a code no country has is refused, so the flow cannot be saved
     (`flow.ValidIssuingCountry`: ISO 3166-1 alpha-3, plus ICAO's own EUE, UNO,
@@ -854,8 +887,9 @@ post-review outcome stay the system's.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
-  admin as actor; a member's request is 404. For an approval this response adds
-  every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
+  admin as actor; a member's request is 404. For an approval, and for a check
+  waiting for review (with its `identity` too, which the API shows only once
+  approved), this response adds every image the engine still holds, `{mimeType, data}`, only PNG/JPEG/WebP
   (anything else, like an unconverted JPEG2000, is dropped): `photo` (the
   document's portrait, DG2 or the disclosed credential's), `selfie`,
   `referencePhoto` (the sender's own photo of the person, §14), and
@@ -1139,7 +1173,9 @@ the engine's status live (`devices[].current`/`away`) as `waiting`, `connected` 
 `deepLinkExpiresAt` or the last code lapses), hides it while `connected`, and
 mints a handover QR the moment the app is `away`; the app coming back drops that
 code (the engine cancels the grant). If `app` cannot be read it falls back to the
-manual "Show a new code", which the hosted page still uses.
+page's own code. That code, like the hosted page's, lasts the whole session, so
+neither page offers a new one while it shows; a hosted page opened with no code
+in the window (a reload) still has "Show a new code".
 
 ## 7. Hosted link
 
@@ -1188,8 +1224,8 @@ A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
 
 **Consent and completion.** The overview step is the consent screen (who asks,
-what is collected, retention, privacy link). It never shows the flow's name or
-its assurance level, and the hosted view leaves both out of its `flow`: the
+what is collected, why, retention, privacy link). It never shows the flow's name
+or its assurance level, and the hosted view leaves both out of its `flow`: the
 token alone opens it. The retention it states is the
 server's `retentionDays` (hosted view `flow`, flow list):
 `subjectRetentionDays`, the flow's override else the org's days, plus the
@@ -1221,8 +1257,22 @@ retention; the branding is the flow's own over the org's). Once `Session` report
 to its parent for each allowed origin (never `*`), then redirects
 (`location.replace`, so back does not land on the link and redirect again) with
 `?session=&status=` when there is a redirect; otherwise it shows its own
-outcome (`cancelled` included). A data request in review is not handed back:
-the page says it is in review. The page's language is the request's
+outcome (`cancelled` included). A session that ran out, or a link that lapsed
+unstarted, shows "This check has ended" instead (`HostedCheckEnded` in
+`proof.tsx`, VF5) and stays on it: an `expired` check is posted to an embedder
+but never redirected (`hostedHandBack`). It says nothing was shared, for a
+started session how long it ran, and who to ask for a new link, with the
+support contact from the branding (the flow's, else the org's; a mail or web
+address is a link, a web one in a new tab because the page can be framed). How
+long it ran is the lifetime the session was created with, not today's
+settings: the engine reports it (`proofingprovider.Session.TTL`, the asked TTL
+within its bounds), `AttachSession` keeps it (`ips_session_ttl_seconds`), and
+the hosted progress carries it as `sessionTtlSeconds` once started; a session
+started before it was kept says "not finished in time" without a number. The
+on-screen page's ended state is the same `CheckEnded` with Start again. The
+hosted card sits at the top, 80 px down, on every step. A data request in
+review is not handed back: the page says it is in review. The page's language
+is the request's
 `language` (also passed to the engine at start), then the browser's, then English
 (`lib/hosted-completion.ts`). It switches i18n without persisting the wallet's
 stored choice. Framing: the proofing handler is a `server.PageHeaderer`, so the
@@ -1292,17 +1342,112 @@ the reviews such an org still had open. Audit events recorded with
 ## 9. Manual review
 
 A session in review (`needs_review`) waits for a decision (or for the engine to
-end it, §3). The reviewer sees the person's identity and check results (an
-audited result read). An admin decides it on the All people page or the flow's People tab (filter
-"Needs review", also counted on the overview): approve or reject (optionally
-with an error code), with a required reason. `POST .../requests/{id}/review` calls the engine's
-`DecideReview` (the admin's e-mail as `reviewer`; the engine keeps who
+end it, §3). An admin, or a member with the reviewer right (below), decides it on
+Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and the
+overview count what waits).
+The page lists what waits, oldest first (waiting since = `completed_at`, when it
+went to review), under All, Identity checks and Data requests; Closed lists the
+data requests that ended, whoever ended them. The list carries no mark of a
+reviewer's decision (the audit event is not read), and a data request is also
+rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
+the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
+data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
+that a reviewer decided, and the Outcome column shows the error code in words.
+An identity check has no closed list yet, as none goes to review today. A data
+request shows "Answer by" = `purge_at`, a calendar month after it went to review
+(`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
+The list is `GET .../requests?status=needs_review`: the filter is applied before
+the list's cap of 200, and that list is the longest in review first, so the cap
+leaves out the newest, never the most overdue. A count from a capped list shows
+"200+" (`listedCount`, `requestListCapped`), on the tabs and the sidebar. Closed reads
+`?flowKind=data_request&status=approved` and `...&status=rejected`, each narrowed
+before its cap. A row opens its review page, `reviews/{requestId}`: for an identity check
+(`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
+from the chip (an audited result read) and the decision; for a data request §15.
+The decision is approve or reject with a required reason; a rejection names what
+is wrong, sent as the error code (`REJECT_REASONS` in `lib/proofing-reviews.ts`):
+`REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED` (it looks
+altered), `EVIDENCE_NOT_AS_REQUESTED`, none for "Something else", which is
+`MANUAL_REVIEW_REJECTED`. These are the reviewer's own codes
+(`reviewerRejectCodes`, any other is 400 for a reviewer): a wallet code would
+mean something else to the person, and `IDENTITY_MISMATCH` would hide the
+session from a later data request (`Candidates`). A reviewer does not decide an
+identity check they sent or that is about them (403 `own_review`; the page
+shows a note in place of the decision); a data request's link sender may
+decide it, or a one-admin org could never answer it.
+`POST .../requests/{id}/review` calls the engine's
+`DecideReview` (the reviewer's e-mail as `reviewer`; the engine keeps who
 decided, why and when with the session, `session.ReviewDecision`), audits
-`identity_proofing.review_decided` with the admin as actor, then reconciles:
+`identity_proofing.review_decided` with the reviewer as actor, then reconciles:
 the outcome lands like any other, so an approval still has to meet the flow's
 assurance level and the org's webhook is sent (for an external request). A request no longer under
-review is 409 `not_under_review`. Two reviewers deciding at once are
-serialised (`LockReview`).
+review is 409 `not_under_review`. A decision leaves the page, so it marks the
+result read stale without reading it again (`refetchType: "none"`): each read is
+audited, and the next page that opens the request reads the outcome. Two
+reviewers deciding at once are serialised (`LockReview`). An identity check goes
+to review only for something no signature or authoritative register vouches for:
+an unsigned upload, a value typed in by hand. Today nothing built produces that,
+so only data requests (§15) and the dev stub reach review, and the identity
+check page has no "What to check" box for the unsigned item: it needs the item
+from the wallet, which none yet carries.
+
+**The reviewer right.** An admin gives a member the right to decide in the
+member's edit page, "Can review" (`PUT .../members/{userId}/review-right`,
+`memberships.can_review`, audited `membership.review_changed` only when it
+changes, and subscribable in Notifications like `membership.role_changed`). The
+right is a member's: a PUT on an admin is 409 `admin_reviews`, a role change
+clears it (audited too), so an admin made a member again has to be given it
+anew, and `memberships_can_review_member` holds every row to that.
+`organization.MayReview` is an admin whose mandate is not withdrawn, or a member
+with the right, and `organization.RequireReviewer` gates the four `reviewer(...)`
+routes in `proofing/handler.go`: `review`, `result`, `data-matches` and
+`data-export`. Everything else stays a member's. A reviewer who is not an admin
+reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
+request waiting for review, and a data request (`data_access`, `data_erasure`)
+in any status. An identity check that is not waiting holds a person's identity
+and photos the right was never given for. So `GET .../requests` lists every
+request in the org only for `?status=needs_review` (Waiting) and for
+`?flowKind=data_request` (Closed reads it with `status=approved` and `rejected`);
+any other list is the requests they sent. So are the stats, All people and the
+member routes. `GET .../requests/{id}` opens one they sent or one in that scope
+(`mayOpen`, judged on the stored request through `Service.RequestIf`, before the
+engine is asked), and `result`, `data-matches`, `data-export` and the decision
+take the same scope (`reviewScope`); any other is a 404, as for a member. The
+app reads `canReview` from `GET /orgs/{slug}` (the same `MayReview`): it shows
+the sidebar's Reviews item and count, the Reviews and review pages, and the
+Overview's **Waiting for your decision**, which lists what waits in the org as
+the sidebar counts it. The Reviews footer links to Members for an admin only, as only an admin
+reads that page. Not yet: the review link on a row of All people and the flow's
+People tab is an admin's.
+
+**The Overview and the dashboard are to-do lists** (`identity-proofing-overview.tsx`,
+`dashboard.tsx` and `dashboard-todo.tsx`, built from `ui/task-list.tsx`).
+The Overview lists, up to five rows each: what waits for the reader's decision
+(an admin and a reviewer; a link to Reviews); the external checks nobody has
+finished (`pending`, `in_progress`), the longest waiting first; and the latest
+that ended (`approved`, `rejected`, `expired`; a withdrawn one is no news). A member
+reads the same lists about the checks they sent, as `GET .../requests` already
+scopes them. A member who cannot decide sees their own checks held for review under
+**Waiting for the person** as "Waiting for an admin", first, so the five rows never
+cut them off. The lists wait for the org's `canReview` before they load. The dashboard's **To do** holds
+a row for what waits for the reader's decision and, for an admin, for the members
+who have not identified and those whose VOG needs attention
+(`lib/member-insights.ts`); **Waiting on others** holds the unfinished checks and,
+for a member who cannot decide, the ones held for an admin. A row appears only
+with a count above zero. The line pointing to Settings › Organisation is an admin's,
+as only an admin opens that page.
+
+Each list is its own read, `GET .../requests?subjectKind=external&status=<s>`, one
+per status (`useExternalRequestsInQuery`, `todoStatuses`): `?status=` matches the
+status a request reads in (`EffectiveStatus`, in SQL `effectiveStatusColumn`), so a
+link that lapsed unstarted is `expired`, not `pending`, and cannot use up the 200 cap
+of the running ones. A count from a read that hit the cap shows as at least
+that many, "200+" (`listedCount` and `requestListCapped` in
+`lib/identity-proofing.ts`, `cappedAmong`). While a platform admin has paused the org's
+proofing, only **Verify a person** is hidden on both pages (`todoShows`): every list
+route stays open, and the Overview puts why above the lists. The pure parts
+(`lib/proofing-todo.ts`) are tested; the counts come from the same lists as the
+Overview.
 
 ## 10. Data minimisation
 
@@ -1345,7 +1490,8 @@ A session is purged by the `identity_proofing_purge` pruner
 row), or for a member's `proofedNameRetention`
 (30 days), after it ends (completed, cancelled, expired, or gone to review: an
 undecided identity review is kept no longer than a decided one; a data request
-in review lapses after `dataRequestReviewDays` instead): as `DELETE`
+in review lapses a calendar month after it went there, `dataRequestReviewMonths`,
+instead): as `DELETE`
 above, erased in the engine, then its personal data cleared here (the subject's
 name and address, the proofed name, the redirect URL and Yivi transaction, its
 diplomas and stored idempotent answers, a data request's own matches), the
@@ -1357,7 +1503,7 @@ dashboard shows the time as `purgeAt`.
   computing the time for every unpurged row.
   - The store computes it, not a trigger: `setPurgeAt` in
     `request_store.go` is the one rule (retention after settling, a data
-    request's review lapse after `dataRequestReviewDays`, an approved erasure
+    request's review lapse after `dataRequestReviewMonths`, an approved erasure
     when it was decided; the legal retention is a floor of an approved external
     identity check's retention, the later of two moments, not of two intervals:
     PostgreSQL compares a month to 30 days, `TestLegalCountsCalendarMonths`).
@@ -1661,9 +1807,11 @@ its erasure ("delete my data", Art. 17). See my data and Delete my data are a
 standard feature of every org, not flows anyone sets up: the org sends the
 person a session on its standard flow of that kind, like any other session
 (API, hosted link, mail or on-screen); the person proves who they are, and the
-session goes to the org's **needs review**, where an org admin decides. Code:
-`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`,
-the Verify a person dialog's "What do you send?" and the hosted page.
+session goes to the org's **needs review**, where an org admin or a reviewer
+decides (§9). Code:
+`standard_flow.go`, `data_request*.go`; frontend `routes/data-request-review.tsx`
+(its review page), the Verify a person dialog's "What do you send?" and the
+hosted page.
 
 - **Standard flows.** One flow per org of each kind, `data_access` and
   `data_erasure` (`identity_proofing_flow_settings.kind`, `standard` true; a
@@ -1678,11 +1826,13 @@ the Verify a person dialog's "What do you send?" and the hosted page.
   chip read and a face check (Regula, liveness) at eIDAS Substantial, releasing
   the document data (`dg1`, the name and date of birth a request finds the
   person's sessions by), `chip_checks` and `biometrics`, never an image and
-  never the age check, which would withhold that date of birth; legal basis
-  `legal_obligation`. A standard flow whose active version falls short of it
-  (`meetsStandard`, which needs `readsIdentity`: `dg1` without `age_over`)
-  gets it back in a new version under its own name, and
-  one the engine no longer lists is replaced. Both are audited
+  never the age check, which would withhold that date of birth, each with the
+  wallet's reason in every hosted language (`standardReasons`, §1's reasons per
+  item); legal basis `legal_obligation`. A standard flow whose active version
+  falls short of it (`meetsStandard`, which needs `readsIdentity`: `dg1`
+  without `age_over`; a version saved before reasons existed included) gets it
+  back in a new version under its own name, and one the engine no longer lists
+  is replaced. Both are audited
   `flow_created`/`flow_version_created` and `flow_kind_configured` without an
   actor. Two first sends at once each create a flow; `ClaimStandardFlow`
   (an advisory lock per org and kind) makes the first the standard one and
@@ -1756,7 +1906,7 @@ the Verify a person dialog's "What do you send?" and the hosted page.
   - It links one person's sessions at one org for a database reader, who can
     already link them by the plaintext `subject_email`; it never links across
     orgs.
-- **Review.** The session's panel shows the person's identity and proof (name,
+- **Review.** The review page shows the person's identity and proof (name,
   date of birth, document, chip, face match, liveness, eIDAS level; the
   result read allows a data request in review, `heldToVerdict`) and the
   matches. A match whose name and date of birth were read off a verified chip
@@ -1806,8 +1956,10 @@ the Verify a person dialog's "What do you send?" and the hosted page.
   (`legalRetention` in the hosted progress, `withLegalNotice`, GDPR Art.
   12(4)), on a declined request and on an approved one alike, until that date.
   "See my data" is never held.
-- **Nobody reviews it.** A data request left in review 30 days (GDPR Art.
-  12(3)) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`. An identity
+- **Nobody reviews it.** A data request left in review a calendar month (GDPR
+  Art. 12(3); `dataRequestReviewMonths`, counted in UTC: 31 Jan lapses at the end
+  of February) is rejected `REVIEW_LAPSED` and purged by `PurgeDue`, at the
+  "Answer by" the Reviews page shows. An identity
   review counts its retention from going to review, and lapses the same way
   then: it is kept no longer than a decided one.
 - **Export.** An approved access request's data: per approved session the

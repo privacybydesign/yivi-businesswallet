@@ -37,6 +37,7 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
+import { showsReviewTag } from "../lib/review-right";
 import { MemberProofing } from "./member-proofing";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
@@ -50,11 +51,11 @@ function DetailRow({
   label,
   value,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -76,13 +77,13 @@ function TimelineItem({
   formatWhen,
   t,
   isLast,
-}: {
+}: Readonly<{
   event: AuditEvent;
   dateFormatter: Intl.DateTimeFormat;
   formatWhen: (iso: string) => string;
   t: TFunction;
   isLast: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const visual = auditVisual(event.action);
   const subject = auditSubject(event, dateFormatter, t);
   return (
@@ -365,6 +366,7 @@ export default function MemberDetail(): React.JSX.Element {
                   {screeningStatusLabel(member.vogStatus, t)}
                 </Tag>
               )}
+              {showsReviewTag(member) && <Tag>{t("common.canReview")}</Tag>}
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">

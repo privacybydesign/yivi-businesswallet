@@ -6,6 +6,7 @@ type (
 	orgCtxKey       struct{}
 	roleCtxKey      struct{}
 	authorityCtxKey struct{}
+	reviewCtxKey    struct{}
 )
 
 func contextWithOrg(ctx context.Context, org Organization) context.Context {
@@ -80,4 +81,19 @@ func ContextWithAuthority(ctx context.Context, a Authority) context.Context {
 func AuthorityFromContext(ctx context.Context) Authority {
 	a, _ := ctx.Value(authorityCtxKey{}).(Authority)
 	return a
+}
+
+func contextWithReviewRight(ctx context.Context, right ReviewRight) context.Context {
+	return context.WithValue(ctx, reviewCtxKey{}, right)
+}
+
+// MayReview reports whether the caller decides identity checks and data
+// requests: an admin whose mandate is not withdrawn, or a member an admin gave
+// the reviewer right. The caller RequireReviewer lets through.
+func MayReview(ctx context.Context) bool {
+	if IsAdmin(ctx) {
+		return ActsAsAdmin(ctx)
+	}
+	right, _ := ctx.Value(reviewCtxKey{}).(ReviewRight)
+	return right == ReviewRightGranted
 }

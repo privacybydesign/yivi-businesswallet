@@ -27,6 +27,22 @@ export function useDateFormatter(): (iso: string) => string {
   }, [i18n.language]);
 }
 
+// Formats a day and month without the year ("16 Nov"): for a date within weeks
+// of today, such as a deadline.
+export function useDayMonthFormatter(): (iso: string) => string {
+  const { i18n } = useTranslation();
+  return useMemo(() => {
+    const dayMonth = new Intl.DateTimeFormat(i18n.language, {
+      month: "short",
+      day: "numeric",
+    });
+    return (iso: string): string => {
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? iso : dayMonth.format(date);
+    };
+  }, [i18n.language]);
+}
+
 // Formats an event timestamp for "when it happened": 24-hour time, with Today /
 // Yesterday labels for the two most recent days and an absolute date before that.
 export function useWhenFormatter(): (iso: string) => string {

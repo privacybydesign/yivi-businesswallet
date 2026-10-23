@@ -28,7 +28,7 @@ export function Outcome({
   message,
   action,
   role,
-}: Props): React.JSX.Element {
+}: Readonly<Props>): React.JSX.Element {
   return (
     <div role={role} className="mt-6 flex flex-col items-center text-center">
       <span

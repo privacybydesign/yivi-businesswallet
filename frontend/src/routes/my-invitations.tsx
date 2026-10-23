@@ -210,9 +210,9 @@ export default function MyInvitations(): React.JSX.Element {
 
 function InvitationsShell({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <>

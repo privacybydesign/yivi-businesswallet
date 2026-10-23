@@ -20,7 +20,7 @@ import {
   proofingErrorMessage,
   shortRequestId,
 } from "../lib/identity-proofing";
-import { Button, Card, ConfirmDialog, Input, Tag } from "../ui";
+import { Button, Card, ConfirmDialog, Input, StatusText } from "../ui";
 import { SecretReveal, WebhookStateText } from "./proofing-ui";
 
 const ERROR = "text-error text-[12.5px]";
@@ -32,7 +32,9 @@ const SECRET_MASK = "••••••••••••••••";
 
 // Where the org's session results go: one endpoint the org hosts, for all its
 // flows, with the deliveries made to it. Without one, no event reaches the org.
-export function WebhookSection({ slug }: { slug: string }): React.JSX.Element {
+export function WebhookSection({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const webhook = useProofingWebhookQuery(slug);
   const [editing, setEditing] = useState(false);
@@ -89,12 +91,12 @@ function EndpointForm({
   webhook,
   onCancel,
   onSaved,
-}: {
+}: Readonly<{
   slug: string;
   webhook: ProofingWebhook;
   onCancel?: () => void;
   onSaved: (saved: ProofingWebhook) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveWebhookMutation(slug);
   const [url, setUrl] = useState(webhook.url ?? "");
@@ -189,9 +191,9 @@ function EndpointForm({
 // Sessions, through the API and in the audit log.
 function DefaultEndpointCard({
   onCustomize,
-}: {
+}: Readonly<{
   onCustomize: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Card>
@@ -220,12 +222,12 @@ function EndpointCard({
   webhook,
   onEdit,
   onRotated,
-}: {
+}: Readonly<{
   slug: string;
   webhook: ProofingWebhook;
   onEdit: () => void;
   onRotated: (secret: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendWebhookTestMutation(slug);
   const rotate = useNewWebhookSecretMutation(slug);
@@ -240,13 +242,13 @@ function EndpointCard({
           {t("identityProofing.webhooks.endpoint")}
         </h2>
         {failing ? (
-          <Tag tone="red" dot>
+          <StatusText tone="red">
             {t("identityProofing.webhooks.failing")}
-          </Tag>
+          </StatusText>
         ) : (
-          <Tag tone="green" dot>
+          <StatusText tone="green">
             {t("identityProofing.webhooks.delivering")}
-          </Tag>
+          </StatusText>
         )}
       </div>
       <dl className="divide-line divide-y px-5">
@@ -258,15 +260,8 @@ function EndpointCard({
         </div>
         <div className="py-3">
           <dt className={CAPTION}>{t("identityProofing.webhooks.events")}</dt>
-          <dd className="mt-1.5 flex flex-wrap gap-1.5">
-            {webhook.events.map((name) => (
-              <span
-                key={name}
-                className="bg-surface-3 text-ink-soft rounded-full px-2 py-0.5 font-mono text-[11.5px]"
-              >
-                {name}
-              </span>
-            ))}
+          <dd className="text-ink mt-1 font-mono text-[12.5px]">
+            {webhook.events.join(", ")}
           </dd>
         </div>
         <div className="py-3">
@@ -363,7 +358,9 @@ function EndpointCard({
   );
 }
 
-function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
+function DeliveriesCard({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const deliveries = useWebhookDeliveriesQuery(slug);
   const formatWhen = useWhenFormatter();
@@ -400,7 +397,7 @@ function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
                 {d.sessionId ? shortRequestId(d.sessionId) : "—"}
               </span>
               <span className="shrink-0 whitespace-nowrap">
-                <DeliveryTag delivery={d} />
+                <DeliveryStatus delivery={d} />
               </span>
               <span className="text-muted ml-auto min-w-20 shrink-0 text-right whitespace-nowrap">
                 {formatWhen(d.lastAttemptAt ?? d.createdAt)}
@@ -413,22 +410,22 @@ function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
   );
 }
 
-function DeliveryTag({
+function DeliveryStatus({
   delivery,
-}: {
+}: Readonly<{
   delivery: WebhookDelivery;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const code = delivery.lastStatusCode;
   if (delivery.status === "pending" && delivery.attempts === 0) {
-    return <Tag tone="blue">{t("identityProofing.webhooks.queuedTag")}</Tag>;
+    return <StatusText>{t("identityProofing.webhooks.queuedTag")}</StatusText>;
   }
   const label =
     code !== undefined ? String(code) : t("identityProofing.webhooks.noAnswer");
   const tone = code !== undefined && isSuccessStatus(code) ? "green" : "red";
   return (
     <span className="inline-flex items-center gap-2">
-      <Tag
+      <StatusText
         tone={tone}
         title={
           delivery.status === "pending"
@@ -439,7 +436,7 @@ function DeliveryTag({
         }
       >
         {label}
-      </Tag>
+      </StatusText>
       {delivery.status === "failed" && (
         <span className="text-error">
           {t("identityProofing.webhooks.gaveUp")}

@@ -1,5 +1,10 @@
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
@@ -89,6 +94,7 @@ import type {
   RegisterAddress,
   ProofingAddressInput,
   ProofingDataMatch,
+  ListedStatus,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -97,6 +103,7 @@ import {
   deliveriesPollInterval,
   isProofingLive,
   progressPollContinues,
+  requestListCapped,
   reviewPollContinues,
 } from "../lib/identity-proofing";
 
@@ -104,6 +111,9 @@ import {
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
+// What waits for a decision changes when a person finishes a data request, which
+// no page of the reviewer is watching: the sidebar's count is re-read now and then.
+const WAITING_REVIEWS_POLL_INTERVAL_MS = 60_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
@@ -389,6 +399,70 @@ export function useExternalRequestsQuery(
   });
 }
 
+function externalInKey(slug: string, status: ListedStatus): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "external", status];
+}
+
+// The external requests that read in each of the given statuses, one read
+// per status, so the backend's cap counts each on its own: what the to-do
+// lists are built from. While one of them still runs, they are all re-read
+// together, so a check that ends leaves one list for another in one go.
+export function useExternalRequestsInQuery(
+  slug: string,
+  statuses: readonly ListedStatus[],
+): StatusReads {
+  const queryClient = useQueryClient();
+  const running = (): boolean =>
+    statuses.some((status) =>
+      queryClient
+        .getQueryData<ProofingRequest[]>(externalInKey(slug, status))
+        ?.some((r) => isProofingLive(r.status)),
+    );
+  return useQueries({
+    queries: statuses.map((status) => ({
+      queryKey: externalInKey(slug, status),
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getProofingRequests(slug, { subjectKind: "external", status }, signal),
+      enabled: slug !== "",
+      refetchInterval: () => (running() ? REQUESTS_POLL_INTERVAL_MS : false),
+    })),
+    combine: (results) => combineStatusReads(statuses, results),
+  });
+}
+
+interface StatusReads {
+  // Every status's requests, once all landed.
+  data: ProofingRequest[] | undefined;
+  // The statuses whose read hit the backend's cap: more of them may exist
+  // than were read.
+  capped: readonly ListedStatus[];
+  isPending: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+// The reads of statuses, in that order, as one list once every one landed,
+// pending while any is and failed when any did.
+export function combineStatusReads(
+  statuses: readonly ListedStatus[],
+  results: readonly Pick<
+    UseQueryResult<ProofingRequest[], Error>,
+    "data" | "isPending" | "isError" | "error"
+  >[],
+): StatusReads {
+  return {
+    data: results.every((r) => r.data !== undefined)
+      ? results.flatMap((r) => r.data ?? [])
+      : undefined,
+    capped: statuses.filter((_, i) =>
+      requestListCapped(results[i]?.data ?? []),
+    ),
+    isPending: results.some((r) => r.isPending),
+    isError: results.some((r) => r.isError),
+    error: results.find((r) => r.error)?.error ?? null,
+  };
+}
+
 // The requests sent to one member, newest first. Under the requests key, so
 // everything that refreshes the org's requests refreshes these too.
 export function useMemberRequestsQuery(
@@ -404,6 +478,70 @@ export function useMemberRequestsQuery(
       query.state.data?.some((r) => isProofingLive(r.status))
         ? REQUESTS_POLL_INTERVAL_MS
         : false,
+  });
+}
+
+// The requests held in review, the longest in review first: what waits for a
+// decision. The backend caps the list after that order, so what it leaves out
+// is the newest. Under the requests key, so a decision refreshes it. A request
+// whose engine session ended is still held here but reads expired: the caller
+// keeps the ones that still read needs_review.
+export function useWaitingReviewsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
+    queryFn: ({ signal }) =>
+      getProofingRequests(slug, { status: "needs_review" }, signal),
+    enabled: options.enabled && slug !== "",
+    refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
+  });
+}
+
+// The data requests that ended, approved or rejected: two reads, each narrowed
+// by the backend before its cap, so a busy org's identity checks never push
+// them off. Under the requests key, so a decision refreshes it.
+export function useClosedDataRequestsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest[], Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "closed-data"],
+    queryFn: async ({ signal }) => {
+      const [approved, rejected] = await Promise.all(
+        (["approved", "rejected"] as const).map((status) =>
+          getProofingRequests(
+            slug,
+            { status, flowKind: "data_request" },
+            signal,
+          ),
+        ),
+      );
+      return [...approved, ...rejected];
+    },
+    enabled: options.enabled && slug !== "",
+  });
+}
+
+// One request, for its review page. Under the requests key, so a decision
+// refreshes it.
+export function proofingRequestQueryKey(
+  slug: string,
+  requestId: string,
+): readonly string[] {
+  return [...proofingRequestsQueryKey(slug), "one", requestId];
+}
+
+export function useProofingRequestQuery(
+  slug: string,
+  requestId: string,
+  options: { enabled: boolean },
+): UseQueryResult<ProofingRequest, Error> {
+  return useQuery({
+    queryKey: proofingRequestQueryKey(slug, requestId),
+    queryFn: ({ signal }) => getProofingRequest(slug, requestId, signal),
+    enabled: options.enabled && slug !== "" && requestId !== "",
   });
 }
 
@@ -684,7 +822,7 @@ export function useProofingDataMatchesQuery(
 // then shows the read. It holds the person's identity and photos, so it is
 // dropped from the cache as soon as no row shows it (gcTime 0), not kept for
 // the default five minutes.
-function proofingRequestResultQueryKey(
+export function proofingRequestResultQueryKey(
   slug: string,
   requestId: string,
 ): readonly string[] {
@@ -921,6 +1059,24 @@ export function useDeclineHostedMutation(
   });
 }
 
+export function refreshAfterReviewDecision(
+  queryClient: ReturnType<typeof useQueryClient>,
+  slug: string,
+  requestId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestsQueryKey(slug),
+  });
+  // The result is read once and kept (staleTime Infinity); the decision
+  // changed it, so the one read under review is no longer the outcome. The page
+  // is being left and every read is audited, so it is marked stale and read
+  // again by the next page that opens it, not at once.
+  void queryClient.invalidateQueries({
+    queryKey: proofingRequestResultQueryKey(slug, requestId),
+    refetchType: "none",
+  });
+}
+
 // Decides a request under review; the lists (and counts) follow.
 export function useDecideReviewMutation(
   slug: string,
@@ -930,15 +1086,6 @@ export function useDecideReviewMutation(
   return useMutation({
     mutationFn: (input) => decideProofingReview(slug, requestId, input),
     meta: { suppressErrorToast: true },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestsQueryKey(slug),
-      });
-      // The result is read once and kept (staleTime Infinity); the decision
-      // changed it, so the one read under review is no longer the outcome.
-      void queryClient.invalidateQueries({
-        queryKey: proofingRequestResultQueryKey(slug, requestId),
-      });
-    },
+    onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });
 }

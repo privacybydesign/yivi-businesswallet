@@ -12,12 +12,14 @@ import {
   BSN_POLICIES,
   DOCUMENT_KINDS,
   FOLLOW_ORG,
+  MAX_ATTRIBUTE_REASON_CHARS,
   REQUESTED_ATTRIBUTES,
   SESSION_TTL_OPTIONS_SECONDS,
   ageOverChoices,
   asksAge,
   assuranceLevelLabel,
   attributeAvailable,
+  missingReasonLocales,
   lockedByLevel,
   retentionChoices,
   ttlMinutes,
@@ -32,19 +34,23 @@ import {
   issuingCountryChoices,
   issuingCountryName,
 } from "../lib/issuing-countries";
-import {
-  ChevronSelect,
-  ERROR,
-  HINT,
-  OptionRow,
-  Section,
-} from "./flow-editor-parts";
+import { SUPPORTED_LANGUAGES } from "../i18n";
+import type { Language } from "../i18n";
+import { Select } from "../ui";
+import { ERROR, HINT, OptionRow, Section } from "./flow-editor-parts";
 import type { OptionLock } from "./flow-editor-parts";
 import { FaceMatchThreshold } from "./flow-editor-threshold";
 
 const LABEL = "text-[14px] font-semibold";
-// Lines a field up under an option's label: past its checkbox and the gap.
-const UNDER_OPTION = "pl-[30px]";
+// Lines a field up under an option's label, past its checkbox and the gap;
+// on a phone the field takes the full width.
+const UNDER_OPTION = "sm:ml-[30px]";
+// A reason field is a plain input: Input's own border would win over the
+// error one.
+const REASON_FIELD =
+  "rounded-yivi bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:ring-3";
+const REASON_FIELD_OK = "border-line-strong focus:border-ink focus:ring-ink/10";
+const REASON_FIELD_ERR = "border-error focus:border-error focus:ring-error/10";
 const RADIO = "h-[18px] w-[18px] flex-none accent-ink";
 
 interface AdvancedSettingsProps {
@@ -60,15 +66,18 @@ interface AdvancedSettingsProps {
   addressError: string | null;
   // Whether the flow must read the name and date of birth: required diplomas.
   requiresIdentity: boolean;
+  // The languages the flow's hosted page offers: each ticked item is
+  // explained in every one, and may be in the others.
+  locales: readonly Language[];
   // The field the editor refused to save, once it was tried.
   error: FlowDraftError | null;
 }
 
 // Everything under Advanced settings, grouped by the question it answers.
 export function AdvancedSettings(
-  props: AdvancedSettingsProps,
+  props: Readonly<AdvancedSettingsProps>,
 ): React.JSX.Element {
-  const { draft, update, settings, error } = props;
+  const { draft, update, settings, locales, error } = props;
 
   return (
     <>
@@ -78,6 +87,7 @@ export function AdvancedSettings(
         draft={draft}
         update={update}
         requiresIdentity={props.requiresIdentity}
+        locales={locales}
         error={error}
       />
       <ChecksSection draft={draft} update={update} />
@@ -122,7 +132,9 @@ function StepsSection({
   onAddress,
   addressError,
   error,
-}: Omit<AdvancedSettingsProps, "requiresIdentity">): React.JSX.Element {
+}: Readonly<
+  Omit<AdvancedSettingsProps, "requiresIdentity" | "locales">
+>): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   const orgTtl = settings?.sessionTtlSeconds;
@@ -193,10 +205,12 @@ function StepsSection({
         <label htmlFor="flow-lifetime" className={LABEL}>
           {t("identityProofingFlows.editor.steps.lifetime")}
         </label>
-        <ChevronSelect
+        <Select
           id="flow-lifetime"
           value={String(draft.sessionTtlSeconds)}
-          onChange={(value) => update({ sessionTtlSeconds: Number(value) })}
+          onChange={(event) =>
+            update({ sessionTtlSeconds: Number(event.target.value) })
+          }
         >
           <option value={FOLLOW_ORG}>
             {orgTtl === undefined
@@ -212,7 +226,7 @@ function StepsSection({
               })}
             </option>
           ))}
-        </ChevronSelect>
+        </Select>
         <span className={HINT}>
           {t("identityProofingFlows.editor.steps.lifetimeHint")}
         </span>
@@ -225,11 +239,11 @@ function DocumentsSection({
   draft,
   update,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const choices = useMemo(
     () => issuingCountryChoices(i18n.language, t),
@@ -328,13 +342,17 @@ function DocumentsSection({
             <label htmlFor="flow-country-add" className="sr-only">
               {t("identityProofingFlows.editor.documents.add")}
             </label>
-            <ChevronSelect
+            <Select
               id="flow-country-add"
               value=""
-              onChange={(code) =>
-                code !== "" &&
-                update({ issuingCountries: [...draft.issuingCountries, code] })
-              }
+              onChange={(event) => {
+                const code = event.target.value;
+                if (code === "") {
+                  return;
+                }
+
+                update({ issuingCountries: [...draft.issuingCountries, code] });
+              }}
             >
               <option value="">
                 {t("identityProofingFlows.editor.documents.addPlaceholder")}
@@ -344,7 +362,7 @@ function DocumentsSection({
                   {choice.name}
                 </option>
               ))}
-            </ChevronSelect>
+            </Select>
             <p className={HINT}>
               {t("identityProofingFlows.editor.documents.addHint")}
             </p>
@@ -364,57 +382,105 @@ function ReceiveSection({
   draft,
   update,
   requiresIdentity,
+  locales,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   requiresIdentity: boolean;
+  locales: readonly Language[];
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
+
+  function setReason(value: string, locale: string, text: string): void {
+    update({
+      attributeReasons: {
+        ...draft.attributeReasons,
+        [value]: { ...draft.attributeReasons[value], [locale]: text },
+      },
+    });
+  }
 
   return (
     <Section
       title={t("identityProofingFlows.editor.receive.title")}
       hint={t("identityProofingFlows.editor.receive.hint")}
     >
-      {REQUESTED_ATTRIBUTES.map(({ value }) => {
-        const available = attributeAvailable(draft, value);
-        const ticked = draft.requestedAttributes.has(value);
-        // Once ticked, Document data stays on: an older version without it can
-        // still tick it.
-        const locked =
-          requiresIdentity && value === ATTRIBUTE_DOCUMENT && ticked;
-        // Once unticked, the age check stays off: it withholds the date of
-        // birth the flow needs.
-        const ageLock =
-          requiresIdentity && value === ATTRIBUTE_AGE_OVER && !ticked
-            ? { note: t("identityProofingFlows.editor.receive.ageOverLocked") }
-            : undefined;
-        return (
-          <React.Fragment key={value}>
-            <OptionRow
-              id={`flow-attr-${value}`}
-              checked={available && ticked}
-              disabled={!available || locked}
-              label={t(`identityProofingFlows.attributes.${value}`)}
-              hint={t(`identityProofingFlows.attributeHints.${value}`)}
-              lock={ageLock}
-              onChange={() =>
-                update({
-                  requestedAttributes: toggled(
-                    draft.requestedAttributes,
-                    value,
-                  ),
-                })
-              }
-            />
-            {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
-              <MinimumAge draft={draft} update={update} error={error} />
-            )}
-          </React.Fragment>
-        );
-      })}
+      <div className="flex flex-col">
+        {REQUESTED_ATTRIBUTES.map(({ value }) => {
+          const available = attributeAvailable(draft, value);
+          const ticked = available && draft.requestedAttributes.has(value);
+          // Once ticked, Document data stays on: an older version without it
+          // can still tick it.
+          const locked =
+            requiresIdentity &&
+            value === ATTRIBUTE_DOCUMENT &&
+            draft.requestedAttributes.has(value);
+          // Once unticked, the age check stays off: it withholds the date of
+          // birth the flow needs.
+          const ageLock =
+            requiresIdentity &&
+            value === ATTRIBUTE_AGE_OVER &&
+            !draft.requestedAttributes.has(value)
+              ? {
+                  note: t("identityProofingFlows.editor.receive.ageOverLocked"),
+                }
+              : undefined;
+          return (
+            <div
+              key={value}
+              className="border-line flex flex-col gap-3 border-t py-3.5"
+            >
+              <OptionRow
+                id={`flow-attr-${value}`}
+                checked={ticked}
+                disabled={!available || locked}
+                label={t(`identityProofingFlows.attributes.${value}`)}
+                hint={t(`identityProofingFlows.attributeHints.${value}`)}
+                lock={ageLock}
+                onChange={() =>
+                  update({
+                    requestedAttributes: toggled(
+                      draft.requestedAttributes,
+                      value,
+                    ),
+                  })
+                }
+              />
+              {value === ATTRIBUTE_AGE_OVER && asksAge(draft) && (
+                <MinimumAge draft={draft} update={update} error={error} />
+              )}
+              {ticked && (
+                <fieldset
+                  aria-label={t(`identityProofingFlows.attributes.${value}`)}
+                  className={`grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3 ${UNDER_OPTION}`}
+                >
+                  {/* Every language, so a reason can be written before the
+                      Hosted page tab offers it; only the offered ones are
+                      required. */}
+                  {SUPPORTED_LANGUAGES.map((locale) => (
+                    <ReasonField
+                      key={locale}
+                      id={`flow-attr-${value}-reason-${locale}`}
+                      locale={locale}
+                      required={locales.includes(locale)}
+                      text={draft.attributeReasons[value]?.[locale] ?? ""}
+                      missing={
+                        error === "reasons" &&
+                        missingReasonLocales(draft, value, locales).includes(
+                          locale,
+                        )
+                      }
+                      onChange={(text) => setReason(value, locale, text)}
+                    />
+                  ))}
+                </fieldset>
+              )}
+            </div>
+          );
+        })}
+      </div>
       {requiresIdentity && (
         <p className={HINT}>
           {t("identityProofingFlows.editor.receive.identityLocked")}
@@ -435,11 +501,11 @@ function MinimumAge({
   draft,
   update,
   error,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   error: FlowDraftError | null;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
@@ -447,17 +513,18 @@ function MinimumAge({
       <label htmlFor="flow-age-over" className={LABEL}>
         {t("identityProofingFlows.editor.receive.ageOver")}
       </label>
-      <ChevronSelect
+      <Select
         id="flow-age-over"
         value={draft.ageOver}
-        onChange={(ageOver) => update({ ageOver })}
+        state={error === "ageOver" ? "error" : "ok"}
+        onChange={(event) => update({ ageOver: event.target.value })}
       >
         {ageOverChoices(draft).map((age) => (
           <option key={age} value={String(age)}>
             {t("identityProofingFlows.editor.receive.ageOverOption", { age })}
           </option>
         ))}
-      </ChevronSelect>
+      </Select>
       <span className={HINT}>
         {t("identityProofingFlows.editor.receive.ageOverHint")}
       </span>
@@ -470,13 +537,66 @@ function MinimumAge({
   );
 }
 
+// An item's reason in one language: required when the hosted page offers
+// it, optional otherwise.
+function ReasonField({
+  id,
+  locale,
+  required,
+  text,
+  missing,
+  onChange,
+}: Readonly<{
+  id: string;
+  locale: Language;
+  required: boolean;
+  text: string;
+  missing: boolean;
+  onChange: (text: string) => void;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const language = t(`common.languageName.${locale}`);
+  const errorId = `${id}-error`;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-semibold">
+        {t(
+          required
+            ? "identityProofingFlows.editor.receive.reason"
+            : "identityProofingFlows.editor.receive.reasonOptional",
+          { language },
+        )}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={text}
+        maxLength={MAX_ATTRIBUTE_REASON_CHARS}
+        aria-required={required || undefined}
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? errorId : undefined}
+        className={`${REASON_FIELD} ${missing ? REASON_FIELD_ERR : REASON_FIELD_OK}`}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {missing && (
+        <p id={errorId} role="alert" className={ERROR}>
+          {t("identityProofingFlows.editor.receive.reasonMissing", {
+            language,
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ChecksSection({
   draft,
   update,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   // A check its step always runs is locked on with the step, whatever the level.
@@ -548,11 +668,11 @@ function PrivacySection({
   draft,
   update,
   settings,
-}: {
+}: Readonly<{
   draft: ProofingFlowDraft;
   update: (patch: Partial<ProofingFlowDraft>) => void;
   settings: ProofingSettings | undefined;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const orgDays = settings?.dataRetentionDays;
 
@@ -583,17 +703,19 @@ function PrivacySection({
           <label htmlFor="flow-retention" className={LABEL}>
             {t("identityProofingFlows.editor.privacy.retention")}
           </label>
-          <ChevronSelect
+          <Select
             id="flow-retention"
             value={String(draft.retentionSeconds)}
-            onChange={(value) => update({ retentionSeconds: Number(value) })}
+            onChange={(event) =>
+              update({ retentionSeconds: Number(event.target.value) })
+            }
           >
             {retentionChoices(draft.retentionSeconds).map((seconds) => (
               <option key={seconds} value={seconds}>
                 {retentionLabel(seconds)}
               </option>
             ))}
-          </ChevronSelect>
+          </Select>
           <span className={HINT}>
             {t("identityProofingFlows.editor.privacy.retentionHint")}
           </span>
@@ -602,14 +724,15 @@ function PrivacySection({
           <label htmlFor="flow-bsn" className={LABEL}>
             {t("identityProofingFlows.editor.privacy.bsn")}
           </label>
-          <ChevronSelect
+          <Select
             id="flow-bsn"
             value={draft.bsnPolicy}
-            onChange={(value) =>
+            onChange={(event) =>
               update({
                 bsnPolicy:
-                  BSN_POLICIES.find((policy) => policy === value) ??
-                  draft.bsnPolicy,
+                  BSN_POLICIES.find(
+                    (policy) => policy === event.target.value,
+                  ) ?? draft.bsnPolicy,
               })
             }
           >
@@ -618,7 +741,7 @@ function PrivacySection({
                 {t(`identityProofingFlows.bsnPolicies.${policy}`)}
               </option>
             ))}
-          </ChevronSelect>
+          </Select>
           <span className={HINT}>
             {t("identityProofingFlows.editor.privacy.bsnHint")}
           </span>

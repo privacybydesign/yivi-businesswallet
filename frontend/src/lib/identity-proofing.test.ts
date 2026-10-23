@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
 import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
 import type {
@@ -26,6 +26,7 @@ import {
   addressVerificationNote,
   matchingAddress,
   ageOverChoices,
+  ageOverFact,
   dataRequestRefusal,
   deliveriesPollInterval,
   hostedErrorMessage,
@@ -41,6 +42,12 @@ import {
   diplomaRejectionReason,
   diplomaStepDone,
   OUTCOME_ONLY,
+  MAX_ATTRIBUTE_REASON_CHARS,
+  collectedAttributes,
+  draftReason,
+  localesWithoutReasons,
+  missingReasonLocales,
+  reasonIn,
   mailLifetimeMinutes,
   readsIdentity,
   sendableByMail,
@@ -92,7 +99,6 @@ import {
   sessionFilterCounts,
   shortRequestId,
   sumProofingStats,
-  verifiedShare,
   isHexColor,
   isSuccessStatus,
   ownEndpointDeliveries,
@@ -102,8 +108,10 @@ import {
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
   SUBSTANTIAL_FACE_MATCH_FLOOR,
+  supportContactLink,
 } from "./identity-proofing";
 import type { ProofingFlowDraft } from "./identity-proofing";
+import { REJECT_REASONS } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
 
@@ -111,8 +119,22 @@ function apiError(status: number, code: string, message: string): ApiError {
   return new ApiError(status, "", "/api/v1/x", { error: message, code });
 }
 
+// A reason for every item in every language, so a test's draft is refused
+// only for what the test is about.
+const EXPLAINED = Object.fromEntries(
+  REQUESTED_ATTRIBUTES.map(({ value }) => [
+    value,
+    { en: `Why ${value}`, nl: `Waarom ${value}` },
+  ]),
+);
+
 function draft(patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft {
-  return { ...emptyFlowDraft(), name: "  Passport check ", ...patch };
+  return {
+    ...emptyFlowDraft(),
+    name: "  Passport check ",
+    attributeReasons: EXPLAINED,
+    ...patch,
+  };
 }
 
 // Every item What you receive offers, ticked, but the age check, which
@@ -714,6 +736,20 @@ describe("assurance level", () => {
   });
 });
 
+describe("ageOverFact", () => {
+  it("shows the age check's answer, and nothing without one", () => {
+    expect(ageOverFact({ ageOver: { age: 18, over: true } }, t)).toEqual({
+      label: "18 or older",
+      value: "Yes",
+    });
+    expect(ageOverFact({ ageOver: { age: 21, over: false } }, t)?.value).toBe(
+      "No",
+    );
+    expect(ageOverFact({}, t)).toBeUndefined();
+    expect(ageOverFact(undefined, t)).toBeUndefined();
+  });
+});
+
 describe("ageOverChoices", () => {
   it("offers the usual ages, plus a saved one that is not among them", () => {
     expect(ageOverChoices(draft({ ageOver: "18" }))).toEqual([
@@ -722,6 +758,228 @@ describe("ageOverChoices", () => {
     expect(ageOverChoices(draft({ ageOver: "17" }))).toEqual([
       12, 16, 17, 18, 21, 65,
     ]);
+  });
+});
+
+describe("attribute reasons", () => {
+  // A draft with every item ticked, explained in both languages: a new flow
+  // starts with none ticked.
+  const ticked = (patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft =>
+    draft({ requestedAttributes: EVERY_ATTRIBUTE, ...patch });
+  const chipOnly = ticked({ faceVerification: false });
+  const bare = (patch: Partial<ProofingFlowDraft> = {}): ProofingFlowDraft =>
+    ticked({ attributeReasons: {}, ...patch });
+
+  it("asks a new flow no reason until it collects an item, then one for each", () => {
+    const fresh = { ...emptyFlowDraft(), name: "F" };
+    expect(flowDraftError(fresh)).toBeNull();
+    expect(
+      flowDraftError({ ...fresh, requestedAttributes: EVERY_ATTRIBUTE }),
+    ).toBe("reasons");
+  });
+
+  it("wants each collected item explained in every language the page offers", () => {
+    expect(flowDraftError(bare(), false, ["en", "nl"])).toBe("reasons");
+    expect(flowDraftError(ticked(), false, ["en", "nl"])).toBeNull();
+
+    const dutchMissing = ticked({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { en: "To check your age." },
+      },
+    });
+    expect(flowDraftError(dutchMissing, false, ["en", "nl"])).toBe("reasons");
+    expect(flowDraftError(dutchMissing, false, ["en"])).toBeNull();
+  });
+
+  it("counts a blank reason as none", () => {
+    const blank = ticked({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { en: "  ", nl: "Om te controleren." },
+      },
+    });
+    expect(flowDraftError(blank, false, ["en", "nl"])).toBe("reasons");
+    expect(draftReason(blank, "dg1", "en")).toBe("");
+  });
+
+  it("asks nothing for an item that is not collected", () => {
+    const outcomeOnly = bare({ requestedAttributes: new Set() });
+    expect(flowDraftError(outcomeOnly, false, ["en", "nl"])).toBeNull();
+
+    // Selfie stays ticked while its step is off, and is not collected.
+    const stepOff = ticked({
+      faceVerification: false,
+      attributeReasons: { ...EXPLAINED, selfie: {}, biometrics: {} },
+    });
+    expect(flowDraftError(stepOff, false, ["en", "nl"])).toBeNull();
+  });
+
+  it("lists the data a draft collects in the editor's order", () => {
+    expect(collectedAttributes(chipOnly)).toEqual([
+      "dg1",
+      "chip_checks",
+      "dg11",
+      "dg2",
+    ]);
+    expect(
+      collectedAttributes(bare({ requestedAttributes: new Set() })),
+    ).toEqual([]);
+  });
+
+  it("sends the trimmed reasons of the collected items only", () => {
+    const spec = flowSpecFromDraft(
+      ticked({
+        faceVerification: false,
+        attributeReasons: {
+          ...EXPLAINED,
+          dg1: { en: "  To check your age. ", nl: "Om je leeftijd te zien." },
+        },
+      }),
+    );
+    expect(spec.attributeReasons).toEqual({
+      dg1: { en: "To check your age.", nl: "Om je leeftijd te zien." },
+      chip_checks: EXPLAINED.chip_checks,
+      dg11: EXPLAINED.dg11,
+      dg2: EXPLAINED.dg2,
+    });
+  });
+
+  it("asks the age check for its reason too, and shows it to the person", () => {
+    const ageCheck = new Set(["dg1", "age_over"]);
+    const halfExplained = draft({
+      requestedAttributes: ageCheck,
+      attributeReasons: {
+        ...EXPLAINED,
+        age_over: { en: "To check your age." },
+      },
+    });
+    expect(collectedAttributes(halfExplained)).toEqual(["dg1", "age_over"]);
+    expect(flowDraftError(halfExplained, false, ["en", "nl"])).toBe("reasons");
+    expect(
+      missingReasonLocales(halfExplained, "age_over", ["en", "nl"]),
+    ).toEqual(["nl"]);
+
+    const explained = draft({ requestedAttributes: ageCheck });
+    expect(flowDraftError(explained, false, ["en", "nl"])).toBeNull();
+    expect(flowSpecFromDraft(explained).attributeReasons?.age_over).toEqual(
+      EXPLAINED.age_over,
+    );
+    // The overview lists the age check, its "Why" line under it.
+    expect(isRequestedAttribute("age_over")).toBe(true);
+  });
+
+  it("sends none for a flow that collects nothing", () => {
+    const spec = flowSpecFromDraft(ticked({ requestedAttributes: new Set() }));
+    expect(spec.requestedAttributes).toEqual([OUTCOME_ONLY]);
+    expect(spec).not.toHaveProperty("attributeReasons");
+  });
+
+  it("starts from the reasons a flow has, and from none for one saved before", () => {
+    const flow = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["nfc_read", "document_capture"],
+      requestedAttributes: ["dg1"],
+      createdAt: "2026-09-28T00:00:00Z",
+      completable: true,
+    };
+    expect(draftFromFlow(flow).attributeReasons).toEqual({});
+    expect(flowDraftError(draftFromFlow(flow), false, ["en", "nl"])).toBe(
+      "reasons",
+    );
+
+    const explained = { ...flow, attributeReasons: { dg1: EXPLAINED.dg1 } };
+    expect(draftFromFlow(explained).attributeReasons).toEqual({
+      dg1: EXPLAINED.dg1,
+    });
+    expect(
+      flowDraftError(draftFromFlow(explained), false, ["en", "nl"]),
+    ).toBeNull();
+  });
+
+  it("names the language a reason is missing in", () => {
+    const englishMissing = ticked({
+      attributeReasons: {
+        ...EXPLAINED,
+        dg1: { nl: "Om je leeftijd te zien." },
+      },
+    });
+    expect(missingReasonLocales(englishMissing, "dg1", ["en", "nl"])).toEqual([
+      "en",
+    ]);
+    expect(missingReasonLocales(englishMissing, "dg1", ["nl"])).toEqual([]);
+    expect(missingReasonLocales(bare(), "dg1", ["en", "nl"])).toEqual([
+      "en",
+      "nl",
+    ]);
+  });
+
+  it("keeps a hosted page from offering a language without reasons", () => {
+    const flow = {
+      requestedAttributes: ["dg1", "chip_checks"],
+      attributeReasons: {
+        dg1: { en: "To check your age.", nl: "Om je leeftijd te zien." },
+        chip_checks: { en: "To make sure your document is real." },
+      },
+    };
+    expect(localesWithoutReasons(flow, ["en"])).toEqual([]);
+    expect(localesWithoutReasons(flow, ["en", "nl"])).toEqual(["nl"]);
+    // No languages named is every one.
+    expect(localesWithoutReasons(flow, [])).toEqual(["nl"]);
+    expect(
+      localesWithoutReasons(
+        {
+          requestedAttributes: [OUTCOME_ONLY],
+          attributeReasons: flow.attributeReasons,
+        },
+        ["en", "nl"],
+      ),
+    ).toEqual([]);
+  });
+
+  // #329's open point: a version saved before reasons gives none, and its
+  // page may offer any language (without a "Why" line).
+  it("lets a version from before reasons offer any language", () => {
+    expect(
+      localesWithoutReasons({ requestedAttributes: ["dg1"] }, ["en", "nl"]),
+    ).toEqual([]);
+    expect(
+      localesWithoutReasons(
+        { requestedAttributes: ["dg1"], attributeReasons: {} },
+        ["en", "nl"],
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads the reason in the page's language and never another", () => {
+    const reasons = { en: "To check your age.", nl: "Om je leeftijd te zien." };
+    expect(reasonIn(reasons, "nl")).toBe(reasons.nl);
+    expect(reasonIn(reasons, "nl-NL")).toBe(reasons.nl);
+    expect(reasonIn(reasons, "EN")).toBe(reasons.en);
+    expect(reasonIn({ en: "To check your age." }, "nl")).toBeUndefined();
+    expect(reasonIn({ nl: "  " }, "nl")).toBeUndefined();
+    expect(reasonIn(undefined, "en")).toBeUndefined();
+  });
+});
+
+// The longest reason the editor takes is the one the backend accepts.
+describe("attribute reason bound mirrors backend/internal/proofing", () => {
+  it("allows reasons as long as the backend does", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofing/flow_reasons.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const found = /maxAttributeReasonLength\s*=\s*(\d+)/.exec(source);
+    expect(found, "maxAttributeReasonLength is declared").not.toBeNull();
+    expect(MAX_ATTRIBUTE_REASON_CHARS).toBe(Number(found![1]));
   });
 });
 
@@ -1091,6 +1349,7 @@ describe("proofingErrorMessage", () => {
     [409, "link_started", "linkStarted"],
     [422, "address_not_found", "addressNotFound"],
     [409, "legal_retention", "legalRetention"],
+    [400, "reasons_missing", "reasonsMissing"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -1199,11 +1458,6 @@ describe("proofing stats", () => {
     expect(perFlow.get("f2")?.approved).toBe(2);
     expect(perFlow.has("f3")).toBe(false);
   });
-
-  it("has no verified share without sessions", () => {
-    expect(verifiedShare(sumProofingStats([]))).toBeUndefined();
-    expect(verifiedShare(sumProofingStats([row("f", 4, 3)]))).toBe(0.75);
-  });
 });
 
 describe("requestFlows", () => {
@@ -1245,6 +1499,12 @@ describe("listedCount", () => {
     expect(listedCount(12, true, t)).toBe("12+");
     expect(listedCount(12, false, t)).toBe("12");
     expect(listedCount(0, false, t)).toBe("0");
+  });
+
+  it("shows it so in Dutch too", () => {
+    const nl = i18n.getFixedT("nl");
+    expect(listedCount(MAX_LISTED_REQUESTS, true, nl)).toBe("200+");
+    expect(listedCount(12, false, nl)).toBe("12");
   });
 });
 
@@ -1555,7 +1815,9 @@ describe("secondsUntil", () => {
 });
 
 // Every code a session can be rejected with has copy, and copy is only kept
-// for codes the backend still sends: the engine's and the wallet's own.
+// for codes the backend still sends: the engine's, the wallet's own, and the
+// ones a reviewer picks when rejecting a check (review.go), which the engine
+// stores as given.
 describe("rejection codes mirror the backend", () => {
   const read = (path: string): string =>
     readFileSync(
@@ -1573,19 +1835,27 @@ describe("rejection codes mirror the backend", () => {
         /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g,
       ),
   );
-  const wallet = ["proofing.go", "service.go", "data_request.go"].flatMap(
-    (file) =>
-      codes(
-        read(`proofing/${file}`),
-        /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
-      ),
-  );
+  const walletCodes = /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g;
+  const wallet = [
+    "proofing.go",
+    "service.go",
+    "data_request.go",
+    "review.go",
+  ].flatMap((file) => codes(read(`proofing/${file}`), walletCodes));
+  const reviewer = codes(read("proofing/review.go"), walletCodes);
   const backend = [...new Set([...engine, ...wallet])];
 
   it("has copy for every backend code and no other", () => {
     expect(engine.length).toBeGreaterThan(0);
     expect(wallet.length).toBeGreaterThan(0);
     expect([...PROOFING_REJECTION_CODES].sort()).toEqual(backend.sort());
+  });
+
+  it("offers a reviewer only the reviewer's own codes", () => {
+    expect(reviewer.length).toBeGreaterThan(0);
+    for (const { errorCode } of REJECT_REASONS) {
+      if (errorCode !== undefined) expect(reviewer).toContain(errorCode);
+    }
   });
 });
 
@@ -1981,6 +2251,59 @@ describe("mailLifetimeMinutes", () => {
   });
 });
 
+describe("supportContactLink", () => {
+  it.each([
+    "help@example.nl",
+    "  help@example.nl ",
+    "mailto:help@example.nl",
+    "MAILTO:help@example.nl",
+  ])("opens %j in the mail app, never as a mailto: prefix", (contact) => {
+    expect(supportContactLink(contact)).toEqual({
+      href: "mailto:help@example.nl",
+      kind: "mail",
+    });
+  });
+
+  it("does not link a mailto: prefix without an address", () => {
+    expect(supportContactLink("mailto:help")).toBeUndefined();
+  });
+
+  it.each([
+    ["https://example.nl/help", "https://example.nl/help"],
+    ["http://example.nl", "http://example.nl/"],
+    ["https://mastodon.social/@yivi", "https://mastodon.social/@yivi"],
+    ["https://medium.com/@yivi/help", "https://medium.com/@yivi/help"],
+    ["https://user@example.nl", "https://user@example.nl/"],
+  ])("opens %s as a web link, also with an @", (contact, href) => {
+    expect(supportContactLink(contact)).toEqual({ href, kind: "web" });
+  });
+
+  it("parses without URL.canParse, which Safari 16 lacks", () => {
+    const canParse = vi.spyOn(URL, "canParse");
+    try {
+      supportContactLink("https://example.nl");
+      supportContactLink("030 123 4567");
+      supportContactLink("");
+
+      expect(canParse).not.toHaveBeenCalled();
+    } finally {
+      canParse.mockRestore();
+    }
+  });
+
+  it("leaves a phone number or opening hours as text", () => {
+    expect(supportContactLink("030 123 4567")).toBeUndefined();
+    expect(supportContactLink("Mon to Fri, 9:00 to 17:00")).toBeUndefined();
+    expect(supportContactLink("")).toBeUndefined();
+  });
+
+  it("never links a script or a file", () => {
+    expect(supportContactLink("javascript:alert(1)")).toBeUndefined();
+    expect(supportContactLink("data:text/html,<b>x</b>")).toBeUndefined();
+    expect(supportContactLink("file:///etc/passwd")).toBeUndefined();
+  });
+});
+
 describe("data request review", () => {
   it("starts an erasure with the matches read off a verified chip ticked", () => {
     expect(matchTickedByDefault("data_erasure", "strong")).toBe(true);
@@ -2028,11 +2351,10 @@ describe("data request review", () => {
     ).toBe("decide");
   });
 
-  it("names the sessions an erasure deletes", () => {
-    const key =
-      "identityProofing.sessions.dataRequest.data_erasure.confirm.title";
-    expect(t(key, { count: 1 })).toBe("Erase 1 session?");
-    expect(t(key, { count: 3 })).toBe("Erase 3 sessions?");
+  it("names the checks an erasure deletes", () => {
+    const key = "identityProofing.reviews.dataRequest.decision.confirmTitle";
+    expect(t(key, { count: 1 })).toBe("Delete 1 check?");
+    expect(t(key, { count: 3 })).toBe("Delete 3 checks?");
   });
 });
 
@@ -2072,6 +2394,13 @@ describe("rejection reasons", () => {
 
   it("tells a refused data request from a failed identity check", () => {
     expect(dataRequestRefusal("MANUAL_REVIEW_REJECTED")).toBe("reviewer");
+    for (const code of [
+      "REVIEW_NOT_HOLDER",
+      "REVIEW_ALTERED",
+      "EVIDENCE_NOT_AS_REQUESTED",
+    ]) {
+      expect(dataRequestRefusal(code)).toBe("reviewer");
+    }
     expect(dataRequestRefusal("LEGAL_RETENTION")).toBe("law");
     expect(dataRequestRefusal("FACE_NO_MATCH")).toBeUndefined();
     expect(dataRequestRefusal(undefined)).toBeUndefined();

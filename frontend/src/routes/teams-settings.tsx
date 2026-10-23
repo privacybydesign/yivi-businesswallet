@@ -70,10 +70,10 @@ function testError(error: Error, t: TFunction): string {
 function WebhookForm({
   slug,
   initial,
-}: {
+}: Readonly<{
   slug: string;
   initial: TeamsSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateTeamsSettingsMutation(slug);
 
@@ -190,10 +190,10 @@ function WebhookForm({
 function TestCard({
   slug,
   ready,
-}: {
+}: Readonly<{
   slug: string;
   ready: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const test = useSendTeamsTestMutation(slug);
 
@@ -234,9 +234,9 @@ function TestCard({
 // and its forms.
 export function TeamsSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useTeamsSettingsQuery(slug, true);
 

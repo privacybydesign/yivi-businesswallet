@@ -111,7 +111,7 @@ func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofi
 		return false, nil
 	}
 	f.attached = append(f.attached, sess)
-	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	f.stored.FlowVersion = sess.FlowVersion
 	if req.Method != "" {
 		f.stored.Method = req.Method
@@ -1018,6 +1018,20 @@ func TestEffectiveStatusExpiry(t *testing.T) {
 	}
 }
 
+// A list narrows to any status a request can read in, the derived expired and
+// cancelled included, and to no other.
+func TestStatusKnown(t *testing.T) {
+	for status, want := range map[Status]bool{
+		StatusPending: true, StatusInProgress: true, StatusApproved: true,
+		StatusRejected: true, StatusNeedsReview: true,
+		StatusExpired: true, StatusCancelled: true, Status("done"): false, Status(""): false,
+	} {
+		if got := status.known(); got != want {
+			t.Errorf("%q.known() = %v, want %v", status, got, want)
+		}
+	}
+}
+
 func TestCompletable(t *testing.T) {
 	if !flowCompletable(testFlow("a", "a", []string{"document_capture", "nfc_read"}, selfieLocationBrowser)) {
 		t.Error("a flow without face steps needs no browser")
@@ -1116,11 +1130,27 @@ func TestHostedFlowSessionLifetime(t *testing.T) {
 	f.ips.flows[0].SessionTTLSeconds = int((2 * time.Minute) / time.Second)
 	_, token := f.sendHosted(t)
 
-	if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err != nil {
+	started, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
+	if err != nil {
 		t.Fatalf("StartHosted: %v", err)
 	}
 	if got := f.ips.sessions[0].TTL; got != 2*time.Minute {
 		t.Errorf("hosted session = %v, want the flow's 2m0s", got)
+	}
+	if got := f.requests.stored.session.TTL; got != 2*time.Minute || started.Request.session.TTL != got {
+		t.Errorf("kept session lifetime = %v (start %v), want the flow's 2m0s", got, started.Request.session.TTL)
+	}
+}
+
+// The lifetime a request keeps for its session is the one the provider gave
+// it, else the one it was asked for.
+func TestWithSessionTTL(t *testing.T) {
+	asked := 10 * time.Minute
+	if got := withSessionTTL(proofingprovider.Session{TTL: 15 * time.Minute}, asked).TTL; got != 15*time.Minute {
+		t.Errorf("provider's lifetime = %v, want 15m0s", got)
+	}
+	if got := withSessionTTL(proofingprovider.Session{}, asked).TTL; got != asked {
+		t.Errorf("unsaid lifetime = %v, want the asked %v", got, asked)
 	}
 }
 
@@ -1775,6 +1805,25 @@ func TestReadRechecksAtMostOnce(t *testing.T) {
 	}
 }
 
+func TestRequestIfSkipsRecheck(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	refuse := func(Request) bool { return false }
+	accept := func(Request) bool { return true }
+	if _, err := f.svc.RequestIf(context.Background(), testOrg.ID, sent.Request.ID, refuse); !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("RequestIf refused = %v, want ErrRequestNotFound", err)
+	}
+	if f.ips.statusReads != 0 {
+		t.Fatalf("status reads = %d, want none for a request the caller may not open", f.ips.statusReads)
+	}
+	if _, err := f.svc.RequestIf(context.Background(), testOrg.ID, sent.Request.ID, accept); err != nil {
+		t.Fatalf("RequestIf allowed: %v", err)
+	}
+	if f.ips.statusReads != 1 {
+		t.Errorf("status reads = %d, want 1: the refused read took no slot", f.ips.statusReads)
+	}
+}
+
 func TestCreateRequestResolvesOnce(t *testing.T) {
 	f := newFixture()
 	_, err := f.svc.CreateRequest(context.Background(), testOrg, sam,
@@ -1928,6 +1977,109 @@ func TestReviewDecisionSettles(t *testing.T) {
 	if _, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "sam@acme.test",
 		ReviewInput{Reason: "again"}); !errors.Is(err, ErrNotUnderReview) {
 		t.Errorf("a second decision = %v, want ErrNotUnderReview", err)
+	}
+}
+
+// A reviewer's rejection names one of the reviewer's own codes, never one the
+// wallet sets for another reason: IDENTITY_MISMATCH would hide the session from
+// a later data request. The wallet deciding on its own names its own.
+func TestReviewerRejectCodes(t *testing.T) {
+	reviewer := uuid.New()
+	for code, want := range map[string]bool{
+		errorReviewNotHolder: true, errorReviewAltered: true, errorEvidenceNotAsRequested: true,
+		ErrorReviewRejected: true, "": true,
+		errorIdentityMismatch: false, "DOC_TAMPERED": false, ErrorOrgPaused: false,
+	} {
+		f := newFixture()
+		sent := f.send(t)
+		f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+		f.reconcile(t)
+		_, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "anna@acme.test",
+			ReviewInput{Reason: "Not her payslip", ErrorCode: code, ReviewerID: reviewer})
+		if errors.Is(err, ErrInvalidInput) == want {
+			t.Errorf("a reviewer rejecting with %q: %v, want allowed %v", code, err, want)
+		}
+	}
+	f := newFixture()
+	sent := f.send(t)
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	if _, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, orgPausedReviewer,
+		ReviewInput{Reason: orgPausedReason, ErrorCode: ErrorOrgPaused}); err != nil {
+		t.Errorf("the wallet rejecting with %s: %v, want it decided", ErrorOrgPaused, err)
+	}
+}
+
+// A reviewer does not decide an identity check they sent or one about
+// themselves: another reviewer does.
+func TestOwnReviewRefused(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	sender := uuid.New()
+	f.requests.stored.RequestedBy = &sender
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	for name, reviewer := range map[string]uuid.UUID{"sender": sender, "subject": alex.UserID} {
+		_, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "x@acme.test",
+			ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: reviewer})
+		if !errors.Is(err, ErrOwnReview) {
+			t.Errorf("the %s deciding: %v, want ErrOwnReview", name, err)
+		}
+	}
+	if len(f.ips.decisions) != 0 {
+		t.Fatalf("decisions = %+v, want none sent to the engine", f.ips.decisions)
+	}
+	if req, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "anna@acme.test",
+		ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: uuid.New()}); err != nil || req.Status != StatusApproved {
+		t.Errorf("another reviewer deciding = %+v, %v; want approved", req, err)
+	}
+}
+
+// A reviewer who is not an admin reaches what the Reviews page shows: a
+// request waiting for review, and a data request in any status. An identity
+// check that is not waiting is an admin's alone.
+func TestReviewScopeReaches(t *testing.T) {
+	for name, tc := range map[string]struct {
+		req  Request
+		want bool
+	}{
+		"a check waiting":         {Request{FlowKind: FlowIdentity, Status: StatusNeedsReview}, true},
+		"an approved check":       {Request{FlowKind: FlowIdentity, Status: StatusApproved}, false},
+		"a rejected check":        {Request{FlowKind: FlowIdentity, Status: StatusRejected}, false},
+		"a pending check":         {Request{FlowKind: FlowIdentity, Status: StatusPending}, false},
+		"a data request waiting":  {Request{FlowKind: FlowDataErasure, Status: StatusNeedsReview}, true},
+		"an approved access":      {Request{FlowKind: FlowDataAccess, Status: StatusApproved}, true},
+		"a pending data request":  {Request{FlowKind: FlowDataAccess, Status: StatusPending}, true},
+		"a rejected data request": {Request{FlowKind: FlowDataErasure, Status: StatusRejected}, true},
+	} {
+		if got := ReviewScopeReviews.reaches(tc.req); got != tc.want {
+			t.Errorf("%s: a reviewer reaches it = %v, want %v", name, got, tc.want)
+		}
+		if !ReviewScopeAll.reaches(tc.req) {
+			t.Errorf("%s: an admin does not reach it", name)
+		}
+	}
+}
+
+func TestOwnReview(t *testing.T) {
+	sender, subject, other := uuid.New(), uuid.New(), uuid.New()
+	check := Request{FlowKind: FlowIdentity, RequestedBy: &sender, SubjectUserID: &subject}
+	erasure := Request{FlowKind: FlowDataErasure, RequestedBy: &sender}
+	for name, tc := range map[string]struct {
+		req      Request
+		reviewer uuid.UUID
+		want     bool
+	}{
+		"the check's sender":           {check, sender, true},
+		"the check's subject":          {check, subject, true},
+		"another reviewer":             {check, other, false},
+		"the wallet itself":            {check, uuid.Nil, false},
+		"a data request's link sender": {erasure, sender, false},
+		"an API request":               {Request{FlowKind: FlowIdentity}, other, false},
+	} {
+		if got := ownReview(tc.req, tc.reviewer); got != tc.want {
+			t.Errorf("%s: ownReview = %v, want %v", name, got, tc.want)
+		}
 	}
 }
 

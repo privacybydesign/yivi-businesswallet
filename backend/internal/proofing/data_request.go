@@ -357,10 +357,13 @@ func sameDocument(a, b SubjectIdentity) bool {
 
 // DataMatches are the org's sessions a data request matched, for its
 // review; none for any other request.
-func (s *Service) DataMatches(ctx context.Context, orgID, id uuid.UUID) (Request, []DataMatch, error) {
+func (s *Service) DataMatches(ctx context.Context, orgID, id uuid.UUID, scope ReviewScope) (Request, []DataMatch, error) {
 	req, err := s.requests.Get(ctx, orgID, id)
 	if err != nil {
 		return Request{}, nil, err
+	}
+	if !scope.reaches(req) {
+		return Request{}, nil, ErrRequestNotFound
 	}
 	if !req.External() || !req.FlowKind.dataRequest() || s.dataRequests == nil {
 		return req, []DataMatch{}, nil
@@ -779,10 +782,13 @@ func (s *Service) dataExport(ctx context.Context, req Request) (DataExport, erro
 
 // AdminDataExport is an approved "see my data" request's data for an org
 // admin, to hand the person who asked.
-func (s *Service) AdminDataExport(ctx context.Context, orgID, id uuid.UUID) (DataExport, error) {
+func (s *Service) AdminDataExport(ctx context.Context, orgID, id uuid.UUID, scope ReviewScope) (DataExport, error) {
 	req, err := s.requests.Get(ctx, orgID, id)
 	if err != nil {
 		return DataExport{}, err
+	}
+	if !scope.reaches(req) {
+		return DataExport{}, ErrRequestNotFound
 	}
 	return s.dataExport(ctx, req)
 }

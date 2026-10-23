@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canCloseDecline,
+  checkEndReason,
   completedMessage,
   completionRedirect,
   hostedHandBack,
@@ -92,6 +93,20 @@ describe("hostedHandBack", () => {
     const handBack = hostedHandBack({ ...settled, framed: true, redirectUrl });
     expect(handBack?.post).toBe(true);
     expect(handBack?.redirectTo).toBeDefined();
+  });
+
+  // "This check has ended" says what to do next: a redirect would replace
+  // it at once, as if the check were done.
+  it("keeps a check that ran out on its own page, telling an embedder", () => {
+    const handBack = hostedHandBack({
+      ...settled,
+      status: "expired",
+      framed: true,
+      redirectUrl,
+    });
+    expect(handBack?.redirectTo).toBeUndefined();
+    expect(handBack?.post).toBe(true);
+    expect(handBack?.message.status).toBe("expired");
   });
 
   it("stays on the page for an unusable redirect", () => {
@@ -233,5 +248,26 @@ describe("canCloseDecline", () => {
   it("closes it before the decline and after it failed", () => {
     expect(canCloseDecline("idle")).toBe(true);
     expect(canCloseDecline("error")).toBe(true);
+  });
+});
+
+describe("checkEndReason", () => {
+  it("names the lifetime the started session ran with", () => {
+    expect(checkEndReason({ started: true, sessionTtlSeconds: 120 })).toEqual({
+      kind: "timedOut",
+      minutes: 2,
+    });
+  });
+
+  it("says in time for a session started before its lifetime was kept", () => {
+    expect(checkEndReason({ started: true })).toEqual({
+      kind: "timedOut",
+      minutes: undefined,
+    });
+  });
+
+  it("says a link that ran out was never started", () => {
+    expect(checkEndReason({ started: false })).toEqual({ kind: "notStarted" });
+    expect(checkEndReason({})).toEqual({ kind: "notStarted" });
   });
 });

@@ -27,7 +27,9 @@ export interface RouteHandle {
 
 const SEPARATOR_SIZE = 12;
 
-function Breadcrumb({ items }: { items: BreadcrumbItem[] }): React.JSX.Element {
+function Breadcrumb({
+  items,
+}: Readonly<{ items: BreadcrumbItem[] }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <nav aria-label={t("nav.breadcrumb")}>

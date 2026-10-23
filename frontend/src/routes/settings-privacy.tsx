@@ -29,14 +29,11 @@ import type {
   LegalRetentionLoss,
   LegalRetentionUnit,
 } from "../lib/legal-retention";
-import { Button, Card, ConfirmDialog, Icon, Input } from "../ui";
+import { Button, Card, ConfirmDialog, Input, Select } from "../ui";
 
 const LABEL = "text-ink text-[13px] font-semibold";
 const HINT = "text-muted text-[12px]";
 const ERROR = "text-error text-[12.5px]";
-const SELECT =
-  "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 h-9 w-36 appearance-none border pr-10 pl-3 text-[13.5px] outline-none focus:ring-3";
-const CHEVRON_SIZE = 12;
 const TEXTAREA =
   "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-20 w-full max-w-xl border px-3 py-2 font-mono text-[13px] outline-none focus:ring-3";
 const AMOUNT_ID = "legal-amount";
@@ -58,9 +55,9 @@ function erasureHintId(handling: ErasureHandling): string {
 // its person back.
 export function PrivacySettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
 
@@ -89,10 +86,10 @@ export function PrivacySettingsPanel({
 function DataRequestsCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateSettingsMutation(slug);
   const legal = settings.legalRetention;
@@ -183,10 +180,10 @@ function DataRequestsCard({
 function LegalRetentionCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateSettingsMutation(slug);
   const saved = settings.legalRetention;
@@ -289,28 +286,21 @@ function LegalRetentionCard({
                         onChange={(e) => set("amount", e.target.value)}
                       />
                     </div>
-                    <div className="relative">
-                      <select
-                        id="legal-unit"
-                        aria-label={t("identityProofing.legalRetention.unit")}
-                        className={SELECT}
-                        value={draft.unit}
-                        onChange={(e) =>
-                          set("unit", e.target.value as LegalRetentionUnit)
-                        }
-                      >
-                        {LEGAL_RETENTION_UNITS.map((unit) => (
-                          <option key={unit} value={unit}>
-                            {t(`identityProofing.legalRetention.units.${unit}`)}
-                          </option>
-                        ))}
-                      </select>
-                      <Icon
-                        name="chevron_down"
-                        size={CHEVRON_SIZE}
-                        className="pointer-events-none absolute top-3 right-4"
-                      />
-                    </div>
+                    <Select
+                      id="legal-unit"
+                      aria-label={t("identityProofing.legalRetention.unit")}
+                      className="w-36"
+                      value={draft.unit}
+                      onChange={(e) =>
+                        set("unit", e.target.value as LegalRetentionUnit)
+                      }
+                    >
+                      {LEGAL_RETENTION_UNITS.map((unit) => (
+                        <option key={unit} value={unit}>
+                          {t(`identityProofing.legalRetention.units.${unit}`)}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                   {flagged.includes("amount") ? (
                     <p id={AMOUNT_HINT_ID} className={ERROR}>
@@ -426,10 +416,10 @@ function lossCopy(
 function RedirectOriginsCard({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: ProofingSettings;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const update = useUpdateSettingsMutation(slug);
   const saved = settings.allowedRedirectOrigins.join("\n");
@@ -491,13 +481,13 @@ function ReasonField({
   value,
   invalid,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   value: string;
   invalid: boolean;
   onChange: (value: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-ink-soft text-[13px]">
@@ -519,10 +509,10 @@ function ReasonField({
 function Changes({
   months,
   className,
-}: {
+}: Readonly<{
   months: number;
   className: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const period = legalPeriodLabel(months, t);
   return (

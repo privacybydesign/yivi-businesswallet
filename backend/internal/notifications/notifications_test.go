@@ -36,6 +36,20 @@ func TestSubscribable(t *testing.T) {
 	}
 }
 
+// A change to a member's reviewer right is a membership change like a role
+// change, and is offered with it.
+func TestReviewRightChangeIsSubscribable(t *testing.T) {
+	for _, e := range Catalog() {
+		if e.Event == audit.MembershipReviewChanged {
+			if e.Group != GroupMembership {
+				t.Errorf("%s is in group %q, want %q", e.Event, e.Group, GroupMembership)
+			}
+			return
+		}
+	}
+	t.Errorf("%s is not in the catalog, though %s is", audit.MembershipReviewChanged, audit.MembershipRoleChanged)
+}
+
 // A rejected accept records the legal name or e-mail the person disclosed from
 // their passport, which the organization was not told and a channel must not
 // carry off to a webhook. It stays out of the catalog on purpose; see catalog.

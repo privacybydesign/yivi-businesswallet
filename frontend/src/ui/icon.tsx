@@ -70,7 +70,7 @@ export function Icon({
   name,
   size = DEFAULT_ICON_SIZE,
   className,
-}: IconProps): React.JSX.Element | null {
+}: Readonly<IconProps>): React.JSX.Element | null {
   const markup = iconMarkup[name];
   if (markup === undefined) {
     return null;

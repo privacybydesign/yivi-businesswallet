@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -1122,10 +1123,11 @@ type hostedBranding struct {
 
 // hostedView is the public hosted page of a session, as its subject reads it.
 type hostedView struct {
-	Status       string `json:"status"`
-	Started      bool   `json:"started"`
-	DeepLink     string `json:"deepLink"`
-	Organization struct {
+	Status            string `json:"status"`
+	Started           bool   `json:"started"`
+	SessionTTLSeconds int    `json:"sessionTtlSeconds"`
+	DeepLink          string `json:"deepLink"`
+	Organization      struct {
 		Name     string         `json:"name"`
 		Branding hostedBranding `json:"branding"`
 	} `json:"organization"`
@@ -1195,8 +1197,11 @@ func assertHostedStartsOnce(t *testing.T, env *testEnv, token string) {
 		t.Errorf("second start = %d, want 409", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started {
-		t.Errorf("status = %+v, want started", status)
+	// The session keeps the lifetime it was started with, the default here.
+	wantTTL := int(proofing.SessionTTL / time.Second)
+	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started ||
+		status.SessionTTLSeconds != wantTTL {
+		t.Errorf("status = %+v, want started with a %d s lifetime", status, wantTTL)
 	}
 }
 
@@ -1295,12 +1300,52 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 		t.Fatalf("session = %+v, want needs_review", read)
 	}
 
-	review := "/api/v1/orgs/acme/identity-proofing/requests/" + session.ID + "/review"
+	requests := "/api/v1/orgs/acme/identity-proofing/requests"
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 1 || list[0].Status != "needs_review" {
+		t.Errorf("requests in review = %+v, want the one waiting", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=approved", nil)); len(list) != 0 {
+		t.Errorf("approved requests = %+v, want none yet", list)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=expired", nil)); len(list) != 0 {
+		t.Errorf("expired requests = %+v, want none", list)
+	}
+	wantProofingError(t, "an unknown status", env.do(http.MethodGet, requests+"?status=done", nil),
+		http.StatusBadRequest, "invalid_input")
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?flowKind=data_request", nil)); len(list) != 0 {
+		t.Errorf("data requests = %+v, want none: it is an identity check", list)
+	}
+	wantProofingError(t, "a flow kind other than data_request", env.do(http.MethodGet, requests+"?flowKind=identity", nil),
+		http.StatusBadRequest, "invalid_input")
+
+	// While it waits, the reviewer reads the identity and the photos it holds.
+	held := decodeJSON[struct {
+		Identity *struct {
+			FamilyName string `json:"familyName"`
+		} `json:"identity"`
+		Photo  *struct{ Data string } `json:"photo"`
+		Selfie *struct{ Data string } `json:"selfie"`
+	}](t, env.do(http.MethodGet, requests+"/"+session.ID+"/result", nil))
+	if held.Identity == nil || held.Identity.FamilyName == "" || held.Photo == nil || held.Photo.Data == "" ||
+		held.Selfie == nil || held.Selfie.Data == "" {
+		t.Errorf("result in review = %+v; want the identity, the chip's photo and the selfie", held)
+	}
+	// The API's own result does not show the identity before an approval.
+	if api := decodeJSON[struct {
+		Identity *struct{} `json:"identity"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+session.ID+"/result", key.Secret, nil)); api.Identity != nil {
+		t.Errorf("API result in review carries the identity, want none until approved")
+	}
+
+	review := requests + "/" + session.ID + "/review"
 	resp := env.postJSON(review, map[string]any{"decision": "approve"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("decision without a reason = %d, want 400", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+	wantProofingError(t, "a reviewer naming a wallet code", env.postJSON(review,
+		map[string]any{"decision": "reject", "reason": "someone else", "errorCode": "IDENTITY_MISMATCH"}),
+		http.StatusBadRequest, "invalid_input")
 	resp = env.postJSON(review, map[string]any{"decision": "approve", "reason": "document checked by hand"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("decision = %d, want 200", resp.StatusCode)
@@ -1315,6 +1360,50 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	_ = resp.Body.Close()
 	if n := env.auditCount(orgID, audit.IdentityProofingReviewDecided); n != 1 {
 		t.Errorf("review_decided audits = %d, want 1", n)
+	}
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 0 {
+		t.Errorf("requests in review after the decision = %+v, want none", list)
+	}
+}
+
+// A reviewer does not decide a check they sent, or one about themselves: 403
+// own_review, and the check still waits for another reviewer.
+func TestProofingOwnReviewRefused(t *testing.T) {
+	env := setup(t)
+	env.proofing.Outcome = proofingprovider.StatusNeedsReview
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	flow := env.proofingDefaultFlow("acme")
+	// Members may be sent it too, as a check about the admin is.
+	resp := env.putJSON("/api/v1/orgs/acme/identity-proofing/flow-selection",
+		map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("flow selection = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	requests := "/api/v1/orgs/acme/identity-proofing/requests"
+
+	for name, body := range map[string]map[string]any{
+		"sent":     {"email": "anna@example.org", "name": "Anna Jansen", "flowId": flow.ID},
+		"about me": {"userId": me.ID, "flowId": flow.ID},
+	} {
+		resp = env.postJSON(requests, body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("%s: send = %d, want 201", name, resp.StatusCode)
+		}
+		sent := decodeJSON[proofingRequestResp](t, resp)
+		if read := decodeJSON[proofingRequestResp](t, env.do(http.MethodGet, requests+"/"+sent.ID, nil)); read.Status != "needs_review" {
+			t.Fatalf("%s: request = %+v, want needs_review", name, read)
+		}
+		wantProofingError(t, name+": deciding", env.postJSON(requests+"/"+sent.ID+"/review",
+			map[string]any{"decision": "approve", "reason": "looks fine"}), http.StatusForbidden, "own_review")
+		if read := decodeJSON[proofingRequestResp](t, env.do(http.MethodGet, requests+"/"+sent.ID, nil)); read.Status != "needs_review" {
+			t.Errorf("%s: after the refusal = %+v, want it still waiting", name, read)
+		}
+	}
+	if n := env.auditCount(orgID, audit.IdentityProofingReviewDecided); n != 0 {
+		t.Errorf("review_decided audits = %d, want none", n)
 	}
 }
 

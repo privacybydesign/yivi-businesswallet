@@ -317,3 +317,84 @@ func TestHostedViewLeavesOutFlowLabels(t *testing.T) {
 		t.Errorf("hosted view = %s, want no flow name %q", w.Body.String(), appFlow.Name)
 	}
 }
+
+// The hosted page gets the reasons of every language, and an object even for a
+// flow saved before reasons existed, so the page can tell none from a failure.
+func TestHostedViewCarriesReasons(t *testing.T) {
+	d := newDiplomaFixture(DiplomasOff)
+	_, token := d.sendHosted(t)
+	view := func() string {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		return w.Body.String()
+	}
+
+	const noReasons = `"attributeReasons":{}`
+	if body := view(); !strings.Contains(body, noReasons) {
+		t.Errorf("hosted view of a flow without reasons = %s, want %s", body, noReasons)
+	}
+
+	i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == appFlow.ID })
+	d.ips.flows[i].AttributeReasons = documentReasons()
+	const withReasons = `"attributeReasons":{"dg1":{"en":"` + reasonDocumentEN + `","nl":"` + reasonDocumentNL + `"}}`
+	if body := view(); !strings.Contains(body, withReasons) {
+		t.Errorf("hosted view = %s, want %s", body, withReasons)
+	}
+}
+
+// The hosted page names how long its session ran when it ends: the lifetime
+// the session was started with (the flow's own, else the org's fixed default),
+// not whatever the flow says by the time the page is read.
+func TestHostedViewSessionTTL(t *testing.T) {
+	d := newDiplomaFixture(DiplomasOff)
+	_, token := d.sendHosted(t)
+	view := func() hostedProgressResponse {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(d.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		var out hostedProgressResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode hosted view: %v", err)
+		}
+		return out
+	}
+	// The org's lifetime is a fixed default (#341): the flow sets its own.
+	setFlowTTL := func(ttl time.Duration) {
+		t.Helper()
+		i := slices.IndexFunc(d.ips.flows, func(f proofingprovider.Flow) bool { return f.ID == d.requests.stored.FlowID })
+		if i < 0 {
+			t.Fatalf("flow %s not in the engine", d.requests.stored.FlowID)
+		}
+		d.ips.flows[i].SessionTTLSeconds = int(ttl.Seconds())
+	}
+
+	if got := view().SessionTTLSeconds; got != 0 {
+		t.Errorf("unstarted link's lifetime = %d, want none", got)
+	}
+
+	setFlowTTL(5 * time.Minute)
+	started, err := d.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem)
+	if err != nil {
+		t.Fatalf("StartHosted: %v", err)
+	}
+	if got, want := newHostedProgress(started.Request, time.Now()).SessionTTLSeconds, 300; got != want {
+		t.Errorf("start lifetime = %d, want the flow's %d", got, want)
+	}
+	if got := d.ips.sessions[len(d.ips.sessions)-1].TTL; got != 5*time.Minute {
+		t.Errorf("session asked for %s, want the flow's 5m", got)
+	}
+
+	// A change of the flow afterwards leaves what the session ran with.
+	setFlowTTL(2 * time.Minute)
+	if got, want := view().SessionTTLSeconds, 300; got != want {
+		t.Errorf("lifetime after the flow's changed = %d, want the %d it was started with", got, want)
+	}
+}

@@ -16,6 +16,7 @@ import {
 vi.mock("./http", () => ({ request: vi.fn(), absoluteApiUrl: vi.fn() }));
 
 const RETENTION_DAYS = 31;
+const SESSION_TTL_SECONDS = 600;
 
 // The schema the last request was made with.
 function lastSchema(): z.ZodType {
@@ -57,6 +58,7 @@ const hostedPage = {
   flow: {
     name: "Onboarding",
     requestedAttributes: [],
+    attributeReasons: {},
     yiviAvailable: true,
     diplomaMode: "off",
     addressMode: "off",
@@ -120,6 +122,39 @@ describe("a value the backend adds", () => {
     };
     expect(schema.parse({ ...hostedPage, flow })).toMatchObject({
       flow: { diplomaMode: "required", kind: "identity" },
+    });
+  });
+});
+
+// The hosted page names how long the session ran when it ends unfinished: the
+// lifetime it was started with, which a started link's progress carries.
+describe("the session lifetime a subject is told", () => {
+  beforeEach(() => {
+    vi.mocked(request).mockReset();
+  });
+
+  it("comes with a started link's progress, and not before", async () => {
+    await getHostedProofing("token");
+    const page = lastSchema();
+    expect(
+      page.parse({
+        ...hostedPage,
+        started: true,
+        sessionTtlSeconds: SESSION_TTL_SECONDS,
+      }),
+    ).toMatchObject({ sessionTtlSeconds: SESSION_TTL_SECONDS });
+    expect(page.parse(hostedPage)).not.toHaveProperty("sessionTtlSeconds");
+
+    await getHostedProofingStatus("token");
+    const status = {
+      status: "expired",
+      linkExpiresAt: hostedPage.linkExpiresAt,
+      started: true,
+      addressGiven: false,
+      sessionTtlSeconds: SESSION_TTL_SECONDS,
+    };
+    expect(lastSchema().parse(status)).toMatchObject({
+      sessionTtlSeconds: SESSION_TTL_SECONDS,
     });
   });
 });

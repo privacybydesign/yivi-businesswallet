@@ -31,6 +31,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "membership.role_changed": { icon: "settings", tone: "blue" },
   "membership.expired": { icon: "time", tone: "slate" },
   "membership.type_changed": { icon: "edit", tone: "blue" },
+  "membership.review_changed": { icon: "settings", tone: "blue" },
   "membership.identity_requested": { icon: "personal", tone: "amber" },
   "membership.identity_reverified": { icon: "valid", tone: "green" },
   "membership.identity_reverify_rejected": { icon: "warning", tone: "amber" },
@@ -239,6 +240,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.inviteExpired");
     case "membership.type_changed":
       return t("auditLog.actions.memberTypeChanged");
+    case "membership.review_changed":
+      return t("auditLog.actions.reviewRightChanged");
     case "membership.identity_requested":
       return t("auditLog.actions.identityRequested");
     case "membership.identity_reverified":

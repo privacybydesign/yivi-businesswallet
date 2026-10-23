@@ -2102,6 +2102,255 @@ func TestRequestListByFlow(t *testing.T) {
 	}
 }
 
+// The cap on a list applies after the narrowing by status: a request in review
+// older than the newest maxListedRequests settled ones is still listed when
+// only the ones in review are asked for.
+func TestRequestListByStatus(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	waiting := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s-review")
+	if err := store.RecordOutcome(ctx, waiting, "s-review", StatusNeedsReview, proofingprovider.Result{}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("b@example.org"))); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	all, err := store.List(ctx, orgID, RequestFilter{})
+	if err != nil || len(all) != maxListedRequests || slices.ContainsFunc(all, func(r Request) bool { return r.ID == waiting.ID }) {
+		t.Fatalf("List = %d rows, %v; want the newest %d, none in review", len(all), err, maxListedRequests)
+	}
+
+	status := StatusNeedsReview
+	got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
+	if err != nil || len(got) != 1 || got[0].ID != waiting.ID {
+		t.Errorf("List needs_review = %d rows, %v; want only the request in review", len(got), err)
+	}
+	status = StatusApproved
+	if got, err = store.List(ctx, orgID, RequestFilter{Status: &status}); err != nil || len(got) != 0 {
+		t.Errorf("List approved = %d rows, %v; want none", len(got), err)
+	}
+}
+
+// A list narrowed by status matches the status a request reads in
+// (EffectiveStatus), not the one stored: a pending request whose link or
+// session lapsed is listed as expired, not pending, and so cannot use up the
+// cap of the running ones.
+func TestRequestListByEffectiveStatus(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	want := map[uuid.UUID]Status{}
+	create := func(in NewStoredRequest) Request {
+		t.Helper()
+		return createdRequest(t, store, in)
+	}
+	hosted := func(linkExpiresAt time.Time) NewStoredRequest {
+		t.Helper()
+		return hostedRequestIn(t, orgID, sam, linkExpiresAt)
+	}
+	started := func(sessionID string, expiresAt time.Time) Request {
+		t.Helper()
+		return startedUntil(t, store, orgID, sam, sessionID, expiresAt)
+	}
+	running := time.Now().Add(SessionTTL)
+	lapsed := time.Now().Add(-time.Minute)
+
+	want[create(hosted(running)).ID] = StatusPending
+	want[create(hosted(lapsed)).ID] = StatusExpired
+	want[create(newStoredRequest(orgID, sam, externalSubject("a@example.org"))).ID] = StatusExpired
+	want[started("s-running", running).ID] = StatusPending
+	want[started("s-past-cap", lapsed).ID] = StatusExpired
+	inProgress := started("s-started", running)
+	if err := store.MarkStarted(ctx, inProgress, "s-started", proofingprovider.MethodIdem); err != nil {
+		t.Fatalf("MarkStarted: %v", err)
+	}
+	want[inProgress.ID] = StatusInProgress
+	ended := started("s-ended", running)
+	if err := store.EndSession(ctx, ended, "s-ended", proofingprovider.StatusExpired, ""); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	want[ended.ID] = StatusExpired
+	for sessionID, outcome := range map[string]Status{
+		"s-review": StatusNeedsReview, "s-review-ended": StatusNeedsReview,
+		"s-approved": StatusApproved, "s-rejected": StatusRejected,
+	} {
+		req := started(sessionID, running)
+		if err := store.RecordOutcome(ctx, req, sessionID, outcome, proofingprovider.Result{}); err != nil {
+			t.Fatalf("RecordOutcome: %v", err)
+		}
+		want[req.ID] = outcome
+		if sessionID == "s-review-ended" {
+			if err := store.EndSession(ctx, req, sessionID, proofingprovider.StatusExpired, ""); err != nil {
+				t.Fatalf("EndSession: %v", err)
+			}
+			want[req.ID] = StatusExpired
+		}
+	}
+	cancelled := started("s-cancelled", running)
+	if ok, err := store.Cancel(ctx, cancelled, nil); err != nil || !ok {
+		t.Fatalf("Cancel = %v, %v", ok, err)
+	}
+	want[cancelled.ID] = StatusCancelled
+
+	assertListsByEffectiveStatus(t, store, orgID, want)
+}
+
+// createdRequest creates in, failing the test on an error.
+func createdRequest(t *testing.T, store *RequestStore, in NewStoredRequest) Request {
+	t.Helper()
+	req, err := store.Create(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return req
+}
+
+// hostedRequestIn is a hosted request by sam to an external person, its link
+// lasting until linkExpiresAt.
+func hostedRequestIn(t *testing.T, orgID, sam uuid.UUID, linkExpiresAt time.Time) NewStoredRequest {
+	t.Helper()
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newStoredRequest(orgID, sam, externalSubject("a@example.org"))
+	in.LinkTokenHash, in.LinkExpiresAt = hash, linkExpiresAt
+	return in
+}
+
+// startedUntil is a request by sam to an external person, created with session
+// sessionID attached and running until expiresAt, as the store reads it back.
+func startedUntil(t *testing.T, store *RequestStore, orgID, sam uuid.UUID, sessionID string, expiresAt time.Time) Request {
+	t.Helper()
+	ctx := context.Background()
+	req := createdRequest(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+	sess := attachedSession(sessionID)
+	sess.ExpiresAt = expiresAt
+	if ok, err := store.AttachSession(ctx, req, sess); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	req, err := store.Get(ctx, orgID, req.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	return req
+}
+
+// assertListsByEffectiveStatus checks that the org's requests read in the
+// statuses want gives them, and that a list narrowed to each status holds
+// exactly the ones that read in it.
+func assertListsByEffectiveStatus(t *testing.T, store *RequestStore, orgID uuid.UUID, want map[uuid.UUID]Status) {
+	t.Helper()
+	all, err := store.List(context.Background(), orgID, RequestFilter{})
+	if err != nil || len(all) != len(want) {
+		t.Fatalf("List = %d rows, %v; want %d", len(all), err, len(want))
+	}
+	now := time.Now()
+	for _, req := range all {
+		if got := req.EffectiveStatus(now); got != want[req.ID] {
+			t.Fatalf("request reads %s, want %s: the setup is off", got, want[req.ID])
+		}
+	}
+	for _, status := range []Status{
+		StatusPending, StatusInProgress, StatusNeedsReview, StatusApproved,
+		StatusRejected, StatusExpired, StatusCancelled,
+	} {
+		assertListedInStatus(t, store, orgID, status, want, now)
+	}
+}
+
+// assertListedInStatus checks that the org's list narrowed to status holds
+// every request that reads in it at now, and no other.
+func assertListedInStatus(t *testing.T, store *RequestStore, orgID uuid.UUID, status Status, want map[uuid.UUID]Status, now time.Time) {
+	t.Helper()
+	got, err := store.List(context.Background(), orgID, RequestFilter{Status: &status})
+	if err != nil {
+		t.Fatalf("List %s: %v", status, err)
+	}
+	var ids []uuid.UUID
+	for _, req := range got {
+		ids = append(ids, req.ID)
+		if req.EffectiveStatus(now) != status {
+			t.Errorf("List %s holds a request that reads %s", status, req.EffectiveStatus(now))
+		}
+	}
+	for id, s := range want {
+		if s == status && !slices.Contains(ids, id) {
+			t.Errorf("List %s misses a request that reads %s", status, s)
+		}
+	}
+}
+
+// What waits for review is listed the longest in review first, so the cap
+// leaves out the newest and never the most overdue.
+func TestRequestListInReviewOldestFirst(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	ids := make([]uuid.UUID, 0, maxListedRequests+1)
+	for range maxListedRequests + 1 {
+		req, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("a@example.org")))
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		ids = append(ids, req.ID)
+	}
+	// The first created went to review last: the order is by when each went
+	// there, not by when it was sent.
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_requests r SET status = 'needs_review',
+		completed_at = now() - make_interval(mins => array_position($1::uuid[], r.id))
+		WHERE r.id = ANY($1)`, ids); err != nil {
+		t.Fatalf("put in review: %v", err)
+	}
+
+	status := StatusNeedsReview
+	got, err := store.List(ctx, orgID, RequestFilter{Status: &status})
+	if err != nil || len(got) != maxListedRequests {
+		t.Fatalf("List needs_review = %d rows, %v; want %d", len(got), err, maxListedRequests)
+	}
+	longest, newest := ids[len(ids)-1], ids[0]
+	if got[0].ID != longest || slices.ContainsFunc(got, func(r Request) bool { return r.ID == newest }) {
+		t.Errorf("List needs_review starts at %s and holds the newest %v; want the longest in review first, the newest cut",
+			got[0].ID, slices.ContainsFunc(got, func(r Request) bool { return r.ID == newest }))
+	}
+}
+
+// ?flowKind=data_request narrows to data requests before the cap: one older
+// than the newest maxListedRequests identity checks is still listed.
+func TestRequestListDataRequests(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	access := newDataRequest(t, store, orgID, sam, FlowDataAccess, "s-access")
+	erasure := newDataRequest(t, store, orgID, sam, FlowDataErasure, "s-erasure")
+	for range maxListedRequests {
+		if _, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject("b@example.org"))); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+
+	got, err := store.List(ctx, orgID, RequestFilter{DataRequests: true})
+	if err != nil || len(got) != 2 || got[0].ID != erasure.ID || got[1].ID != access.ID {
+		t.Errorf("List data requests = %d rows, %v; want the erasure and the access request, newest first", len(got), err)
+	}
+	status := StatusApproved
+	if got, err = store.List(ctx, orgID, RequestFilter{DataRequests: true, Status: &status}); err != nil || len(got) != 0 {
+		t.Errorf("List approved data requests = %d rows, %v; want none", len(got), err)
+	}
+}
+
 // A request for one known person drops the expected birth date as soon as no
 // match can follow: here, cancelled.
 func TestCancelDropsBirthDate(t *testing.T) {

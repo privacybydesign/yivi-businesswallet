@@ -78,10 +78,10 @@ function draftFrom(saved: ProofingFlowBranding): BrandingDraft {
 export function FlowBrandingSettings({
   slug,
   flowId,
-}: {
+}: Readonly<{
   slug: string;
   flowId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const own = useProofingFlowBrandingQuery(slug, flowId);
   const settings = useProofingSettingsQuery(slug);
@@ -127,7 +127,7 @@ function BrandingForm({
   orgBranding,
   orgTheme,
   saved,
-}: {
+}: Readonly<{
   slug: string;
   flowId: string;
   orgName: string;
@@ -136,7 +136,7 @@ function BrandingForm({
   // The org's theme, the Idem app's look without a proofing look of its own.
   orgTheme: OrgTheme;
   saved: ProofingFlowBranding;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveFlowBrandingMutation(slug, flowId);
   const [mode, setMode] = useState<Mode>(modeOf(saved));
@@ -360,10 +360,10 @@ function BrandingForm({
 function BrandingPreview({
   mail,
   app,
-}: {
+}: Readonly<{
   mail: React.ReactNode;
   app: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [kind, setKind] = useState<PreviewKind>("mail");
   const headingId = useId();
@@ -403,7 +403,9 @@ function BrandingPreview({
 // A sketch of the Idem app's first screen for this flow: its header with the
 // logo and name, and its colour on the button. A colour the branding leaves
 // empty is the app's own, drawn as the preview's fallback.
-function AppPreviewCard({ look }: { look: AppLook }): React.JSX.Element {
+function AppPreviewCard({
+  look,
+}: Readonly<{ look: AppLook }>): React.JSX.Element {
   const { t } = useTranslation();
   const fill = isHexColor(look.primaryColor)
     ? look.primaryColor
@@ -466,14 +468,14 @@ function ModeOption({
   title,
   children,
   footer,
-}: {
+}: Readonly<{
   mode: Mode;
   selected: boolean;
   onSelect: (mode: Mode) => void;
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const titleId = useId();
   const shownId = useId();
   return (

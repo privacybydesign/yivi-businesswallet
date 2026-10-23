@@ -599,7 +599,7 @@ func TestExportPersonalOnlyStrong(t *testing.T) {
 	data.matches[0].Approved, data.matches[1].Approved = &yes, &yes
 	f.requests.stored.DataExportUntil = data.exportTill
 
-	export, err := f.svc.AdminDataExport(ctx, testOrg.ID, req.ID)
+	export, err := f.svc.AdminDataExport(ctx, testOrg.ID, req.ID, ReviewScopeAll)
 	if err != nil {
 		t.Fatalf("AdminDataExport: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestExportContactOnlyWhenAddressed(t *testing.T) {
 	data.matches[0].Approved, data.matches[1].Approved = &yes, &yes
 	f.requests.stored.DataExportUntil = data.exportTill
 
-	export, err := f.svc.AdminDataExport(ctx, testOrg.ID, req.ID)
+	export, err := f.svc.AdminDataExport(ctx, testOrg.ID, req.ID, ReviewScopeAll)
 	if err != nil {
 		t.Fatalf("AdminDataExport: %v", err)
 	}

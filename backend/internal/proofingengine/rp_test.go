@@ -2,6 +2,7 @@ package proofingengine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -99,5 +100,36 @@ func TestSetSessionsRetention(t *testing.T) {
 	}
 	if got, _ := sessions.Get("org", "s1"); got.RetentionOverride != 48*time.Hour {
 		t.Errorf("retention = %v, want 48h", got.RetentionOverride)
+	}
+}
+
+// A version keeps its reasons through the stored definition, and one stored
+// before reasons existed reads back without any rather than failing.
+func TestAttributeReasonsRoundTrip(t *testing.T) {
+	reasons := map[string]map[string]string{"dg1": {"en": "To check your age.", "nl": "Om je leeftijd te controleren."}}
+	spec := pp.FlowSpec{
+		Name: "x", Steps: []string{"document_capture", "nfc_read"},
+		RequestedAttributes: []string{"dg1"}, AttributeReasons: reasons,
+	}
+
+	stored, err := json.Marshal(toDefinition("org", "f1", spec))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var fd flow.FlowDefinition
+	if err := json.Unmarshal(stored, &fd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := toFlow(fd).AttributeReasons["dg1"]["nl"]; got != reasons["dg1"]["nl"] {
+		t.Errorf("stored Dutch reason = %q, want %q", got, reasons["dg1"]["nl"])
+	}
+
+	var legacy flow.FlowDefinition
+	if err := json.Unmarshal([]byte(`{"ID":"f0","Name":"old","Steps":["document_capture"],"RequestedAttributes":["dg1"]}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy: %v", err)
+	}
+	if got := toFlow(legacy).AttributeReasons; len(got) != 0 {
+		t.Errorf("a version stored without reasons reads back %v, want none", got)
 	}
 }

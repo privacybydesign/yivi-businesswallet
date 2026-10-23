@@ -20,7 +20,7 @@ export function DeclineDialog({
   onConfirm,
   onClose,
   busy = false,
-}: DeclineDialogProps): React.JSX.Element {
+}: Readonly<DeclineDialogProps>): React.JSX.Element {
   const { t } = useTranslation();
   const [reason, setReason] = useState("");
 

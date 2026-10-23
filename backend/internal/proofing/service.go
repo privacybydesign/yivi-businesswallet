@@ -481,6 +481,11 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
+	// A new flow's hosted page has the defaults until its admin sets it.
+	in, err = withReasons(in, DefaultFlowHosted())
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
 	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlow(ctx, tenant, in)
 	if err != nil {
@@ -511,6 +516,14 @@ func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingp
 	}
 	if required && !releasesIdentity(in.RequestedAttributes) {
 		return proofingprovider.Flow{}, ErrFlowNoIdentity
+	}
+	hosted, err := s.flowHosted(ctx, org.ID, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	in, err = withReasons(in, hosted)
+	if err != nil {
+		return proofingprovider.Flow{}, err
 	}
 	tenant := orgTenant(org.ID)
 	flow, err := s.ips.CreateFlowVersion(ctx, tenant, id, in)
@@ -609,6 +622,25 @@ func flowSessionTTL(f proofingprovider.Flow, orgTTL time.Duration) time.Duration
 	return time.Duration(f.SessionTTLSeconds) * time.Second
 }
 
+// sessionTTL is how long a session of f runs under s: the flow's own lifetime
+// when it sets one, else the org's, else SessionTTL.
+func (s Settings) sessionTTL(f proofingprovider.Flow) time.Duration {
+	orgTTL := SessionTTL
+	if s.Session.SessionTTL != 0 {
+		orgTTL = s.Session.SessionTTL
+	}
+	return flowSessionTTL(f, orgTTL)
+}
+
+// withSessionTTL is sess with the lifetime it was created with: the one the
+// provider gave it, or for a provider that does not say, the one asked for.
+func withSessionTTL(sess proofingprovider.Session, asked time.Duration) proofingprovider.Session {
+	if sess.TTL == 0 {
+		sess.TTL = asked
+	}
+	return sess
+}
+
 // Requester is who sends a request: a member, or the org's software calling
 // the API.
 type Requester struct {
@@ -668,10 +700,6 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	ttl := SessionTTL
-	if settings != nil && settings.Session.SessionTTL != 0 {
-		ttl = settings.Session.SessionTTL
-	}
 	flowID, err := s.requestFlowID(ctx, org, by, in)
 	if err != nil {
 		return Sent{}, err
@@ -681,7 +709,13 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	ttl = flowSessionTTL(flow, ttl)
+	// A member's request reads no org settings: the defaults' lifetime, else
+	// the flow's.
+	var lifetimes Settings
+	if settings != nil {
+		lifetimes = *settings
+	}
+	ttl := lifetimes.sessionTTL(flow)
 	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
 		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
 	}
@@ -732,6 +766,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", id, err)
 	}
+	sess = withSessionTTL(sess, ttl)
 	// An Idem session is the vcmrtd link; a Yivi one is started from the screen.
 	if in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess,
@@ -759,7 +794,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
 	}
-	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	out := Sent{Request: req}
 	if sess.Claim == nil {
 		return out, nil
@@ -1478,12 +1513,14 @@ func (s *Service) RequestResult(ctx context.Context, orgID, id uuid.UUID) (Reque
 // external requests in the wallet: audited identity_proofing.result_read with
 // the admin as actor. A member's request is not found: its subject is a
 // colleague, whose identity the wallet shows nowhere.
-func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error) {
-	req, err := s.Request(ctx, orgID, id, nil)
+func (s *Service) AdminRequestResult(ctx context.Context, orgID, id uuid.UUID, scope ReviewScope) (Request, proofingprovider.Identity, error) {
+	// One out of scope is never re-checked in the engine, and one a re-check
+	// moved out of it (decided meanwhile) is not read either.
+	req, err := s.RequestIf(ctx, orgID, id, func(req Request) bool { return req.External() && scope.reaches(req) })
 	if err != nil {
 		return Request{}, proofingprovider.Identity{}, err
 	}
-	if !req.External() {
+	if !scope.reaches(req) {
 		return Request{}, proofingprovider.Identity{}, ErrRequestNotFound
 	}
 	return s.requestResult(ctx, req)
@@ -1605,7 +1642,7 @@ func (s *Service) purgeDue(ctx context.Context) (int64, error) {
 }
 
 // errorReviewLapsed is the error code of a request nobody reviewed in time: a
-// data request dataRequestReviewDays after it went to review, an identity
+// data request dataRequestReviewMonths after it went to review, an identity
 // request its retention after (purge_at, refreshPurgeAt).
 const errorReviewLapsed = "REVIEW_LAPSED"
 
@@ -1655,6 +1692,20 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
 		return Request{}, err
+	}
+	return s.readReconciled(ctx, req)
+}
+
+// RequestIf is Request for a caller whose scope the caller decides: allow sees the
+// request as stored, and one it refuses is ErrRequestNotFound, never re-checked in
+// the engine.
+func (s *Service) RequestIf(ctx context.Context, orgID, id uuid.UUID, allow func(Request) bool) (Request, error) {
+	req, err := s.requests.Get(ctx, orgID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if !allow(req) {
+		return Request{}, ErrRequestNotFound
 	}
 	return s.readReconciled(ctx, req)
 }

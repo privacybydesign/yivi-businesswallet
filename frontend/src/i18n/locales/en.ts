@@ -1,6 +1,7 @@
 export const en = {
   common: {
     cancel: "Cancel",
+    canReview: "Can review",
     close: "Close",
     comingSoon: "Coming soon",
     copy: "Copy",
@@ -39,6 +40,8 @@ export const en = {
     identityProofing: "Identity proofing",
     identityProofingOverview: "Overview",
     flows: "Flows",
+    reviews: "Reviews",
+    reviewsWaiting: "waiting",
     developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
@@ -437,43 +440,29 @@ export const en = {
     overview: {
       apiDocs: "API docs",
       title: "Overview",
-      subtitle: "Identity checks you run. Last 30 days.",
-      stats: {
-        sessions: "Sessions",
-        sessionsHint_one: "across {{count}} flow",
-        sessionsHint_other: "across {{count}} flows",
-        verified: "Verified",
-        verifiedHint: "{{share}} of sessions",
-        failed: "Failed",
-        failedHint: "Did not pass the checks",
-        expired: "Expired",
-        needsReview: "Needs review",
-        needsReviewHint: "Waiting for your decision",
-        expiredHint: "Not finished within 10 minutes",
-        cancelled: "Cancelled",
-        cancelledHint: "Withdrawn before they finished",
-        noSessions: "No sessions yet",
+      subtitle: "What needs you, and who you are waiting for.",
+      decision: {
+        title: "Waiting for your decision",
+        open: "Open Reviews",
+        empty:
+          "Nothing to review. When a check can't decide on its own, it shows up here.",
       },
-      recent: {
-        title: "Recent sessions",
-        scope: "the whole organisation",
-        scopeOwn: "sent by you",
-        viewAll: "View all",
-        person: "Person",
-        flow: "Flow",
-        result: "Result",
-        started: "Started",
-        empty: "No sessions yet.",
+      waiting: {
+        title: "Waiting for the person",
+        hint: "Sent, but not finished yet.",
+        empty: "No check is waiting for a person.",
+        forAdmin: "Waiting for an admin",
       },
-      flows: {
-        title: "Flows",
-        viewAll: "View all",
-        empty: "No flows yet.",
-        summary_one: "{{count}} session · {{share}} verified",
-        summary_other: "{{count}} sessions · {{share}} verified",
-        noSessions: "No sessions in 30 days",
-        default: "Default",
+      finished: {
+        title: "Recently finished",
+        empty:
+          "No check has finished yet. Verified, failed and expired checks appear here.",
       },
+      allPeople: "All people",
+      summary_one:
+        "Last 30 days: {{count}} check sent, {{verified}} verified, {{failed}} failed.",
+      summary_other:
+        "Last 30 days: {{count}} checks sent, {{verified}} verified, {{failed}} failed.",
       webhookAlertNoAnswer_one:
         "The webhook endpoint has not answered since {{since}}. {{count}} result is queued for retry.",
       webhookAlertNoAnswer_other:
@@ -521,13 +510,17 @@ export const en = {
       docExpired: "document expired",
       assuranceNotMet: "below the flow's required assurance level",
       manualReviewRejected: "refused by a reviewer",
-      reviewLapsed: "not reviewed within 30 days",
+      reviewNotHolder: "a reviewer found that what was sent is someone else's",
+      reviewAltered: "a reviewer found that what was sent looks altered",
+      reviewLapsed: "not reviewed in time",
       legalRetention: "the organisation is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused while the session waited for review; try again later",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
       unknown: "the check did not pass ({{code}})",
+      evidenceNotAsRequested:
+        "a reviewer found that what was sent is not what was asked for",
     },
     errors: {
       noEncryptionKey:
@@ -545,6 +538,8 @@ export const en = {
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
+      ownReview:
+        "You sent this check, or it is about you, so another reviewer decides it.",
       referencePhotoRequired:
         "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
@@ -576,6 +571,8 @@ export const en = {
       dataFlowForMember:
         "A data request flow is for external people. Take it off the members' flows first.",
       exportUnavailable: "This data can no longer be downloaded.",
+      reasonsMissing:
+        "Every item this flow collects needs a reason in each language its hosted page offers. Fill them in on the Check tab first.",
       mandateWithdrawn:
         "Your mandate for this organization is no longer active, so its admin settings are closed to you. A legal representative can grant you a new one.",
       legalRetention:
@@ -739,6 +736,7 @@ export const en = {
         intro:
           "You check your identity with your passport or ID card. {{name}} receives:",
         noData: "Only the outcome: whether your identity was verified.",
+        why: "Why:",
         retention_one:
           "This data is deleted at most {{count}} day after the check ends.",
         retention_other:
@@ -800,7 +798,7 @@ export const en = {
           "Scan this code with the Idem app to carry on where the session was, on the same phone or another one.",
         newCodeLoading: "Getting a new code…",
         newCodeHint:
-          "App closed, code expired, or another phone? A new code carries on where the session was.",
+          "App closed or another phone? A new code carries on where the session was.",
       },
       yiviEnded: "The Yivi app session ended: {{reason}}",
       yiviShared: "Shared from the Yivi app. Finishing the verification…",
@@ -808,6 +806,10 @@ export const en = {
         documentNotAccepted: "this flow does not accept the shared document.",
         ageNotDisclosed:
           "the shared document did not say whether you are old enough.",
+      },
+      ended: {
+        title: "This check has ended",
+        message: "It was not finished in time, so nothing was shared.",
       },
       outcome: {
         approved: {
@@ -851,64 +853,10 @@ export const en = {
     },
     sessions: {
       review: {
-        title: "Decide this review",
-        hint: "The checks could not decide on their own. Your decision settles the session and is sent to your webhook endpoint.",
-        reason: "Reason",
-        reasonPlaceholder: "What you checked, and why you decided so",
         reasonRequired: "Give a reason: it is kept in the audit log.",
         reasonTooLong: "Keep the reason to {{max}} characters or fewer.",
-        approve: "Approve",
-        reject: "Reject",
       },
       dataRequest: {
-        data_access: {
-          title: "This person asks what data is held about them",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to share: they can download that data from their link for 24 hours, and you can download it here to send it.",
-          approve_one: "Approve: share {{count}} session",
-          approve_other: "Approve: share {{count}} sessions",
-        },
-        data_erasure: {
-          title: "This person asks for their data to be deleted",
-          hint: "They proved who they are with this session. Check the identity, then approve the sessions of theirs to erase: their personal data is deleted at once, the sessions stay as a record, and your webhook endpoint is told per session.",
-          approve_one: "Approve: erase {{count}} session",
-          approve_other: "Approve: erase {{count}} sessions",
-          confirm: {
-            title_one: "Erase {{count}} session?",
-            title_other: "Erase {{count}} sessions?",
-            message:
-              "The personal data in the sessions you ticked, and in this request, is deleted at once and cannot be restored. The sessions stay as a record without it.",
-          },
-        },
-        reasonPlaceholder:
-          "What you checked, and why, e.g. a legal duty to keep the data",
-        noMatches:
-          "No other sessions of this person were found in your organisation.",
-        matches_one: "{{count}} session of this person found",
-        matches_other: "{{count}} sessions of this person found",
-        emailMatches_one:
-          "{{count}} unfinished session with the same address or name",
-        emailMatches_other:
-          "{{count}} unfinished sessions with the same address or name",
-        emailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's.",
-        levels: {
-          strong: "Same document",
-          probable: "Name and date of birth",
-          email: "Same e-mail address",
-          name: "Same name",
-        },
-        erasureUntickHint:
-          "Sessions whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept, for example under a legal retention duty.",
-        erasureEmailMatchesHint:
-          "These never finished, so there is no proven identity to compare: only the e-mail address or the name typed in matches. Tick the ones that are this person's to erase them too; the rest is deleted when the organisation's retention lapses.",
-        untickHint:
-          "Sessions proven with the same document are ticked; one that only shares the name and date of birth is not, so tick it only when you are sure it is this person's. Untick what must be kept, for example under a legal retention duty.",
-        erased: "Erased",
-        approved: "Approved",
-        kept: "Kept",
-        heldUntil: "Kept by law until {{date}}",
-        heldHint:
-          "Sessions the law makes you keep cannot be erased yet, so they cannot be ticked. A request to delete them is declined until the date shown.",
         download: "Download the data",
         downloadUntil: "Available until {{date}}",
         downloadClosed: "The download was available until {{date}}.",
@@ -1152,6 +1100,170 @@ export const en = {
       hint: "One per line, such as https://portal.example.com. A hosted page may send its subject back to these origins and be embedded on them.",
       save: "Save",
     },
+    reviews: {
+      title: "Reviews",
+      subtitle:
+        "Checks and data requests that wait for a person's decision. Oldest first.",
+      notAllowed: "Only admins and members with the reviewer right can review.",
+      tabsLabel: "Show",
+      tabs: {
+        all: "All",
+        checks: "Identity checks",
+        data: "Data requests",
+        closed: "Closed",
+      },
+      columns: {
+        person: "Person",
+        what: "What",
+        why: "Why it waits",
+        since: "Waiting since",
+        outcome: "Outcome",
+        closed: "Closed",
+        action: "Action",
+      },
+      review: "Review",
+      view: "View",
+      reviewOf: "Review {{name}}",
+      viewOf: "View {{name}}",
+      empty: "Nothing waits for a decision.",
+      emptyClosed: "No data request has been closed yet.",
+      identityCheck: "Identity check",
+      requestedBy: "Requested by {{name}}",
+      provenWith: {
+        idem_app: "Proven with the Idem app",
+        yivi_app: "Proven with the Yivi app",
+        browser: "Proven in the browser",
+        unknown: "Proven",
+      },
+      why: {
+        identity: "Part of it is not signed or sourced",
+        data_access: "A reviewer approves every request to see data",
+        data_erasure: "A reviewer approves every request to delete data",
+      },
+      answerBy: "Answer by {{date}}",
+      outcome: {
+        approved: "Approved",
+        rejected: "Rejected",
+      },
+      footer: "Admins and members with the reviewer right see this page.",
+      footerWho: "Who has it: <members>Members</members>.",
+      back: "Back to reviews",
+      notWaiting: {
+        approved:
+          "This request no longer waits for a decision. It was approved.",
+        rejected:
+          "This request no longer waits for a decision. It was rejected.",
+        other: "This request no longer waits for a decision.",
+      },
+      check: {
+        title: "Review an identity check",
+        why: {
+          title: "Why this waits for you",
+          body: "No signature or register vouches for part of this check, so a person has to check it.",
+        },
+        auto: {
+          title: "Checked automatically",
+          none: "No automatic check was reported.",
+          chipGenuine: "The chip's data is genuine and unaltered",
+          chipNotCopy: "The chip is not a copy",
+          livePerson: "A live person, not a photo or video",
+          faceMatch: "The face matches the document photo",
+          passed: "Passed",
+          failed: "Failed",
+          notPerformed: "Not performed",
+        },
+        data: {
+          title: "Data from the chip",
+          expires: "Expires",
+          level: "Level reached",
+          levelOnceApproved: "{{level}}, once approved",
+        },
+        decision: {
+          title: "Your decision",
+          question: "Is what {{name}} sent genuine, and is it theirs?",
+          approve: "Yes, approve the check",
+          reject: "No, reject the check",
+          wrong: "What is wrong",
+          wrongOptions: {
+            someoneElse: "It is someone else's",
+            altered: "It looks altered",
+            notAsked: "It is not what was asked for",
+            other: "Something else",
+          },
+          reason: "Reason",
+          reasonHint:
+            "Required. Kept in the audit log with your name; the person does not see it.",
+          choiceRequired: "Choose whether to approve or reject the check.",
+          submit: "Decide",
+          approveSubmit: "Approve the check",
+          rejectSubmit: "Reject the check",
+          approved: "The check is approved.",
+          rejected: "The check is rejected.",
+        },
+        own: {
+          sent: "You sent this check, so another reviewer decides it.",
+          subject: "This check is about you, so another reviewer decides it.",
+        },
+      },
+      dataRequest: {
+        asked: "Asked by {{name}} on {{date}}.",
+        askedPurged: "Asked on {{date}}.",
+        answerBy: "Answer by {{date}} (the GDPR gives one month).",
+        who: {
+          title: "Who asks",
+          provenWith: "Proven with",
+          chip: "chip",
+          faceMatch: "live face match",
+          level: "Level reached",
+        },
+        found: {
+          title: "Data found for this person",
+          data_access:
+            "Tick what to share. Checks proven with the same document are ticked; the others may be someone else.",
+          data_erasure:
+            "Tick what to delete. Checks whose name and date of birth were read off a verified chip are ticked, on the same document or another: they are this person's. Untick what must be kept.",
+          closed: "What was decided for each check.",
+          none: "No other check of this person was found in your organisation.",
+          unfinished:
+            "A check that never finished has no proven identity to compare: only the e-mail address or the name typed in matches. Tick it only when it is this person's.",
+          unfinishedErasure:
+            "A check that never finished has no proven identity to compare: only the e-mail address or the name typed in matches. Tick it when it is this person's to delete it too; the rest is deleted when your organisation's retention lapses.",
+          heldUntil: "Kept by law until {{date}}",
+          held: "A check the law makes you keep cannot be deleted yet, so it cannot be ticked. The request to delete it is declined until the date shown.",
+          levels: {
+            strong: "Same document",
+            probable: "Same name and date of birth",
+            email: "Same e-mail address",
+            name: "Same name",
+          },
+          erased: "Deleted",
+          approved: "Approved",
+          kept: "Kept",
+        },
+        decision: {
+          title: "Your decision",
+          data_erasure_one: "Delete {{count}} check.",
+          data_erasure_other: "Delete {{count}} checks.",
+          data_access_one: "Open the data of {{count}} check for download.",
+          data_access_other: "Open the data of {{count}} checks for download.",
+          kept_one: "The other {{count}} stays.",
+          kept_other: "The other {{count}} stay.",
+          reason: "Reason",
+          reasonHint: "Required. Kept in the audit log with your name.",
+          approve_data_erasure_one: "Delete {{count}} check",
+          approve_data_erasure_other: "Delete {{count}} checks",
+          approve_data_access_one: "Open {{count}} check",
+          approve_data_access_other: "Open {{count}} checks",
+          refuse: "Refuse the request",
+          confirmTitle_one: "Delete {{count}} check?",
+          confirmTitle_other: "Delete {{count}} checks?",
+          confirmMessage:
+            "The personal data in the checks you ticked, and in this request, is deleted at once and cannot be restored. The checks stay as a record without it.",
+          approved: "The request is approved.",
+          rejected: "The request is refused.",
+        },
+      },
+    },
     developers: {
       title: "Developers",
       subtitle:
@@ -1310,6 +1422,9 @@ export const en = {
       localesHint:
         "The page opens in the language of the request, otherwise in the person's browser language.",
       localesRequired: "Keep at least one language.",
+      reasonsMissing:
+        "Fill in the reasons in {{languages}} on the Check tab first: every item the flow collects needs one in each language the page offers.",
+      openCheck: "Go to the Check tab",
       completion: "When the check ends",
       completions: {
         redirect: {
@@ -1486,7 +1601,7 @@ export const en = {
       },
       receive: {
         title: "What you receive",
-        hint: "With nothing ticked you only get the outcome.",
+        hint: "With nothing ticked you only get the outcome. Every item you tick needs a reason in each language of the hosted page; the person reads it before they start.",
         identityLocked:
           "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
         ageOver: "Minimum age",
@@ -1495,6 +1610,9 @@ export const en = {
           "Age check only answers whether the person is this age or older on the day of the check.",
         ageOverLocked:
           "Off with required diplomas: they are checked against the date of birth.",
+        reason: "Why you need it · {{language}}",
+        reasonOptional: "Why you need it · {{language}} (optional)",
+        reasonMissing: "Fill in the reason in {{language}} too.",
       },
       checks: {
         title: "Checks",
@@ -1564,6 +1682,18 @@ export const en = {
     },
     redirecting: "Taking you back…",
     poweredBy: "Powered by Yivi",
+    ended: {
+      started_one:
+        "It was not finished within {{count}} minute, so nothing was shared with {{name}}.",
+      started_other:
+        "It was not finished within {{count}} minutes, so nothing was shared with {{name}}.",
+      timedOut:
+        "It was not finished in time, so nothing was shared with {{name}}.",
+      notStarted:
+        "It was not started in time, so nothing was shared with {{name}}.",
+      retryTitle: "Want to try again?",
+      retryHint: "Ask {{name}} for a new link.",
+    },
     dataRequest: {
       data_access: {
         intro:
@@ -1590,7 +1720,7 @@ export const en = {
         reviewer:
           "{{organization}} refused your request. Contact them if you want to know why.",
         lapsed:
-          "{{organization}} did not answer your request within 30 days. Ask them for a new link.",
+          "{{organization}} did not answer your request within a month. Ask them for a new link.",
         paused:
           "{{organization}} could not handle your request just now. Ask them for a new link later.",
         law: "{{organization}} is required by law to keep your data, so it was not deleted.",
@@ -1664,36 +1794,40 @@ export const en = {
       afternoon: "Good afternoon, {{name}}",
       evening: "Good evening, {{name}}",
     },
-    role: "Your role: {{role}}",
-    stats: {
-      attestations: "Attestations issued",
-      documents: "Documents to sign",
-    },
-    insights: {
-      title: "Member overview",
-      members: "Members",
-      notIdentified: "Not identified",
-      notIdentifiedHint: "Never identified, overdue or asked to identify",
-      vogAttention: "VOG needs attention",
-      vogAttentionHint: "Missing, requested, rejected, expired or to be redone",
-      vogNotRequired: "No VOG required by your policy",
-      identityBar: "Identity status",
-      screeningBar: "VOG status",
-      empty: "No members yet.",
-      error: "Could not load member insights: {{message}}",
-    },
-    details: "Details",
-    id: "ID",
     viewMembers: "View members",
-    wallet: {
-      title: "Business wallet",
-      legalName: "Legal name",
-      kvkNumber: "KVK number",
-      euid: "EUID",
-      address: "Digital address",
-      noAddress: "No default digital address",
-      status: "Status",
+    todo: {
+      title: "To do",
+      hint: "Things across the Business Wallet that need you.",
+      empty: "Nothing needs you right now.",
+      error: "Could not load member insights: {{message}}",
+      reviews_one: "{{number}} request waits for your decision",
+      reviews_other: "{{number}} requests wait for your decision",
+      reviewsDetail:
+        "Identity checks and data requests that need a person to decide.",
+      openReviews: "Open Reviews",
+      notIdentified_one: "{{count}} member has not identified",
+      notIdentified_other: "{{count}} members have not identified",
+      notIdentifiedDetail:
+        "Members need to identify before they can act for {{org}}.",
+      vogAttention_one: "{{count}} member has a VOG that needs attention",
+      vogAttention_other: "{{count}} members have a VOG that needs attention",
+      vogAttentionDetail:
+        "Missing, requested, rejected, expired or to be redone.",
     },
+    waiting: {
+      title: "Waiting on others",
+      hint: "Nothing for you to do yet.",
+      empty: "You are not waiting on anyone.",
+      unfinished_one: "{{number}} identity check not finished",
+      unfinished_other: "{{number}} identity checks not finished",
+      unfinishedDetail: "The people have not completed them yet.",
+      forAdmin_one: "{{number}} request waiting for an admin",
+      forAdmin_other: "{{number}} requests waiting for an admin",
+      forAdminDetail: "An admin has to decide on them.",
+      openOverview: "Open overview",
+    },
+    orgDetails:
+      "Organisation details, KVK number and digital address are in <settings>Settings › Organisation</settings>.",
   },
   access: {
     notMember: "You are not a member of this organization.",
@@ -1971,6 +2105,7 @@ export const en = {
       roleChanged: "Changed role",
       inviteExpired: "Invitation expired",
       memberTypeChanged: "Changed member type",
+      reviewRightChanged: "Changed reviewer right",
       identityRequested: "Requested identification",
       identityReverified: "Re-confirmed identity",
       identityReverifyRejected: "Rejected re-identification attempt",
@@ -2247,6 +2382,8 @@ export const en = {
       "Externals can be held to a shorter re-identification interval than employees.",
     externalOrganisation: "Works for",
     externalOrganisationPlaceholder: "e.g. Contractors BV",
+    canReviewHint:
+      "Decides identity checks and data requests under Reviews. Admins always can.",
     lastAdmin:
       "This is the organization's only admin. Promote another member to admin first.",
   },

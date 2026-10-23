@@ -205,7 +205,7 @@ func (s *Stub) createLocked(t Tenant, flowID string, version int, ttl time.Durat
 	s.sessions[id] = stubSession{
 		tenant: t.ID, token: token, flowID: flowID, flowVersion: version, method: method, expiresAt: now.Add(ttl),
 	}
-	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), FlowVersion: version}
+	sess := Session{ID: id, Token: token, ExpiresAt: now.Add(ttl), TTL: ttl, FlowVersion: version}
 	if s.Outcome != "" && s.onChange != nil {
 		notify := s.onChange
 		time.AfterFunc(stubDecisionDelay, func() { notify(id) })
@@ -245,14 +245,16 @@ func (s *Stub) SessionResult(_ context.Context, t Tenant, sessionID, sessionToke
 }
 
 // SessionIdentity is SessionResult with the stub subject's identity and a
-// valid chip read, for an approved session.
+// valid chip read, for an approved session and one waiting for review.
 func (s *Stub) SessionIdentity(ctx context.Context, t Tenant, sessionID, sessionToken string) (Identity, error) {
 	res, err := s.SessionResult(ctx, t, sessionID, sessionToken)
 	if err != nil {
 		return Identity{}, err
 	}
 	id := Identity{Result: res}
-	if res.Status == StatusApproved {
+	// The engine holds a session's identity and photos from its submit on,
+	// so a reviewer reads them while it waits.
+	if res.Status == StatusApproved || res.Status == StatusNeedsReview {
 		id.GivenName, id.FamilyName, id.BirthDate, id.Nationality = "Anna", "Jansen", "1990-04-12", stubSpecimenState
 		id.Evidence = &Evidence{
 			Type: EvidenceEMRTD, DocumentType: "P", DocumentKind: "passport", IssuingState: stubSpecimenState, ExpiryDate: "2031-02-01",

@@ -155,6 +155,10 @@ type hostedProgressResponse struct {
 	// data" request's person: it declined the request, or an approved one left
 	// those sessions; absent otherwise.
 	LegalRetention *hostedLegalRetention `json:"legalRetention,omitempty"`
+	// SessionTTLSeconds is the lifetime the started session was created with,
+	// which a page that ran out names; absent before a start, and for a
+	// session started before the wallet kept it.
+	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
 }
 
 // hostedLegalRetention is what the person is told about the data an erasure
@@ -184,12 +188,16 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 	if at := req.SessionExpiresAt(now); at != nil {
 		expires = *at
 	}
+	var ttlSeconds int
+	if req.session != nil {
+		ttlSeconds = int(req.session.TTL / time.Second)
+	}
 	return hostedProgressResponse{
 		Status: req.EffectiveStatus(now), ErrorCode: req.ErrorCode, Method: string(req.Method),
 		LinkExpiresAt: expires, Started: req.session != nil, CompletedAt: req.CompletedAt,
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
-		LegalRetention: newHostedLegalRetention(req.LegalNotice),
+		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
 	}
 }
 
@@ -229,7 +237,10 @@ type hostedViewResponse struct {
 	// this page, and the person's page shows neither.
 	Flow struct {
 		RequestedAttributes []string `json:"requestedAttributes"`
-		YiviAvailable       bool     `json:"yiviAvailable"`
+		// AttributeReasons is why each requested attribute is collected, by
+		// attribute and language; empty for a flow saved without reasons.
+		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
+		YiviAvailable    bool                         `json:"yiviAvailable"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -345,6 +356,10 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.RequestedAttributes = f.RequestedAttributes
 	if out.Flow.RequestedAttributes == nil {
 		out.Flow.RequestedAttributes = []string{}
+	}
+	out.Flow.AttributeReasons = f.AttributeReasons
+	if out.Flow.AttributeReasons == nil {
+		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)

@@ -316,6 +316,40 @@ func TestFlowsAreVersionedPerOrg(t *testing.T) {
 	}
 }
 
+// A version keeps its reasons in the stored definition; the next version
+// without any has none, and the earlier one still has them.
+func TestFlowVersionReasons(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	explained := chipFlow
+	explained.AttributeReasons = map[string]map[string]string{
+		"dg1": {"en": "To check your age.", "nl": "Om je leeftijd te controleren."},
+	}
+
+	f, err := h.engine.CreateFlow(ctx, h.tenant, explained)
+	if err != nil {
+		t.Fatalf("CreateFlow: %v", err)
+	}
+	if got := f.AttributeReasons["dg1"]["nl"]; got != "Om je leeftijd te controleren." {
+		t.Fatalf("created flow's Dutch reason = %q", got)
+	}
+
+	if _, err := h.engine.CreateFlowVersion(ctx, h.tenant, f.ID, chipFlow); err != nil {
+		t.Fatalf("CreateFlowVersion: %v", err)
+	}
+
+	versions, err := h.engine.ListFlowVersions(ctx, h.tenant, f.ID)
+	if err != nil || len(versions) != 2 {
+		t.Fatalf("versions = %+v, %v", versions, err)
+	}
+	if got := versions[0].AttributeReasons["dg1"]["en"]; got != "To check your age." {
+		t.Errorf("version 1 reason = %q, want it kept", got)
+	}
+	if got := versions[1].AttributeReasons; len(got) != 0 {
+		t.Errorf("version 2 reasons = %v, want none", got)
+	}
+}
+
 func TestReviewAndCancel(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

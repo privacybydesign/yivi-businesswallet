@@ -254,13 +254,9 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 			return Sent{}, ErrFlowNotCompletable
 		}
 	}
-	ttl := SessionTTL
-	if settings.Session.SessionTTL != 0 {
-		ttl = settings.Session.SessionTTL
-	}
-	ttl = flowSessionTTL(flow, ttl)
 	tenant := orgTenant(req.OrganizationID)
 	retention := engineRetention(&settings, req.FlowKind, req.RetentionOverride)
+	ttl := settings.sessionTTL(flow)
 	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
 		Language: string(req.Language), Retention: retention, ReferencePhoto: photo,
@@ -268,6 +264,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if err != nil {
 		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)
 	}
+	sess = withSessionTTL(sess, ttl)
 	if method == proofingprovider.MethodIdem && sess.Claim == nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess,
 			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID))
@@ -286,7 +283,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if sess.FlowVersion != 0 {
 		req.FlowVersion = sess.FlowVersion
 	}
-	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt}
+	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	out := Sent{Request: req}
 	if sess.Claim != nil {
 		out.DeepLink = sess.Claim.DeepLink

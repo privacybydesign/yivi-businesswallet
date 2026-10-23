@@ -26,6 +26,7 @@ import {
   screeningStatusTone,
 } from "../lib/screening-status";
 import { fullName, personInitials } from "../lib/name";
+import { showsReviewTag } from "../lib/review-right";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
 import type { SortDir } from "../ui";
@@ -588,11 +589,18 @@ export default function Members(): React.JSX.Element {
                           </Table.Cell>
                         )}
                         <Table.Cell>
-                          <Tag
-                            tone={member.role === "admin" ? "blue" : "default"}
-                          >
-                            <span className="capitalize">{member.role}</span>
-                          </Tag>
+                          <div className="flex flex-wrap gap-1">
+                            <Tag
+                              tone={
+                                member.role === "admin" ? "blue" : "default"
+                              }
+                            >
+                              <span className="capitalize">{member.role}</span>
+                            </Tag>
+                            {showsReviewTag(member) && (
+                              <Tag>{t("common.canReview")}</Tag>
+                            )}
+                          </div>
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           {pending && member.invitationId && (
@@ -677,10 +685,10 @@ export default function Members(): React.JSX.Element {
 function IdentityTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag
@@ -698,10 +706,10 @@ function IdentityTag({
 function VogTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag

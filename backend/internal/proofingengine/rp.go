@@ -58,6 +58,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		fd.AssuranceTiers = append(fd.AssuranceTiers, flow.AssuranceTier{Level: t.Level, MinPercent: t.MinPercent})
 	}
 	fd.RequestedAttributes = in.RequestedAttributes
+	fd.AttributeReasons = in.AttributeReasons
 	return fd
 }
 
@@ -71,7 +72,7 @@ func toSteps(in []string) []flow.Step {
 
 func toFlow(fd flow.FlowDefinition) pp.Flow {
 	spec := pp.FlowSpec{
-		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd),
+		Name: fd.Name, RequestedAttributes: requestedAttributesOf(fd), AttributeReasons: fd.AttributeReasons,
 		SelfieLocation: string(fd.EffectiveSelfieLocation()), FaceProvider: string(fd.FaceProvider),
 		AcceptedDocumentTypes: fd.AcceptedDocumentTypes, AcceptedIssuingCountries: fd.AcceptedIssuingCountries,
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
@@ -305,7 +306,7 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		return pp.Session{}, fmt.Errorf("proofingengine: create session: %w", err)
 	}
 	s.auditProofing(sess, eventSessionCreated, nil)
-	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, FlowVersion: sess.FlowVersion}
+	out := pp.Session{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: ttl, FlowVersion: sess.FlowVersion}
 	if sess.Method == session.MethodNFCPassport && sessionOpenForDevices(sess) == nil {
 		updated, claims, err := s.mintClaimTokens(sess, "create", session.DeviceRoleNative)
 		if err != nil {
@@ -700,8 +701,10 @@ var reviewErrorCodePattern = regexp.MustCompile(`^[A-Z0-9_]{1,64}$`)
 
 var errNotUnderReview = errors.New("the session is not under review")
 
-// DecideReview settles a session in needs_review as the reviewer decided.
-func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
+// DecideReview settles a session in needs_review as the reviewer decided, and
+// drops the face photos it held for the review unless its flow keeps them
+// (dropFacePhotos).
+func (s *Server) DecideReview(ctx context.Context, t pp.Tenant, id, token string, d pp.ReviewDecision) error {
 	reason, reviewer := strings.TrimSpace(d.Reason), strings.TrimSpace(d.Reviewer)
 	switch {
 	case d.Approve && d.ErrorCode != "":
@@ -724,6 +727,11 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 	if err != nil {
 		return err
 	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: decide review: %w", err)
+	}
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status != session.StatusNeedsReview {
 			return errNotUnderReview
@@ -736,6 +744,7 @@ func (s *Server) DecideReview(_ context.Context, t pp.Tenant, id, token string, 
 		// never in the server log, where a free-text reason does not belong.
 		sess.ErrorCode = errorCode
 		sess.Review = &session.ReviewDecision{Reviewer: reviewer, Reason: reason, DecidedAt: now}
+		dropFacePhotos(sess, bsnPolicy, redaction)
 		return nil
 	})
 	switch {
