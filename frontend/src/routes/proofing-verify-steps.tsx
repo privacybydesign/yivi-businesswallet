@@ -647,6 +647,57 @@ export function Session({
 // diplomas they downloaded from DUO, each checked at once against DUO's
 // signature and their proven name and date of birth. The step ends once one
 // is held, or the time to add one is up.
+// The opening of an upload step: the identity done, what to upload and the
+// three steps to get it, the first linking to where it is downloaded.
+function UploadStepIntro({
+  section,
+  link,
+}: Readonly<{
+  section: "diplomas" | "employment";
+  link: { href: string; label: string };
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t(`identityProofing.${section}.identityDone`)}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <StepHeading>{t(`identityProofing.${section}.heading`)}</StepHeading>
+        <p className={HINT}>{t(`identityProofing.${section}.intro`)}</p>
+      </div>
+
+      <ol className="flex flex-col gap-2.5">
+        {(["login", "download", "upload"] as const).map((step, i) => (
+          <li key={step} className="flex items-start gap-3 text-[13.5px]">
+            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+              {i + 1}
+            </span>
+            <span className="text-ink pt-0.5">
+              {t(`identityProofing.${section}.how.${step}`)}
+              {step === "login" && (
+                <>
+                  {" "}
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link font-semibold hover:underline"
+                  >
+                    {link.label}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
 function DiplomaStep({
   target,
   until,
@@ -702,41 +753,13 @@ function DiplomaStep({
     <div className="flex w-full flex-col gap-5">
       {/* Mounted throughout, so each upload's verdicts are announced. */}
       <output className="sr-only">{announced}</output>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.diplomas.identityDone")}
-      </p>
-
-      <div className="flex flex-col gap-1">
-        <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
-        <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
-      </div>
-
-      <ol className="flex flex-col gap-2.5">
-        {(["login", "download", "upload"] as const).map((step, i) => (
-          <li key={step} className="flex items-start gap-3 text-[13.5px]">
-            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
-              {i + 1}
-            </span>
-            <span className="text-ink pt-0.5">
-              {t(`identityProofing.diplomas.how.${step}`)}
-              {step === "login" && (
-                <>
-                  {" "}
-                  <a
-                    href={MIJN_DUO_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-link font-semibold hover:underline"
-                  >
-                    {t("identityProofing.diplomas.how.openDuo")}
-                  </a>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <UploadStepIntro
+        section="diplomas"
+        link={{
+          href: MIJN_DUO_URL,
+          label: t("identityProofing.diplomas.how.openDuo"),
+        }}
+      />
 
       {held.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -882,43 +905,13 @@ function EmploymentStep({
 
   return (
     <div className="flex w-full flex-col gap-5">
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.employment.identityDone")}
-      </p>
-
-      <div className="flex flex-col gap-1">
-        <h2 className="text-ink text-[18px] font-bold">
-          {t("identityProofing.employment.heading")}
-        </h2>
-        <p className={HINT}>{t("identityProofing.employment.intro")}</p>
-      </div>
-
-      <ol className="flex flex-col gap-2.5">
-        {(["login", "download", "upload"] as const).map((step, i) => (
-          <li key={step} className="flex items-start gap-3 text-[13.5px]">
-            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
-              {i + 1}
-            </span>
-            <span className="text-ink pt-0.5">
-              {t(`identityProofing.employment.how.${step}`)}
-              {step === "login" && (
-                <>
-                  {" "}
-                  <a
-                    href={MIJN_UWV_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-link font-semibold hover:underline"
-                  >
-                    {t("identityProofing.employment.how.openUwv")}
-                  </a>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <UploadStepIntro
+        section="employment"
+        link={{
+          href: MIJN_UWV_URL,
+          label: t("identityProofing.employment.how.openUwv"),
+        }}
+      />
 
       {kept !== undefined && (
         <div

@@ -1,17 +1,17 @@
 package vog
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/pdftext"
 )
 
 // The parser is a port of go-vog-issuer's (#242), the implementation that was
@@ -136,67 +136,11 @@ func (p *PDFiumParser) extractWords(pdf []byte) ([]Word, error) {
 // Word is a positioned piece of text on the first page of the VOG. Coordinates
 // are PDF user space points: X grows to the right, Y grows upwards, so Top is
 // larger than Bottom and the first line of the page has the largest Top.
-type Word struct {
-	Text   string
-	Left   float64
-	Top    float64
-	Right  float64
-	Bottom float64
-}
-
-// line is a group of words that share (approximately) the same baseline.
-type line struct {
-	top   float64
-	words []Word
-}
-
-func (l line) text() string {
-	parts := make([]string, len(l.words))
-	for i, w := range l.words {
-		parts[i] = w.Text
-	}
-	return strings.Join(parts, " ")
-}
-
-// lineTolerance is the maximum vertical distance (points) between two words on
-// the same line. Justis renders the VOG at ~10pt so words on one line differ by
-// a few points at most, while lines are ~10pt apart.
-const lineTolerance = 4.0
+type Word = pdftext.Word
 
 // valueGap is how far (points) a word must start right of a label's end to be
 // read as that label's value rather than as part of the label itself.
 const valueGap = 2.0
-
-func groupLines(words []Word) []line {
-	sorted := make([]Word, len(words))
-	copy(sorted, words)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Top != sorted[j].Top {
-			return sorted[i].Top > sorted[j].Top
-		}
-		return sorted[i].Left < sorted[j].Left
-	})
-
-	var lines []line
-	for _, w := range sorted {
-		if len(lines) > 0 {
-			current := &lines[len(lines)-1]
-			// Compare against the running maximum of the line so a slightly
-			// lower word (descenders) still joins the line.
-			if current.top-w.Top <= lineTolerance {
-				current.words = append(current.words, w)
-				continue
-			}
-		}
-		lines = append(lines, line{top: w.Top, words: []Word{w}})
-	}
-	for i := range lines {
-		sort.Slice(lines[i].words, func(a, b int) bool {
-			return lines[i].words[a].Left < lines[i].words[b].Left
-		})
-	}
-	return lines
-}
 
 // title is the document heading every VOG carries; its absence is what makes
 // a validated PDF "not a VOG" rather than an unreadable one.
@@ -231,38 +175,20 @@ var codePattern = regexp.MustCompile(`\b\d{2}\b`)
 // the Dutch label, and the profile codes are the line(s) after "profiel:".
 // Exported so the pure layout logic is testable without PDFium.
 func ExtractDocument(words []Word) (Document, error) {
-	lines := groupLines(words)
+	lines := pdftext.GroupLines(words)
 	if len(lines) == 0 {
 		return Document{}, fmt.Errorf("%w: no text found", ErrNotAVOG)
 	}
 
 	fullText := make([]string, len(lines))
 	for i, l := range lines {
-		fullText[i] = l.text()
+		fullText[i] = l.Text()
 	}
 	if !strings.Contains(strings.Join(fullText, "\n"), title) {
 		return Document{}, fmt.Errorf("%w: title not found", ErrNotAVOG)
 	}
 
-	fields := map[string]string{}
-	for _, l := range lines {
-		for i, w := range l.words {
-			field, ok := fieldLabels[w.Text]
-			if !ok {
-				continue
-			}
-			if _, seen := fields[field]; seen {
-				continue
-			}
-			var value []string
-			for _, v := range l.words[i+1:] {
-				if v.Left > w.Right+valueGap {
-					value = append(value, v.Text)
-				}
-			}
-			fields[field] = strings.Join(value, " ")
-		}
-	}
+	fields := labelledFields(lines)
 
 	issueDate, err := ParseDutchDate(fields["issue_date"])
 	if err != nil {
@@ -280,14 +206,7 @@ func ExtractDocument(words []Word) (Document, error) {
 	if len(codes) == 0 {
 		return Document{}, fmt.Errorf("%w: screening profile codes not found", ErrUnparseable)
 	}
-	var aspects, profiles []string
-	for _, code := range codes {
-		if IsFunctionAspect(code) {
-			aspects = append(aspects, code)
-		} else {
-			profiles = append(profiles, code)
-		}
-	}
+	aspects, profiles := splitCodes(codes)
 
 	return Document{
 		GivenNames:   fields["given_names"],
@@ -298,6 +217,48 @@ func ExtractDocument(words []Word) (Document, error) {
 		AspectCodes:  aspects,
 		ProfileCodes: profiles,
 	}, nil
+}
+
+// labelledFields reads each labelled field's value: the words right of its
+// label on the same line. The first label of a field wins.
+func labelledFields(lines []pdftext.Line) map[string]string {
+	fields := map[string]string{}
+	for _, l := range lines {
+		for i, w := range l.Words {
+			field, ok := fieldLabels[w.Text]
+			if !ok {
+				continue
+			}
+			if _, seen := fields[field]; seen {
+				continue
+			}
+			fields[field] = valueRightOf(w, l.Words[i+1:])
+		}
+	}
+	return fields
+}
+
+// valueRightOf joins the words that start clear of label's end.
+func valueRightOf(label Word, rest []Word) string {
+	var value []string
+	for _, v := range rest {
+		if v.Left > label.Right+valueGap {
+			value = append(value, v.Text)
+		}
+	}
+	return strings.Join(value, " ")
+}
+
+// splitCodes splits the screening codes into function aspects and profiles.
+func splitCodes(codes []string) (aspects, profiles []string) {
+	for _, code := range codes {
+		if IsFunctionAspect(code) {
+			aspects = append(aspects, code)
+		} else {
+			profiles = append(profiles, code)
+		}
+	}
+	return aspects, profiles
 }
 
 // extractProfileCodes returns the two digit codes on the line(s) following
@@ -330,49 +291,8 @@ func extractProfileCodes(lines []string) []string {
 	return codes
 }
 
-var dutchMonths = map[string]time.Month{
-	"januari": time.January, "februari": time.February, "maart": time.March,
-	"april": time.April, "mei": time.May, "juni": time.June, "juli": time.July,
-	"augustus": time.August, "september": time.September, "oktober": time.October,
-	"november": time.November, "december": time.December,
-	"jan": time.January, "feb": time.February, "mrt": time.March, "apr": time.April,
-	"jun": time.June, "jul": time.July, "aug": time.August, "sep": time.September,
-	"okt": time.October, "nov": time.November, "dec": time.December,
-}
-
-// numericDateLayouts are the numeric forms accepted next to the written one.
-var numericDateLayouts = []string{"02-01-2006", "2006-01-02", "2-1-2006"}
-
 // ParseDutchDate parses dates as printed on the VOG ("25 maart 2026"); the
 // numeric forms "25-03-2026" and "2026-03-25" are accepted as well.
 func ParseDutchDate(s string) (time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, errors.New("empty date")
-	}
-	for _, layout := range numericDateLayouts {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	parts := strings.Fields(s)
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("unrecognised date %q", s)
-	}
-	var day, year int
-	if _, err := fmt.Sscanf(parts[0], "%d", &day); err != nil {
-		return time.Time{}, fmt.Errorf("unrecognised day in %q", s)
-	}
-	month, ok := dutchMonths[strings.ToLower(parts[1])]
-	if !ok {
-		return time.Time{}, fmt.Errorf("unrecognised month in %q", s)
-	}
-	if _, err := fmt.Sscanf(parts[2], "%d", &year); err != nil {
-		return time.Time{}, fmt.Errorf("unrecognised year in %q", s)
-	}
-	t := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
-	if t.Day() != day {
-		return time.Time{}, fmt.Errorf("invalid day in %q", s)
-	}
-	return t, nil
+	return pdftext.ParseDutchDate(s)
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +14,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
 // EmploymentMode is whether a flow has the employment step: once their
@@ -300,8 +298,8 @@ func (s *Service) FlowEmployment(ctx context.Context, org Org, flowID string) (E
 	return s.flowEmployment(ctx, org.ID, flowID)
 }
 
-// SaveFlowEmployment sets one of the org's flows' EmploymentMode: required
-// only for a flow that reads the name and date of birth, which the
+// SaveFlowEmployment sets one of the org's flows' EmploymentMode, not a data
+// request flow's: required only for a flow that reads the name and date of birth, which the
 // statement's holder is matched against. Requests already sent keep the mode
 // they were sent with.
 func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string, mode EmploymentMode) (EmploymentMode, error) {
@@ -311,16 +309,8 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: employment is off or required", ErrInvalidInput)
 	}
-	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
-	if err != nil {
-		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
-	}
-	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
-	if i < 0 {
-		return "", ErrFlowNotFound
-	}
-	if mode.asked() && !readsIdentity(flows[i]) {
-		return "", ErrFlowNoIdentity
+	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
+		return "", err
 	}
 	return s.flowEmploymentSettings.Save(ctx, org.ID, flowID, mode)
 }
