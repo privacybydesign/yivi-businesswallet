@@ -1,4 +1,6 @@
-// Package verify checks the authenticity of a DUO diploma PDF.
+// Package verify checks the authenticity of a sealed PDF: a DUO diploma
+// extract, or a UWV Verzekeringsbericht. An issuer's signatures may lack some
+// of the parts below (trust.Lacks); the checks for those are left out.
 //
 // The checks, in order:
 //
@@ -226,10 +228,12 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 		ID: CheckCoversWholeFile, Name: "signature covers whole file", OK: sig.CoversWholeFile,
 		Detail: fmt.Sprintf("ByteRange %v, file size %d", sig.ByteRange, len(pdf)),
 	})
-	res.add(Check{
-		ID: CheckCertification, Name: "certification signature (DocMDP)", OK: sig.DocMDPPermission == 1,
-		Detail: fmt.Sprintf("DocMDP /P = %d (1 = no changes permitted)", sig.DocMDPPermission),
-	})
+	if !opts.Issuer.Lacks.Certification {
+		res.add(Check{
+			ID: CheckCertification, Name: "certification signature (DocMDP)", OK: sig.DocMDPPermission == 1,
+			Detail: fmt.Sprintf("DocMDP /P = %d (1 = no changes permitted)", sig.DocMDPPermission),
+		})
+	}
 	res.add(Check{
 		ID: CheckPadesSubfilter, Name: "PAdES subfilter", OK: sig.SubFilter == subFilterCAdES || sig.SubFilter == subFilterPKCS7,
 		Detail: "/SubFilter /" + sig.SubFilter,
@@ -248,6 +252,7 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 		return res, nil
 	}
 	p7.Content = signed
+	digestAsHash(p7)
 	// Verify() checks the messageDigest attribute against the content and
 	// the signature against the signer certificate found in the CMS. It does
 	// not establish trust; we do that ourselves below so we can control the
@@ -263,14 +268,19 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 	}
 	res.Signer = signer
 	res.add(Check{ID: CheckCmsSignature, Name: "CMS signature", OK: true, Detail: "message digest and signature valid"})
-	res.add(checkSigningCertificate(p7, signer))
-
-	// 3. Signing time: the RFC 3161 timestamp token.
-	res.SigningTime = opts.Now()
-	if t, err := parsePDFDate(sig.SigningTimeClaimed); err == nil {
-		res.SigningTime = t
+	if !opts.Issuer.Lacks.SigningCertificate {
+		res.add(checkSigningCertificate(p7, signer))
 	}
-	checkTimestamp(res, p7, sig, opts.Trust)
+
+	// 3. Signing time: the RFC 3161 timestamp token. Without one the issuer
+	// puts in, the remaining checks run at the time of verification.
+	res.SigningTime = opts.Now()
+	if !opts.Issuer.Lacks.Timestamp {
+		if t, err := parsePDFDate(sig.SigningTimeClaimed); err == nil {
+			res.SigningTime = t
+		}
+		checkTimestamp(res, p7, sig, opts.Trust)
+	}
 
 	// 4. Chain to a trust anchor at signing time.
 	checkChain(res, p7, signer, opts.Trust)
@@ -300,6 +310,25 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 	res.add(checkRevocation(ctx, res, p7, opts))
 
 	return res, nil
+}
+
+// signatureDigests are the RSA signature algorithms some signers name as a
+// SignerInfo's digest algorithm, by the hash they stand for: UWV's seal names
+// sha256WithRSAEncryption there, which pkcs7 refuses as a digest.
+var signatureDigests = map[string]asn1.ObjectIdentifier{
+	pkcs7.OIDEncryptionAlgorithmRSASHA256.String(): pkcs7.OIDDigestAlgorithmSHA256,
+	pkcs7.OIDEncryptionAlgorithmRSASHA384.String(): pkcs7.OIDDigestAlgorithmSHA384,
+	pkcs7.OIDEncryptionAlgorithmRSASHA512.String(): pkcs7.OIDDigestAlgorithmSHA512,
+}
+
+// digestAsHash reads such a signature algorithm as its hash. The signature
+// is still checked as RSA with that hash, so nothing else is accepted.
+func digestAsHash(p7 *pkcs7.PKCS7) {
+	for i := range p7.Signers {
+		if hash, ok := signatureDigests[p7.Signers[i].DigestAlgorithm.Algorithm.String()]; ok {
+			p7.Signers[i].DigestAlgorithm.Algorithm = hash
+		}
+	}
 }
 
 // essCertIDv2 and signingCertificateV2 are the ESS signing-certificate-v2
@@ -421,9 +450,9 @@ func checkChain(res *Result, p7 *pkcs7.PKCS7, signer *x509.Certificate, trustSou
 }
 
 // checkRevocation checks every certificate of the chain below its anchor,
-// online with opts.OCSP and otherwise against the signature's embedded
-// revocation information. It fails closed: a certificate it cannot check is
-// a failure, never a pass.
+// online with opts.OCSP or for an issuer that embeds nothing, and otherwise
+// against the signature's embedded revocation information. It fails closed: a
+// certificate it cannot check is a failure, never a pass.
 func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Options) Check {
 	c := Check{ID: CheckRevocation, Name: "revocation"}
 	if len(res.Chain) < 2 {
@@ -431,8 +460,9 @@ func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Opt
 		return c
 	}
 
+	online := opts.OCSP || opts.Issuer.Lacks.EmbeddedRevocation
 	var archive revocationArchive
-	if !opts.OCSP {
+	if !online {
 		var err error
 		if archive, err = embeddedRevocation(p7); err != nil {
 			c.Detail = "online revocation check disabled and " + err.Error()
@@ -445,7 +475,7 @@ func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Opt
 		cert, issuer := res.Chain[i], res.Chain[i+1]
 		var detail string
 		var err error
-		if opts.OCSP {
+		if online {
 			detail, err = checkOnline(ctx, opts.HTTPClient, cert, issuer, opts.Now())
 		} else {
 			detail, err = archive.check(cert, issuer, res.SigningTime)

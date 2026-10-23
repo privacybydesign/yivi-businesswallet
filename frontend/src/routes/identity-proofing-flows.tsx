@@ -318,6 +318,9 @@ function FlowSummary({ flow }: { flow: ProofingFlow }): React.JSX.Element {
   if (flow.diplomaMode === "required") {
     steps.push(t("identityProofingFlows.steps.diploma_upload"));
   }
+  if (flow.employmentMode === "required") {
+    steps.push(t("identityProofingFlows.steps.employment_upload"));
+  }
   const checks = (flow.requiredChecks ?? []).map((check) => {
     const key = CHECK_LABELS[check];
     return key ? t(`identityProofingFlows.checks.${key}`) : check;

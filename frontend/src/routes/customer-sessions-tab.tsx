@@ -20,7 +20,11 @@ import {
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
-import { useWhenFormatter } from "../lib/format-when";
+import {
+  useDateFormatter,
+  useMonthFormatter,
+  useWhenFormatter,
+} from "../lib/format-when";
 import {
   addressVerificationNote,
   assuranceLevelLabel,
@@ -247,6 +251,7 @@ function SessionRow({
           <ResultTag request={request} compact />{" "}
           <AddressTag request={request} />
           <DiplomaTag request={request} />
+          <EmploymentTag request={request} />
           <DataRequestTag request={request} />
         </Table.Cell>
         <Table.Cell className="whitespace-nowrap">
@@ -388,6 +393,9 @@ function SessionRow({
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
                 )}
+                {request.employmentMode !== "off" && (
+                  <SessionEmployment request={request} />
+                )}
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
@@ -521,6 +529,90 @@ function SessionDiplomas({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// For an approved session that requires the Verzekeringsbericht, that none
+// was kept.
+function EmploymentTag({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    request.employmentMode === "required" &&
+    request.status === "approved" &&
+    request.employment === undefined &&
+    request.purgedAt === undefined
+  ) {
+    return <Tag tone="amber">{t("customers.sessions.employment.missing")}</Tag>;
+  }
+  return null;
+}
+
+// The employment relations UWV's Verzekeringsbericht lists, as of the date
+// UWV made it.
+function SessionEmployment({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const formatMonth = useMonthFormatter();
+  const e = request.employment;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("customers.sessions.employment.title")}
+      </h3>
+      {e === undefined ? (
+        <p className={HINT}>{t("customers.sessions.employment.none")}</p>
+      ) : (
+        <>
+          <p className="text-ink text-[13px]">
+            {t("customers.sessions.employment.statementDate", {
+              date: formatDate(e.statementDate),
+            })}
+          </p>
+          {e.relations.length === 0 ? (
+            <p className={HINT}>
+              {t("customers.sessions.employment.noRelations")}
+            </p>
+          ) : (
+            <ul className="border-line divide-y rounded-lg border">
+              {e.relations.map((r) => (
+                <li
+                  key={`${r.payrollTaxNumber}-${r.from}`}
+                  className="flex flex-col gap-0.5 px-3 py-2"
+                >
+                  <span className="text-ink text-[13px] font-semibold">
+                    {r.employer}
+                  </span>
+                  <span className={HINT}>
+                    {[
+                      t("customers.sessions.employment.since", {
+                        from: formatMonth(r.from),
+                      }),
+                      r.contractForm,
+                    ]
+                      .filter((part) => part.trim() !== "")
+                      .join(" · ")}
+                  </span>
+                  <span className="text-muted font-mono text-[11.5px]">
+                    {t("customers.sessions.employment.payrollTaxNumber", {
+                      number: r.payrollTaxNumber,
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className={HINT}>{t("customers.sessions.employment.source")}</p>
+        </>
       )}
     </div>
   );

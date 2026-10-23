@@ -32,6 +32,9 @@ services:
       # dev accepts any extract, since nobody holds a DUO-signed one of a test
       # person. Set DIPLOMA_VALIDATOR_PROVIDER=duo in .env to check for real.
       DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-stub}
+      # Verzekeringsbericht uploads likewise: dev accepts any statement's seal.
+      # Set EMPLOYMENT_VALIDATOR_PROVIDER=uwv in .env to check for real.
+      EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-stub}
       # The EU Trusted Lists cache, on the diploma-trust-cache volume so a
       # restart does not fetch them again.
       DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-/var/cache/diploma-trust}

@@ -27,8 +27,15 @@ const diplomas = {
   diplomaMode: "required" as const,
 };
 
+const employment = {
+  id: "employment",
+  requestedAttributes: ["dg1"],
+  diplomaMode: "off" as const,
+  employmentMode: "required" as const,
+};
+
 const base = {
-  sendable: [plain, matching, diplomas],
+  sendable: [plain, matching, diplomas, employment],
   initial: plain,
   picked: "",
   channel: "email" as const,
@@ -47,6 +54,12 @@ describe("sendFormDecision", () => {
 
   it("runs a flow asking for diplomas on screen, never by mail", () => {
     const d = sendFormDecision({ ...base, picked: "diplomas" });
+    expect(d.mailable).toBe(false);
+    expect(d.delivery).toBe("on_screen");
+  });
+
+  it("runs a flow asking for the Verzekeringsbericht on screen, never by mail", () => {
+    const d = sendFormDecision({ ...base, picked: "employment" });
     expect(d.mailable).toBe(false);
     expect(d.delivery).toBe("on_screen");
   });

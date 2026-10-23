@@ -235,6 +235,12 @@ const (
 	// subject entered (never its content)
 	IdentityProofingFlowAddressConfigured = "identity_proofing.flow_address_configured"
 	IdentityProofingAddressAdded          = "identity_proofing.address_added"
+
+	// whether a flow asks for the UWV Verzekeringsbericht, and a statement a
+	// subject uploaded: kept (never its relations), or refused with its reason
+	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"
+	IdentityProofingEmploymentAdded          = "identity_proofing.employment_added"
+	IdentityProofingEmploymentRejected       = "identity_proofing.employment_rejected"
 )
 
 const (

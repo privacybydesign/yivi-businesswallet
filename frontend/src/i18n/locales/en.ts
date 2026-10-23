@@ -587,6 +587,11 @@ export const en = {
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
         "This address is not in the Dutch address register. Check the postal code, house number and street.",
+      employmentNeedsPage:
+        "This flow asks for the UWV Verzekeringsbericht, which is uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
+      employmentClosed:
+        "The Verzekeringsbericht can only be uploaded once, for a while after the identity check succeeded.",
+      employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -658,6 +663,44 @@ export const en = {
           "DUO's signature does not hold: the file was changed or not made by DUO. Download the original PDF again.",
         holderMismatch: "This diploma is not in your name and date of birth.",
         duplicate: "This diploma was added already.",
+      },
+    },
+    employment: {
+      overview: {
+        label: "Employment history",
+        detail:
+          "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
+      },
+      identityDone: "Your identity is verified.",
+      heading: "Now add your Verzekeringsbericht",
+      intro:
+        "Upload the Verzekeringsbericht from UWV. It lists your employment. We check that UWV issued it and that it is in your name.",
+      how: {
+        login: "Log in to Mijn UWV with DigiD.",
+        openUwv: "Open Mijn UWV",
+        download:
+          "Under “Persoonlijke gegevens”, open “Arbeidsverleden” and download it as a PDF.",
+        upload:
+          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF or rename it, because that removes UWV's seal.",
+      },
+      choose: "Choose PDF",
+      chooseAgain: "Choose another PDF",
+      checking: "Checking…",
+      closed: "The time to add your Verzekeringsbericht is up.",
+      continue: "Continue",
+      kept: "Verzekeringsbericht of {{date}} accepted",
+      keptChecks:
+        "UWV's seal is valid, the file is unchanged, and it is in your name.",
+      noRelations: "It lists no current employment.",
+      since: "since {{from}}",
+      reasons: {
+        notAStatement:
+          "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
+        signatureInvalid:
+          "UWV's seal does not hold: the file was changed or not made by UWV. Download it again and upload the original file.",
+        holderMismatch: "This Verzekeringsbericht is in another person's name.",
+        stale:
+          "This Verzekeringsbericht is older than 30 days. Download a new one.",
       },
     },
   },
@@ -786,7 +829,7 @@ export const en = {
       email: "E-mail address",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
-        "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
+        "This flow asks for an address, diplomas or a Verzekeringsbericht, which are given on the page that runs the check, so it runs on this screen or as a link.",
       name: "Name (optional)",
       nameHint:
         "Leave it empty if you do not know it: once verified, the name on their document is shown here for 30 days.",
@@ -813,6 +856,7 @@ export const en = {
         session: "Scan the QR code",
         address: "Address",
         diplomas: "Diploma",
+        employment: "Employment",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -1064,6 +1108,17 @@ export const en = {
         missing: "No diploma",
         number: "DUO number {{number}}",
       },
+      employment: {
+        title: "Current employment",
+        none: "No Verzekeringsbericht uploaded.",
+        missing: "No employment history",
+        statementDate: "Verzekeringsbericht of {{date}}",
+        noRelations: "No current employment or benefit in UWV's records",
+        payrollTaxNumber: "Payroll tax number {{number}}",
+        since: "since {{from}}",
+        source:
+          "From UWV's Verzekeringsbericht, checked against UWV's seal and the verified name and date of birth. Only the employment current on the statement's date is kept.",
+      },
       purged: "Personal data purged",
       purgedSubject: "Purged",
       failedBecause: "{{status}} · {{reason}}",
@@ -1295,6 +1350,7 @@ export const en = {
       face_verification: "Face check",
       address: "Enter the address",
       diploma_upload: "Upload diplomas (DUO)",
+      employment_upload: "Upload Verzekeringsbericht (UWV)",
     },
     bsnPolicies: {
       retrieve: "Release the BSN",
@@ -1376,6 +1432,8 @@ export const en = {
         "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       diplomaUploadHint:
         "After the identity check, in the browser rather than the Idem app: the person uploads the diploma extracts they download from DUO, checked against DUO's signature and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
+      employmentUploadHint:
+        "The occupational status, from UWV's employment record. After the identity check, in the browser rather than the Idem app: the person uploads the Verzekeringsbericht they download from Mijn UWV, checked against UWV's seal and their name and date of birth. Such a flow is shown on screen or sent as a hosted link, never mailed.",
       faceLocationNative:
         "The face check runs in the app: the person has no browser step.",
       faceProvider: "Face check provider",
@@ -1385,7 +1443,7 @@ export const en = {
         "Without reading the chip there is no chip photo: the face is matched against the customer's own photo of the person, which its system sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
       dataTitle: "Requested result data",
       identityLocked:
-        "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
+        "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma or Verzekeringsbericht is checked against them.",
       dataHint:
         "Controls which result data the proofing service returns. Only data from a step in this flow can be requested; with none ticked, only the outcome is returned. The wallet itself keeps only the outcome and assurance level.",
       checksTitle: "Required checks",
@@ -2004,6 +2062,10 @@ export const en = {
       identityProofingFlowAddressConfigured:
         "Changed whether a flow asks for the address",
       identityProofingAddressAdded: "Entered an address",
+      identityProofingFlowEmploymentConfigured:
+        "Changed whether a flow asks for the Verzekeringsbericht",
+      identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
+      identityProofingEmploymentRejected: "Refused a Verzekeringsbericht",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",

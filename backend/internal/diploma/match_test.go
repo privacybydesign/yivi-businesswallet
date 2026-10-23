@@ -181,3 +181,42 @@ func TestSameName(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchInitials(t *testing.T) {
+	deVries := Person{GivenNames: "Johanna Theodora", Surname: "DE VRIES", DateOfBirth: "1980-02-03"}
+	cases := []struct {
+		name      string
+		initials  []string
+		surname   string
+		dob       string
+		disclosed Person
+		matched   bool
+	}{
+		{"same person", []string{"J", "Th"}, "de Vries", "03-02-1980", deVries, true},
+		{"one initial per given name", []string{"J", "T"}, "de Vries", "03-02-1980", deVries, true},
+		{
+			"BRP prefix split",
+			[]string{"J", "T"},
+			"de Vries", "03-02-1980",
+			Person{GivenNames: "Johanna Theodora", Prefix: "de", Surname: "Vries", DateOfBirth: "1980-02-03"},
+			true,
+		},
+		{"IJ initial", []string{"IJ"}, "Smit", "03-02-1980", Person{GivenNames: "IJsbrand", Surname: "SMIT", DateOfBirth: "1980-02-03"}, true},
+		{"ICAO transliteration", []string{"O"}, "Müller", "03-02-1980", Person{GivenNames: "OEZLEM", Surname: "MUELLER", DateOfBirth: "1980-02-03"}, true},
+		{"partner's name first", []string{"J", "T"}, "Jansen-de Vries", "03-02-1980", deVries, true},
+		{"partner's name last", []string{"J", "T"}, "de Vries-Jansen", "03-02-1980", deVries, true},
+		{"partner's name alone", []string{"J", "T"}, "Jansen", "03-02-1980", deVries, false},
+		{"wrong initial", []string{"M", "T"}, "de Vries", "03-02-1980", deVries, false},
+		{"an initial missing", []string{"J"}, "de Vries", "03-02-1980", deVries, false},
+		{"wrong surname", []string{"J", "T"}, "de Vos", "03-02-1980", deVries, false},
+		{"wrong date of birth", []string{"J", "T"}, "de Vries", "04-02-1980", deVries, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MatchInitials(tc.initials, tc.surname, tc.dob, tc.disclosed)
+			if got.Matched != tc.matched {
+				t.Errorf("Matched = %v, want %v (%+v)", got.Matched, tc.matched, got)
+			}
+		})
+	}
+}

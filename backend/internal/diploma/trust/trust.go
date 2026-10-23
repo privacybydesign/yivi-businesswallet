@@ -89,6 +89,24 @@ type Issuer struct {
 	OrganizationIdentifier string
 	// Organization must equal the subject O attribute.
 	Organization string
+	// Lacks is what this issuer's signatures leave out; the zero value
+	// requires all of it.
+	Lacks Lacks
+}
+
+// Lacks lists the parts of a long-term PAdES signature an issuer does not
+// put in, so the checks for them are left out rather than failed.
+type Lacks struct {
+	// Certification: no DocMDP certification (/P = 1).
+	Certification bool
+	// Timestamp: no RFC 3161 timestamp, so the chain and revocation are
+	// checked at the time of verification.
+	Timestamp bool
+	// SigningCertificate: no signed ESS signing-certificate-v2 attribute.
+	SigningCertificate bool
+	// EmbeddedRevocation: no revocation information in the signature, so it
+	// is always checked online.
+	EmbeddedRevocation bool
 }
 
 // DUO is the Dutch Dienst Uitvoering Onderwijs, the government agency that
@@ -97,4 +115,15 @@ var DUO = Issuer{
 	Name:                   "Dienst Uitvoering Onderwijs (DUO)",
 	OrganizationIdentifier: "NTRNL-50973029",
 	Organization:           "Dienst Uitvoering Onderwijs (DUO)",
+}
+
+// UWV is the Uitvoeringsinstituut werknemersverzekeringen, which seals the
+// Verzekeringsbericht a person downloads from Mijn UWV. Its seal is a bare
+// adbe.pkcs7.detached signature: no certification, timestamp, signed
+// attributes or revocation information.
+var UWV = Issuer{
+	Name:                   "Uitvoeringsinstituut werknemersverzekeringen (UWV)",
+	OrganizationIdentifier: "NTRNL-34360247",
+	Organization:           "Uitvoeringsinstituut werknemersverzekeringen",
+	Lacks:                  Lacks{Certification: true, Timestamp: true, SigningCertificate: true, EmbeddedRevocation: true},
 }

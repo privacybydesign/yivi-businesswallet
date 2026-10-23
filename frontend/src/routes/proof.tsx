@@ -107,9 +107,11 @@ function HostedFlow({
     appChoice: choice,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
+  const [inEmployment, setInEmployment] = useState(false);
   // A link started before (another tab, a reload) goes straight to its session.
   const [step, setStep] = useState<Step>(
     page.started || !isProofingLive(page.status) ? "session" : "overview",
@@ -187,7 +189,7 @@ function HostedFlow({
   const actionError = start.isError
     ? hostedErrorMessage(start.error, t)
     : undefined;
-  const stage = currentStage({ step, inAddress, inDiplomas });
+  const stage = currentStage({ step, inAddress, inDiplomas, inEmployment });
   return (
     <Card className="flex flex-col overflow-hidden">
       {/* The theme's header colour, as the top of the Idem app's screens. */}
@@ -276,6 +278,8 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
+              employmentMode={flow.employmentMode}
+              onEmploymentStep={setInEmployment}
               onSettled={settle}
               dataRequest={dataRequest}
               outcomeActions={

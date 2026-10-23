@@ -461,15 +461,9 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	if req.session == nil {
 		return nil, ErrDiplomasClosed
 	}
-	tenant := requestTenant(req)
-	identity, err := s.ips.SessionIdentity(ctx, tenant, req.session.ID, req.session.Token)
+	holder, err := s.sessionHolder(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: identity for diplomas request %s: %w", req.ID, err)
-	}
-	// The chip's DG11 name when it has one: the MRZ's cuts a long name off.
-	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
-	if identity.FullFamilyName != "" {
-		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+		return nil, err
 	}
 
 	verdicts := make([]DiplomaVerdict, 0, len(files))
@@ -481,6 +475,24 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 		verdicts = append(verdicts, verdict)
 	}
 	return verdicts, nil
+}
+
+// sessionHolder is the identity the engine approved for req, as a document's
+// holder is matched against it: the chip's DG11 name when it has one, as the
+// MRZ's cuts a long name off.
+func (s *Service) sessionHolder(ctx context.Context, req Request) (diploma.Person, error) {
+	if req.session == nil {
+		return diploma.Person{}, fmt.Errorf("proofing: request %s has no session to read the identity of", req.ID)
+	}
+	identity, err := s.ips.SessionIdentity(ctx, requestTenant(req), req.session.ID, req.session.Token)
+	if err != nil {
+		return diploma.Person{}, fmt.Errorf("proofing: identity for request %s: %w", req.ID, err)
+	}
+	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
+	if identity.FullFamilyName != "" {
+		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+	}
+	return holder, nil
 }
 
 func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (DiplomaVerdict, error) {

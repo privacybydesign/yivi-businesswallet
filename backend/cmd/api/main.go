@@ -26,8 +26,10 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/csc"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/trust"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
@@ -151,28 +153,63 @@ type vogValidatorProvider interface {
 	Validate(ctx context.Context, pdf []byte) (vog.ResponseCode, error)
 }
 
-// newDiplomaValidator checks a diploma extract's DUO signature: for real
-// (ProviderDUO, loading the trust anchors now, which with the EU lists takes
-// a few seconds), or the stub that accepts every signature.
-func newDiplomaValidator(ctx context.Context, cfg config.Config) (diploma.Validator, error) {
-	switch cfg.DiplomaValidatorProvider {
-	case config.ProviderStub:
-		return diploma.StubValidator{}, nil
-	case config.ProviderDUO:
-		store, err := diploma.NewTrustStore(ctx, diploma.TrustConfig{
+// sealValidators check the seal on an uploaded document: a diploma extract's
+// DUO signature and a Verzekeringsbericht's UWV seal.
+type sealValidators struct {
+	diploma, employment diploma.Validator
+}
+
+// newSealValidators builds each for real (ProviderDUO, ProviderUWV), on one
+// trust store loaded now, which with the EU lists takes a few seconds, or as
+// the stub that accepts every seal.
+func newSealValidators(ctx context.Context, cfg config.Config) (sealValidators, error) {
+	var store *diploma.TrustStore
+	trustStore := func() (*diploma.TrustStore, error) {
+		if store != nil {
+			return store, nil
+		}
+		loaded, err := diploma.NewTrustStore(ctx, diploma.TrustConfig{
 			Source: cfg.DiplomaTrustSource, CacheDir: cfg.DiplomaTrustCacheDir, FallbackToPinned: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("diploma trust anchors: %w", err)
 		}
-		revocation := diploma.RevocationOffline
-		if cfg.DiplomaOCSP {
-			revocation = diploma.RevocationOCSP
-		}
-		return diploma.NewPadesValidator(store, revocation), nil
-	default:
-		return nil, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
+		store = loaded
+		return store, nil
 	}
+	revocation := diploma.RevocationOffline
+	if cfg.DiplomaOCSP {
+		revocation = diploma.RevocationOCSP
+	}
+
+	var out sealValidators
+	switch cfg.DiplomaValidatorProvider {
+	case config.ProviderStub:
+		out.diploma = diploma.StubValidator{}
+	case config.ProviderDUO:
+		s, err := trustStore()
+		if err != nil {
+			return sealValidators{}, err
+		}
+		out.diploma = diploma.NewPadesValidator(s, trust.DUO, revocation)
+	default:
+		return sealValidators{}, fmt.Errorf("diploma validator provider %q is not implemented", cfg.DiplomaValidatorProvider)
+	}
+	switch cfg.EmploymentValidatorProvider {
+	case config.ProviderStub:
+		out.employment = diploma.StubValidator{}
+	case config.ProviderUWV:
+		s, err := trustStore()
+		if err != nil {
+			return sealValidators{}, err
+		}
+		// UWV embeds no revocation information, so its seal is checked
+		// online whatever revocation says.
+		out.employment = diploma.NewPadesValidator(s, trust.UWV, revocation)
+	default:
+		return sealValidators{}, fmt.Errorf("employment validator provider %q is not implemented", cfg.EmploymentValidatorProvider)
+	}
+	return out, nil
 }
 
 func newVogValidatorProvider(cfg config.Config) (vogValidatorProvider, error) {
@@ -959,11 +996,12 @@ func run() error {
 	proofingService := proofing.NewService(
 		proofing.NewStores(pool, recorder, proofingCipher, proofingRequests, proofingWebhooks),
 		ips, verifier, emailService)
-	diplomaValidator, err := newDiplomaValidator(ctx, cfg)
+	sealValidators, err := newSealValidators(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	// A diploma extract is parsed on its own PDFium pool, apart from VOG's.
+	// A diploma extract or a Verzekeringsbericht is parsed on its own PDFium
+	// pool, apart from VOG's.
 	diplomaPool, err := newDiplomaPDFiumPool()
 	if err != nil {
 		return err
@@ -973,11 +1011,17 @@ func run() error {
 			slog.Error("close diploma pdfium pool", slog.String("error", err.Error()))
 		}
 	}()
-	diplomaChecker := diploma.NewChecker(diplomaValidator, diploma.NewPDFiumParser(diplomaPool))
+	diplomaParser := diploma.NewPDFiumParser(diplomaPool)
+	diplomaChecker := diploma.NewChecker(sealValidators.diploma, diplomaParser)
 	if err := diplomaChecker.Ping(ctx); err != nil {
 		return fmt.Errorf("diploma validator ping: %w", err)
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
+	employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
+	if err := employmentChecker.Ping(ctx); err != nil {
+		return fmt.Errorf("employment validator ping: %w", err)
+	}
+	proofingService.SetEmploymentChecker(employmentChecker)
 	// The address step checks a Dutch address against the BAG.
 	addressLookup := addresslookup.NewPDOK(cfg.AddressLookupURL, &http.Client{Timeout: addressLookupHTTPTimeout})
 	addressProbeCtx, addressProbeCancel := context.WithTimeout(ctx, addressLookupProbeTimeout)

@@ -35,6 +35,8 @@ type demoProofingFlow struct {
 	kind     proofing.FlowKind
 	diplomas proofing.DiplomaMode
 	address  proofing.AddressMode
+	// employment is whether the flow asks for the UWV Verzekeringsbericht.
+	employment proofing.EmploymentMode
 }
 
 // demoProofingCustomer is a customer with the flows assigned to it, the
@@ -259,10 +261,12 @@ var demoProofingOrgs = []demoProofingOrg{
 	{
 		slug: unibetSlug,
 		flows: []demoProofingFlow{
-			// A new player under the AMLR: full identification and liveness.
-			// The occupational status (UWV Verzekeringsbericht) is not a step
-			// the wallet can collect yet.
-			{def: chipAndFace(flowUnibetOnboarding, privacy.LegalBasisLegalObligation, "Klantonderzoek kansspelen (AMLR/Wwft)")},
+			// A new player under the AMLR: full identification and liveness,
+			// then their occupational status from the UWV Verzekeringsbericht.
+			{
+				def:        chipAndFace(flowUnibetOnboarding, privacy.LegalBasisLegalObligation, "Klantonderzoek kansspelen (AMLR/Wwft)"),
+				employment: proofing.EmploymentRequired,
+			},
 		},
 		customers: []demoProofingCustomer{
 			{name: "Unibet Casino (Demo)", flows: []string{flowUnibetOnboarding}, retentionDays: demoRetentionDays},
@@ -523,8 +527,9 @@ func ensureProofingFlows(ctx context.Context, pool *pgxpool.Pool, recorder audit
 	return ids, nil
 }
 
-// createProofingFlow saves f for orgID with its kind, diploma and address settings in
-// one transaction, so a re-run never finds the flow without them.
+// createProofingFlow saves f for orgID with its kind, diploma, address and
+// employment settings in one transaction, so a re-run never finds the flow
+// without them.
 func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.Recorder, orgID uuid.UUID, f demoProofingFlow) (string, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -552,6 +557,11 @@ func createProofingFlow(ctx context.Context, pool *pgxpool.Pool, recorder audit.
 	if f.address != "" {
 		if _, err := proofing.NewFlowAddressStore(tx, recorder).Save(ctx, orgID, saved.ID, f.address); err != nil {
 			return "", fmt.Errorf("seed: flow %s address: %w", f.def.Name, err)
+		}
+	}
+	if f.employment != "" {
+		if _, err := proofing.NewFlowEmploymentStore(tx, recorder).Save(ctx, orgID, saved.ID, f.employment); err != nil {
+			return "", fmt.Errorf("seed: flow %s employment: %w", f.def.Name, err)
 		}
 	}
 

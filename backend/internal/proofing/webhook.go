@@ -44,7 +44,10 @@ const (
 	// EventSessionAddressAdded is sent when the subject entered their postal
 	// address after their identity was approved.
 	EventSessionAddressAdded = "session.address_added"
-	EventTest                = "test"
+	// EventSessionEmploymentAdded is sent when the subject's UWV
+	// Verzekeringsbericht was kept after their identity was approved.
+	EventSessionEmploymentAdded = "session.employment_added"
+	EventTest                   = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
@@ -52,7 +55,13 @@ var WebhookEvents = []string{
 	EventSessionCreated, EventSessionStarted, EventSessionHandover,
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
 	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
+	EventSessionEmploymentAdded,
 }
+
+// webhookPersonalKeys are the payload keys that carry what the subject added
+// after their identity was approved: a delivery drops them once final, and
+// Purge from the request's deliveries still pending.
+var webhookPersonalKeys = []string{webhookDiplomaKey, webhookAddressKey, webhookEmploymentKey}
 
 // outcomeEvents is the webhook event each recorded outcome sends.
 var outcomeEvents = map[Status]string{

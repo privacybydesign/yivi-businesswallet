@@ -240,10 +240,12 @@ func (s *TrustStore) reload(ctx context.Context) {
 	slog.InfoContext(ctx, "diploma: trust anchors reloaded", slog.String("source", description))
 }
 
-// PadesValidator verifies the PAdES signature DUO puts on every extract
-// against the anchors of a TrustStore.
+// PadesValidator verifies the PAdES signature an issuer puts on every
+// document it seals (DUO's extracts, UWV's Verzekeringsbericht) against the
+// anchors of a TrustStore.
 type PadesValidator struct {
 	trust      *TrustStore
+	issuer     trust.Issuer
 	ocsp       bool
 	httpClient *http.Client
 }
@@ -259,9 +261,10 @@ const (
 	RevocationOCSP
 )
 
-// NewPadesValidator creates a validator that checks revocation as asked.
-func NewPadesValidator(store *TrustStore, revocation Revocation) *PadesValidator {
-	return &PadesValidator{trust: store, ocsp: revocation == RevocationOCSP, httpClient: &http.Client{Timeout: verify.OCSPTimeout}}
+// NewPadesValidator creates a validator for issuer's seal that checks
+// revocation as asked, or online for an issuer that embeds none.
+func NewPadesValidator(store *TrustStore, issuer trust.Issuer, revocation Revocation) *PadesValidator {
+	return &PadesValidator{trust: store, issuer: issuer, ocsp: revocation == RevocationOCSP, httpClient: &http.Client{Timeout: verify.OCSPTimeout}}
 }
 
 // Ping fails when no anchors are loaded.
@@ -279,6 +282,7 @@ func (v *PadesValidator) Validate(ctx context.Context, pdf []byte) (*Verificatio
 		return nil, ErrTrustUnavailable
 	}
 	result, err := verify.PDF(ctx, pdf, verify.Options{
+		Issuer:     &v.issuer,
 		Trust:      source,
 		OCSP:       v.ocsp,
 		HTTPClient: v.httpClient,

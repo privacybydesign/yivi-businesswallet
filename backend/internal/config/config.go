@@ -95,6 +95,10 @@ const (
 	// revocation online; off, only the revocation information embedded in the
 	// extract counts. Either way an unchecked certificate fails.
 	envDiplomaOCSP = "DIPLOMA_OCSP"
+	// A UWV Verzekeringsbericht (identity proofing): UWV's seal on an uploaded
+	// statement is checked against the diploma trust anchors, its revocation
+	// always online (the statement embeds none).
+	envEmploymentValidatorProvider = "EMPLOYMENT_VALIDATOR_PROVIDER"
 
 	// Identity proofing: the wallet's own proofing engine
 	// (internal/proofingengine) runs document + face verification for an org.
@@ -329,6 +333,12 @@ const (
 	DiplomaTrustPinned              = "pinned"
 	defaultDiplomaTrustSource       = DiplomaTrustEUTL
 
+	// ProviderUWV checks a Verzekeringsbericht's UWV seal for real, and is the
+	// default; ProviderStub accepts every statement's seal and runs only when
+	// set explicitly (the dev stack sets it, as for diplomas).
+	ProviderUWV                        = "uwv"
+	defaultEmploymentValidatorProvider = ProviderUWV
+
 	// ProviderEngine runs identity proofing in the wallet's own engine (the
 	// default); ProviderStub is an in-memory stand-in whose sessions no phone
 	// can reach.
@@ -444,6 +454,10 @@ type Config struct {
 	// DiplomaOCSP enables the online revocation check of DUO's signing
 	// certificate (envDiplomaOCSP).
 	DiplomaOCSP bool
+
+	// EmploymentValidatorProvider is how a Verzekeringsbericht's seal is
+	// checked (envEmploymentValidatorProvider).
+	EmploymentValidatorProvider string
 
 	IdentityProofingProvider string
 	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
@@ -648,6 +662,11 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: %s must be %q or %q", envDiplomaTrustSource, DiplomaTrustEUTL, DiplomaTrustPinned)
 	}
 
+	employmentValidatorProvider := envOrDefault(envEmploymentValidatorProvider, defaultEmploymentValidatorProvider)
+	if employmentValidatorProvider != ProviderStub && employmentValidatorProvider != ProviderUWV {
+		return Config{}, fmt.Errorf("config: %s must be %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV)
+	}
+
 	identityProofingProvider := envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
 	if identityProofingProvider != ProviderEngine && identityProofingProvider != ProviderStub {
 		return Config{}, fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderEngine, ProviderStub)
@@ -754,6 +773,7 @@ func Load() (Config, error) {
 			envIdentityProofingProvider:    identityProofingProvider == ProviderStub,
 			envIdentityProofingStubOutcome: identityProofingStubOutcome != "",
 			envDiplomaValidatorProvider:    diplomaValidatorProvider == ProviderStub,
+			envEmploymentValidatorProvider: employmentValidatorProvider == ProviderStub,
 		} {
 			if stubbed {
 				return Config{}, fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
@@ -831,6 +851,8 @@ func Load() (Config, error) {
 		DiplomaTrustSource:       diplomaTrustSource,
 		DiplomaOCSP:              !strings.EqualFold(os.Getenv(envDiplomaOCSP), "false"),
 		DiplomaTrustCacheDir:     os.Getenv(envDiplomaTrustCacheDir),
+
+		EmploymentValidatorProvider: employmentValidatorProvider,
 
 		IdentityProofingProvider:      identityProofingProvider,
 		IdentityProofingStubOutcome:   identityProofingStubOutcome,
