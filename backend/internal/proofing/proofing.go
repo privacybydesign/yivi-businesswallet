@@ -359,6 +359,17 @@ type Request struct {
 	Address        AddressMode
 	SubjectAddress *Address
 	AddressAddedAt *time.Time
+	// Employment is whether the request asks for the subject's UWV
+	// Verzekeringsbericht once the identity is approved: its flow's
+	// EmploymentMode when it was sent. SubjectEmployment is what was kept of
+	// it, decrypted, at EmploymentAddedAt; nil before, and once purged.
+	Employment        EmploymentMode
+	SubjectEmployment *Employment
+	EmploymentAddedAt *time.Time
+	// ReviewReason is why the wallet itself put the request in review after
+	// the engine approved it (Employment.reviewReason); "" for a review the
+	// engine opened, and for none. Such a review is decided in the wallet.
+	ReviewReason string
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -423,8 +434,8 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 }
 
 // linkLive reports whether a hosted link still has its subject at work:
-// waiting to start, its session running or in review, or an address, diploma
-// or data export window open. A link past all of that only shows its outcome.
+// waiting to start, its session running or in review, or an address,
+// diploma, employment or data export window open. A link past all of that only shows its outcome.
 func (r Request) linkLive(now time.Time) bool {
 	if r.PurgedAt != nil || r.CancelledAt != nil {
 		return false
@@ -433,6 +444,9 @@ func (r Request) linkLive(now time.Time) bool {
 		return true
 	}
 	if until := addressUntil(r); until != nil && now.Before(*until) {
+		return true
+	}
+	if until := employmentUntil(r); until != nil && now.Before(*until) {
 		return true
 	}
 	if until := diplomasUntil(r); until != nil && now.Before(*until) {
@@ -495,6 +509,8 @@ type OrgFlow struct {
 	Diplomas DiplomaMode
 	// Address is whether the flow asks for the subject's postal address.
 	Address AddressMode
+	// Employment is whether the flow asks for the UWV Verzekeringsbericht.
+	Employment EmploymentMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
 }
@@ -649,11 +665,12 @@ type StatsRow struct {
 // CustomerFlow is one of the org's flows with a customer's assignment applied.
 type CustomerFlow struct {
 	proofingprovider.Flow
-	Assigned bool
-	Default  bool
-	Diplomas DiplomaMode
-	Address  AddressMode
-	Kind     FlowKind
+	Assigned   bool
+	Default    bool
+	Diplomas   DiplomaMode
+	Address    AddressMode
+	Employment EmploymentMode
+	Kind       FlowKind
 	// RetentionDays is what a subject on this flow for the customer is told
 	// about keeping their data: subjectRetentionDays.
 	RetentionDays int

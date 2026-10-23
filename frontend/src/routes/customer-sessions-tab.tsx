@@ -20,7 +20,11 @@ import {
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
-import { useWhenFormatter } from "../lib/format-when";
+import {
+  useDateFormatter,
+  useMonthFormatter,
+  useWhenFormatter,
+} from "../lib/format-when";
 import {
   addressVerificationNote,
   assuranceLevelLabel,
@@ -62,11 +66,11 @@ export function SessionsTab({
   slug,
   customer,
   isAdmin,
-}: {
+}: Readonly<{
   slug: string;
   customer: ProofingCustomer;
   isAdmin: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useProofingRequestsQuery(slug, customer.id);
   const formatWhen = useWhenFormatter();
@@ -76,13 +80,49 @@ export function SessionsTab({
   const counts = sessionFilterCounts(all);
   const shown = all.filter((r) => matchesSessionFilter(r.status, filter));
 
+  const sessionRows = (): React.ReactNode => {
+    if (requests.isPending) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {t("common.loading")}
+        </Table.State>
+      );
+    }
+    if (requests.isError) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {proofingErrorMessage(requests.error, t)}
+        </Table.State>
+      );
+    }
+    if (shown.length === 0) {
+      return (
+        <Table.State colSpan={SESSION_COLUMNS}>
+          {t("identityProofing.requests.empty")}
+        </Table.State>
+      );
+    }
+    return shown.map((request) => (
+      <SessionRow
+        key={request.id}
+        slug={slug}
+        request={request}
+        isAdmin={isAdmin}
+        expanded={open === request.id}
+        onToggle={() =>
+          setOpen((current) => (current === request.id ? null : request.id))
+        }
+        formatWhen={formatWhen}
+      />
+    ));
+  };
+
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="group"
+        <fieldset
           aria-label={t("customers.sessions.filterLabel")}
-          className="flex flex-wrap gap-2"
+          className="flex min-w-0 flex-wrap gap-2"
         >
           {SESSION_FILTERS.map((key) => {
             const active = filter === key;
@@ -105,7 +145,7 @@ export function SessionsTab({
               </button>
             );
           })}
-        </div>
+        </fieldset>
         <p className="text-muted text-[12px]">
           {isAdmin
             ? t("customers.sessions.retention", {
@@ -119,65 +159,27 @@ export function SessionsTab({
       <Card>
         <Table>
           <Table.Head>
-            <Table.HeaderCell>
-              {t("customers.sessions.session")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("identityProofing.requests.subject")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("identityProofing.requests.flow")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.method")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.result")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.started")}
-            </Table.HeaderCell>
-            <Table.HeaderCell>
-              {t("customers.sessions.duration")}
-            </Table.HeaderCell>
+            {SESSION_HEADINGS.map((key) => (
+              <Table.HeaderCell key={key}>{t(key)}</Table.HeaderCell>
+            ))}
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
-          <Table.Body>
-            {requests.isPending ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {t("common.loading")}
-              </Table.State>
-            ) : requests.isError ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {proofingErrorMessage(requests.error, t)}
-              </Table.State>
-            ) : shown.length === 0 ? (
-              <Table.State colSpan={SESSION_COLUMNS}>
-                {t("identityProofing.requests.empty")}
-              </Table.State>
-            ) : (
-              shown.map((request) => (
-                <SessionRow
-                  key={request.id}
-                  slug={slug}
-                  request={request}
-                  isAdmin={isAdmin}
-                  expanded={open === request.id}
-                  onToggle={() =>
-                    setOpen((current) =>
-                      current === request.id ? null : request.id,
-                    )
-                  }
-                  formatWhen={formatWhen}
-                />
-              ))
-            )}
-          </Table.Body>
+          <Table.Body>{sessionRows()}</Table.Body>
         </Table>
       </Card>
     </>
   );
 }
+
+const SESSION_HEADINGS = [
+  "customers.sessions.session",
+  "identityProofing.requests.subject",
+  "identityProofing.requests.flow",
+  "customers.sessions.method",
+  "customers.sessions.result",
+  "customers.sessions.started",
+  "customers.sessions.duration",
+] as const;
 
 function SessionRow({
   slug,
@@ -186,14 +188,14 @@ function SessionRow({
   expanded,
   onToggle,
   formatWhen,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
   isAdmin: boolean;
   expanded: boolean;
   onToggle: () => void;
   formatWhen: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const subject = requestSubject(request);
   const duration = sessionDurationSeconds(request);
@@ -247,6 +249,7 @@ function SessionRow({
           <ResultTag request={request} compact />{" "}
           <AddressTag request={request} />
           <DiplomaTag request={request} />
+          <EmploymentTag request={request} />
           <DataRequestTag request={request} />
         </Table.Cell>
         <Table.Cell className="whitespace-nowrap">
@@ -388,6 +391,9 @@ function SessionRow({
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
                 )}
+                {request.employmentMode !== "off" && (
+                  <SessionEmployment request={request} />
+                )}
               </div>
               <SessionTimeline slug={slug} request={request} />
             </div>
@@ -395,7 +401,11 @@ function SessionRow({
               <DataRequestPanel slug={slug} request={request} />
             )}
             {isAdmin && !dataRequest && request.status === "needs_review" && (
-              <ReviewDecision slug={slug} requestId={request.id} />
+              <ReviewDecision
+                slug={slug}
+                requestId={request.id}
+                reviewReason={request.reviewReason}
+              />
             )}
           </td>
         </tr>
@@ -455,9 +465,9 @@ function SessionAddress({
 // approved one that requires them, that none came.
 function DiplomaTag({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (request.diplomas.length > 0) {
     return (
@@ -478,9 +488,9 @@ function DiplomaTag({
 // number duo.nl/diplomacontrole checks.
 function SessionDiplomas({
   request,
-}: {
+}: Readonly<{
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
@@ -526,15 +536,136 @@ function SessionDiplomas({
   );
 }
 
+// For an approved session that requires the Verzekeringsbericht, that none
+// was kept.
+function EmploymentTag({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    request.employmentMode === "required" &&
+    request.status === "approved" &&
+    request.employment === undefined &&
+    request.purgedAt === undefined
+  ) {
+    return <Tag tone="amber">{t("customers.sessions.employment.missing")}</Tag>;
+  }
+  return null;
+}
+
+// The employment relations UWV's Verzekeringsbericht lists, as of the date
+// UWV made it.
+function SessionEmployment({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const formatMonth = useMonthFormatter();
+  const e = request.employment;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("customers.sessions.employment.title")}
+      </h3>
+      {e === undefined ? (
+        <p className={HINT}>{t("customers.sessions.employment.none")}</p>
+      ) : (
+        <>
+          <p className="text-ink text-[13px]">
+            {t("customers.sessions.employment.statementDate", {
+              date: formatDate(e.statementDate),
+            })}
+          </p>
+          <p className="text-ink text-[13px] font-semibold">
+            {e.employed
+              ? t("customers.sessions.employment.employed")
+              : t("customers.sessions.employment.notEmployed")}
+          </p>
+          {e.relations.length === 0 ? (
+            <p className={HINT}>
+              {t("customers.sessions.employment.noRelations")}
+            </p>
+          ) : (
+            <ul className="border-line divide-y rounded-lg border">
+              {e.relations.map((r) => (
+                <li
+                  key={`${r.employer}-${r.payrollTaxNumber}-${r.contractForm}-${r.from}`}
+                  className="flex flex-col gap-0.5 px-3 py-2"
+                >
+                  <span className="text-ink flex items-center gap-2 text-[13px] font-semibold">
+                    {r.employer}
+                    {r.kind === "benefit" && (
+                      <Tag tone="amber">
+                        {t("customers.sessions.employment.benefit")}
+                      </Tag>
+                    )}
+                    {r.kind === "other_income" && (
+                      <Tag tone="amber">
+                        {t("customers.sessions.employment.otherIncome")}
+                      </Tag>
+                    )}
+                    {r.kind === "sick_via_employer" && (
+                      <Tag tone="blue">
+                        {t("customers.sessions.employment.sickViaEmployer")}
+                      </Tag>
+                    )}
+                  </span>
+                  <span className={HINT}>
+                    {[
+                      t("customers.sessions.employment.period", {
+                        from: formatMonth(r.from),
+                        to: formatMonth(r.to),
+                      }),
+                      r.contractForm,
+                    ]
+                      .filter((part) => part.trim() !== "")
+                      .join(" · ")}
+                  </span>
+                  <span className="text-muted font-mono text-[11.5px]">
+                    {t("customers.sessions.employment.payrollTaxNumber", {
+                      number: r.payrollTaxNumber,
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className={HINT}>{t("customers.sessions.employment.source")}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// The hint for a review the wallet opened itself, by its reviewReason.
+const REVIEW_REASON_HINT: Partial<
+  Record<
+    string,
+    | "customers.sessions.review.noCurrentEmployment"
+    | "customers.sessions.review.currentBenefit"
+    | "customers.sessions.review.currentOtherIncome"
+  >
+> = {
+  no_current_employment: "customers.sessions.review.noCurrentEmployment",
+  current_benefit: "customers.sessions.review.currentBenefit",
+  current_other_income: "customers.sessions.review.currentOtherIncome",
+};
+
 // An administrator's decision on a session under review: approve or reject,
 // always with a reason, which the audit log keeps.
 function ReviewDecision({
   slug,
   requestId,
-}: {
+  reviewReason,
+}: Readonly<{
   slug: string;
   requestId: string;
-}): React.JSX.Element {
+  reviewReason?: string;
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const decide = useDecideReviewMutation(slug, requestId);
   const [reason, setReason] = useState("");
@@ -555,7 +686,10 @@ function ReviewDecision({
         {t("customers.sessions.review.title")}
       </h3>
       <p className="text-ink-soft text-[13px]">
-        {t("customers.sessions.review.hint")}
+        {t(
+          REVIEW_REASON_HINT[reviewReason ?? ""] ??
+            "customers.sessions.review.hint",
+        )}
       </p>
       <label
         htmlFor={fieldId}
@@ -618,16 +752,16 @@ function ReviewDecision({
 // from the engine when an admin opens the row, audited each time.
 function IdentityRows({
   result,
-}: {
+}: Readonly<{
   result: UseQueryResult<ProofingResult, Error>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
-  const check = (value: string | undefined): string =>
-    value === undefined || value === ""
-      ? "—"
-      : isCheckOutcome(value)
-        ? t(`customers.sessions.identity.checks.${value}`)
-        : value;
+  const check = (value: string | undefined): string => {
+    if (value === undefined || value === "") return "—";
+    return isCheckOutcome(value)
+      ? t(`customers.sessions.identity.checks.${value}`)
+      : value;
+  };
 
   if (result.isPending) {
     return (
@@ -728,9 +862,9 @@ function IdentityRows({
 // is blurred until a member reveals it.
 function IdentityPhotos({
   result,
-}: {
+}: Readonly<{
   result: ProofingResult;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const photos = [
     { key: "photo", image: result.photo },
@@ -764,10 +898,10 @@ const REVEAL_ICON_SIZE = 16;
 function RevealablePhoto({
   image,
   label,
-}: {
+}: Readonly<{
   image: ProofingImage;
   label: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
   return (
@@ -815,10 +949,10 @@ function RevealablePhoto({
 function SessionTimeline({
   slug,
   request,
-}: {
+}: Readonly<{
   slug: string;
   request: ProofingRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
   const formatWhen = useWhenFormatter();
@@ -831,15 +965,18 @@ function SessionTimeline({
       >
         {t("customers.sessions.timeline")}
       </h3>
-      {events.isPending ? (
+      {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
-      ) : events.isError ? (
+      )}
+      {events.isError && (
         <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
-      ) : events.data.length === 0 ? (
+      )}
+      {events.isSuccess && events.data.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("customers.sessions.noEvents")}
         </p>
-      ) : (
+      )}
+      {events.isSuccess && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

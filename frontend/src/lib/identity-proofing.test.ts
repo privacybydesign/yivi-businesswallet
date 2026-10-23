@@ -18,6 +18,9 @@ import {
   proofingRejectionReason,
   diplomaRejectionReason,
   diplomaStepDone,
+  employmentRejectionReason,
+  employmentReview,
+  employmentStepDone,
   OUTCOME_ONLY,
   readsIdentity,
   sendableByMail,
@@ -425,6 +428,8 @@ describe("identity for data requests and diplomas", () => {
     expect(identityRequired("identity", "required")).toBe(true);
     expect(identityRequired("data_erasure", "off")).toBe(true);
     expect(identityRequired("data_access", "off")).toBe(true);
+    expect(identityRequired("identity", "off", "off")).toBe(false);
+    expect(identityRequired("identity", "off", "required")).toBe(true);
   });
 
   it("refuses a draft that drops the name and date of birth when needed", () => {
@@ -614,6 +619,9 @@ describe("proofingErrorMessage", () => {
     [404, "webhook_not_found", "webhookNotFound"],
     [409, "link_started", "linkStarted"],
     [422, "address_not_found", "addressNotFound"],
+    [422, "employment_needs_page", "employmentNeedsPage"],
+    [409, "employment_closed", "employmentClosed"],
+    [409, "employment_not_asked", "employmentNotAsked"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -979,12 +987,16 @@ describe("rejection codes mirror the backend", () => {
         /errCode\w+\s*=\s*"([A-Z][A-Z_]+)"/g,
       ),
   );
-  const wallet = ["proofing.go", "service.go", "data_request.go"].flatMap(
-    (file) =>
-      codes(
-        read(`proofing/${file}`),
-        /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
-      ),
+  const wallet = [
+    "proofing.go",
+    "service.go",
+    "data_request.go",
+    "employment.go",
+  ].flatMap((file) =>
+    codes(
+      read(`proofing/${file}`),
+      /\b[eE]rror[A-Z]\w*\s*=\s*"([A-Z][A-Z_]+)"/g,
+    ),
   );
   const backend = [...new Set([...engine, ...wallet])];
 
@@ -1049,6 +1061,9 @@ describe("sessionView", () => {
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
     diplomasDone: false,
+    employmentMode: "off" as const,
+    employmentUntil: undefined,
+    employmentDone: false,
     secondsLeft: 60,
   };
 
@@ -1132,6 +1147,42 @@ describe("sessionView", () => {
       sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
     ).toBe("outcome");
   });
+
+  it("asks for the Verzekeringsbericht after the diplomas", () => {
+    const settled = {
+      ...running,
+      status: "approved",
+      diplomaMode: "required" as const,
+      diplomasUntil: until,
+      employmentMode: "required" as const,
+      employmentUntil: until,
+    };
+    expect(sessionView(settled)).toBe("diplomas");
+    expect(sessionView({ ...settled, diplomasDone: true })).toBe("employment");
+    expect(
+      sessionView({ ...settled, diplomasDone: true, employmentDone: true }),
+    ).toBe("outcome");
+    expect(
+      sessionView({
+        ...settled,
+        diplomasDone: true,
+        employmentUntil: undefined,
+      }),
+    ).toBe("outcome");
+  });
+
+  it("does not ask for the Verzekeringsbericht while live or unasked", () => {
+    expect(
+      sessionView({
+        ...running,
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("running");
+    expect(
+      sessionView({ ...running, status: "approved", employmentUntil: until }),
+    ).toBe("outcome");
+  });
 });
 
 describe("address step", () => {
@@ -1146,6 +1197,7 @@ describe("address step", () => {
       step: "session",
       inAddress: false,
       inDiplomas: false,
+      inEmployment: false,
     } as const;
     expect(currentStage(at)).toBe("session");
     expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
@@ -1160,6 +1212,111 @@ describe("address step", () => {
     expect(
       sendableByMail({ addressMode: "required", diplomaMode: "off" }),
     ).toBe(false);
+  });
+});
+
+describe("employment step", () => {
+  it("adds the employment stage after the diplomas", () => {
+    expect(
+      verifyStages({
+        appChoice: false,
+        address: true,
+        diplomas: true,
+        employment: true,
+      }),
+    ).toEqual(["overview", "session", "address", "diplomas", "employment"]);
+    expect(
+      verifyStages({ appChoice: false, diplomas: false, employment: true }),
+    ).toEqual(["overview", "session", "employment"]);
+  });
+
+  it("is at the employment step while it is open", () => {
+    const at = {
+      step: "session",
+      inAddress: false,
+      inDiplomas: false,
+      inEmployment: false,
+    } as const;
+    expect(currentStage({ ...at, inEmployment: true })).toBe("employment");
+    expect(currentStage({ ...at, inDiplomas: true, inEmployment: true })).toBe(
+      "diplomas",
+    );
+  });
+
+  it("ends the step once a statement is kept or the time is up", () => {
+    const kept = {
+      statementDate: "2026-10-15",
+      employed: true,
+      relations: [],
+    };
+    expect(employmentStepDone(undefined, 60)).toBe(false);
+    expect(employmentStepDone(kept, 60)).toBe(true);
+    expect(employmentStepDone(undefined, 0)).toBe(true);
+  });
+
+  it("sends a statement without a job or with a benefit to review", () => {
+    const relation = (kind: string) => ({
+      kind,
+      employer: "",
+      payrollTaxNumber: "",
+      contractForm: "",
+      from: "",
+      to: "",
+    });
+    const statement = (employed: boolean, kinds: string[]) => ({
+      statementDate: "2026-10-15",
+      employed,
+      relations: kinds.map(relation),
+    });
+    expect(employmentReview(statement(true, ["employment"]))).toBeUndefined();
+    expect(
+      employmentReview(statement(true, ["sick_via_employer"])),
+    ).toBeUndefined();
+    expect(employmentReview(statement(true, ["employment", "benefit"]))).toBe(
+      "benefit",
+    );
+    expect(
+      employmentReview(statement(true, ["employment", "other_income"])),
+    ).toBe("otherIncome");
+    expect(
+      employmentReview(
+        statement(true, ["employment", "other_income", "benefit"]),
+      ),
+    ).toBe("benefit");
+    expect(employmentReview(statement(false, ["benefit"]))).toBe("noJob");
+  });
+
+  it("mails only a flow that asks for no Verzekeringsbericht", () => {
+    expect(sendableByMail({ employmentMode: "off" })).toBe(true);
+    expect(sendableByMail({ employmentMode: "required" })).toBe(false);
+    expect(
+      sendableByMail({
+        employmentMode: "required",
+        diplomaMode: "off",
+        addressMode: "off",
+      }),
+    ).toBe(false);
+  });
+
+  it("explains every refusal the backend gives, and shows another as is", () => {
+    const t = i18n.getFixedT("en");
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/employment/checker.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const reasons = [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(reasons).toHaveLength(4);
+    for (const reason of reasons) {
+      expect(employmentRejectionReason(reason, t)).not.toBe(reason);
+    }
+    expect(employmentRejectionReason("something_new", t)).toBe("something_new");
   });
 });
 
@@ -1223,7 +1380,7 @@ describe("diploma step", () => {
     const reasons = sources.flatMap((source) =>
       [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map((m) => m[1]),
     );
-    expect(reasons.length).toBe(4);
+    expect(reasons).toHaveLength(4);
     for (const reason of reasons) {
       expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
     }

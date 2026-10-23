@@ -360,18 +360,28 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
 	}
+	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
+		return "", err
+	}
+	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
+}
+
+// checkFlowIdentity is ErrFlowNotFound for a flow that is not one of the
+// org's, and ErrFlowNoIdentity when the setting is asked for but the flow does
+// not read the name and date of birth.
+func (s *Service) checkFlowIdentity(ctx context.Context, org Org, flowID string, asked bool) error {
 	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
 	if err != nil {
-		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+		return fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
 	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
 	if i < 0 {
-		return "", ErrFlowNotFound
+		return ErrFlowNotFound
 	}
-	if mode.asked() && !readsIdentity(flows[i]) {
-		return "", ErrFlowNoIdentity
+	if asked && !readsIdentity(flows[i]) {
+		return ErrFlowNoIdentity
 	}
-	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
+	return nil
 }
 
 // RequestDiplomas returns the extracts each request holds.
@@ -461,15 +471,9 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	if req.session == nil {
 		return nil, ErrDiplomasClosed
 	}
-	tenant := requestTenant(req)
-	identity, err := s.ips.SessionIdentity(ctx, tenant, req.session.ID, req.session.Token)
+	holder, err := s.sessionHolder(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: identity for diplomas request %s: %w", req.ID, err)
-	}
-	// The chip's DG11 name when it has one: the MRZ's cuts a long name off.
-	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
-	if identity.FullFamilyName != "" {
-		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+		return nil, err
 	}
 
 	verdicts := make([]DiplomaVerdict, 0, len(files))
@@ -481,6 +485,24 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 		verdicts = append(verdicts, verdict)
 	}
 	return verdicts, nil
+}
+
+// sessionHolder is the identity the engine approved for req, as a document's
+// holder is matched against it: the chip's DG11 name when it has one, as the
+// MRZ's cuts a long name off.
+func (s *Service) sessionHolder(ctx context.Context, req Request) (diploma.Person, error) {
+	if req.session == nil {
+		return diploma.Person{}, fmt.Errorf("proofing: request %s has no session to read the identity of", req.ID)
+	}
+	identity, err := s.ips.SessionIdentity(ctx, requestTenant(req), req.session.ID, req.session.Token)
+	if err != nil {
+		return diploma.Person{}, fmt.Errorf("proofing: identity for request %s: %w", req.ID, err)
+	}
+	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
+	if identity.FullFamilyName != "" {
+		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+	}
+	return holder, nil
 }
 
 func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (DiplomaVerdict, error) {

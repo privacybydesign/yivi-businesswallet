@@ -31,9 +31,9 @@ func TestRequiredDiplomasNeedIdentity(t *testing.T) {
 	}
 }
 
-// A data request flow, or one requiring diplomas, keeps reading the name and
-// birth date: an edit or an older version that drops dg1 is refused, as
-// setting the kind on such a flow is.
+// A data request flow, or one requiring diplomas or the Verzekeringsbericht,
+// keeps reading the name and birth date: an edit or an older version that
+// drops dg1 is refused, as setting the kind on such a flow is.
 func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	ctx := context.Background()
 	noIdentity := proofingprovider.FlowSpec{Name: "Delete my data", Steps: []string{"document_capture", "nfc_read"}, RequestedAttributes: []string{"dg2"}}
@@ -62,6 +62,12 @@ func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	d.svc.flowDiplomaSettings = &fakeFlowDiplomas{modes: map[string]DiplomaMode{chipFlow.ID: DiplomasRequired}}
 	if _, err := d.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
 		t.Errorf("diplomas-required flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
+	}
+
+	e := newFixture()
+	e.svc.flowEmploymentSettings = &fakeFlowEmployment{modes: map[string]EmploymentMode{chipFlow.ID: EmploymentRequired}}
+	if _, err := e.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
+		t.Errorf("employment-required flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
 	}
 }
 

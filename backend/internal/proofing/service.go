@@ -70,6 +70,7 @@ type requestStore interface {
 	Purge(ctx context.Context, req Request, endSession func(context.Context) error) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
+	RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
@@ -89,6 +90,10 @@ type requestStore interface {
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID, customerID *uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
+	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
+	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
+	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
+	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -162,10 +167,13 @@ type Service struct {
 	diplomaChecker      diplomaChecker
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
 	flowAddressSettings flowAddressStore
-	ips                 Provider
-	verifier            verifier
-	mailer              Mailer
-	now                 func() time.Time
+	// flowEmploymentSettings is each flow's EmploymentMode; nil asks for none.
+	flowEmploymentSettings flowEmploymentStore
+	employmentChecker      employmentChecker
+	ips                    Provider
+	verifier               verifier
+	mailer                 Mailer
+	now                    func() time.Time
 	// readChecks throttles the engine re-check of a single-request read.
 	readChecks *readThrottle
 	// hostedBaseURL is the public page a hosted link's token is appended to.
@@ -195,6 +203,8 @@ type Stores struct {
 	Diplomas     diplomaStore
 	// FlowAddresses holds each flow's AddressMode; nil asks for none.
 	FlowAddresses flowAddressStore
+	// FlowEmployment holds each flow's EmploymentMode; nil asks for none.
+	FlowEmployment flowEmploymentStore
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
@@ -206,8 +216,8 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		settings: stores.Settings, requests: stores.Requests, customers: stores.Customers, apiKeys: stores.APIKeys,
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		flowAddressSettings: stores.FlowAddresses,
-		ips:                 ips, verifier: verifier, mailer: mailer, now: time.Now,
+		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
+		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
 	}
 }
@@ -277,6 +287,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	employment, err := s.allFlowEmployment(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	kinds, err := s.allFlowKinds(ctx, org.ID)
 	if err != nil {
 		return nil, err
@@ -285,7 +299,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	for _, f := range flows {
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
-			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity,
+			Diplomas: DiplomasOff, Address: AddressOff, Employment: EmploymentOff, Kind: FlowIdentity,
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
@@ -295,6 +309,9 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 		}
 		if mode, ok := addresses[f.ID]; ok {
 			of.Address = mode
+		}
+		if mode, ok := employment[f.ID]; ok {
+			of.Employment = mode
 		}
 		if view == FlowsAll || of.Allowed {
 			out = append(out, of)
@@ -520,59 +537,24 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if err != nil {
 		return Sent{}, err
 	}
-	ttl := SessionTTL
-	if customer != nil && customer.Settings.SessionTTL != 0 {
-		ttl = customer.Settings.SessionTTL
-	}
 	tenant := orgTenant(org.ID)
-	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, customer)
+	plan, err := s.planRequest(ctx, org, tenant, in, subject, customer)
 	if err != nil {
 		return Sent{}, err
 	}
-	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
-	}
-	if subject.BirthDate != "" && !readsIdentity(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
-	}
-	photo, err := referencePhotoFor(flow, in.ReferencePhoto)
-	if err != nil {
+	if err := plan.checkChannel(in.Channel); err != nil {
 		return Sent{}, err
-	}
-	diplomas, err := s.flowDiplomas(ctx, org.ID, flow.ID)
-	if err != nil {
-		return Sent{}, err
-	}
-	address, err := s.flowAddress(ctx, org.ID, flow.ID)
-	if err != nil {
-		return Sent{}, err
-	}
-	kind, err := s.flowKind(ctx, org.ID, flow.ID)
-	if err != nil {
-		return Sent{}, err
-	}
-	// A data request is a customer's subject asking for their data; it
-	// collects no diplomas and no address.
-	if kind.dataRequest() {
-		if customer == nil {
-			return Sent{}, ErrDataFlowForMember
-		}
-		diplomas, address = DiplomasOff, AddressOff
-	}
-	if diplomas.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
-		return Sent{}, ErrDiplomasNeedPage
-	}
-	if address.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
-		return Sent{}, ErrAddressNeedsPage
 	}
 	if in.Channel == ChannelHosted {
-		return s.createHosted(ctx, org, by, in, subject, *customer, flow, diplomas, address, kind, photo)
+		return s.createHosted(ctx, org, by, in, subject, *customer, plan)
 	}
 
+	ttl := requestTTL(customer)
+	flow := plan.flow
 	id := uuid.New()
 	input := proofingprovider.SessionInput{
 		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
-		Language: string(in.Language), Retention: engineRetention(customer, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: photo,
+		Language: string(in.Language), Retention: engineRetention(customer, time.Duration(flow.RetentionOverrideSeconds)*time.Second), ReferencePhoto: plan.photo,
 	}
 	sess, err := s.ips.CreateSession(ctx, tenant, input)
 	if err != nil {
@@ -586,7 +568,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
-		Diplomas: diplomas, Address: address, FlowKind: kind,
+		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
 	})
 	if err != nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess, err)
@@ -609,7 +591,9 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	out.DeepLink, out.DeepLinkExpiresAt = sess.Claim.DeepLink, sess.Claim.ExpiresAt
 	if s.mailer != nil && !in.SkipMail && in.Channel == ChannelEmail {
-		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, subject, by, sess.Claim.DeepLink, ttl, in.Language))
+		err := s.mailer.SendIdentityProofingRequested(ctx, org.ID, s.proofingMail(ctx, org, customer, email.ProofingMail{
+			To: subject.Email, RequesterName: by.Name, DeepLink: sess.Claim.DeepLink, ValidFor: ttl, Locale: in.Language,
+		}))
 		if err != nil {
 			slog.WarnContext(ctx, "identity proofing: request e-mail not sent",
 				slog.String("org_id", org.ID.String()), slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -617,6 +601,97 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 		out.MailSent = err == nil
 	}
 	return out, nil
+}
+
+// requestTTL is how long a new request's session runs: the customer's
+// setting, else SessionTTL.
+func requestTTL(customer *Customer) time.Duration {
+	if customer != nil && customer.Settings.SessionTTL != 0 {
+		return customer.Settings.SessionTTL
+	}
+	return SessionTTL
+}
+
+// requestPlan is what a new request runs and collects, read from its flow at
+// send.
+type requestPlan struct {
+	flow       proofingprovider.Flow
+	diplomas   DiplomaMode
+	address    AddressMode
+	employment EmploymentMode
+	kind       FlowKind
+	photo      *proofingprovider.Image
+}
+
+// planRequest is the flow a new request runs, if it can run it as asked, and
+// what that flow collects.
+func (s *Service) planRequest(ctx context.Context, org Org, tenant proofingprovider.Tenant, in NewRequest, subject Subject,
+	customer *Customer,
+) (requestPlan, error) {
+	flow, err := s.sendableFlow(ctx, org, tenant, in.FlowID, customer)
+	if err != nil {
+		return requestPlan{}, err
+	}
+	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
+		return requestPlan{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+	}
+	if subject.BirthDate != "" && !readsIdentity(flow) {
+		return requestPlan{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
+	}
+	photo, err := referencePhotoFor(flow, in.ReferencePhoto)
+	if err != nil {
+		return requestPlan{}, err
+	}
+	plan, err := s.flowCollects(ctx, org.ID, flow.ID)
+	if err != nil {
+		return requestPlan{}, err
+	}
+	// A data request is a customer's subject asking for their data; it
+	// collects no diplomas, address or employment.
+	if plan.kind.dataRequest() {
+		if customer == nil {
+			return requestPlan{}, ErrDataFlowForMember
+		}
+		plan.diplomas, plan.address, plan.employment = DiplomasOff, AddressOff, EmploymentOff
+	}
+	plan.flow, plan.photo = flow, photo
+	return plan, nil
+}
+
+// flowCollects is what the org's flow collects beyond the identity, and its kind.
+func (s *Service) flowCollects(ctx context.Context, orgID uuid.UUID, flowID string) (requestPlan, error) {
+	var plan requestPlan
+	var err error
+	if plan.diplomas, err = s.flowDiplomas(ctx, orgID, flowID); err != nil {
+		return requestPlan{}, err
+	}
+	if plan.address, err = s.flowAddress(ctx, orgID, flowID); err != nil {
+		return requestPlan{}, err
+	}
+	if plan.employment, err = s.flowEmployment(ctx, orgID, flowID); err != nil {
+		return requestPlan{}, err
+	}
+	if plan.kind, err = s.flowKind(ctx, orgID, flowID); err != nil {
+		return requestPlan{}, err
+	}
+	return plan, nil
+}
+
+// checkChannel refuses a mailed request that collects more than the identity:
+// that is asked on a page.
+func (p requestPlan) checkChannel(channel Channel) error {
+	if channel == ChannelHosted || channel == ChannelOnScreen {
+		return nil
+	}
+	switch {
+	case p.diplomas.asked():
+		return ErrDiplomasNeedPage
+	case p.address.asked():
+		return ErrAddressNeedsPage
+	case p.employment.asked():
+		return ErrEmploymentNeedsPage
+	}
+	return nil
 }
 
 // discardSession erases sess, an engine session no request holds (its
@@ -638,8 +713,9 @@ func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Te
 // the subject starts one from the page (StartHosted) until hostedLinkTTL. Its
 // redirect must be on one of the customer's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
-	customer Customer, flow proofingprovider.Flow, diplomas DiplomaMode, address AddressMode, kind FlowKind, photo *proofingprovider.Image,
+	customer Customer, plan requestPlan,
 ) (Sent, error) {
+	flow := plan.flow
 	if s.hostedBaseURL == "" {
 		return Sent{}, errors.New("proofing: no hosted page URL configured")
 	}
@@ -669,7 +745,8 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
 		LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
-		Diplomas: diplomas, Address: address, FlowKind: kind, ReferencePhoto: photo,
+		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
+		ReferencePhoto: plan.photo,
 	})
 	if err != nil {
 		return Sent{}, err
@@ -807,7 +884,7 @@ func expectedBirthDate(raw, name string, now time.Time) (string, error) {
 
 // identityRequired reports whether flow flowID must read the name and date of
 // birth: a data request's other sessions are found by them, and a required
-// diploma's holder is checked against them.
+// diploma's or Verzekeringsbericht's holder is checked against them.
 func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID string) (bool, error) {
 	kind, err := s.flowKind(ctx, orgID, flowID)
 	if err != nil {
@@ -820,7 +897,11 @@ func (s *Service) identityRequired(ctx context.Context, orgID uuid.UUID, flowID 
 	if err != nil {
 		return false, err
 	}
-	return mode.asked(), nil
+	employment, err := s.flowEmployment(ctx, orgID, flowID)
+	if err != nil {
+		return false, err
+	}
+	return mode.asked() || employment.asked(), nil
 }
 
 // readsIdentity reports whether flow f's result carries the holder's name and
@@ -840,12 +921,8 @@ func releasesIdentity(attrs []string) bool {
 // customer's subject's is signed with and styled as the customer, with its
 // support contact and privacy statement. A logo that cannot be read is left
 // out (the wordmark shows): a cosmetic loss must not block the send.
-func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer, subject Subject, by Requester,
-	deepLink string, ttl time.Duration, locale email.Locale,
-) email.ProofingMail {
-	m := email.ProofingMail{
-		To: subject.Email, OrgName: org.Name, RequesterName: by.Name, DeepLink: deepLink, ValidFor: ttl, Locale: locale,
-	}
+func (s *Service) proofingMail(ctx context.Context, org Org, customer *Customer, m email.ProofingMail) email.ProofingMail {
+	m.OrgName = org.Name
 	if customer == nil {
 		return m
 	}
@@ -929,6 +1006,47 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	// What the engine reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
+	// A review the wallet opened after the engine approved, its decision, and
+	// a rejection for a missing Verzekeringsbericht are the wallet's alone:
+	// the engine still reports the approval.
+	if req.ReviewReason != "" || req.ErrorCode == ErrorEmploymentNotProvided {
+		return req, nil
+	}
+	req, res, ok, err := s.readSession(ctx, tenant, req)
+	if !ok || err != nil {
+		return req, err
+	}
+	next, decided := engineDecisions[res.Status]
+	if !decided {
+		return s.followSession(ctx, req, res)
+	}
+	if next, res, err = s.judgeApproval(ctx, tenant, req, next, res); err != nil {
+		return req, err
+	}
+	if req.FlowKind.dataRequest() {
+		var release func()
+		var done *Request
+		if next, release, done, err = s.routeDataRequest(ctx, tenant, req, next); done != nil {
+			return *done, err
+		}
+		if release != nil {
+			defer release()
+		}
+	}
+	if next == req.Status {
+		return req, nil
+	}
+	req, err = s.recordDecision(ctx, tenant, req, next, res)
+	if err != nil || next != StatusNeedsReview {
+		return req, err
+	}
+	return s.settleReview(ctx, req)
+}
+
+// readSession reads the request's engine session status. ok is false when the
+// reconcile ends with req as it is. A session opened for longer than it was
+// created with moves the stored cap along.
+func (s *Service) readSession(ctx context.Context, tenant proofingprovider.Tenant, req Request) (Request, proofingprovider.Result, bool, error) {
 	sess := req.session
 	res, err := s.ips.SessionStatus(ctx, tenant, sess.ID, sess.Token)
 	if errors.Is(err, proofingprovider.ErrNotFound) {
@@ -936,7 +1054,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		// the engine's copy: the person was proven, and the review is the
 		// wallet's own.
 		if req.FlowKind.dataRequest() && req.Status.Settled() {
-			return req, nil
+			return req, res, false, nil
 		}
 		// The engine purged or erased the session: treat it like a lapsed one.
 		res, err = proofingprovider.Result{Status: proofingprovider.StatusExpired}, nil
@@ -944,7 +1062,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	if err != nil {
 		slog.WarnContext(ctx, "identity proofing: reconcile failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return req, err
+		return req, res, false, err
 	}
 	// Opening a session gives it more time in the engine than it was created
 	// with: the stored cap follows, or the request would read expired while
@@ -953,21 +1071,27 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		if err := s.requests.ExtendSession(ctx, req, sess.ID, res.ExpiresAt); err != nil {
 			slog.WarnContext(ctx, "identity proofing: extend session failed",
 				slog.String("request_id", req.ID.String()), slog.Any("error", err))
-			return req, err
+			return req, res, false, err
 		}
 		extended := *sess
 		extended.ExpiresAt = res.ExpiresAt
-		req.session, sess = &extended, &extended
+		req.session = &extended
 	}
+	return req, res, true, nil
+}
 
-	var next Status
+// engineDecisions is the request status each of the engine's decisions lands as.
+var engineDecisions = map[proofingprovider.Status]Status{
+	proofingprovider.StatusApproved:    StatusApproved,
+	proofingprovider.StatusRejected:    StatusRejected,
+	proofingprovider.StatusNeedsReview: StatusNeedsReview,
+}
+
+// followSession records a session the engine has not decided: started, or
+// ended undecided.
+func (s *Service) followSession(ctx context.Context, req Request, res proofingprovider.Result) (Request, error) {
+	sess := req.session
 	switch res.Status {
-	case proofingprovider.StatusApproved:
-		next = StatusApproved
-	case proofingprovider.StatusRejected:
-		next = StatusRejected
-	case proofingprovider.StatusNeedsReview:
-		next = StatusNeedsReview
 	case proofingprovider.StatusOpened, proofingprovider.StatusInProgress:
 		if req.Status != StatusPending {
 			return req, nil
@@ -1000,62 +1124,95 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	default:
 		return req, nil
 	}
-	if next == StatusApproved {
-		next, res = enforceAssurance(req, res)
+}
+
+// judgeApproval holds an approval to the request's assurance level and, when
+// it expects a subject, to that person.
+func (s *Service) judgeApproval(ctx context.Context, tenant proofingprovider.Tenant, req Request, next Status,
+	res proofingprovider.Result,
+) (Status, proofingprovider.Result, error) {
+	if next != StatusApproved {
+		return next, res, nil
 	}
-	if next == StatusApproved && req.ExpectsSubject {
-		if next, res, err = s.matchSubject(ctx, tenant, req, res); err != nil {
-			slog.WarnContext(ctx, "identity proofing: read the identity to match failed",
-				slog.String("request_id", req.ID.String()), slog.Any("error", err))
-			return req, err
-		}
+	if next, res = enforceAssurance(req, res); next != StatusApproved || !req.ExpectsSubject {
+		return next, res, nil
 	}
-	if req.FlowKind.dataRequest() {
-		// A data request's decision is the wallet reviewer's alone, whatever
-		// the engine reports after it.
-		if req.Status == StatusApproved || req.Status == StatusRejected {
-			return req, nil
-		}
-		// A proven person's data request goes to review with the customer's
-		// sessions of that person, found once.
-		if next == StatusApproved || next == StatusNeedsReview {
-			if req.Status != StatusNeedsReview && s.dataRequests != nil {
-				// One reconcile matches at a time, across replicas: the hosted
-				// page's status polls would otherwise each search while the
-				// first is still at it.
-				release, ok, err := s.dataRequests.TryLockMatching(ctx, req.ID)
-				if err != nil {
-					slog.WarnContext(ctx, "identity proofing: lock data request matching failed",
-						slog.String("request_id", req.ID.String()), slog.Any("error", err))
-					return req, err
-				}
-				if !ok {
-					return req, nil
-				}
-				defer release()
-				// Another reconcile may have finished between this one's read
-				// and the lock.
-				fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
-				if err != nil {
-					slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
-						slog.String("request_id", req.ID.String()), slog.Any("error", err))
-					return req, err
-				}
-				if fresh.Status != req.Status {
-					return fresh, nil
-				}
-				if err := s.findDataMatches(ctx, tenant, req); err != nil {
-					slog.WarnContext(ctx, "identity proofing: find data request matches failed",
-						slog.String("request_id", req.ID.String()), slog.Any("error", err))
-					return req, err
-				}
-			}
-			next = StatusNeedsReview
-		}
+	next, res, err := s.matchSubject(ctx, tenant, req, res)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: read the identity to match failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 	}
-	if next == req.Status {
-		return req, nil
+	return next, res, err
+}
+
+// routeDataRequest is where a data request's outcome goes: a proven person's
+// goes to review with the customer's sessions of that person, found once. done
+// is set, with what the reconcile returns, when it ends here; release, when
+// set, frees the matching lock once the outcome is recorded.
+func (s *Service) routeDataRequest(ctx context.Context, tenant proofingprovider.Tenant, req Request, next Status) (
+	routed Status, release func(), done *Request, err error,
+) {
+	// A data request's decision is the wallet reviewer's alone, whatever
+	// the engine reports after it.
+	if req.Status == StatusApproved || req.Status == StatusRejected {
+		return next, nil, &req, nil
 	}
+	if next != StatusApproved && next != StatusNeedsReview {
+		return next, nil, nil, nil
+	}
+	if req.Status == StatusNeedsReview || s.dataRequests == nil {
+		return StatusNeedsReview, nil, nil, nil
+	}
+	release, done, err = s.matchDataRequest(ctx, tenant, req)
+	return StatusNeedsReview, release, done, err
+}
+
+// matchDataRequest finds a data request's matches under its matching lock,
+// which release frees. done is set, with what the reconcile returns, when it
+// ends here, and then no lock is held.
+func (s *Service) matchDataRequest(ctx context.Context, tenant proofingprovider.Tenant, req Request) (
+	release func(), done *Request, err error,
+) {
+	// One reconcile matches at a time, across replicas: the hosted
+	// page's status polls would otherwise each search while the
+	// first is still at it.
+	release, ok, err := s.dataRequests.TryLockMatching(ctx, req.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: lock data request matching failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return nil, &req, err
+	}
+	if !ok {
+		return nil, &req, nil
+	}
+	// Another reconcile may have finished between this one's read
+	// and the lock.
+	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return nil, &req, err
+	}
+	if fresh.Status != req.Status {
+		release()
+		return nil, &fresh, nil
+	}
+	if err := s.findDataMatches(ctx, tenant, req); err != nil {
+		release()
+		slog.WarnContext(ctx, "identity proofing: find data request matches failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return nil, &req, err
+	}
+	return release, nil, nil
+}
+
+// recordDecision records the engine's decision next on req and returns req
+// as it now reads; on failure, req as it was.
+func (s *Service) recordDecision(ctx context.Context, tenant proofingprovider.Tenant, req Request, next Status,
+	res proofingprovider.Result,
+) (Request, error) {
+	sess := req.session
 	if err := s.recordIdentityKey(ctx, tenant, req, sess, next, res); err != nil {
 		slog.WarnContext(ctx, "identity proofing: record the identity match key failed",
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
@@ -1093,9 +1250,12 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		completedAt = *res.CompletedAt
 	}
 	req.CompletedAt = &completedAt
-	if next != StatusNeedsReview {
-		return req, nil
-	}
+	return req, nil
+}
+
+// settleReview decides at once a review its org cannot: a paused org's is
+// rejected, an erasure goes as its customer set.
+func (s *Service) settleReview(ctx context.Context, req Request) (Request, error) {
 	// A paused org can decide nothing, so a review it reaches is rejected at once.
 	decided, err := s.rejectIfPaused(ctx, req)
 	if err != nil {
@@ -1203,12 +1363,13 @@ func (s *Service) CustomerFlows(ctx context.Context, org Org, id uuid.UUID, view
 	out := make([]CustomerFlow, 0, len(flows))
 	for _, f := range flows {
 		cf := CustomerFlow{
-			Flow:     f.Flow,
-			Assigned: slices.Contains(customer.Flows.FlowIDs, f.ID) && customerCompletable(f.Flow),
-			Default:  f.ID == customer.Flows.DefaultFlowID,
-			Diplomas: f.Diplomas,
-			Address:  f.Address,
-			Kind:     f.Kind,
+			Flow:       f.Flow,
+			Assigned:   slices.Contains(customer.Flows.FlowIDs, f.ID) && customerCompletable(f.Flow),
+			Default:    f.ID == customer.Flows.DefaultFlowID,
+			Diplomas:   f.Diplomas,
+			Address:    f.Address,
+			Employment: f.Employment,
+			Kind:       f.Kind,
 			RetentionDays: subjectRetentionDays(customer,
 				time.Duration(f.RetentionOverrideSeconds)*time.Second),
 		}
@@ -1485,7 +1646,11 @@ func (s *Service) lapseReview(ctx context.Context, req Request) error {
 	if req.Status != StatusNeedsReview || req.session == nil {
 		return nil
 	}
-	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
+	record := s.requests.RecordOutcome
+	if req.ReviewReason != "" {
+		record = s.requests.RecordWalletOutcome
+	}
+	return record(ctx, req, req.session.ID, StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
 }
 

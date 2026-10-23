@@ -111,6 +111,25 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 			t.Errorf("odixus onboarding address = %q, %v; want required", mode, err)
 		}
 	}
+
+	unibetID := orgsBySlug[unibetSlug].ID
+	unibetFlows, err := flow.NewPostgresStore(pool).List(ctx, unibetID.String())
+	if err != nil {
+		t.Fatalf("unibet flows: %v", err)
+	}
+	seen := false
+	for _, f := range unibetFlows {
+		if f.Name != flowUnibetOnboarding {
+			continue
+		}
+		seen = true
+		if mode, err := proofing.NewFlowEmploymentStore(pool, audit.NopRecorder{}).Get(ctx, unibetID, f.ID); err != nil || mode != proofing.EmploymentRequired {
+			t.Errorf("unibet onboarding employment = %q, %v; want required", mode, err)
+		}
+	}
+	if !seen {
+		t.Errorf("unibet has no %q flow", flowUnibetOnboarding)
+	}
 }
 
 // The staging proofing demo seeds the demo proofing orgs with their flows and

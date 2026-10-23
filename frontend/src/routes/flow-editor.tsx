@@ -6,12 +6,14 @@ import {
   useEditProofingFlowMutation,
   useSaveFlowDiplomasMutation,
   useSaveFlowAddressMutation,
+  useSaveFlowEmploymentMutation,
   useSaveFlowKindMutation,
 } from "../api/identity-proofing.queries";
 import { FLOW_KINDS, isDataRequest } from "../api/identity-proofing";
 import type {
   AddressMode,
   DiplomaMode,
+  EmploymentMode,
   FlowKind,
   ProofingFlow,
 } from "../api/identity-proofing";
@@ -51,6 +53,27 @@ const SELECT_CLASS =
 
 export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
 
+function offForDataRequest<T extends string>(
+  kind: FlowKind,
+  mode: T,
+): T | "off" {
+  return isDataRequest(kind) ? "off" : mode;
+}
+
+// Saves a setting that changed, then runs next; an unchanged one goes
+// straight to next.
+function saveIfChanged(
+  changed: boolean,
+  save: (onSuccess: () => void) => void,
+  next: () => void,
+): void {
+  if (!changed) {
+    next();
+    return;
+  }
+  save(next);
+}
+
 // The flow editor, here and on a customer's Flows tab: onDone closes it (after
 // a save or a cancel), onSaved gets the saved flow first.
 export function FlowEditor({
@@ -59,18 +82,18 @@ export function FlowEditor({
   onDone,
   onSaved,
   note,
-}: {
+}: Readonly<{
   slug: string;
   mode: EditorMode;
   onDone: () => void;
   onSaved?: (flow: ProofingFlow) => void;
   // Shown under the heading, e.g. that a shared flow changes for everyone.
   note?: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const editing = mode.kind === "edit" ? mode.flow : null;
   // The flow this editor already saved, with the spec it was saved with. When
-  // a follow-up save (diplomas, address, kind) fails, a retry must not save the flow
+  // a follow-up save (diplomas, address, employment, kind) fails, a retry must not save the flow
   // again: a create would make a second flow, an edit another version.
   const [saved, setSaved] = useState<{
     flow: ProofingFlow;
@@ -89,6 +112,10 @@ export function FlowEditor({
   const saveAddress = useSaveFlowAddressMutation(slug);
   const savedAddress: AddressMode = editing?.addressMode ?? "off";
   const [addressMode, setAddressMode] = useState<AddressMode>(savedAddress);
+  const saveEmployment = useSaveFlowEmploymentMutation(slug);
+  const savedEmployment: EmploymentMode = editing?.employmentMode ?? "off";
+  const [employmentMode, setEmploymentMode] =
+    useState<EmploymentMode>(savedEmployment);
   const saveKind = useSaveFlowKindMutation(slug);
   const savedKind: FlowKind = editing?.kind ?? "identity";
   const [flowKind, setFlowKind] = useState<FlowKind>(savedKind);
@@ -96,10 +123,14 @@ export function FlowEditor({
     editing ? draftFromFlow(editing) : emptyFlowDraft(),
   );
   const [touched, setTouched] = useState(false);
-  // A data request asks for no address and no diplomas.
-  const address: AddressMode = isDataRequest(flowKind) ? "off" : addressMode;
-  const diplomas: DiplomaMode = isDataRequest(flowKind) ? "off" : diplomaMode;
-  const requiresIdentity = identityRequired(flowKind, diplomas);
+  // A data request asks for no address, no diplomas and no employment.
+  const address: AddressMode = offForDataRequest(flowKind, addressMode);
+  const diplomas: DiplomaMode = offForDataRequest(flowKind, diplomaMode);
+  const employment: EmploymentMode = offForDataRequest(
+    flowKind,
+    employmentMode,
+  );
+  const requiresIdentity = identityRequired(flowKind, diplomas, employment);
   const invalid = flowDraftError(draft, requiresIdentity);
   const steps = draftSteps(draft);
 
@@ -107,13 +138,24 @@ export function FlowEditor({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  // Choosing a data request or required diplomas ticks Document data, which
-  // then stays ticked (identityRequired), and unticks the age check, which
-  // withholds the date of birth they need.
-  function chooseKindAndDiplomas(kind: FlowKind, mode: DiplomaMode): void {
+  // Choosing a data request, required diplomas or required employment ticks
+  // Document data, which then stays ticked (identityRequired), and unticks the
+  // age check, which withholds the date of birth they need.
+  function chooseKindAndUploads(
+    kind: FlowKind,
+    mode: DiplomaMode,
+    employmentChoice: EmploymentMode = employmentMode,
+  ): void {
     setFlowKind(kind);
     setDiplomaMode(mode);
-    if (identityRequired(kind, isDataRequest(kind) ? "off" : mode)) {
+    setEmploymentMode(employmentChoice);
+    if (
+      identityRequired(
+        kind,
+        offForDataRequest(kind, mode),
+        offForDataRequest(kind, employmentChoice),
+      )
+    ) {
       setDraft((current) => ({
         ...current,
         requestedAttributes: new Set([
@@ -136,7 +178,7 @@ export function FlowEditor({
     update({ requestedAttributes: next });
   }
 
-  function submit(event: React.FormEvent): void {
+  function submit(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setTouched(true);
     if (invalid !== null) {
@@ -148,29 +190,35 @@ export function FlowEditor({
       onSaved?.(flow);
       onDone();
     };
-    // The diploma mode, the address, then the kind, each only when it changed.
+    // The diploma mode, the address, the employment, then the kind, each only
+    // when it changed.
     const saveSettings = (flowId: string, then: () => void): void => {
-      const kindThen = (): void => {
-        if (flowKind === savedKind) {
-          then();
-          return;
-        }
-        saveKind.mutate({ flowId, kind: flowKind }, { onSuccess: then });
-      };
-      const addressThen = (): void => {
-        if (address === savedAddress) {
-          kindThen();
-          return;
-        }
-        saveAddress.mutate({ flowId, mode: address }, { onSuccess: kindThen });
-      };
-      if (diplomas === savedDiplomas) {
-        addressThen();
-        return;
-      }
-      saveDiplomas.mutate(
-        { flowId, mode: diplomas },
-        { onSuccess: addressThen },
+      const kindThen = (): void =>
+        saveIfChanged(
+          flowKind !== savedKind,
+          (onSuccess) =>
+            saveKind.mutate({ flowId, kind: flowKind }, { onSuccess }),
+          then,
+        );
+      const employmentThen = (): void =>
+        saveIfChanged(
+          employment !== savedEmployment,
+          (onSuccess) =>
+            saveEmployment.mutate({ flowId, mode: employment }, { onSuccess }),
+          kindThen,
+        );
+      const addressThen = (): void =>
+        saveIfChanged(
+          address !== savedAddress,
+          (onSuccess) =>
+            saveAddress.mutate({ flowId, mode: address }, { onSuccess }),
+          employmentThen,
+        );
+      saveIfChanged(
+        diplomas !== savedDiplomas,
+        (onSuccess) =>
+          saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess }),
+        addressThen,
       );
     };
     const saveSpec = (then: (flow: ProofingFlow) => void): void => {
@@ -185,7 +233,7 @@ export function FlowEditor({
         },
       });
     };
-    // The service holds a data request or required-diplomas flow to reading
+    // The service holds a data request, required-diplomas or required-employment flow to reading
     // the name and date of birth, in each version and setting. Settings that
     // lift that go before a version that may drop it; otherwise the version
     // goes first, and the settings that need it check the version that reads
@@ -248,7 +296,7 @@ export function FlowEditor({
             className={SELECT_CLASS}
             value={flowKind}
             onChange={(event) =>
-              chooseKindAndDiplomas(event.target.value as FlowKind, diplomaMode)
+              chooseKindAndUploads(event.target.value as FlowKind, diplomaMode)
             }
           >
             {FLOW_KINDS.map((kind) => (
@@ -309,7 +357,21 @@ export function FlowEditor({
             label={t("identityProofingFlows.steps.diploma_upload")}
             hint={t("identityProofingFlows.new.diplomaUploadHint")}
             onChange={(checked) =>
-              chooseKindAndDiplomas(flowKind, checked ? "required" : "off")
+              chooseKindAndUploads(flowKind, checked ? "required" : "off")
+            }
+          />
+          <Checkbox
+            id="proofing-flow-step-employment"
+            checked={employmentMode !== "off" && !isDataRequest(flowKind)}
+            disabled={isDataRequest(flowKind)}
+            label={t("identityProofingFlows.steps.employment_upload")}
+            hint={t("identityProofingFlows.new.employmentUploadHint")}
+            onChange={(checked) =>
+              chooseKindAndUploads(
+                flowKind,
+                diplomaMode,
+                checked ? "required" : "off",
+              )
             }
           />
           {saveAddress.isError && (
@@ -320,6 +382,11 @@ export function FlowEditor({
           {saveDiplomas.isError && (
             <p className={ERROR}>
               {proofingErrorMessage(saveDiplomas.error, t)}
+            </p>
+          )}
+          {saveEmployment.isError && (
+            <p className={ERROR}>
+              {proofingErrorMessage(saveEmployment.error, t)}
             </p>
           )}
           <p className={HINT}>
@@ -335,6 +402,9 @@ export function FlowEditor({
                     ...(diplomas === "off"
                       ? []
                       : [t("identityProofingFlows.steps.diploma_upload")]),
+                    ...(employment === "off"
+                      ? []
+                      : [t("identityProofingFlows.steps.employment_upload")]),
                   ].join(" → "),
                 })
               : t("identityProofingFlows.new.errors.steps")}
@@ -655,13 +725,13 @@ function Field({
   hint,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
   error?: string | null;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex max-w-md flex-col gap-1.5">
       <label htmlFor={id} className={LABEL}>
@@ -683,13 +753,13 @@ function TristateField({
   hint,
   value,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
   value: Tristate;
   onChange: (value: Tristate) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Field id={id} label={label} hint={hint}>
@@ -718,14 +788,14 @@ function Checkbox({
   label,
   hint,
   onChange,
-}: {
+}: Readonly<{
   id: string;
   checked: boolean;
   disabled?: boolean;
   label: string;
   hint?: string;
   onChange: (checked: boolean) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-start gap-2.5">
       <input

@@ -95,6 +95,10 @@ const (
 	// revocation online; off, only the revocation information embedded in the
 	// extract counts. Either way an unchecked certificate fails.
 	envDiplomaOCSP = "DIPLOMA_OCSP"
+	// A UWV Verzekeringsbericht (identity proofing): UWV's seal on an uploaded
+	// statement is checked against the diploma trust anchors, its revocation
+	// always online (the statement embeds none).
+	envEmploymentValidatorProvider = "EMPLOYMENT_VALIDATOR_PROVIDER"
 
 	// Identity proofing: the wallet's own proofing engine
 	// (internal/proofingengine) runs document + face verification for an org.
@@ -329,6 +333,12 @@ const (
 	DiplomaTrustPinned              = "pinned"
 	defaultDiplomaTrustSource       = DiplomaTrustEUTL
 
+	// ProviderUWV checks a Verzekeringsbericht's UWV seal for real, and is the
+	// default; ProviderStub accepts every statement's seal and runs only when
+	// set explicitly (the dev stack sets it, as for diplomas).
+	ProviderUWV                        = "uwv"
+	defaultEmploymentValidatorProvider = ProviderUWV
+
 	// ProviderEngine runs identity proofing in the wallet's own engine (the
 	// default); ProviderStub is an in-memory stand-in whose sessions no phone
 	// can reach.
@@ -444,6 +454,10 @@ type Config struct {
 	// DiplomaOCSP enables the online revocation check of DUO's signing
 	// certificate (envDiplomaOCSP).
 	DiplomaOCSP bool
+
+	// EmploymentValidatorProvider is how a Verzekeringsbericht's seal is
+	// checked (envEmploymentValidatorProvider).
+	EmploymentValidatorProvider string
 
 	IdentityProofingProvider string
 	// IdentityProofingPublicURL is the origin in every vcmrtd deep link.
@@ -563,236 +577,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("%s is required", envDatabaseURL)
 	}
 
-	cookieSecure := strings.EqualFold(envOrDefault(envSessionCookieSecure, defaultSessionCookieSecure), "true")
-
-	verifierURL := envOrDefault(envEudiVerifierURL, defaultEudiVerifierURL)
-	if cookieSecure && os.Getenv(envEudiVerifierURL) == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
-	}
-
-	intendedUseID := os.Getenv(envEudiIntendedUseID)
-	registrationCertificate := os.Getenv(envEudiRegistrationCertificate)
-	if intendedUseID != "" && registrationCertificate != "" {
-		return Config{}, fmt.Errorf("config: %s and %s are mutually exclusive", envEudiIntendedUseID, envEudiRegistrationCertificate)
-	}
-	if intendedUseID == "" && registrationCertificate == "" && verifierURL == defaultEudiVerifierURL {
-		intendedUseID = defaultEudiIntendedUseID
-	}
-
-	// A typo would otherwise only surface when a user logs in: the boot probe's
-	// presentation request does not check the vcts it names.
-	credentialScheme := os.Getenv(envEudiCredentialScheme)
-	if credentialScheme != "" && !slices.Contains(eudiCredentialSchemes, credentialScheme) {
-		return Config{}, fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), credentialScheme)
-	}
-
-	sessionTTL, err := parseDuration(envSessionTTL, defaultSessionTTL)
-	if err != nil {
-		return Config{}, err
-	}
-
-	sessionPruneEvery, err := parseDuration(envSessionPruneEvery, defaultSessionPruneEvery)
-	if err != nil {
-		return Config{}, err
-	}
-
-	presentationTTL, err := parseDuration(envPresentationTTL, defaultPresentationTTL)
-	if err != nil {
-		return Config{}, err
-	}
-
-	openid4vpTransactionTTL, err := parseDuration(envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL)
-	if err != nil {
-		return Config{}, err
-	}
-	openid4vpOrgRequestTTL, err := parseDuration(envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL)
-	if err != nil {
-		return Config{}, err
-	}
-	requesterCACert, requesterCAKey := os.Getenv(envOpenID4VPRequesterCACert), os.Getenv(envOpenID4VPRequesterCAKey)
-	if (requesterCACert == "") != (requesterCAKey == "") {
-		return Config{}, fmt.Errorf("config: %s and %s must be set together", envOpenID4VPRequesterCACert, envOpenID4VPRequesterCAKey)
-	}
-
-	// "0" (or "0s") disables the background inbound poller. With the webhook
-	// also unconfigured no mechanism delivers inbound messages automatically,
-	// so that combination fails the boot rather than degrading to manual-only
-	// console polls.
-	qerdsInboundPollInterval, err := parseDuration(envQerdsInboundPollInterval, defaultQerdsInboundPollInterval)
-	if err != nil {
-		return Config{}, err
-	}
-	qerdsWebhookSecret := os.Getenv(envQerdsWebhookSecret)
-	if qerdsInboundPollInterval <= 0 && qerdsWebhookSecret == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s disables the background poller, or no inbound QERDS message is delivered automatically", envQerdsWebhookSecret, envQerdsInboundPollInterval)
-	}
-
-	qerdsProvider := envOrDefault(envQerdsProvider, defaultQerdsProvider)
-	qerdsProviderURL := os.Getenv(envQerdsProviderURL)
-	if qerdsProvider != ProviderStub && qerdsProviderURL == "" {
-		return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
-	}
-
-	vogValidatorProvider := envOrDefault(envVogValidatorProvider, defaultVogValidatorProvider)
-	if vogValidatorProvider != ProviderStub && vogValidatorProvider != ProviderValidatieNL {
-		return Config{}, fmt.Errorf("config: %s must be %q or %q", envVogValidatorProvider, ProviderStub, ProviderValidatieNL)
-	}
-	vogValidatorURL := envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
-
-	diplomaValidatorProvider := envOrDefault(envDiplomaValidatorProvider, defaultDiplomaValidatorProvider)
-	if diplomaValidatorProvider != ProviderStub && diplomaValidatorProvider != ProviderDUO {
-		return Config{}, fmt.Errorf("config: %s must be %q or %q", envDiplomaValidatorProvider, ProviderStub, ProviderDUO)
-	}
-	diplomaTrustSource := envOrDefault(envDiplomaTrustSource, defaultDiplomaTrustSource)
-	if diplomaTrustSource != DiplomaTrustEUTL && diplomaTrustSource != DiplomaTrustPinned {
-		return Config{}, fmt.Errorf("config: %s must be %q or %q", envDiplomaTrustSource, DiplomaTrustEUTL, DiplomaTrustPinned)
-	}
-
-	identityProofingProvider := envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
-	if identityProofingProvider != ProviderEngine && identityProofingProvider != ProviderStub {
-		return Config{}, fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderEngine, ProviderStub)
-	}
-	regulaFaceAPIURL := os.Getenv(envRegulaFaceAPIURL)
-	regulaFaceAPIPublicURL := envOrDefault(envRegulaFaceAPIPublicURL, regulaFaceAPIURL)
-	for key, raw := range map[string]string{envRegulaFaceAPIURL: regulaFaceAPIURL, envRegulaFaceAPIPublicURL: regulaFaceAPIPublicURL} {
-		if raw == "" {
-			continue
-		}
-		if err := requireAbsoluteHTTPURL(key, raw); err != nil {
-			return Config{}, err
-		}
-	}
-	var regulaFaceMatchThreshold float64
-	if raw := os.Getenv(envRegulaFaceMatchThreshold); raw != "" {
-		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil || v <= 0 || v > 1 {
-			return Config{}, fmt.Errorf("config: %s must be a number in (0, 1]", envRegulaFaceMatchThreshold)
-		}
-		regulaFaceMatchThreshold = v
-	}
-	identityProofingStubOutcome := os.Getenv(envIdentityProofingStubOutcome)
-	switch identityProofingStubOutcome {
-	case "", "approved", "rejected", "needs_review":
-	default:
-		return Config{}, fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
-	}
-	if identityProofingStubOutcome != "" && identityProofingProvider != ProviderStub {
-		return Config{}, fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
-	}
-
-	attestationIssuer := envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
-	attestationIssuerURL := os.Getenv(envAttestationIssuerURL)
-	attestationIssuerInstance := os.Getenv(envAttestationIssuerInstance)
-	if attestationIssuer != IssuerStub {
-		if attestationIssuerURL == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerURL, envAttestationIssuer, IssuerStub)
-		}
-		if attestationIssuerInstance == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
-		}
-	}
-
-	postguardURLs, err := loadPostGuardURLs()
-	if err != nil {
-		return Config{}, err
-	}
-
-	attestationHolder := envOrDefault(envAttestationHolder, defaultAttestationHolder)
-	attestationHolderStorageDir := os.Getenv(envAttestationHolderStorageDir)
-	attestationHolderMasterKey := os.Getenv(envAttestationHolderMasterKey)
-	if attestationHolder != HolderStub {
-		if attestationHolderStorageDir == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderStorageDir, envAttestationHolder, HolderStub)
-		}
-		if attestationHolderMasterKey == "" {
-			return Config{}, fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderMasterKey, envAttestationHolder, HolderStub)
-		}
-	}
-
-	// Outbound mail and QERDS messages build their links by concatenating onto
-	// APP_BASE_URL, and internal/email refuses to render a link that is not an
-	// absolute http(s) URL. Without this check a scheme-less value boots clean and
-	// then fails every credential offer and invitation at send time.
-	appBaseURL := envOrDefault(envAppBaseURL, defaultAppBaseURL)
-	if err := requireAbsoluteHTTPURL(envAppBaseURL, appBaseURL); err != nil {
-		return Config{}, err
-	}
-	requesterPublicURL := envOrDefault(envOpenID4VPRequesterPublicURL, appBaseURL)
-	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, requesterPublicURL); err != nil {
-		return Config{}, err
-	}
-	identityProofingPublicURL := envOrDefault(envIdentityProofingPublicURL, appBaseURL)
-	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, identityProofingPublicURL); err != nil {
-		return Config{}, err
-	}
-	identityProofingAppLinkURL := os.Getenv(envIdentityProofingAppLinkURL)
-	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, identityProofingAppLinkURL); err != nil {
-		return Config{}, err
-	}
-	addressLookupURL := envOrDefault(envAddressLookupURL, defaultAddressLookupURL)
-	if err := requireAbsoluteHTTPURL(envAddressLookupURL, addressLookupURL); err != nil {
-		return Config{}, err
-	}
-	devMode := strings.EqualFold(os.Getenv(envDevMode), "true")
-	if devMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(appBaseURL)) {
-		return Config{}, fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
-			envDevMode, envAppBaseURL, os.Getenv(envAppBaseURL))
-	}
-	if !devMode {
-		// The Idem app sends chip data, selfies and liveness frames to these:
-		// over the network only with https. Plain http to this machine never
-		// leaves it.
-		for key, raw := range map[string]string{
-			envIdentityProofingPublicURL: identityProofingPublicURL,
-			envRegulaFaceAPIPublicURL:    regulaFaceAPIPublicURL,
-		} {
-			if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
-				return Config{}, fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
-			}
-		}
-		for key, stubbed := range map[string]bool{
-			envIdentityProofingProvider:    identityProofingProvider == ProviderStub,
-			envIdentityProofingStubOutcome: identityProofingStubOutcome != "",
-			envDiplomaValidatorProvider:    diplomaValidatorProvider == ProviderStub,
-		} {
-			if stubbed {
-				return Config{}, fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
-			}
-		}
-	}
-
-	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
-	// but a set value is concatenated into the QTSP authorize URL and the token
-	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
-	// at boot rather than deep inside the signing ceremony at the QTSP.
-	signingRedirectURI := os.Getenv(envSigningRedirectURI)
-	if signingRedirectURI != "" {
-		if err := requireAbsoluteHTTPURL(envSigningRedirectURI, signingRedirectURI); err != nil {
-			return Config{}, err
-		}
-	}
-
-	trustedProxies, err := clientip.ParseTrusted(parseList(os.Getenv(envTrustedProxies)))
-	if err != nil {
-		return Config{}, fmt.Errorf("config: %s: %w", envTrustedProxies, err)
-	}
-
-	return Config{
+	cfg := Config{
 		DatabaseDSN: dsn,
 		LogLevel:    envOrDefault(envLogLevel, defaultLogLevel),
 		LogFormat:   envOrDefault(envLogFormat, defaultLogFormat),
 		LogSource:   strings.EqualFold(envOrDefault(envLogSource, defaultLogSource), "true"),
 
-		EudiVerifierURL:             verifierURL,
-		EudiIssuerChain:             os.Getenv(envEudiIssuerChain),
-		EudiIntendedUseID:           intendedUseID,
-		EudiRegistrationCertificate: registrationCertificate,
-		EudiCredentialScheme:        credentialScheme,
-		SessionCookieSecure:         cookieSecure,
-		SessionTTL:                  sessionTTL,
-		SessionPruneEvery:           sessionPruneEvery,
-		PresentationTTL:             presentationTTL,
-		OpenID4VPTransactionTTL:     openid4vpTransactionTTL,
+		EudiIssuerChain: os.Getenv(envEudiIssuerChain),
 		OpenID4VPPresenterAllowInsecureHTTP: strings.EqualFold(
 			os.Getenv(envOpenID4VPPresenterAllowInsecureHTTP), "true"),
 		OpenID4VPPresenterAllowUnverifiedRequests: strings.EqualFold(
@@ -800,17 +591,9 @@ func Load() (Config, error) {
 		OpenID4VPPresenterAutoPresent: strings.EqualFold(
 			os.Getenv(envOpenID4VPPresenterAutoPresent), "true"),
 		OpenID4VPVerifierTrustChain: os.Getenv(envOpenID4VPVerifierTrustChain),
-		OpenID4VPOrgRequestTTL:      openid4vpOrgRequestTTL,
-		OpenID4VPRequesterCACert:    requesterCACert,
-		OpenID4VPRequesterCAKey:     requesterCAKey,
-		OpenID4VPRequesterPublicURL: requesterPublicURL,
 
-		QerdsProvider:             qerdsProvider,
-		QerdsProviderURL:          qerdsProviderURL,
 		QerdsAuthToken:            os.Getenv(envQerdsAuthToken),
-		QerdsWebhookSecret:        qerdsWebhookSecret,
 		QerdsDefaultAddressDomain: envOrDefault(envQerdsDefaultAddressDomain, defaultQerdsDefaultAddressDomain),
-		QerdsInboundPollInterval:  qerdsInboundPollInterval,
 		QerdsTrustedOfferSenders:  parseList(os.Getenv(envQerdsTrustedOfferSenders)),
 		QerdsTrustedOfferParties:  parseList(os.Getenv(envQerdsTrustedOfferParties)),
 
@@ -823,36 +606,17 @@ func Load() (Config, error) {
 
 		WalletRegistryProvider: envOrDefault(envWalletRegistryProvider, defaultWalletRegistryProvider),
 
-		VogValidatorProvider: vogValidatorProvider,
-		VogValidatorURL:      vogValidatorURL,
-		VogReferenceHashKey:  os.Getenv(envVogReferenceHashKey),
+		VogReferenceHashKey: os.Getenv(envVogReferenceHashKey),
 
-		DiplomaValidatorProvider: diplomaValidatorProvider,
-		DiplomaTrustSource:       diplomaTrustSource,
-		DiplomaOCSP:              !strings.EqualFold(os.Getenv(envDiplomaOCSP), "false"),
-		DiplomaTrustCacheDir:     os.Getenv(envDiplomaTrustCacheDir),
+		DiplomaOCSP:          !strings.EqualFold(os.Getenv(envDiplomaOCSP), "false"),
+		DiplomaTrustCacheDir: os.Getenv(envDiplomaTrustCacheDir),
 
-		IdentityProofingProvider:      identityProofingProvider,
-		IdentityProofingStubOutcome:   identityProofingStubOutcome,
-		IdentityProofingPublicURL:     identityProofingPublicURL,
-		IdentityProofingAppLinkURL:    identityProofingAppLinkURL,
-		AddressLookupURL:              addressLookupURL,
-		DevMode:                       devMode,
 		IdentityProofingEncryptionKey: os.Getenv(envIdentityProofingEncryptionKey),
-		RegulaFaceAPIURL:              regulaFaceAPIURL,
-		RegulaFaceAPIPublicURL:        regulaFaceAPIPublicURL,
-		RegulaFaceMatchThreshold:      regulaFaceMatchThreshold,
 		IdentityProofingEDLCSCAPaths:  parseList(os.Getenv(envIdentityProofingEDLCSCAPaths)),
 
-		AttestationIssuer:         attestationIssuer,
-		AttestationIssuerURL:      attestationIssuerURL,
 		AttestationIssuerToken:    os.Getenv(envAttestationIssuerToken),
-		AttestationIssuerInstance: attestationIssuerInstance,
 		AttestationPingCredential: os.Getenv(envAttestationPingCredential),
 
-		AttestationHolder:           attestationHolder,
-		AttestationHolderStorageDir: attestationHolderStorageDir,
-		AttestationHolderMasterKey:  attestationHolderMasterKey,
 		AttestationHolderTrustChain: os.Getenv(envAttestationHolderTrustChain),
 		AttestationHolderStagingAnchors: strings.EqualFold(
 			os.Getenv(envAttestationHolderStagingAnchors), "true"),
@@ -864,27 +628,322 @@ func Load() (Config, error) {
 		AttestationHolderWSCAInsecure: strings.EqualFold(
 			os.Getenv(envAttestationHolderWSCAInsecure), "true"),
 
-		AppBaseURL:                 appBaseURL,
 		EmailEncryptionKey:         os.Getenv(envEmailEncryptionKey),
 		SlackEncryptionKey:         os.Getenv(envSlackEncryptionKey),
 		TeamsEncryptionKey:         os.Getenv(envTeamsEncryptionKey),
 		ProvisioningEncryptionKey:  os.Getenv(envProvisioningEncryptionKey),
 		CSCEncryptionKey:           os.Getenv(envCSCEncryptionKey),
 		SigningOAuthIssuerInternal: os.Getenv(envSigningOAuthIssuerInternal),
-		SigningRedirectURI:         signingRedirectURI,
 		MailDefaultLocale:          envOrDefault(envMailDefaultLocale, defaultMailLocale),
 		StaticDir:                  os.Getenv(envStaticDir),
-		TrustedProxies:             trustedProxies,
 
 		PostGuardSidecarURL:    os.Getenv(envPostGuardSidecarURL),
 		PostGuardSharedSecret:  os.Getenv(envPostGuardSharedSecret),
 		PostGuardEncryptionKey: os.Getenv(envPostGuardEncryptionKey),
-		PostGuardPkgURL:        postguardURLs.pkg,
-		PostGuardCryptifyURL:   postguardURLs.cryptify,
-		PostGuardWebsiteURL:    postguardURLs.website,
 
 		PlatformAdminEmails: parseList(os.Getenv(envPlatformAdminEmails)),
-	}, nil
+	}
+
+	// Each step reads and checks one group of settings, in this order, so the
+	// first misconfiguration found is the one reported.
+	for _, load := range []func(*Config) error{
+		loadEudiVerifier,
+		loadDurations,
+		loadRequesterCA,
+		loadQerds,
+		loadDocumentValidators,
+		loadIdentityProofing,
+		loadAttestationIssuer,
+		loadPostGuard,
+		loadAttestationHolder,
+		loadURLs,
+		loadDevMode,
+		loadSigningRedirectURI,
+		loadTrustedProxies,
+	} {
+		if err := load(&cfg); err != nil {
+			return Config{}, err
+		}
+	}
+	return cfg, nil
+}
+
+func loadEudiVerifier(c *Config) error {
+	c.SessionCookieSecure = strings.EqualFold(envOrDefault(envSessionCookieSecure, defaultSessionCookieSecure), "true")
+
+	c.EudiVerifierURL = envOrDefault(envEudiVerifierURL, defaultEudiVerifierURL)
+	if c.SessionCookieSecure && os.Getenv(envEudiVerifierURL) == "" {
+		return fmt.Errorf("config: %s must be set when %s is true", envEudiVerifierURL, envSessionCookieSecure)
+	}
+
+	c.EudiIntendedUseID = os.Getenv(envEudiIntendedUseID)
+	c.EudiRegistrationCertificate = os.Getenv(envEudiRegistrationCertificate)
+	if c.EudiIntendedUseID != "" && c.EudiRegistrationCertificate != "" {
+		return fmt.Errorf("config: %s and %s are mutually exclusive", envEudiIntendedUseID, envEudiRegistrationCertificate)
+	}
+	if c.EudiIntendedUseID == "" && c.EudiRegistrationCertificate == "" && c.EudiVerifierURL == defaultEudiVerifierURL {
+		c.EudiIntendedUseID = defaultEudiIntendedUseID
+	}
+
+	// A typo would otherwise only surface when a user logs in: the boot probe's
+	// presentation request does not check the vcts it names.
+	c.EudiCredentialScheme = os.Getenv(envEudiCredentialScheme)
+	if c.EudiCredentialScheme != "" && !slices.Contains(eudiCredentialSchemes, c.EudiCredentialScheme) {
+		return fmt.Errorf("config: %s must be one of %s, got %q", envEudiCredentialScheme, strings.Join(eudiCredentialSchemes, ", "), c.EudiCredentialScheme)
+	}
+	return nil
+}
+
+func loadDurations(c *Config) error {
+	for _, d := range []struct {
+		dst           *time.Duration
+		key, fallback string
+	}{
+		{&c.SessionTTL, envSessionTTL, defaultSessionTTL},
+		{&c.SessionPruneEvery, envSessionPruneEvery, defaultSessionPruneEvery},
+		{&c.PresentationTTL, envPresentationTTL, defaultPresentationTTL},
+		{&c.OpenID4VPTransactionTTL, envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL},
+		{&c.OpenID4VPOrgRequestTTL, envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL},
+	} {
+		v, err := parseDuration(d.key, d.fallback)
+		if err != nil {
+			return err
+		}
+		*d.dst = v
+	}
+	return nil
+}
+
+func loadRequesterCA(c *Config) error {
+	c.OpenID4VPRequesterCACert, c.OpenID4VPRequesterCAKey = os.Getenv(envOpenID4VPRequesterCACert), os.Getenv(envOpenID4VPRequesterCAKey)
+	if (c.OpenID4VPRequesterCACert == "") != (c.OpenID4VPRequesterCAKey == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envOpenID4VPRequesterCACert, envOpenID4VPRequesterCAKey)
+	}
+	return nil
+}
+
+func loadQerds(c *Config) error {
+	// "0" (or "0s") disables the background inbound poller. With the webhook
+	// also unconfigured no mechanism delivers inbound messages automatically,
+	// so that combination fails the boot rather than degrading to manual-only
+	// console polls.
+	pollInterval, err := parseDuration(envQerdsInboundPollInterval, defaultQerdsInboundPollInterval)
+	if err != nil {
+		return err
+	}
+	c.QerdsInboundPollInterval = pollInterval
+	c.QerdsWebhookSecret = os.Getenv(envQerdsWebhookSecret)
+	if c.QerdsInboundPollInterval <= 0 && c.QerdsWebhookSecret == "" {
+		return fmt.Errorf("config: %s must be set when %s disables the background poller, or no inbound QERDS message is delivered automatically", envQerdsWebhookSecret, envQerdsInboundPollInterval)
+	}
+
+	c.QerdsProvider = envOrDefault(envQerdsProvider, defaultQerdsProvider)
+	c.QerdsProviderURL = os.Getenv(envQerdsProviderURL)
+	if c.QerdsProvider != ProviderStub && c.QerdsProviderURL == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envQerdsProviderURL, envQerdsProvider, ProviderStub)
+	}
+	return nil
+}
+
+func loadDocumentValidators(c *Config) error {
+	c.VogValidatorProvider = envOrDefault(envVogValidatorProvider, defaultVogValidatorProvider)
+	if c.VogValidatorProvider != ProviderStub && c.VogValidatorProvider != ProviderValidatieNL {
+		return fmt.Errorf("config: %s must be %q or %q", envVogValidatorProvider, ProviderStub, ProviderValidatieNL)
+	}
+	c.VogValidatorURL = envOrDefault(envVogValidatorURL, defaultVogValidatorURL)
+
+	c.DiplomaValidatorProvider = envOrDefault(envDiplomaValidatorProvider, defaultDiplomaValidatorProvider)
+	if c.DiplomaValidatorProvider != ProviderStub && c.DiplomaValidatorProvider != ProviderDUO {
+		return fmt.Errorf("config: %s must be %q or %q", envDiplomaValidatorProvider, ProviderStub, ProviderDUO)
+	}
+	c.DiplomaTrustSource = envOrDefault(envDiplomaTrustSource, defaultDiplomaTrustSource)
+	if c.DiplomaTrustSource != DiplomaTrustEUTL && c.DiplomaTrustSource != DiplomaTrustPinned {
+		return fmt.Errorf("config: %s must be %q or %q", envDiplomaTrustSource, DiplomaTrustEUTL, DiplomaTrustPinned)
+	}
+
+	c.EmploymentValidatorProvider = envOrDefault(envEmploymentValidatorProvider, defaultEmploymentValidatorProvider)
+	if c.EmploymentValidatorProvider != ProviderStub && c.EmploymentValidatorProvider != ProviderUWV {
+		return fmt.Errorf("config: %s must be %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV)
+	}
+
+	// The pinned roots hold only PKIoverheid and certSIGN, and UWV's seal
+	// chains to QuoVadis: that pairing would reject every statement.
+	if c.DiplomaTrustSource == DiplomaTrustPinned && c.EmploymentValidatorProvider == ProviderUWV {
+		return fmt.Errorf("config: %s=%q holds no root UWV's seal chains to, so %s=%q needs %s=%q",
+			envDiplomaTrustSource, DiplomaTrustPinned, envEmploymentValidatorProvider, ProviderUWV, envDiplomaTrustSource, DiplomaTrustEUTL)
+	}
+	return nil
+}
+
+func loadIdentityProofing(c *Config) error {
+	c.IdentityProofingProvider = envOrDefault(envIdentityProofingProvider, defaultIdentityProofingProvider)
+	if c.IdentityProofingProvider != ProviderEngine && c.IdentityProofingProvider != ProviderStub {
+		return fmt.Errorf("config: %s must be %q or %q", envIdentityProofingProvider, ProviderEngine, ProviderStub)
+	}
+	c.RegulaFaceAPIURL = os.Getenv(envRegulaFaceAPIURL)
+	c.RegulaFaceAPIPublicURL = envOrDefault(envRegulaFaceAPIPublicURL, c.RegulaFaceAPIURL)
+	for key, raw := range map[string]string{envRegulaFaceAPIURL: c.RegulaFaceAPIURL, envRegulaFaceAPIPublicURL: c.RegulaFaceAPIPublicURL} {
+		if raw == "" {
+			continue
+		}
+		if err := requireAbsoluteHTTPURL(key, raw); err != nil {
+			return err
+		}
+	}
+	threshold, err := parseFaceMatchThreshold()
+	if err != nil {
+		return err
+	}
+	c.RegulaFaceMatchThreshold = threshold
+	c.IdentityProofingStubOutcome = os.Getenv(envIdentityProofingStubOutcome)
+	switch c.IdentityProofingStubOutcome {
+	case "", "approved", "rejected", "needs_review":
+	default:
+		return fmt.Errorf("config: %s must be approved, rejected or needs_review", envIdentityProofingStubOutcome)
+	}
+	if c.IdentityProofingStubOutcome != "" && c.IdentityProofingProvider != ProviderStub {
+		return fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
+	}
+	return nil
+}
+
+// parseFaceMatchThreshold reads the Regula face match threshold, 0 when unset.
+func parseFaceMatchThreshold() (float64, error) {
+	raw := os.Getenv(envRegulaFaceMatchThreshold)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v > 1 {
+		return 0, fmt.Errorf("config: %s must be a number in (0, 1]", envRegulaFaceMatchThreshold)
+	}
+	return v, nil
+}
+
+func loadAttestationIssuer(c *Config) error {
+	c.AttestationIssuer = envOrDefault(envAttestationIssuer, defaultAttestationIssuer)
+	c.AttestationIssuerURL = os.Getenv(envAttestationIssuerURL)
+	c.AttestationIssuerInstance = os.Getenv(envAttestationIssuerInstance)
+	if c.AttestationIssuer == IssuerStub {
+		return nil
+	}
+	if c.AttestationIssuerURL == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerURL, envAttestationIssuer, IssuerStub)
+	}
+	if c.AttestationIssuerInstance == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationIssuerInstance, envAttestationIssuer, IssuerStub)
+	}
+	return nil
+}
+
+func loadPostGuard(c *Config) error {
+	urls, err := loadPostGuardURLs()
+	if err != nil {
+		return err
+	}
+	c.PostGuardPkgURL, c.PostGuardCryptifyURL, c.PostGuardWebsiteURL = urls.pkg, urls.cryptify, urls.website
+	return nil
+}
+
+func loadAttestationHolder(c *Config) error {
+	c.AttestationHolder = envOrDefault(envAttestationHolder, defaultAttestationHolder)
+	c.AttestationHolderStorageDir = os.Getenv(envAttestationHolderStorageDir)
+	c.AttestationHolderMasterKey = os.Getenv(envAttestationHolderMasterKey)
+	if c.AttestationHolder == HolderStub {
+		return nil
+	}
+	if c.AttestationHolderStorageDir == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderStorageDir, envAttestationHolder, HolderStub)
+	}
+	if c.AttestationHolderMasterKey == "" {
+		return fmt.Errorf("config: %s must be set when %s is not %q", envAttestationHolderMasterKey, envAttestationHolder, HolderStub)
+	}
+	return nil
+}
+
+func loadURLs(c *Config) error {
+	// Outbound mail and QERDS messages build their links by concatenating onto
+	// APP_BASE_URL, and internal/email refuses to render a link that is not an
+	// absolute http(s) URL. Without this check a scheme-less value boots clean and
+	// then fails every credential offer and invitation at send time.
+	c.AppBaseURL = envOrDefault(envAppBaseURL, defaultAppBaseURL)
+	if err := requireAbsoluteHTTPURL(envAppBaseURL, c.AppBaseURL); err != nil {
+		return err
+	}
+	c.OpenID4VPRequesterPublicURL = envOrDefault(envOpenID4VPRequesterPublicURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envOpenID4VPRequesterPublicURL, c.OpenID4VPRequesterPublicURL); err != nil {
+		return err
+	}
+	c.IdentityProofingPublicURL = envOrDefault(envIdentityProofingPublicURL, c.AppBaseURL)
+	if err := requireAbsoluteHTTPURL(envIdentityProofingPublicURL, c.IdentityProofingPublicURL); err != nil {
+		return err
+	}
+	c.IdentityProofingAppLinkURL = os.Getenv(envIdentityProofingAppLinkURL)
+	if err := requireAppLinkURL(envIdentityProofingAppLinkURL, c.IdentityProofingAppLinkURL); err != nil {
+		return err
+	}
+	c.AddressLookupURL = envOrDefault(envAddressLookupURL, defaultAddressLookupURL)
+	return requireAbsoluteHTTPURL(envAddressLookupURL, c.AddressLookupURL)
+}
+
+func loadDevMode(c *Config) error {
+	c.DevMode = strings.EqualFold(os.Getenv(envDevMode), "true")
+	if c.DevMode && (os.Getenv(envAppBaseURL) == "" || !localhostURL(c.AppBaseURL)) {
+		return fmt.Errorf("config: %s is only for a local stack: %s must be set to a localhost URL, not %q",
+			envDevMode, envAppBaseURL, os.Getenv(envAppBaseURL))
+	}
+	if c.DevMode {
+		return nil
+	}
+	return requireProductionSettings(c)
+}
+
+// requireProductionSettings refuses, outside a local stack, plain http to
+// another machine for what the phone sends, and a stub in place of a real check.
+func requireProductionSettings(c *Config) error {
+	// The Idem app sends chip data, selfies and liveness frames to these:
+	// over the network only with https. Plain http to this machine never
+	// leaves it.
+	for key, raw := range map[string]string{
+		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
+	} {
+		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
+			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+		}
+	}
+	for key, stubbed := range map[string]bool{
+		envIdentityProofingProvider:    c.IdentityProofingProvider == ProviderStub,
+		envIdentityProofingStubOutcome: c.IdentityProofingStubOutcome != "",
+		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
+		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
+	} {
+		if stubbed {
+			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
+		}
+	}
+	return nil
+}
+
+func loadSigningRedirectURI(c *Config) error {
+	// SIGNING_REDIRECT_URI is optional (empty keeps the built-in localhost default),
+	// but a set value is concatenated into the QTSP authorize URL and the token
+	// exchange's redirect_uri, so a scheme-less, spaced or relative value must fail
+	// at boot rather than deep inside the signing ceremony at the QTSP.
+	c.SigningRedirectURI = os.Getenv(envSigningRedirectURI)
+	if c.SigningRedirectURI == "" {
+		return nil
+	}
+	return requireAbsoluteHTTPURL(envSigningRedirectURI, c.SigningRedirectURI)
+}
+
+func loadTrustedProxies(c *Config) error {
+	trusted, err := clientip.ParseTrusted(parseList(os.Getenv(envTrustedProxies)))
+	if err != nil {
+		return fmt.Errorf("config: %s: %w", envTrustedProxies, err)
+	}
+	c.TrustedProxies = trusted
+	return nil
 }
 
 // postGuardURLs holds the three endpoints that aim a deployment at one PostGuard

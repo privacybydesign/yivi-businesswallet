@@ -44,7 +44,8 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
-	r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at, ` + purgeAtColumn
+	r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
+	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''), ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -140,7 +141,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var sessionID *string
 	var tokenCT []byte
 	var sessionExpiresAt, sessionEndedAt *time.Time
-	var nameCT, birthDateCT, addressCT []byte
+	var nameCT, birthDateCT, addressCT, employmentCT []byte
 	var retentionDays, overrideSeconds *int
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
@@ -149,58 +150,88 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.CustomerID, &r.CustomerName, &nameCT, &retentionDays, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
-	r.NameRetention = proofedNameRetention
-	if retentionDays != nil {
-		r.NameRetention = CustomerSettings{DataRetentionDays: *retentionDays}.DataRetention()
-	}
-	if overrideSeconds != nil {
-		r.RetentionOverride = time.Duration(*overrideSeconds) * time.Second
-		r.NameRetention = r.RetentionOverride
-	}
-	if nameCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		name, err := s.cipher.Decrypt(nameCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt proofed name request %s: %w", r.ID, err)}
-		}
-		r.ProofedName = string(name)
-	}
-	if birthDateCT != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		birthDate, err := s.cipher.Decrypt(birthDateCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt expected birth date request %s: %w", r.ID, err)}
-		}
-		r.expectedBirthDate = string(birthDate)
-	}
-	if addressCT != nil {
-		addr, err := s.decryptAddress(r.ID, addressCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectAddress = addr
-	}
-	if sessionID != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
-		token, err := s.cipher.Decrypt(tokenCT)
-		if err != nil {
-			return Request{}, &unreadableRequestError{id: r.ID, err: fmt.Errorf("proofing: decrypt session token request %s: %w", r.ID, err)}
-		}
-		r.session = &ipsSession{ID: *sessionID, Token: string(token), EndedAt: sessionEndedAt}
-		if sessionExpiresAt != nil {
-			r.session.ExpiresAt = *sessionExpiresAt
-		}
+	r.NameRetention, r.RetentionOverride = requestRetention(retentionDays, overrideSeconds)
+	if err := s.openSealed(&r, sealedRequest{
+		name: nameCT, birthDate: birthDateCT, address: addressCT, employment: employmentCT,
+		sessionID: sessionID, sessionToken: tokenCT, sessionExpiresAt: sessionExpiresAt, sessionEndedAt: sessionEndedAt,
+	}); err != nil {
+		return Request{}, err
 	}
 	return r, nil
+}
+
+// requestRetention is how long a request keeps its proofed name: the
+// customer's setting, else the default, and its override above both.
+func requestRetention(retentionDays, overrideSeconds *int) (retention, override time.Duration) {
+	retention = proofedNameRetention
+	if retentionDays != nil {
+		retention = CustomerSettings{DataRetentionDays: *retentionDays}.DataRetention()
+	}
+	if overrideSeconds != nil {
+		override = time.Duration(*overrideSeconds) * time.Second
+		retention = override
+	}
+	return retention, override
+}
+
+// sealedRequest is a request row's sealed columns, nil where it holds none.
+type sealedRequest struct {
+	name, birthDate, address, employment []byte
+	sessionID                            *string
+	sessionToken                         []byte
+	sessionExpiresAt, sessionEndedAt     *time.Time
+}
+
+// openSealed decrypts a request row's sealed columns onto r.
+func (s *RequestStore) openSealed(r *Request, sealed sealedRequest) error {
+	var err error
+	if sealed.name != nil {
+		if r.ProofedName, err = s.decryptText(r.ID, "proofed name", sealed.name); err != nil {
+			return err
+		}
+	}
+	if sealed.birthDate != nil {
+		if r.expectedBirthDate, err = s.decryptText(r.ID, "expected birth date", sealed.birthDate); err != nil {
+			return err
+		}
+	}
+	if sealed.address != nil {
+		if r.SubjectAddress, err = s.decryptAddress(r.ID, sealed.address); err != nil {
+			return err
+		}
+	}
+	if sealed.employment != nil {
+		if r.SubjectEmployment, err = s.decryptEmployment(r.ID, sealed.employment); err != nil {
+			return err
+		}
+	}
+	if sealed.sessionID == nil {
+		return nil
+	}
+	token, err := s.decryptText(r.ID, "session token", sealed.sessionToken)
+	if err != nil {
+		return err
+	}
+	r.session = &ipsSession{ID: *sealed.sessionID, Token: token, EndedAt: sealed.sessionEndedAt}
+	if sealed.sessionExpiresAt != nil {
+		r.session.ExpiresAt = *sealed.sessionExpiresAt
+	}
+	return nil
+}
+
+// decryptText opens one sealed text column of request id; what names it.
+func (s *RequestStore) decryptText(id uuid.UUID, what string, sealed []byte) (string, error) {
+	if s.cipher == nil {
+		return "", ErrNoEncryptionKey
+	}
+	plain, err := s.cipher.Decrypt(sealed)
+	if err != nil {
+		return "", &unreadableRequestError{id: id, err: fmt.Errorf("proofing: decrypt %s request %s: %w", what, id, err)}
+	}
+	return string(plain), nil
 }
 
 // unreadableRequestError is a request row whose sealed fields do not open: a
@@ -238,6 +269,8 @@ type NewStoredRequest struct {
 	Diplomas DiplomaMode
 	// Address is the flow's AddressMode at send; empty is off.
 	Address AddressMode
+	// Employment is the flow's EmploymentMode at send; empty is off.
+	Employment EmploymentMode
 	// ReferencePhoto is a hosted request's reference photo, held sealed until
 	// its subject starts the session (ReferencePhoto); nil for none.
 	ReferencePhoto *proofingprovider.Image
@@ -253,24 +286,18 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 	var photoCT []byte
 	var photoMime *string
 	if in.ReferencePhoto != nil {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
 		var err error
-		if photoCT, err = s.cipher.Encrypt([]byte(in.ReferencePhoto.Base64)); err != nil {
-			return Request{}, fmt.Errorf("proofing: encrypt reference photo org %s: %w", in.OrgID, err)
+		if photoCT, err = s.encryptText("reference photo org "+in.OrgID.String(), in.ReferencePhoto.Base64); err != nil {
+			return Request{}, err
 		}
 		photoMime = &in.ReferencePhoto.MimeType
 	}
 
 	var birthDateCT []byte
 	if in.Subject.BirthDate != "" {
-		if s.cipher == nil {
-			return Request{}, ErrNoEncryptionKey
-		}
 		var err error
-		if birthDateCT, err = s.cipher.Encrypt([]byte(in.Subject.BirthDate)); err != nil {
-			return Request{}, fmt.Errorf("proofing: encrypt expected birth date org %s: %w", in.OrgID, err)
+		if birthDateCT, err = s.encryptText("expected birth date org "+in.OrgID.String(), in.Subject.BirthDate); err != nil {
+			return Request{}, err
 		}
 	}
 
@@ -287,47 +314,22 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			(id, organization_id, requested_by, subject_user_id, customer_id, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
-			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address)
+			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address, employment)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
-				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'))`
+				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'),
+				COALESCE(NULLIF($26, ''), 'off'))`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, in.Subject.CustomerID,
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
-			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address)); err != nil {
+			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address),
+			string(in.Employment)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 
 		if err := refreshPurgeAt(ctx, q, in.ID); err != nil {
 			return err
-		}
-
-		fields := withAuditSubject(map[string]any{
-			"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
-			"channel": string(in.Channel),
-		}, in.Subject.Name, in.Subject.Email)
-		if in.Diplomas.asked() {
-			fields["diplomas"] = string(in.Diplomas)
-		}
-		if in.Address.asked() {
-			fields["address"] = string(in.Address)
-		}
-		if birthDateCT != nil {
-			fields["expectsSubject"] = true
-		}
-		if photoCT != nil {
-			fields["referencePhoto"] = true
-		}
-		fields = withMethod(fields, in.Method)
-		if in.Subject.UserID != nil {
-			fields["subjectUserId"] = in.Subject.UserID.String()
-		}
-		if in.Subject.CustomerID != nil {
-			fields["customerId"] = in.Subject.CustomerID.String()
-		}
-		if in.APIKeyID != nil {
-			fields["apiKeyId"] = in.APIKeyID.String()
 		}
 
 		// A hosted link lapses unstarted at link_expires_at: wake the deadline job.
@@ -339,12 +341,57 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
-			audit.Created(fields))
+			audit.Created(in.auditFields(birthDateCT != nil, photoCT != nil)))
 	})
 	if err != nil {
 		return Request{}, err
 	}
 	return s.get(ctx, in.ID)
+}
+
+// encryptText seals one text column of a request; what names it and its owner.
+func (s *RequestStore) encryptText(what, plain string) ([]byte, error) {
+	if s.cipher == nil {
+		return nil, ErrNoEncryptionKey
+	}
+	sealed, err := s.cipher.Encrypt([]byte(plain))
+	if err != nil {
+		return nil, fmt.Errorf("proofing: encrypt %s: %w", what, err)
+	}
+	return sealed, nil
+}
+
+// auditFields is what identity_proofing.requested records of in: whether it
+// expects a subject and holds a reference photo, never the values.
+func (in NewStoredRequest) auditFields(expectsSubject, referencePhoto bool) map[string]any {
+	fields := withAuditSubject(map[string]any{
+		"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
+		"channel": string(in.Channel),
+	}, in.Subject.Name, in.Subject.Email)
+	if in.Diplomas.asked() {
+		fields["diplomas"] = string(in.Diplomas)
+	}
+	if in.Address.asked() {
+		fields["address"] = string(in.Address)
+	}
+	if in.Employment.asked() {
+		fields["employment"] = string(in.Employment)
+	}
+	if expectsSubject {
+		fields["expectsSubject"] = true
+	}
+	if referencePhoto {
+		fields["referencePhoto"] = true
+	}
+	fields = withMethod(fields, in.Method)
+	for key, id := range map[string]*uuid.UUID{
+		"subjectUserId": in.Subject.UserID, "customerId": in.Subject.CustomerID, "apiKeyId": in.APIKeyID,
+	} {
+		if id != nil {
+			fields[key] = id.String()
+		}
+	}
+	return fields
 }
 
 // ReferencePhoto is the reference photo a hosted request holds until its
@@ -459,36 +506,15 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 		if err != nil {
 			return fmt.Errorf("proofing: lapse links: %w", err)
 		}
-		var reqs []Request
-		for rows.Next() {
-			req, err := s.scanRequest(rows)
-			if err != nil {
-				rows.Close()
-				return fmt.Errorf("proofing: scan lapsed link: %w", err)
-			}
-			reqs = append(reqs, req)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		reqs, err := s.collectRequests(rows)
+		if err != nil {
 			return fmt.Errorf("proofing: lapse links: %w", err)
 		}
-		ids := make([]uuid.UUID, 0, len(reqs))
-		for _, req := range reqs {
-			ids = append(ids, req.ID)
-		}
-		if err := refreshPurgeAt(ctx, q, ids...); err != nil {
+		if err := refreshPurgeAt(ctx, q, endedIDs...); err != nil {
 			return err
 		}
 		for _, req := range reqs {
-			if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
-				audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-				audit.Updated(
-					req.auditFields(map[string]any{"status": string(req.Status)}),
-					req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
-				return err
-			}
-			if err := enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
-				sessionEventData(req, StatusExpired)); err != nil {
+			if err := s.recordLinkLapsed(ctx, q, req); err != nil {
 				return err
 			}
 		}
@@ -496,6 +522,33 @@ func (s *RequestStore) LapseLinks(ctx context.Context, now time.Time, limit int)
 		return nil
 	})
 	return ended, err
+}
+
+// collectRequests scans every row of rows and closes them.
+func (s *RequestStore) collectRequests(rows pgx.Rows) ([]Request, error) {
+	defer rows.Close()
+	var reqs []Request
+	for rows.Next() {
+		req, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs, rows.Err()
+}
+
+// recordLinkLapsed audits and sends the end of req, whose link lapsed unstarted.
+func (s *RequestStore) recordLinkLapsed(ctx context.Context, q database.Querier, req Request) error {
+	if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionEnded,
+		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+		audit.Updated(
+			req.auditFields(map[string]any{"status": string(req.Status)}),
+			req.auditFields(map[string]any{"status": string(StatusExpired), "reason": "link_lapsed"}))); err != nil {
+		return err
+	}
+	return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionExpired, &req.ID,
+		sessionEventData(req, StatusExpired))
 }
 
 // NextDeadline is the earliest session cap or open link's lapse after now;
@@ -1011,7 +1064,7 @@ func (s *RequestStore) RecordResultRead(ctx context.Context, req Request) error 
 
 // Purge erases every personal detail the wallet holds of a request (the
 // subject's name and e-mail address, the proofed name, the redirect and Yivi
-// transaction that pointed at the subject, its diplomas and address, a data request's own
+// transaction that pointed at the subject, its diplomas, address and employment, a data request's own
 // matches, the stored Idempotency-Key answers that name it, and the subject in
 // its audit events) and marks it purged; its outcome stays. A match naming it
 // from another data request stays: that review shows it purged. Audited
@@ -1035,6 +1088,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, expected_birth_date_ciphertext = NULL,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
 				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL, address_ciphertext = NULL,
+				employment_ciphertext = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {
@@ -1055,27 +1109,8 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_matches WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge matches request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_match_checks WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge match checks request %s: %w", req.ID, err)
-		}
-		if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
-			req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
-			return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
-		}
-		// A retry with one of these keys then runs as a new call: the session
-		// it named is erased.
-		if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys WHERE request_id = $1`, req.ID); err != nil {
-			return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
-		}
-		if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
-			WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, []string{webhookDiplomaKey, webhookAddressKey}); err != nil {
-			return fmt.Errorf("proofing: purge webhook diplomas and address request %s: %w", req.ID, err)
+		if err := purgeRequestRecords(ctx, q, req); err != nil {
+			return err
 		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingSessionPurged,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
@@ -1085,6 +1120,33 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, EventSessionPurged, &req.ID,
 			sessionEventData(req, req.Status))
 	})
+}
+
+// purgeRequestRecords erases what other tables hold of req's personal data.
+func purgeRequestRecords(ctx context.Context, q database.Querier, req Request) error {
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_matches WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge matches request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_match_checks WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge match checks request %s: %w", req.ID, err)
+	}
+	if err := audit.StripFields(ctx, q, req.OrganizationID, audit.TargetIdentityProofingRequest,
+		req.ID.String(), audit.IdentityProofingPersonalKeys); err != nil {
+		return fmt.Errorf("proofing: purge audit subject request %s: %w", req.ID, err)
+	}
+	// A retry with one of these keys then runs as a new call: the session
+	// it named is erased.
+	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_idempotency_keys WHERE request_id = $1`, req.ID); err != nil {
+		return fmt.Errorf("proofing: purge idempotent answers request %s: %w", req.ID, err)
+	}
+	if _, err := q.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET payload = payload - $2::text[]
+		WHERE request_id = $1 AND payload ?| $2::text[]`, req.ID, webhookPersonalKeys); err != nil {
+		return fmt.Errorf("proofing: purge webhook diplomas, address and employment request %s: %w", req.ID, err)
+	}
+	return nil
 }
 
 // errCancelSessionMoved is a cancel of a request read before a session was
@@ -1153,8 +1215,20 @@ func scanMember(row pgx.Row) (Member, error) {
 // sealed and kept until proofedNameRetention has passed; it is never audited. A
 // decision (approved, rejected) drops the expected birth date: the match is
 // made. It is a no-op when the row already holds that outcome or moved to another
-// session, so concurrent pollers record a decision once.
+// session, so concurrent pollers record a decision once, and for a request the
+// wallet put in review itself (Request.ReviewReason): the engine's outcome no
+// longer decides it, RecordWalletOutcome does.
 func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	return s.recordOutcome(ctx, req, sessionID, status, res, false)
+}
+
+// RecordWalletOutcome is RecordOutcome for the decision on a review the
+// wallet opened: the reviewer's, or its lapse.
+func (s *RequestStore) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	return s.recordOutcome(ctx, req, sessionID, status, res, true)
+}
+
+func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, wallet bool) error {
 	action, ok := outcomeActions[status]
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
@@ -1163,18 +1237,11 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 	// retainSecs is how long the proofed name is kept, from the database's now().
 	var retainSecs *float64
 	if res.Name != "" {
-		if s.cipher == nil {
-			return ErrNoEncryptionKey
-		}
 		var err error
-		if nameCT, err = s.cipher.Encrypt([]byte(res.Name)); err != nil {
-			return fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
+		if nameCT, err = s.encryptText("proofed name request "+req.ID.String(), res.Name); err != nil {
+			return err
 		}
-		retention := req.NameRetention
-		if retention == 0 {
-			retention = proofedNameRetention
-		}
-		secs := retention.Seconds()
+		secs := cmp.Or(req.NameRetention, proofedNameRetention).Seconds()
 		retainSecs = &secs
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
@@ -1186,9 +1253,10 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 				expected_birth_date_ciphertext = CASE WHEN $3 IN ('approved', 'rejected') THEN NULL
 					ELSE expected_birth_date_ciphertext END
 			WHERE id = $1 AND ips_session_id = $2 AND purged_at IS NULL
-				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3`
+				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
+				AND (review_reason IS NOT NULL) = $11`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method))
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), wallet)
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
 		}
@@ -1198,17 +1266,10 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		after := withMethod(map[string]any{"status": string(status)}, res.Method)
-		for key, value := range map[string]string{
-			"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
-		} {
-			if value != "" {
-				after[key] = value
-			}
-		}
 		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
+			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
+				req.auditFields(outcomeAuditFields(status, res)))); err != nil {
 			return err
 		}
 		event, ok := outcomeEvents[status]
@@ -1219,6 +1280,19 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 		return enqueueWebhook(ctx, q, req.OrganizationID, req.CustomerID, event, &req.ID, sessionEventData(decided, status))
 	})
+}
+
+// outcomeAuditFields is what an outcome's audit event records of res.
+func outcomeAuditFields(status Status, res proofingprovider.Result) map[string]any {
+	after := withMethod(map[string]any{"status": string(status)}, res.Method)
+	for key, value := range map[string]string{
+		"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
+	} {
+		if value != "" {
+			after[key] = value
+		}
+	}
+	return after
 }
 
 // ListPurgeDue returns up to limit requests past their purge time and any

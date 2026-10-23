@@ -1,4 +1,6 @@
-// Package verify checks the authenticity of a DUO diploma PDF.
+// Package verify checks the authenticity of a sealed PDF: a DUO diploma
+// extract, or a UWV Verzekeringsbericht. An issuer's signatures may lack some
+// of the parts below (trust.Lacks); the checks for those are left out.
 //
 // The checks, in order:
 //
@@ -141,6 +143,12 @@ type Check struct {
 	Detail string `json:"detail"`
 }
 
+// Display names of the checks reported from more than one place.
+const (
+	checkNameCmsSignature   = "CMS signature"
+	checkNameTimestampToken = "timestamp token"
+)
+
 // The header and media type of an OCSP request (RFC 6960 appendix A).
 const (
 	headerContentType = "Content-Type"
@@ -189,21 +197,9 @@ func (r *Result) FirstFailure() *Check {
 
 // PDF verifies a diploma PDF given as raw bytes.
 func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
-	if opts.Issuer == nil {
-		opts.Issuer = &trust.DUO
-	}
-	if opts.Now == nil {
-		opts.Now = time.Now
-	}
-	if opts.Trust == nil {
-		pinned, err := trust.NewPinned()
-		if err != nil {
-			return nil, err
-		}
-		opts.Trust = pinned
-	}
-	if opts.HTTPClient == nil {
-		opts.HTTPClient = &http.Client{Timeout: OCSPTimeout}
+	opts, err := withDefaults(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	res := &Result{Valid: true, Document: pdfsig.ExtractInfo(pdf)}
@@ -226,10 +222,12 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 		ID: CheckCoversWholeFile, Name: "signature covers whole file", OK: sig.CoversWholeFile,
 		Detail: fmt.Sprintf("ByteRange %v, file size %d", sig.ByteRange, len(pdf)),
 	})
-	res.add(Check{
-		ID: CheckCertification, Name: "certification signature (DocMDP)", OK: sig.DocMDPPermission == 1,
-		Detail: fmt.Sprintf("DocMDP /P = %d (1 = no changes permitted)", sig.DocMDPPermission),
-	})
+	if !opts.Issuer.Lacks.Certification {
+		res.add(Check{
+			ID: CheckCertification, Name: "certification signature (DocMDP)", OK: sig.DocMDPPermission == 1,
+			Detail: fmt.Sprintf("DocMDP /P = %d (1 = no changes permitted)", sig.DocMDPPermission),
+		})
+	}
 	res.add(Check{
 		ID: CheckPadesSubfilter, Name: "PAdES subfilter", OK: sig.SubFilter == subFilterCAdES || sig.SubFilter == subFilterPKCS7,
 		Detail: "/SubFilter /" + sig.SubFilter,
@@ -242,35 +240,23 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 	}
 
 	// 2. CMS signature over the signed bytes.
-	p7, err := pkcs7.Parse(sig.CMS)
-	if err != nil {
-		res.add(Check{ID: CheckCmsParse, Name: "CMS parse", Detail: err.Error()})
-		return res, nil
-	}
-	p7.Content = signed
-	// Verify() checks the messageDigest attribute against the content and
-	// the signature against the signer certificate found in the CMS. It does
-	// not establish trust; we do that ourselves below so we can control the
-	// validation time and the key usage.
-	if err := p7.Verify(); err != nil {
-		res.add(Check{ID: CheckCmsSignature, Name: "CMS signature", Detail: err.Error()})
-		return res, nil
-	}
-	signer := p7.GetOnlySigner()
+	p7, signer := checkCMS(res, sig.CMS, signed)
 	if signer == nil {
-		res.add(Check{ID: CheckCmsSignature, Name: "CMS signature", Detail: "expected exactly one signer"})
 		return res, nil
 	}
-	res.Signer = signer
-	res.add(Check{ID: CheckCmsSignature, Name: "CMS signature", OK: true, Detail: "message digest and signature valid"})
-	res.add(checkSigningCertificate(p7, signer))
-
-	// 3. Signing time: the RFC 3161 timestamp token.
-	res.SigningTime = opts.Now()
-	if t, err := parsePDFDate(sig.SigningTimeClaimed); err == nil {
-		res.SigningTime = t
+	if !opts.Issuer.Lacks.SigningCertificate {
+		res.add(checkSigningCertificate(p7, signer))
 	}
-	checkTimestamp(res, p7, sig, opts.Trust)
+
+	// 3. Signing time: the RFC 3161 timestamp token. Without one the issuer
+	// puts in, the remaining checks run at the time of verification.
+	res.SigningTime = opts.Now()
+	if !opts.Issuer.Lacks.Timestamp {
+		if t, err := parsePDFDate(sig.SigningTimeClaimed); err == nil {
+			res.SigningTime = t
+		}
+		checkTimestamp(res, p7, sig, opts.Trust)
+	}
 
 	// 4. Chain to a trust anchor at signing time.
 	checkChain(res, p7, signer, opts.Trust)
@@ -300,6 +286,74 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 	res.add(checkRevocation(ctx, res, p7, opts))
 
 	return res, nil
+}
+
+// withDefaults fills the options a caller left unset.
+func withDefaults(opts Options) (Options, error) {
+	if opts.Issuer == nil {
+		opts.Issuer = &trust.DUO
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Trust == nil {
+		pinned, err := trust.NewPinned()
+		if err != nil {
+			return opts, err
+		}
+		opts.Trust = pinned
+	}
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: OCSPTimeout}
+	}
+	return opts, nil
+}
+
+// checkCMS parses the CMS and checks its signature over signed. The signer is
+// nil when a check failed.
+func checkCMS(res *Result, cms, signed []byte) (*pkcs7.PKCS7, *x509.Certificate) {
+	p7, err := pkcs7.Parse(cms)
+	if err != nil {
+		res.add(Check{ID: CheckCmsParse, Name: "CMS parse", Detail: err.Error()})
+		return nil, nil
+	}
+	p7.Content = signed
+	digestAsHash(p7)
+	// Verify() checks the messageDigest attribute against the content and
+	// the signature against the signer certificate found in the CMS. It does
+	// not establish trust; we do that ourselves below so we can control the
+	// validation time and the key usage.
+	if err := p7.Verify(); err != nil {
+		res.add(Check{ID: CheckCmsSignature, Name: checkNameCmsSignature, Detail: err.Error()})
+		return nil, nil
+	}
+	signer := p7.GetOnlySigner()
+	if signer == nil {
+		res.add(Check{ID: CheckCmsSignature, Name: checkNameCmsSignature, Detail: "expected exactly one signer"})
+		return nil, nil
+	}
+	res.Signer = signer
+	res.add(Check{ID: CheckCmsSignature, Name: checkNameCmsSignature, OK: true, Detail: "message digest and signature valid"})
+	return p7, signer
+}
+
+// signatureDigests are the RSA signature algorithms some signers name as a
+// SignerInfo's digest algorithm, by the hash they stand for: UWV's seal names
+// sha256WithRSAEncryption there, which pkcs7 refuses as a digest.
+var signatureDigests = map[string]asn1.ObjectIdentifier{
+	pkcs7.OIDEncryptionAlgorithmRSASHA256.String(): pkcs7.OIDDigestAlgorithmSHA256,
+	pkcs7.OIDEncryptionAlgorithmRSASHA384.String(): pkcs7.OIDDigestAlgorithmSHA384,
+	pkcs7.OIDEncryptionAlgorithmRSASHA512.String(): pkcs7.OIDDigestAlgorithmSHA512,
+}
+
+// digestAsHash reads such a signature algorithm as its hash. The signature
+// is still checked as RSA with that hash, so nothing else is accepted.
+func digestAsHash(p7 *pkcs7.PKCS7) {
+	for i := range p7.Signers {
+		if hash, ok := signatureDigests[p7.Signers[i].DigestAlgorithm.Algorithm.String()]; ok {
+			p7.Signers[i].DigestAlgorithm.Algorithm = hash
+		}
+	}
 }
 
 // essCertIDv2 and signingCertificateV2 are the ESS signing-certificate-v2
@@ -353,14 +407,14 @@ func checkTimestamp(res *Result, p7 *pkcs7.PKCS7, sig *pdfsig.Signature, trustSo
 	tok := unsignedAttr(p7, oidTimeStampToken)
 	if tok == nil {
 		res.add(Check{
-			ID: CheckTimestampToken, Name: "timestamp token",
+			ID: CheckTimestampToken, Name: checkNameTimestampToken,
 			Detail: "no RFC 3161 timestamp; the remaining checks use the signer-claimed time /M=" + sig.SigningTimeClaimed,
 		})
 		return
 	}
 	ts, err := timestamp.Parse(tok)
 	if err != nil {
-		res.add(Check{ID: CheckTimestampToken, Name: "timestamp token", Detail: err.Error()})
+		res.add(Check{ID: CheckTimestampToken, Name: checkNameTimestampToken, Detail: err.Error()})
 		return
 	}
 
@@ -368,7 +422,7 @@ func checkTimestamp(res *Result, p7 *pkcs7.PKCS7, sig *pdfsig.Signature, trustSo
 	h.Write(p7.Signers[0].EncryptedDigest)
 	match := bytes.Equal(h.Sum(nil), ts.HashedMessage)
 	if !res.add(Check{
-		ID: CheckTimestampToken, Name: "timestamp token", OK: match,
+		ID: CheckTimestampToken, Name: checkNameTimestampToken, OK: match,
 		Detail: fmt.Sprintf("RFC 3161 token from %s, hash of signature value %s",
 			ts.Time.UTC().Format(time.RFC3339), map[bool]string{true: "matches", false: "MISMATCH"}[match]),
 	}) {
@@ -421,9 +475,9 @@ func checkChain(res *Result, p7 *pkcs7.PKCS7, signer *x509.Certificate, trustSou
 }
 
 // checkRevocation checks every certificate of the chain below its anchor,
-// online with opts.OCSP and otherwise against the signature's embedded
-// revocation information. It fails closed: a certificate it cannot check is
-// a failure, never a pass.
+// online with opts.OCSP or for an issuer that embeds nothing, and otherwise
+// against the signature's embedded revocation information. It fails closed: a
+// certificate it cannot check is a failure, never a pass.
 func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Options) Check {
 	c := Check{ID: CheckRevocation, Name: "revocation"}
 	if len(res.Chain) < 2 {
@@ -431,8 +485,9 @@ func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Opt
 		return c
 	}
 
+	online := opts.OCSP || opts.Issuer.Lacks.EmbeddedRevocation
 	var archive revocationArchive
-	if !opts.OCSP {
+	if !online {
 		var err error
 		if archive, err = embeddedRevocation(p7); err != nil {
 			c.Detail = "online revocation check disabled and " + err.Error()
@@ -445,7 +500,7 @@ func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Opt
 		cert, issuer := res.Chain[i], res.Chain[i+1]
 		var detail string
 		var err error
-		if opts.OCSP {
+		if online {
 			detail, err = checkOnline(ctx, opts.HTTPClient, cert, issuer, opts.Now())
 		} else {
 			detail, err = archive.check(cert, issuer, res.SigningTime)
@@ -699,18 +754,27 @@ func qcStatements(c *x509.Certificate) qcInfo {
 			case st.ID.Equal(oidQcCompliance):
 				info.compliance = true
 			case st.ID.Equal(oidQcType):
-				var types []asn1.ObjectIdentifier
-				if _, err := asn1.Unmarshal(st.Info.FullBytes, &types); err == nil {
-					for _, t := range types {
-						if t.Equal(oidQcTypeESeal) {
-							info.eseal = true
-						}
-					}
+				if hasESealType(st.Info) {
+					info.eseal = true
 				}
 			}
 		}
 	}
 	return info
+}
+
+// hasESealType reports whether a QcType statement lists the eseal type.
+func hasESealType(info asn1.RawValue) bool {
+	var types []asn1.ObjectIdentifier
+	if _, err := asn1.Unmarshal(info.FullBytes, &types); err != nil {
+		return false
+	}
+	for _, t := range types {
+		if t.Equal(oidQcTypeESeal) {
+			return true
+		}
+	}
+	return false
 }
 
 // tsaSigner is the certificate that signed the timestamp token: the one its

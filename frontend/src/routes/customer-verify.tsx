@@ -128,9 +128,11 @@ function VerifyFlow({
     appChoice: choice,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
+  const [inEmployment, setInEmployment] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateRequestMutation(slug);
   const name = customer.branding.displayName || customer.name;
@@ -169,7 +171,9 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`customers.onScreen.steps.${s}`))}
-        current={stages.indexOf(currentStage({ step, inAddress, inDiplomas }))}
+        current={stages.indexOf(
+          currentStage({ step, inAddress, inDiplomas, inEmployment }),
+        )}
       />
       {step === "overview" && (
         <Overview
@@ -215,6 +219,8 @@ function VerifyFlow({
           onDiplomaStep={setInDiplomas}
           addressMode={sent.addressMode}
           onAddressStep={setInAddress}
+          employmentMode={sent.employmentMode}
+          onEmploymentStep={setInEmployment}
           onRestart={restart}
           outcomeActions={
             <div className="flex flex-wrap justify-center gap-2">

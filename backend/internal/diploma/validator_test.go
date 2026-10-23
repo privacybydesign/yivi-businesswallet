@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/trust"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/verify"
 )
 
@@ -204,7 +205,7 @@ func TestPadesValidator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validator := NewPadesValidator(store, RevocationOffline)
+	validator := NewPadesValidator(store, trust.DUO, RevocationOffline)
 	if err := validator.Ping(context.Background()); err != nil {
 		t.Errorf("Ping = %v, want nil with anchors loaded", err)
 	}

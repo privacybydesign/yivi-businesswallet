@@ -112,7 +112,7 @@ tags:
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
       sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `MANUAL_REVIEW_REJECTED`, `REVIEW_LAPSED`,
-      `ORG_PAUSED` and `LEGAL_RETENTION`; the session itself is rejected for `FACE_NO_MATCH`,
+      `ORG_PAUSED`, `LEGAL_RETENTION` and `EMPLOYMENT_NOT_PROVIDED`; the session itself is rejected for `FACE_NO_MATCH`,
       `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
       `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
       `FACE_STEP_NOT_COMPLETED`, `AGE_NOT_DISCLOSED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
@@ -5498,8 +5498,8 @@ paths:
         one must be on-screen (an e-mailed one is 400), its disclosure started through
         `yivi/start`. A Yivi request needs a flow that takes no document photos and is not matched
         against a reference photo (else 400
-        `invalid_input`). A flow that asks for diplomas or the address cannot be e-mailed (422
-        `diplomas_need_page`, `address_needs_page`), and a customer flow matched against a reference photo cannot be
+        `invalid_input`). A flow that asks for diplomas, the address or the Verzekeringsbericht cannot be
+        e-mailed (422 `diplomas_need_page`, `address_needs_page`, `employment_needs_page`), and a customer flow matched against a reference photo cannot be
         sent from here, which takes no photo (422 `reference_photo_required`). A customer's
         request with `birthDate` (a past date, YYYY-MM-DD, with `name`) is for that one person:
         an approval of anyone else is recorded as `rejected` with `errorCode`
@@ -5610,7 +5610,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person is not a member (`member_not_found`), or the flow does not exist, cannot be completed in the app, is not available to members or assigned to the customer, asks for diplomas or the address on an e-mailed request (`diplomas_need_page`, `address_needs_page`), or needs a reference photo (`reference_photo_required`).
+          description: The person is not a member (`member_not_found`), or the flow does not exist, cannot be completed in the app, is not available to members or assigned to the customer, asks for diplomas, the address or the Verzekeringsbericht on an e-mailed request (`diplomas_need_page`, `address_needs_page`, `employment_needs_page`), or needs a reference photo (`reference_photo_required`).
           content:
             application/json:
               schema:
@@ -6248,6 +6248,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/employment:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id.
+    get:
+      tags: [identity-proofing]
+      summary: Read whether a flow asks for the UWV Verzekeringsbericht
+      description: >-
+        Requires an administrator role in the organisation. `{employmentMode}`: `off` or
+        `required` (the flow has the employment step). With `required`, once the identity is
+        approved the subject uploads their UWV Verzekeringsbericht on the page that ran the
+        session, and its employment relations are kept. A flow never set reads `off`.
+      responses:
+        '200':
+          description: The flow's employment mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowEmployment'
+              examples:
+                off:
+                  summary: No Verzekeringsbericht
+                  value:
+                    employmentMode: "off"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing]
+      summary: Set whether a flow asks for the UWV Verzekeringsbericht
+      description: >-
+        Requires an administrator role in the organisation. Body `{employmentMode}`. Sessions
+        already sent keep the mode they were sent with. `required` needs a flow that reads the
+        name and date of birth (`dg1`), which the statement's holder is matched against (422
+        `flow_no_identity`). A flow that asks for the statement cannot be mailed or sent as a
+        bare deep link (422 `employment_needs_page`): show it on screen or create it `hosted`.
+        Audited `identity_proofing.flow_employment_configured` with before and after. A mode
+        other than `off` or `required` is 400 `invalid_input`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowEmployment'
+            examples:
+              required:
+                summary: Ask for the Verzekeringsbericht
+                value:
+                  employmentMode: required
+      responses:
+        '200':
+          description: The saved mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowEmployment'
+              examples:
+                required:
+                  summary: Verzekeringsbericht asked
+                  value:
+                    employmentMode: required
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '422':
+          description: The flow is not one of the organisation's (`flow_not_found`), or does not read the name and date of birth (`flow_no_identity`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/pause:
     parameters:
       - name: slug
@@ -6679,6 +6769,97 @@ paths:
           description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the request was cancelled or erased (`session_over`).
         '413':
           description: An extract or the upload is too large (`too_large`).
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/employment:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the customer API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Upload the UWV Verzekeringsbericht on an on-screen request
+      description: >-
+        Requires organisation membership (an admin, or the member who sent it). One multipart
+        `file` part, the Verzekeringsbericht PDF as downloaded from Mijn UWV, at most 5 MiB.
+        Only within an hour of an approved identity on a request
+        that asks for it, and kept once: the first accepted statement closes the step. The
+        file is checked: UWV's seal (unchanged, a qualified e-seal certificate of UWV on the
+        EU Trusted Lists, its revocation checked online), then the printed holder (initials,
+        surname, alone or joined to a married name, and date of birth) against the proofed
+        identity, then its date (at most 30 days old). The answer is `{fileName, accepted,
+        employment}` or `{fileName, accepted: false, reason, failedCheck}` with `reason`
+        `not_a_statement`, `signature_invalid`, `holder_mismatch` or `stale`; a refused file
+        can be followed by another within the window. An accepted statement keeps the
+        statement date and the relations current on it (reporting a month at most two
+        months before the statement's): employer, payroll tax number, contract form, since
+        when and the newest month, sealed. Never past relations, the PDF, the holder, the
+        hours or the wages.
+        Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
+        refused one `identity_proofing.employment_rejected`. A kept statement with no current
+        job (`employed: false`) moves the approved session to `needs_review` with
+        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
+        with `current_benefit`, and one with other current income paid without hours worked
+        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
+        administrator through the review endpoint.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingEmploymentUpload'
+      responses:
+        '200':
+          description: The verdict on the file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingEmploymentVerdict'
+              examples:
+                accepted:
+                  summary: Kept
+                  value:
+                    fileName: Verzekeringsbericht.pdf
+                    accepted: true
+                    employment:
+                      statementDate: "2026-10-15"
+                      employed: true
+                      relations:
+                        - kind: employment
+                          employer: VOORBEELD B.V.
+                          payrollTaxNumber: 123456789L01
+                          contractForm: schriftelijke arbeidsovereenkomst voor onbepaalde tijd
+                          from: "2025-01-01"
+                          to: "2026-09-30"
+                refused:
+                  summary: Refused
+                  value:
+                    fileName: Verzekeringsbericht.pdf
+                    accepted: false
+                    reason: stale
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request asks for no Verzekeringsbericht (`employment_not_asked`), holds one already or the window is closed (`employment_closed`), or the request was cancelled or erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is too large (`too_large`).
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-matches:
     parameters:
       - name: slug
@@ -7419,7 +7600,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.employment_added]
                     maxAttempts: 8
                 none:
                   summary: No endpoint
@@ -7429,7 +7610,7 @@ paths:
                     health:
                       state: not_configured
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.employment_added]
                     maxAttempts: 8
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -7488,7 +7669,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.employment_added]
                     maxAttempts: 8
                     secret: whsec_4tY8mK2qN6vB1xC9zR3wP7sL5dF0gH8jA2eU6iO4x9Qa
         '400':
@@ -8284,6 +8465,87 @@ paths:
                 $ref: '#/components/schemas/Error'
         '413':
           description: An extract or the upload is too large (`too_large`).
+  /api/v1/proof/{token}/employment:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The hosted link's token.
+    post:
+      tags: [identity-proofing-hosted]
+      summary: Upload the UWV Verzekeringsbericht on a hosted page
+      description: >-
+        Anonymous: the link's token is the credential. As the on-screen upload, for the subject
+        of a hosted session. The link is checked before the body is read. One multipart `file`
+        part, at most 5 MiB. Only within an hour of an approved identity on a request
+        that asks for it, and kept once: the first accepted statement closes the step. The
+        file is checked: UWV's seal (unchanged, a qualified e-seal certificate of UWV on the
+        EU Trusted Lists, its revocation checked online), then the printed holder (initials,
+        surname, alone or joined to a married name, and date of birth) against the proofed
+        identity, then its date (at most 30 days old). The answer is `{fileName, accepted,
+        employment}` or `{fileName, accepted: false, reason, failedCheck}` with `reason`
+        `not_a_statement`, `signature_invalid`, `holder_mismatch` or `stale`; a refused file
+        can be followed by another within the window. An accepted statement keeps the
+        statement date and the relations current on it (reporting a month at most two
+        months before the statement's): employer, payroll tax number, contract form, since
+        when and the newest month, sealed. Never past relations, the PDF, the holder, the
+        hours or the wages.
+        Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
+        refused one `identity_proofing.employment_rejected`. A kept statement with no current
+        job (`employed: false`) moves the approved session to `needs_review` with
+        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
+        with `current_benefit`, and one with other current income paid without hours worked
+        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
+        administrator through the review endpoint.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingEmploymentUpload'
+      responses:
+        '200':
+          description: The verdict on the file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingEmploymentVerdict'
+              examples:
+                accepted:
+                  summary: Kept
+                  value:
+                    fileName: Verzekeringsbericht.pdf
+                    accepted: true
+                    employment:
+                      statementDate: "2026-10-15"
+                      employed: true
+                      relations:
+                        - kind: employment
+                          employer: VOORBEELD B.V.
+                          payrollTaxNumber: 123456789L01
+                          contractForm: schriftelijke arbeidsovereenkomst voor onbepaalde tijd
+                          from: "2025-01-01"
+                          to: "2026-09-30"
+                refused:
+                  summary: Refused
+                  value:
+                    fileName: Verzekeringsbericht.pdf
+                    accepted: false
+                    reason: stale
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session asks for no Verzekeringsbericht (`employment_not_asked`), holds one already or the window is closed (`employment_closed`), or the session was cancelled or erased (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is too large (`too_large`).
   /api/v1/proofing/sessions:
     get:
       tags: [identity-proofing-api]
@@ -8512,8 +8774,9 @@ paths:
           description: >-
             The flow does not exist (`flow_not_found`), cannot be finished
             (`flow_not_completable`), is not assigned to the customer (`flow_not_assigned`), needs a
-            `referencePhoto` (`reference_photo_required`), or asks for diplomas or the address and
-            so needs `hosted: true` (`diplomas_need_page`, `address_needs_page`); or the `Idempotency-Key` was used with
+            `referencePhoto` (`reference_photo_required`), or asks for diplomas, the address or the
+            Verzekeringsbericht and so needs `hosted: true` (`diplomas_need_page`, `address_needs_page`,
+            `employment_needs_page`); or the `Idempotency-Key` was used with
             another body (`idempotency_key_reused`).
           content:
             application/json:
@@ -8541,8 +8804,10 @@ paths:
         document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         in 30 days, an identity check within the data retention), `LEGAL_RETENTION` (an
-        erasure refused because the customer is bound by law to keep the data) and
-        `ORG_PAUSED` (a review left open when the organisation paused proofing). The
+        erasure refused because the customer is bound by law to keep the data),
+        `ORG_PAUSED` (a review left open when the organisation paused proofing) and
+        `EMPLOYMENT_NOT_PROVIDED` (an approved session on a flow that requires the
+        Verzekeringsbericht, without one kept within an hour of the approval). The
         session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
         achieved eIDAS level below the flow's (`ASSURANCE_NOT_MET`); a face that failed liveness
@@ -10907,8 +11172,10 @@ components:
           description: >-
             Why a session was rejected. The wallet itself sets `IDENTITY_MISMATCH` (the
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
-            short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time) and
-            `LEGAL_RETENTION` (an erasure the customer must refuse by law); others come from
+            short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time),
+            `LEGAL_RETENTION` (an erasure the customer must refuse by law) and
+            `EMPLOYMENT_NOT_PROVIDED` (no Verzekeringsbericht kept in time on a flow that
+            requires one); others come from
             the session itself
             (`FACE_NO_MATCH`, `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
             `CHIP_CLONE_DETECTED`, `ASSURANCE_NOT_MET`, …).
@@ -10992,6 +11259,10 @@ components:
         errorCode:
           type: string
           description: Why the session was rejected; see `ProofingApiSession.errorCode`.
+        reviewReason:
+          type: string
+          enum: [no_current_employment, current_benefit, current_other_income]
+          description: Why the session went to review after its identity was approved. `no_current_employment` is a Verzekeringsbericht that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job, `current_other_income` one that lists other current income paid without hours worked beside a job; a reviewer decides it in the wallet. Absent otherwise.
         verifiedAt:
           type: string
           format: date-time
@@ -11063,6 +11334,8 @@ components:
             $ref: '#/components/schemas/ProofingDiploma'
         address:
           $ref: '#/components/schemas/ProofingAddress'
+        employment:
+          $ref: '#/components/schemas/ProofingEmployment'
       required: [id, status, evidence, diplomas]
     ProofingApiMethodStart:
       type: object
@@ -11113,7 +11386,7 @@ components:
           description: The delivery's id; the same on every retry.
         type:
           type: string
-          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, test]
+          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.employment_added, test]
         createdAt:
           type: string
           format: date-time
@@ -11145,6 +11418,8 @@ components:
               description: Only present, as true, on a session created for one person.
             address:
               $ref: '#/components/schemas/ProofingAddress'
+            employment:
+              $ref: '#/components/schemas/ProofingEmployment'
             diploma:
               type: object
               description: Only on `session.diploma_added`.
@@ -11254,6 +11529,79 @@ components:
           items:
             type: string
             format: binary
+      required: [file]
+    ProofingFlowEmployment:
+      type: object
+      additionalProperties: false
+      properties:
+        employmentMode:
+          type: string
+          enum: ['off', required]
+      required: [employmentMode]
+    ProofingEmployment:
+      type: object
+      description: What was kept of a subject's UWV Verzekeringsbericht, checked against UWV's seal and the proofed identity. Only the relations current on the statement's date; never past ones, the PDF, the holder, the hours or the wages.
+      properties:
+        statementDate:
+          type: string
+          format: date
+          description: The day UWV made the statement.
+        employed:
+          type: boolean
+          description: A current relation that is not a benefit (a job with hours worked in one of the last two months, or a sickness benefit paid via the employer). Without one the session goes to review (`reviewReason` `no_current_employment`).
+        relations:
+          type: array
+          description: The employment and benefit relations current on the statement's date (reporting a month at most two months before its month, as payroll is filed a month late), one per employer and contract; empty when none is.
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [employment, benefit, sick_via_employer, other_income]
+                description: '`benefit` is a benefit UWV pays, recognised as HDN''s Inkomensbepaling Loondienst does (Appendix 5) by its description and loonheffingennummer. `sick_via_employer` is a sickness or WAZO benefit paid through the employer. `other_income` is a current payment without hours worked from any other payer: a pension, AOW, social assistance, or a final payment.'
+              employer:
+                type: string
+                description: The employer or paying body (`Werkgever/Instantie`).
+              payrollTaxNumber:
+                type: string
+                description: Its `Loonheffingennummer`.
+              contractForm:
+                type: string
+                description: The printed `Contractvorm`; empty when the statement prints none.
+              from:
+                type: string
+                format: date
+                description: Since when, the first day of the relation's first month on the statement.
+              to:
+                type: string
+                format: date
+                description: The last day of the newest month the statement reports for it.
+            required: [kind, employer, payrollTaxNumber, contractForm, from, to]
+      required: [statementDate, employed, relations]
+    ProofingEmploymentVerdict:
+      type: object
+      properties:
+        fileName:
+          type: string
+        accepted:
+          type: boolean
+        employment:
+          $ref: '#/components/schemas/ProofingEmployment'
+        reason:
+          type: string
+          enum: [not_a_statement, signature_invalid, holder_mismatch, stale]
+          description: Why the file was refused.
+        failedCheck:
+          type: string
+          description: Which seal check failed, with `signature_invalid`.
+      required: [fileName, accepted]
+    ProofingEmploymentUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The Verzekeringsbericht PDF as downloaded from Mijn UWV, at most 5 MiB.
       required: [file]
     ProofingFlowSpec:
       type: object
@@ -11388,6 +11736,9 @@ components:
             addressMode:
               type: string
               enum: ['off', required]
+            employmentMode:
+              type: string
+              enum: ['off', required]
             needsReferencePhoto:
               type: boolean
               description: The face is matched against a reference photo; only a customer's API can send such a flow.
@@ -11429,6 +11780,9 @@ components:
               type: string
               enum: ['off', required]
             addressMode:
+              type: string
+              enum: ['off', required]
+            employmentMode:
               type: string
               enum: ['off', required]
             needsReferencePhoto:
@@ -11622,6 +11976,8 @@ components:
                   $ref: '#/components/schemas/ProofingDiploma'
               address:
                 $ref: '#/components/schemas/ProofingAddress'
+              employment:
+                $ref: '#/components/schemas/ProofingEmployment'
       required: [sessionId, exportedAt, sessions]
     ProofingFlowAddress:
       type: object
@@ -11774,6 +12130,19 @@ components:
           type: string
           format: date-time
           description: When the person can last enter their address; absent until the identity is approved, and once they did.
+        employmentMode:
+          type: string
+          enum: ['off', required]
+        employment:
+          $ref: '#/components/schemas/ProofingEmployment'
+        employmentUntil:
+          type: string
+          format: date-time
+          description: When the person can last upload their Verzekeringsbericht; absent until the identity is approved, and once one was kept.
+        reviewReason:
+          type: string
+          enum: [no_current_employment, current_benefit, current_other_income]
+          description: Why the wallet put the session in review after the identity was approved (no current job, a current UWV benefit, or other current income paid without hours worked, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
         expectedSubject:
           type: boolean
         flowKind:
@@ -12328,7 +12697,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.employment_added]
       required: [url, events]
     ProofingWebhookDeliveryList:
       type: array
@@ -12395,6 +12764,13 @@ components:
         addressGiven:
           type: boolean
           description: The subject entered their address.
+        employmentUntil:
+          type: string
+          format: date-time
+          description: When the subject can last upload their Verzekeringsbericht; absent while they cannot, and once one was kept.
+        employmentGiven:
+          type: boolean
+          description: A Verzekeringsbericht of the subject was kept.
         dataExportUntil:
           type: string
           format: date-time
@@ -12457,6 +12833,9 @@ components:
                   type: string
                   enum: ['off', required]
                 addressMode:
+                  type: string
+                  enum: ['off', required]
+                employmentMode:
                   type: string
                   enum: ['off', required]
                 kind:
