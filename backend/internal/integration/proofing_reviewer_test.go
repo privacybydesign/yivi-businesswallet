@@ -46,12 +46,59 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 
 	base := "/api/v1/orgs/acme/identity-proofing/requests"
 	waiting := base + "?status=needs_review"
+	closed := base + "?status=approved"
 	one := base + "/" + session.ID
-	rightPath := func(id uuid.UUID) string { return "/api/v1/orgs/acme/members/" + id.String() + "/review-right" }
 
-	// A member without the right sees and decides nothing of what waits.
 	member := env.loginAs("member@acme.test")
 	env.addMembership(member, orgID, organization.RoleMember)
+	assertNoReviewWithoutRight(t, env, waiting, one, member)
+
+	env.loginAs("admin@acme.test")
+	assertAdminGivesReviewRight(t, env, orgID, member)
+	own := sendRequestToMember(t, env, base, flow.ID, admin.ID)
+
+	env.loginAs("member@acme.test")
+	assertReviewerDecides(t, env, base, waiting, one, own.ID)
+	assertReviewerLosesDecided(t, env, orgID, closed, one, member)
+
+	// An admin still reads all of it.
+	env.loginAs("admin@acme.test")
+	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, closed+"&subjectKind=external", nil)); len(list) != 1 {
+		t.Errorf("approved external for an admin = %+v, want the one decided", list)
+	}
+	resp := env.do(http.MethodGet, one+"/result", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("result of an approved check, for an admin = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// Taken away, the member is back to their own.
+	resp = env.putJSON(reviewRightPath(member), map[string]any{"canReview": false})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("taking the right = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	env.loginAs("member@acme.test")
+	resp = env.postJSON(one+"/review", map[string]any{"decision": "reject", "reason": "again"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("decision after the right is taken = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	if n := env.auditCount(orgID, audit.MembershipReviewChanged); n != 2 {
+		t.Errorf("review_changed audits after a grant and a revoke = %d, want 2", n)
+	}
+}
+
+// reviewRightPath is the route that sets the reviewer right of member id.
+func reviewRightPath(id uuid.UUID) string {
+	return "/api/v1/orgs/acme/members/" + id.String() + "/review-right"
+}
+
+// assertNoReviewWithoutRight checks that a member without the reviewer right,
+// the caller, sees and decides nothing of what waits, and cannot give
+// themselves the right.
+func assertNoReviewWithoutRight(t *testing.T, env *testEnv, waiting, one string, member uuid.UUID) {
+	t.Helper()
 	if env.canReview("acme") {
 		t.Error("a member without the right canReview = true")
 	}
@@ -72,26 +119,30 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 	}
-	resp := env.putJSON(rightPath(member), map[string]any{"canReview": true})
+	resp := env.putJSON(reviewRightPath(member), map[string]any{"canReview": true})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("a member giving themselves the right = %d, want 403", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+}
 
-	// Only an admin gives it, to a member of the org.
-	env.loginAs("admin@acme.test")
-	resp = env.putJSON(rightPath(member), map[string]any{})
+// assertAdminGivesReviewRight checks that the admin, the caller, gives member
+// the reviewer right, once however often it is sent, and only to a member of
+// the org.
+func assertAdminGivesReviewRight(t *testing.T, env *testEnv, orgID, member uuid.UUID) {
+	t.Helper()
+	resp := env.putJSON(reviewRightPath(member), map[string]any{})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a body without canReview = %d, want 400", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	resp = env.putJSON(rightPath(uuid.New()), map[string]any{"canReview": true})
+	resp = env.putJSON(reviewRightPath(uuid.New()), map[string]any{"canReview": true})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("the right for a stranger = %d, want 404", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 	for range 2 {
-		resp = env.putJSON(rightPath(member), map[string]any{"canReview": true})
+		resp = env.putJSON(reviewRightPath(member), map[string]any{"canReview": true})
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("giving the right = %d, want 200", resp.StatusCode)
 		}
@@ -105,23 +156,32 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 	if m := byEmail(env.listMembers("acme", organization.StatusActive), "member@acme.test"); m == nil || !m.CanReview {
 		t.Errorf("listed member = %+v, want canReview", m)
 	}
+}
 
-	// A request the admin sent to a member is no business of the reviewer until it
-	// waits for review; an engine that decides nothing keeps it pending.
+// sendRequestToMember has the admin, the caller, send a request on flowID to
+// the member adminID: no business of the reviewer until it waits for review.
+// An engine that decides nothing keeps it pending.
+func sendRequestToMember(t *testing.T, env *testEnv, base, flowID string, adminID uuid.UUID) proofingRequestResp {
+	t.Helper()
 	env.proofing.Outcome = ""
-	resp = env.putJSON("/api/v1/orgs/acme/identity-proofing/flow-selection",
-		map[string]any{"flowIds": []string{flow.ID}, "defaultFlowId": flow.ID})
+	resp := env.putJSON("/api/v1/orgs/acme/identity-proofing/flow-selection",
+		map[string]any{"flowIds": []string{flowID}, "defaultFlowId": flowID})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("make the flow available to members = %d, want 200", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	own := decodeJSON[proofingRequestResp](t, env.postJSON(base, map[string]any{"userId": admin.ID, "flowId": flow.ID}))
+	own := decodeJSON[proofingRequestResp](t, env.postJSON(base, map[string]any{"userId": adminID, "flowId": flowID}))
 	if own.Status != "pending" || own.External {
 		t.Fatalf("request to a member = %+v, want pending and not external", own)
 	}
+	return own
+}
 
-	// With it, the member lists what waits, opens it and decides it.
-	env.loginAs("member@acme.test")
+// assertReviewerDecides checks that a reviewer, the caller, lists what waits,
+// opens it and decides it, and still reaches no other request: not ownID,
+// sent to a member, nor a list by status alone.
+func assertReviewerDecides(t *testing.T, env *testEnv, base, waiting, one, ownID string) {
+	t.Helper()
 	if !env.canReview("acme") {
 		t.Error("a member with the right canReview = false")
 	}
@@ -138,13 +198,13 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 	}
 	// What is stored decides, not what the engine would report: it is not asked.
 	env.proofing.Outcome = proofingprovider.StatusNeedsReview
-	wantProofingError(t, "a reviewer opening a request sent to a member", env.do(http.MethodGet, base+"/"+own.ID, nil),
+	wantProofingError(t, "a reviewer opening a request sent to a member", env.do(http.MethodGet, base+"/"+ownID, nil),
 		http.StatusNotFound, "session_not_found")
 	if got := decodeJSON[proofingRequestResp](t, env.do(http.MethodGet, one, nil)); got.Status != "needs_review" {
 		t.Errorf("request opened by a reviewer = %+v, want the one waiting", got)
 	}
 	// While it waits the reviewer reads what the check proved, to decide on it.
-	resp = env.do(http.MethodGet, one+"/result", nil)
+	resp := env.do(http.MethodGet, one+"/result", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("result of a check waiting, for a reviewer = %d, want 200", resp.StatusCode)
 	}
@@ -156,9 +216,13 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 	if decided := decodeJSON[proofingRequestResp](t, resp); decided.Status != "approved" {
 		t.Errorf("decided = %+v, want approved", decided)
 	}
-	// Decided, the identity check is no longer the reviewer's to read: the right
-	// reaches what waits, not every person the org ever checked.
-	closed := base + "?status=approved"
+}
+
+// assertReviewerLosesDecided checks that the identity check one, decided, is
+// no longer the reviewer's to read: the right reaches what waits, not every
+// person the org ever checked. The decision is audited under member's name.
+func assertReviewerLosesDecided(t *testing.T, env *testEnv, orgID uuid.UUID, closed, one string, member uuid.UUID) {
+	t.Helper()
 	for _, path := range []string{closed, closed + "&subjectKind=external", closed + "&subjectKind=member"} {
 		if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, path, nil)); len(list) != 0 {
 			t.Errorf("GET %s for a reviewer = %+v, want only the ones they sent", path, list)
@@ -180,33 +244,6 @@ func TestProofingReviewerRightFlow(t *testing.T) {
 	}
 	if actor != member {
 		t.Errorf("decision audited under %s, want the reviewer %s", actor, member)
-	}
-
-	// An admin still reads all of it.
-	env.loginAs("admin@acme.test")
-	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, closed+"&subjectKind=external", nil)); len(list) != 1 {
-		t.Errorf("approved external for an admin = %+v, want the one decided", list)
-	}
-	resp = env.do(http.MethodGet, one+"/result", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("result of an approved check, for an admin = %d, want 200", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
-
-	// Taken away, the member is back to their own.
-	resp = env.putJSON(rightPath(member), map[string]any{"canReview": false})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("taking the right = %d, want 200", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
-	env.loginAs("member@acme.test")
-	resp = env.postJSON(one+"/review", map[string]any{"decision": "reject", "reason": "again"})
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("decision after the right is taken = %d, want 403", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
-	if n := env.auditCount(orgID, audit.MembershipReviewChanged); n != 2 {
-		t.Errorf("review_changed audits after a grant and a revoke = %d, want 2", n)
 	}
 }
 

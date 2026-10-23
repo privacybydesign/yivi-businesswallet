@@ -341,33 +341,12 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 		return Member{}, fmt.Errorf("organization: read membership user %s org %s: %w", userID, orgID, err)
 	}
 
-	if role != nil && *role == RoleMember && current == RoleAdmin {
-		admins, err := lockAndCountAdmins(ctx, tx, orgID)
-		if err != nil {
-			return Member{}, err
-		}
-		if admins <= 1 {
-			return Member{}, ErrLastAdmin
-		}
+	if err := keepAnAdmin(ctx, tx, orgID, role, current); err != nil {
+		return Member{}, err
 	}
-
-	// A role change clears the reviewer right: an admin reviews by their role,
-	// and one demoted again has to be given it anew.
-	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5,
-			can_review = can_review AND COALESCE($3, role) = role
-		WHERE organization_id = $1 AND user_id = $2
-		RETURNING (SELECT name FROM departments WHERE id = $5 AND organization_id = $1)`
-	var newDeptName *string
-	err = tx.QueryRow(ctx, q, orgID, userID, role, jobTitle, departmentID).Scan(&newDeptName)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == membershipDepartmentFK {
-		return Member{}, ErrDepartmentNotFound
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Member{}, ErrNotMember
-	}
+	newDeptName, err := setMembership(ctx, tx, orgID, userID, role, jobTitle, departmentID)
 	if err != nil {
-		return Member{}, fmt.Errorf("organization: update membership user %s org %s: %w", userID, orgID, err)
+		return Member{}, err
 	}
 
 	newRole := current
@@ -391,6 +370,46 @@ func (s *Store) UpdateMembership(ctx context.Context, orgID, userID uuid.UUID, r
 		return Member{}, fmt.Errorf("organization: commit update membership user %s org %s: %w", userID, orgID, err)
 	}
 	return s.GetMember(ctx, orgID, userID)
+}
+
+// keepAnAdmin refuses to demote the org's last admin: a change of role to
+// member of a user who is an admin now locks the org's admins and counts them.
+func keepAnAdmin(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, role *string, current string) error {
+	if role == nil || *role != RoleMember || current != RoleAdmin {
+		return nil
+	}
+	admins, err := lockAndCountAdmins(ctx, tx, orgID)
+	if err != nil {
+		return err
+	}
+	if admins <= 1 {
+		return ErrLastAdmin
+	}
+	return nil
+}
+
+// setMembership writes a membership's role, job title and department, and
+// returns the department's name.
+func setMembership(ctx context.Context, tx pgx.Tx, orgID, userID uuid.UUID, role, jobTitle *string, departmentID *uuid.UUID) (*string, error) {
+	// A role change clears the reviewer right: an admin reviews by their role,
+	// and one demoted again has to be given it anew.
+	const q = `UPDATE memberships SET role = COALESCE($3, role), job_title = $4, department_id = $5,
+			can_review = can_review AND COALESCE($3, role) = role
+		WHERE organization_id = $1 AND user_id = $2
+		RETURNING (SELECT name FROM departments WHERE id = $5 AND organization_id = $1)`
+	var newDeptName *string
+	err := tx.QueryRow(ctx, q, orgID, userID, role, jobTitle, departmentID).Scan(&newDeptName)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation && pgErr.ConstraintName == membershipDepartmentFK {
+		return nil, ErrDepartmentNotFound
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotMember
+	}
+	if err != nil {
+		return nil, fmt.Errorf("organization: update membership user %s org %s: %w", userID, orgID, err)
+	}
+	return newDeptName, nil
 }
 
 // RemoveMembership off-boards a member: it deletes their membership and records

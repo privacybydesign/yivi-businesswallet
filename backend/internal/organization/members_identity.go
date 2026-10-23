@@ -17,6 +17,9 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
+// invalidUserID is the message of a request whose user id does not parse.
+const invalidUserID = "invalid user id"
+
 type updateMemberTypeRequest struct {
 	MemberType           string  `json:"memberType"`
 	ExternalOrganisation *string `json:"externalOrganisation"`
@@ -25,7 +28,7 @@ type updateMemberTypeRequest struct {
 func (h *Handler) updateMemberType(w http.ResponseWriter, r *http.Request) error {
 	userID, err := uuid.Parse(r.PathValue("userId"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid user id")
+		return badRequest("invalid_id", invalidUserID)
 	}
 	var req updateMemberTypeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -60,7 +63,7 @@ type updateReviewRightRequest struct {
 func (h *Handler) updateReviewRight(w http.ResponseWriter, r *http.Request) error {
 	userID, err := uuid.Parse(r.PathValue("userId"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid user id")
+		return badRequest("invalid_id", invalidUserID)
 	}
 	var req updateReviewRightRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CanReview == nil {
@@ -97,7 +100,7 @@ type requestIdentificationRequest struct {
 func (h *Handler) requestIdentification(w http.ResponseWriter, r *http.Request) error {
 	userID, err := uuid.Parse(r.PathValue("userId"))
 	if err != nil {
-		return badRequest("invalid_id", "invalid user id")
+		return badRequest("invalid_id", invalidUserID)
 	}
 	var req requestIdentificationRequest
 	if r.ContentLength != 0 {
