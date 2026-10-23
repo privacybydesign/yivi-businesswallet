@@ -255,7 +255,7 @@ function VerifyFlow({
           addressMode={sent.addressMode}
           onAddressStep={setInAddress}
           onRestart={restart}
-          ended={() => (
+          renderEnded={() => (
             <CheckEnded message={t("identityProofing.onScreen.ended.message")}>
               <div>
                 <Button

@@ -1776,7 +1776,7 @@ export function ttlMinutes(seconds: number): number {
 
 const MAIL_ADDRESS = /^[^\s@]+@[^\s@]+$/;
 const MAILTO_SCHEME = "mailto:";
-const WEB_PROTOCOLS = ["http:", "https:"];
+const WEB_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
 
 interface SupportLink {
   href: string;
@@ -1797,7 +1797,7 @@ export function supportContactLink(contact: string): SupportLink | undefined {
   }
 
   // Before the mail test: a /@handle path or user@host matches MAIL_ADDRESS.
-  if (url && WEB_PROTOCOLS.includes(url.protocol)) {
+  if (url && WEB_PROTOCOLS.has(url.protocol)) {
     return { href: url.href, kind: "web" };
   }
 

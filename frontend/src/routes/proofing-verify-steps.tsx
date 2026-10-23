@@ -389,20 +389,20 @@ export function CheckEnded({
 }): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <div role="status" className="flex flex-col gap-6">
+    <output className="flex flex-col gap-6">
       <div className="flex flex-col gap-2.5">
         <StepHeading>{t("identityProofing.onScreen.ended.title")}</StepHeading>
         <p className="text-ink-soft text-[15px] leading-[23px]">{message}</p>
       </div>
       {children}
-    </div>
+    </output>
   );
 }
 
 // The running session: the app's QR code and link with a countdown, until
 // the request settles or the session runs out. onRestart, when set, offers a
 // new session after one ended; outcomeActions go under the outcome. Once the
-// session or an unstarted link ran out, the page shows ended(progress)
+// session or an unstarted link ran out, the page shows renderEnded(progress)
 // instead, and is told through onEnded.
 export function Session({
   target,
@@ -412,7 +412,7 @@ export function Session({
   method,
   onRestart,
   outcomeActions,
-  ended,
+  renderEnded,
   onEnded,
   onSettled,
   diplomaMode = "off",
@@ -429,7 +429,7 @@ export function Session({
   method: ProofingMethod;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
-  ended: (progress: ProofingProgress) => React.ReactNode;
+  renderEnded: (progress: ProofingProgress) => React.ReactNode;
   onEnded?: () => void;
   // Called with the progress once the session has an outcome, and the subject
   // is done adding diploma extracts when it asks for them; again whenever
@@ -534,7 +534,7 @@ export function Session({
     );
   }
   if (over) {
-    return <>{ended(current)}</>;
+    return <>{renderEnded(current)}</>;
   }
   if (showsOutcome) {
     return (

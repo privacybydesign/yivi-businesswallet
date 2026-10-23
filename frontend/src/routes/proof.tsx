@@ -304,7 +304,7 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
-              ended={(progress) => (
+              renderEnded={(progress) => (
                 <HostedCheckEnded
                   name={organization.name}
                   contact={organization.branding.supportContact}
@@ -354,16 +354,16 @@ function HostedCheckEnded({
   const link = supportContactLink(contact);
   // The page can be framed, and a plain link would replace it inside the frame.
   const newTab = link?.kind === "web";
+  let message: string;
+  if (reason.kind === "notStarted") {
+    message = t("proofLink.ended.notStarted", { name });
+  } else if (reason.minutes === undefined) {
+    message = t("proofLink.ended.timedOut", { name });
+  } else {
+    message = t("proofLink.ended.started", { name, count: reason.minutes });
+  }
   return (
-    <CheckEnded
-      message={
-        reason.kind === "notStarted"
-          ? t("proofLink.ended.notStarted", { name })
-          : reason.minutes === undefined
-            ? t("proofLink.ended.timedOut", { name })
-            : t("proofLink.ended.started", { name, count: reason.minutes })
-      }
-    >
+    <CheckEnded message={message}>
       <div className="rounded-yivi bg-surface-2 flex flex-col gap-2 p-4">
         <span className="text-ink font-semibold">
           {t("proofLink.ended.retryTitle")}
