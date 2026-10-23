@@ -89,7 +89,7 @@ func TestEmploymentFlowIsNotMailed(t *testing.T) {
 	}
 }
 
-func TestEmploymentModeKeptOnRequest(t *testing.T) {
+func TestEmploymentModeOnRequest(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	sendApprovedAddress(t, e.fixture, 0)
 	if got := e.requests.created[0].Employment; got != EmploymentRequired {
@@ -177,7 +177,7 @@ func TestEmploymentUntil(t *testing.T) {
 
 // Requiring the statement needs a flow that reads the name and date of birth:
 // its holder is matched against them.
-func TestSaveFlowEmploymentNeedsIdentity(t *testing.T) {
+func TestEmploymentNeedsIdentity(t *testing.T) {
 	e := newEmploymentFixture(EmploymentOff)
 	if _, err := e.svc.SaveFlowEmployment(context.Background(), testOrg, appFlow.ID, EmploymentRequired); !errors.Is(err, ErrFlowNoIdentity) {
 		t.Errorf("SaveFlowEmployment on a flow without dg1 = %v, want ErrFlowNoIdentity", err)

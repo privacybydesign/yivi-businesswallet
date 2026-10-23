@@ -854,7 +854,7 @@ function EmploymentStep({
   const [refused, setRefused] = useState<EmploymentVerdict>();
   const [kept, setKept] = useState<ProofingEmployment>();
   const secondsLeft = useSecondsLeft(until);
-  const done = employmentStepDone(kept !== undefined, secondsLeft);
+  const done = employmentStepDone(kept, secondsLeft);
 
   function check(file: File | undefined): void {
     if (file === undefined) return;

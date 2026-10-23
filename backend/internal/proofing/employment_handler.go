@@ -67,6 +67,9 @@ func writeEmploymentVerdict(w http.ResponseWriter, r *http.Request, v Employment
 	})
 }
 
+// employmentUploadSlots is how many files an upload takes: the one statement.
+const employmentUploadSlots = 1
+
 // addEmployment checks the statement uploaded on a request's on-screen page.
 // It is read as one diploma extract is: one file, at most MaxDiplomaFileBytes.
 func (h *Handler) addEmployment(w http.ResponseWriter, r *http.Request) error {
@@ -74,7 +77,7 @@ func (h *Handler) addEmployment(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	files, err := readDiplomaFiles(w, r, 1)
+	files, err := readDiplomaFiles(w, r, employmentUploadSlots)
 	if err != nil {
 		return err
 	}
@@ -93,7 +96,7 @@ func (h *Handler) hostedAddEmployment(w http.ResponseWriter, r *http.Request) er
 	if err := h.service.HostedEmploymentOpen(r.Context(), r.PathValue("token")); err != nil {
 		return mapError(err)
 	}
-	files, err := readDiplomaFiles(w, r, 1)
+	files, err := readDiplomaFiles(w, r, employmentUploadSlots)
 	if err != nil {
 		return err
 	}

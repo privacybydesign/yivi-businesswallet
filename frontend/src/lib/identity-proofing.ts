@@ -14,6 +14,7 @@ import type {
   FlowKind,
   ProofingBranding,
   ProofingChannel,
+  ProofingEmployment,
   ProofingFlow,
   ProofingFlowBranding,
   ProofingFlowHosted,
@@ -1438,10 +1439,10 @@ export function employmentRejectionReason(
 // Whether the employment step can end: once a statement is kept, or the time
 // to upload one is up.
 export function employmentStepDone(
-  kept: boolean,
+  kept: ProofingEmployment | undefined,
   secondsLeft: number,
 ): boolean {
-  return kept || secondsLeft === 0;
+  return kept !== undefined || secondsLeft === 0;
 }
 
 // The copy an identity proofing API error shows, keyed on its stable code.
