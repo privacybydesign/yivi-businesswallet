@@ -9,7 +9,8 @@ import {
   resolveSettingsLocation,
   settingsTabParam,
 } from "../lib/settings-tabs";
-import type { SettingsLocation } from "../lib/settings-tabs";
+import type { SettingsLocation, SettingsTab } from "../lib/settings-tabs";
+import type { OrganizationDetail } from "../api/organization";
 import { Card, TopBar } from "../ui";
 import { EmailSettingsPanel } from "./email-settings";
 import { EmailTemplatesPanel } from "./email-templates";
@@ -99,18 +100,6 @@ export default function Settings(): React.JSX.Element {
               {t("settings.adminOnly")}
             </p>
           </Card>
-        ) : tab === "org" ? (
-          <OrgProfileSettings org={org.data} />
-        ) : tab === "branding" ? (
-          <BrandingPanel slug={slug} orgName={org.data.name} />
-        ) : tab === "mandates" ? (
-          <MandateSettings slug={slug} />
-        ) : tab === "identity" ? (
-          <IdentitySettingsPanel slug={slug} />
-        ) : tab === "screening" ? (
-          <ScreeningSettingsPanel slug={slug} />
-        ) : tab === "theme" ? (
-          <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (
           <div className="flex flex-col gap-6">
             <div
@@ -149,12 +138,6 @@ export default function Settings(): React.JSX.Element {
               <TeamsSettingsPanel slug={slug} />
             ) : null}
           </div>
-        ) : tab === "issuer" ? (
-          <IssuerSettingsPanel slug={slug} />
-        ) : tab === "provisioning" ? (
-          <ProvisioningSettingsPanel slug={slug} />
-        ) : tab === "signing" ? (
-          <CscSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
@@ -162,9 +145,43 @@ export default function Settings(): React.JSX.Element {
             <PostguardNotificationsCard slug={slug} isAdmin={isAdmin} />
           </div>
         ) : (
-          <WscaWalletPanel slug={slug} />
+          <SettingsPanel tab={tab} slug={slug} org={org.data} />
         )}
       </div>
     </>
   );
+}
+
+// The panel of a settings tab that holds one panel, as an admin sees it.
+function SettingsPanel({
+  tab,
+  slug,
+  org,
+}: {
+  tab: SettingsTab;
+  slug: string;
+  org: OrganizationDetail;
+}): React.JSX.Element {
+  switch (tab) {
+    case "org":
+      return <OrgProfileSettings org={org} />;
+    case "branding":
+      return <BrandingPanel slug={slug} orgName={org.name} />;
+    case "mandates":
+      return <MandateSettings slug={slug} />;
+    case "identity":
+      return <IdentitySettingsPanel slug={slug} />;
+    case "screening":
+      return <ScreeningSettingsPanel slug={slug} />;
+    case "theme":
+      return <ThemeSettingsPanel slug={slug} />;
+    case "issuer":
+      return <IssuerSettingsPanel slug={slug} />;
+    case "provisioning":
+      return <ProvisioningSettingsPanel slug={slug} />;
+    case "signing":
+      return <CscSettingsPanel slug={slug} />;
+    default:
+      return <WscaWalletPanel slug={slug} />;
+  }
 }
