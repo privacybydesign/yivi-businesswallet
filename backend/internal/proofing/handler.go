@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -380,40 +381,13 @@ const flowKindDataRequest = "data_request"
 // ?flowKind=data_request to the data requests.
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	var filter RequestFilter
+	filter, err := requestFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	if !organization.ActsAsAdmin(r.Context()) {
 		id := auth.UserFromContext(r.Context()).ID
 		filter.RequestedBy = &id
-	}
-	if raw := r.URL.Query().Get("subjectUserId"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid subject user id"}
-		}
-		filter.SubjectUserID = &id
-	}
-	if raw := r.URL.Query().Get("subjectKind"); raw != "" {
-		kind := SubjectKind(raw)
-		if kind != SubjectMember && kind != SubjectExternal {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "subjectKind must be member or external"}
-		}
-		filter.SubjectKind = &kind
-	}
-	if raw := r.URL.Query().Get("flowId"); raw != "" {
-		filter.FlowID = &raw
-	}
-	if raw := r.URL.Query().Get("status"); raw != "" {
-		status := Status(raw)
-		if !status.stored() {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, approved, rejected or needs_review"}
-		}
-		filter.Status = &status
-	}
-	if raw := r.URL.Query().Get("flowKind"); raw != "" {
-		if raw != flowKindDataRequest {
-			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "flowKind must be " + flowKindDataRequest}
-		}
-		filter.DataRequests = true
 	}
 	reqs, err := h.service.Requests(r.Context(), org.ID, filter)
 	if err != nil {
@@ -434,6 +408,43 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// requestFilterFrom reads a request list's filter from its query, refusing a
+// value it does not know.
+func requestFilterFrom(query url.Values) (RequestFilter, error) {
+	var filter RequestFilter
+	if raw := query.Get("subjectUserId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid subject user id"}
+		}
+		filter.SubjectUserID = &id
+	}
+	if raw := query.Get("subjectKind"); raw != "" {
+		kind := SubjectKind(raw)
+		if kind != SubjectMember && kind != SubjectExternal {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "subjectKind must be member or external"}
+		}
+		filter.SubjectKind = &kind
+	}
+	if raw := query.Get("flowId"); raw != "" {
+		filter.FlowID = &raw
+	}
+	if raw := query.Get("status"); raw != "" {
+		status := Status(raw)
+		if !status.stored() {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "status must be pending, in_progress, approved, rejected or needs_review"}
+		}
+		filter.Status = &status
+	}
+	if raw := query.Get("flowKind"); raw != "" {
+		if raw != flowKindDataRequest {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "flowKind must be " + flowKindDataRequest}
+		}
+		filter.DataRequests = true
+	}
+	return filter, nil
 }
 
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the

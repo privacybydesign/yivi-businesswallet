@@ -289,9 +289,9 @@ function OwnReviewNote({
       <h2 className="font-display text-ink text-[18px] font-semibold">
         {t("identityProofing.reviews.check.decision.title")}
       </h2>
-      <p role="status" className="text-[13.5px]">
+      <output className="block text-[13.5px]">
         {t(`identityProofing.reviews.check.own.${own}`)}
-      </p>
+      </output>
       <BackToReviews to={reviewPath(slug)} />
     </div>
   );

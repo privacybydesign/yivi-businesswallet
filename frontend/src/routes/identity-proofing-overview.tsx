@@ -192,7 +192,7 @@ function StatCell({
   value: string;
   hint: string;
   // Turns the hint into a link.
-  hintTo?: string | undefined;
+  hintTo?: string;
 }): React.JSX.Element {
   return (
     <div className="px-5 py-4">

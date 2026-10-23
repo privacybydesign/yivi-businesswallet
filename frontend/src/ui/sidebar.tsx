@@ -147,7 +147,7 @@ function CountBadge({
   capped = false,
 }: {
   count: number;
-  capped?: boolean | undefined;
+  capped?: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   return (

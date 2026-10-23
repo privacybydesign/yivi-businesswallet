@@ -1977,7 +1977,7 @@ func TestReviewerRejectCodes(t *testing.T) {
 		f.reconcile(t)
 		_, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "anna@acme.test",
 			ReviewInput{Reason: "Not her payslip", ErrorCode: code, ReviewerID: reviewer})
-		if got := !errors.Is(err, ErrInvalidInput); got != want {
+		if errors.Is(err, ErrInvalidInput) == want {
 			t.Errorf("a reviewer rejecting with %q: %v, want allowed %v", code, err, want)
 		}
 	}

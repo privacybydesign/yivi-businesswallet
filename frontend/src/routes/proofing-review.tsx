@@ -28,16 +28,18 @@ export default function ProofingReview(): React.JSX.Element {
       <DataRequestReview slug={slug} kind={data.flowKind} request={data} />
     );
   }
+  let message: string;
+  if (org.isPending || (isAdmin && request.isPending)) {
+    message = t("common.loading");
+  } else if (isAdmin) {
+    message = proofingErrorMessage(request.error, t);
+  } else {
+    message = t("identityProofing.reviews.adminOnly");
+  }
   return (
     <>
       <TopBar title={t("identityProofing.reviews.title")} />
-      <p className="text-ink-soft p-4 text-[14px] sm:p-8">
-        {org.isPending || (isAdmin && request.isPending)
-          ? t("common.loading")
-          : !isAdmin
-            ? t("identityProofing.reviews.adminOnly")
-            : proofingErrorMessage(request.error, t)}
-      </p>
+      <p className="text-ink-soft p-4 text-[14px] sm:p-8">{message}</p>
     </>
   );
 }

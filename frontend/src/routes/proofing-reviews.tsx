@@ -57,6 +57,11 @@ export default function ProofingReviews(): React.JSX.Element {
   // The backend lists at most the 200 longest in review: past that the counts
   // are lower bounds.
   const capped = requestListCapped(waiting.data ?? []);
+  // What shows instead of the reviews to anyone but an admin, and until the
+  // org is known.
+  const notice = org.isPending
+    ? t("common.loading")
+    : t("identityProofing.reviews.adminOnly");
 
   return (
     <>
@@ -64,15 +69,7 @@ export default function ProofingReviews(): React.JSX.Element {
         title={t("identityProofing.reviews.title")}
         subtitle={t("identityProofing.reviews.subtitle")}
       />
-      {org.isPending ? (
-        <p className="text-ink-soft p-4 text-[14px] sm:p-8">
-          {t("common.loading")}
-        </p>
-      ) : !isAdmin ? (
-        <p className="text-ink-soft p-4 text-[14px] sm:p-8">
-          {t("identityProofing.reviews.adminOnly")}
-        </p>
-      ) : (
+      {isAdmin ? (
         <>
           <ReviewTabs active={tab} counts={counts} capped={capped} />
           <div className="flex flex-col gap-4 p-4 sm:p-8">
@@ -93,6 +90,8 @@ export default function ProofingReviews(): React.JSX.Element {
             </p>
           </div>
         </>
+      ) : (
+        <p className="text-ink-soft p-4 text-[14px] sm:p-8">{notice}</p>
       )}
     </>
   );
