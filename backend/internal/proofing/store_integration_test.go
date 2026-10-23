@@ -601,6 +601,15 @@ func TestSettingsSaveIsOneTransaction(t *testing.T) {
 	}
 }
 
+// expectLogo checks that the org's stored logo is want after step.
+func expectLogo(t *testing.T, store *OrgSettingsStore, orgID uuid.UUID, step string, want Logo) {
+	t.Helper()
+	got, err := store.Logo(context.Background(), orgID)
+	if err != nil || !bytes.Equal(got.Bytes, want.Bytes) || got.ContentType != want.ContentType {
+		t.Errorf("%s: Logo = %q %q, %v; want %q %q", step, got.Bytes, got.ContentType, err, want.Bytes, want.ContentType)
+	}
+}
+
 // The branding round trips with its logo, which a save keeps, replaces or
 // removes as asked; each change is audited once, without the logo's bytes, and
 // the other settings stay as they were.
@@ -615,13 +624,6 @@ func TestOrgSettingsBranding(t *testing.T) {
 		DisplayName: "Acme Verify", PrimaryColor: "#0a5cff", SupportContact: "help@acme.example",
 		PrivacyURL: "https://acme.example/privacy", HidePoweredBy: true,
 	}
-	expectLogo := func(step string, want Logo) {
-		t.Helper()
-		got, err := store.Logo(ctx, orgID)
-		if err != nil || !bytes.Equal(got.Bytes, want.Bytes) || got.ContentType != want.ContentType {
-			t.Errorf("%s: Logo = %q %q, %v; want %q %q", step, got.Bytes, got.ContentType, err, want.Bytes, want.ContentType)
-		}
-	}
 
 	week := SessionSettings{SessionTTL: 5 * time.Minute, DataRetentionDays: 7, ErasureHandling: ErasureReview}
 	if _, err := store.SaveSession(ctx, orgID, sessionChange(week)); err != nil {
@@ -634,7 +636,7 @@ func TestOrgSettingsBranding(t *testing.T) {
 	if err != nil || saved.Branding != wantBranding || saved.SignedAs() != "Acme Verify" || saved.Session != week {
 		t.Fatalf("SaveBranding = %+v, %v; want %+v beside the session settings", saved, err, wantBranding)
 	}
-	expectLogo("added", logoA)
+	expectLogo(t, store, orgID, "added", logoA)
 
 	// The same values, the logo kept: nothing changes.
 	again, err := store.SaveBranding(ctx, orgID, branding, LogoChange{})
@@ -651,7 +653,7 @@ func TestOrgSettingsBranding(t *testing.T) {
 	if got, err := store.SaveBranding(ctx, orgID, renamed, LogoChange{}); err != nil || got.Branding.DisplayName != "Acme" || !got.Branding.HasLogo {
 		t.Fatalf("rename with the logo kept = %+v, %v", got.Branding, err)
 	}
-	expectLogo("kept", logoA)
+	expectLogo(t, store, orgID, "kept", logoA)
 
 	// A change that replaces the logo.
 	recoloured := renamed
@@ -659,9 +661,19 @@ func TestOrgSettingsBranding(t *testing.T) {
 	if got, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true, Logo: logoB}); err != nil || got.Branding.PrimaryColor != "#112233" || !got.Branding.HasLogo {
 		t.Fatalf("recolour with another logo = %+v, %v", got.Branding, err)
 	}
-	expectLogo("replaced", logoB)
+	expectLogo(t, store, orgID, "replaced", logoB)
 
-	// Replacing with nothing removes the logo, and nothing else.
+	assertBrandingLogoRemoved(t, store, orgID, recoloured, logoA)
+	assertBrandingAuditsHideLogo(t, pool, orgID)
+}
+
+// assertBrandingLogoRemoved checks that saving recoloured with no logo removes
+// the logo and nothing else, that session settings saved over the branding,
+// with logo added again, leave it alone, and that an emptied branding reads as
+// the org's own again.
+func assertBrandingLogoRemoved(t *testing.T, store *OrgSettingsStore, orgID uuid.UUID, recoloured Branding, logo Logo) {
+	t.Helper()
+	ctx := context.Background()
 	removed, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true})
 	if err != nil || removed.Branding.HasLogo || removed.Branding.PrimaryColor != "#112233" {
 		t.Fatalf("remove the logo = %+v, %v", removed.Branding, err)
@@ -671,7 +683,7 @@ func TestOrgSettingsBranding(t *testing.T) {
 	}
 
 	// Session settings saved on top leave the branding alone.
-	if _, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true, Logo: logoA}); err != nil {
+	if _, err := store.SaveBranding(ctx, orgID, recoloured, LogoChange{Replace: true, Logo: logo}); err != nil {
 		t.Fatalf("add a logo again: %v", err)
 	}
 	year := SessionSettings{SessionTTL: SessionTTL, DataRetentionDays: 365, ErasureHandling: ErasureAutomatic}
@@ -679,15 +691,19 @@ func TestOrgSettingsBranding(t *testing.T) {
 		got.Branding.DisplayName != "Acme" || got.Branding.PrimaryColor != "#112233" || !got.Branding.HasLogo {
 		t.Errorf("SaveSession over the branding = %+v, %v; want the branding kept", got, err)
 	}
-	expectLogo("after the session settings", logoA)
+	expectLogo(t, store, orgID, "after the session settings", logo)
 
 	// Emptied, the branding reads as the org's own again.
 	cleared, err := store.SaveBranding(ctx, orgID, Branding{}, LogoChange{Replace: true})
 	if err != nil || cleared.Branding != (Branding{}) || cleared.SignedAs() != "acme" {
 		t.Errorf("cleared branding = %+v, %v; want none, signed with the org's name", cleared.Branding, err)
 	}
+}
 
-	// The audit holds whether a logo is set, never its bytes.
+// assertBrandingAuditsHideLogo checks the org's eight settings audits: they
+// hold whether a logo is set, never its bytes.
+func assertBrandingAuditsHideLogo(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) {
+	t.Helper()
 	audits := settingsAudits(t, pool, orgID)
 	if len(audits) != 8 {
 		t.Fatalf("settings_updated audits = %d, want 8", len(audits))
@@ -697,7 +713,7 @@ func TestOrgSettingsBranding(t *testing.T) {
 		t.Errorf("branding added audit = %+v", a)
 	}
 	var leaks int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE metadata::text LIKE '%logo a%' OR metadata::text LIKE '%logo b%'`).
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_events WHERE metadata::text LIKE '%logo a%' OR metadata::text LIKE '%logo b%'`).
 		Scan(&leaks); err != nil || leaks != 0 {
 		t.Errorf("audit events holding a logo's bytes = %d, %v; want none", leaks, err)
 	}
@@ -809,6 +825,16 @@ func TestStoreExternalProofedName(t *testing.T) {
 		t.Errorf("List for another org = %+v, %v; want none", none, err)
 	}
 
+	assertProofedNamePurged(t, pool, store, req)
+	assertOrphanPurgeDue(t, pool, store, orgID, requester)
+}
+
+// assertProofedNamePurged checks that req, an approved external request, is
+// due for purge only once its retention has passed, and that the purge takes
+// its proofed name and subject out of it and out of the audit log.
+func assertProofedNamePurged(t *testing.T, pool *pgxpool.Pool, store *RequestStore, req Request) {
+	t.Helper()
+	ctx := context.Background()
 	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
 		t.Errorf("purge due within retention = %d, %v; want none", len(due), err)
 	}
@@ -826,7 +852,7 @@ func TestStoreExternalProofedName(t *testing.T) {
 	if err := store.Purge(ctx, due[0], nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	after, err := store.List(ctx, orgID, RequestFilter{})
+	after, err := store.List(ctx, req.OrganizationID, RequestFilter{})
 	if err != nil || len(after) != 1 || after[0].ProofedName != "" || after[0].SubjectEmail != "" ||
 		after[0].Status != StatusApproved || after[0].PurgedAt == nil {
 		t.Errorf("after purge = %+v, %v; want the outcome without the subject", after, err)
@@ -838,9 +864,13 @@ func TestStoreExternalProofedName(t *testing.T) {
 	if due, err := store.ListPurgeDue(ctx, 10); err != nil || len(due) != 0 {
 		t.Errorf("purge due after purge = %d, %v; want none", len(due), err)
 	}
+}
 
-	// A request whose session never got attached settles when its link
-	// lapses, and is purged its retention after that.
+// assertOrphanPurgeDue checks that a request whose session never got attached
+// settles when its link lapses, and is purged its retention after that.
+func assertOrphanPurgeDue(t *testing.T, pool *pgxpool.Pool, store *RequestStore, orgID, requester uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
 	orphan, err := store.Create(ctx, newStoredRequest(orgID, requester, externalSubject("bram@example.org")))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1571,7 +1601,15 @@ func TestWebhookIsOnePerOrg(t *testing.T) {
 		t.Errorf("RotateSecret = %+v, %q, %v; want a new secret on the same endpoint", rotated, newSecret, err)
 	}
 
-	// Each org's events reach its own endpoint; an org without one is sent none.
+	assertWebhookDeliveriesPerOrg(t, requests, webhooks, orgID, otherOrg, sam, secondURL)
+	assertWebhookRemovedPerOrg(t, webhooks, orgID, otherOrg, firstURL)
+}
+
+// assertWebhookDeliveriesPerOrg checks that each org's events reach its own
+// endpoint, secondURL for orgID, and that otherOrg, without one, is sent none.
+func assertWebhookDeliveriesPerOrg(t *testing.T, requests *RequestStore, webhooks *WebhookStore, orgID, otherOrg, sam uuid.UUID, secondURL string) {
+	t.Helper()
+	ctx := context.Background()
 	createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
 	createStarted(t, requests, newStoredRequest(otherOrg, sam, externalSubject("b@example.org")), "s2")
 	ours, err := webhooks.Deliveries(ctx, orgID)
@@ -1588,8 +1626,13 @@ func TestWebhookIsOnePerOrg(t *testing.T) {
 	if _, err := webhooks.Get(ctx, otherOrg); !errors.Is(err, ErrWebhookNotFound) {
 		t.Errorf("Get of the org without an endpoint = %v, want ErrWebhookNotFound", err)
 	}
+}
 
-	// Removing one org's endpoint leaves the other's.
+// assertWebhookRemovedPerOrg checks that removing orgID's endpoint leaves
+// otherOrg's, saved at firstURL.
+func assertWebhookRemovedPerOrg(t *testing.T, webhooks *WebhookStore, orgID, otherOrg uuid.UUID, firstURL string) {
+	t.Helper()
+	ctx := context.Background()
 	if _, _, err := webhooks.Save(ctx, otherOrg, firstURL, WebhookEvents); err != nil {
 		t.Fatalf("Save other org: %v", err)
 	}
@@ -1683,6 +1726,25 @@ func TestAPIKeysBelongToOrg(t *testing.T) {
 		t.Errorf("List of the other org = %+v, %v; want its own key only", keys, err)
 	}
 
+	assertAPIKeyAuthenticates(t, store, orgID, otherOrg, ci, ciSecret, otherSecret)
+	assertAPIKeyRevokedByOrgOnly(t, store, orgID, otherOrg, ci.ID, ciSecret, backofficeSecret)
+
+	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
+		t.Errorf("List after the revoke = %+v, %v; want the revoked key listed", keys, err)
+	}
+	for action, want := range map[string]int{audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1} {
+		if n := auditCount(t, pool, action); n != want {
+			t.Errorf("%s audited %d times, want %d (a repeat changes nothing)", action, n, want)
+		}
+	}
+}
+
+// assertAPIKeyAuthenticates checks that each org's key authenticates to that
+// org, ci with ciSecret acting for orgID and stamped as used, and that an
+// unknown key does not.
+func assertAPIKeyAuthenticates(t *testing.T, store *APIKeyStore, orgID, otherOrg uuid.UUID, ci APIKey, ciSecret, otherSecret string) {
+	t.Helper()
+	ctx := context.Background()
 	caller, err := store.Authenticate(ctx, ciSecret)
 	if err == nil {
 		err = store.Touch(ctx, caller)
@@ -1700,16 +1762,23 @@ func TestAPIKeysBelongToOrg(t *testing.T) {
 	if keys, _ := store.List(ctx, orgID); keys[0].LastUsedAt == nil || keys[1].LastUsedAt != nil {
 		t.Errorf("last used = %v and %v; want only the key that authenticated stamped", keys[0].LastUsedAt, keys[1].LastUsedAt)
 	}
+}
 
+// assertAPIKeyRevokedByOrgOnly checks that another org cannot revoke ciID,
+// that orgID revokes it, twice to no further effect, and that its other key,
+// backofficeSecret, keeps working.
+func assertAPIKeyRevokedByOrgOnly(t *testing.T, store *APIKeyStore, orgID, otherOrg, ciID uuid.UUID, ciSecret, backofficeSecret string) {
+	t.Helper()
+	ctx := context.Background()
 	// Another org cannot revoke it.
-	if _, err := store.Revoke(ctx, otherOrg, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+	if _, err := store.Revoke(ctx, otherOrg, ciID); !errors.Is(err, ErrAPIKeyNotFound) {
 		t.Errorf("Revoke from another org = %v, want ErrAPIKeyNotFound", err)
 	}
 	if _, err := store.Authenticate(ctx, ciSecret); err != nil {
 		t.Errorf("Authenticate after the refused revoke = %v, want the key kept", err)
 	}
 	for range 2 {
-		if revoked, err := store.Revoke(ctx, orgID, ci.ID); err != nil || revoked.RevokedAt == nil {
+		if revoked, err := store.Revoke(ctx, orgID, ciID); err != nil || revoked.RevokedAt == nil {
 			t.Fatalf("Revoke = %+v, %v", revoked, err)
 		}
 	}
@@ -1718,14 +1787,6 @@ func TestAPIKeysBelongToOrg(t *testing.T) {
 	}
 	if _, err := store.Authenticate(ctx, backofficeSecret); err != nil {
 		t.Errorf("Authenticate the org's other key = %v, want it kept", err)
-	}
-	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
-		t.Errorf("List after the revoke = %+v, %v; want the revoked key listed", keys, err)
-	}
-	for action, want := range map[string]int{audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1} {
-		if n := auditCount(t, pool, action); n != want {
-			t.Errorf("%s audited %d times, want %d (a repeat changes nothing)", action, n, want)
-		}
 	}
 }
 

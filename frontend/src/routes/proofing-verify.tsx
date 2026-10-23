@@ -84,31 +84,35 @@ export default function ProofingVerify(): React.JSX.Element {
   const flowId = searchParams.get("flow") ?? initial?.id;
   const flow = sendable.find((f) => f.id === flowId);
 
+  let body: React.JSX.Element;
+  if (settings.isPending || flows.isPending || org.isPending) {
+    body = <p className={HINT}>{t("common.loading")}</p>;
+  } else if (settings.isError || flows.isError || org.isError) {
+    body = (
+      <p className={ERROR}>
+        {proofingErrorMessage(settings.error ?? flows.error ?? org.error, t)}
+      </p>
+    );
+  } else if (flow === undefined) {
+    body = (
+      <p className={ERROR}>{t("identityProofing.onScreen.missingFlow")}</p>
+    );
+  } else {
+    body = (
+      <VerifyFlow
+        slug={slug}
+        org={{ name: org.data.name, branding: settings.data.branding }}
+        settings={settings.data}
+        flow={flow}
+        subject={subject}
+      />
+    );
+  }
+
   return (
     <>
       <TopBar title={t("identityProofing.onScreen.title")} />
-      <div className="mx-auto w-full max-w-xl px-4 py-6">
-        {settings.isPending || flows.isPending || org.isPending ? (
-          <p className={HINT}>{t("common.loading")}</p>
-        ) : settings.isError || flows.isError || org.isError ? (
-          <p className={ERROR}>
-            {proofingErrorMessage(
-              settings.error ?? flows.error ?? org.error,
-              t,
-            )}
-          </p>
-        ) : flow === undefined ? (
-          <p className={ERROR}>{t("identityProofing.onScreen.missingFlow")}</p>
-        ) : (
-          <VerifyFlow
-            slug={slug}
-            org={{ name: org.data.name, branding: settings.data.branding }}
-            settings={settings.data}
-            flow={flow}
-            subject={subject}
-          />
-        )}
-      </div>
+      <div className="mx-auto w-full max-w-xl px-4 py-6">{body}</div>
     </>
   );
 }

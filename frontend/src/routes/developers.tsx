@@ -50,21 +50,19 @@ export default function Developers(): React.JSX.Element {
       { replace: true },
     );
 
+  // What shows instead of the tabs to anyone but an admin, and until the org
+  // is known.
+  const notice = org.isPending
+    ? t("common.loading")
+    : t("identityProofing.developers.adminOnly");
+
   return (
     <>
       <TopBar
         title={t("identityProofing.developers.title")}
         subtitle={t("identityProofing.developers.subtitle")}
       />
-      {org.isPending ? (
-        <p className="text-ink-soft p-4 text-[14px] sm:p-8">
-          {t("common.loading")}
-        </p>
-      ) : !isAdmin ? (
-        <p className="text-ink-soft p-4 text-[14px] sm:p-8">
-          {t("identityProofing.developers.adminOnly")}
-        </p>
-      ) : (
+      {isAdmin ? (
         <>
           <div
             role="tablist"
@@ -132,6 +130,8 @@ export default function Developers(): React.JSX.Element {
               ))}
           </div>
         </>
+      ) : (
+        <p className="text-ink-soft p-4 text-[14px] sm:p-8">{notice}</p>
       )}
     </>
   );

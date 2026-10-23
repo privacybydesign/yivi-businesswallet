@@ -52,15 +52,7 @@ func TestAppBrandingResolver(t *testing.T) {
 			themesettings.LogoUpdate{Replace: true, Logo: themesettings.Logo{Bytes: orgLogo, ContentType: "image/png"}}); err != nil {
 			t.Fatalf("save org theme: %v", err)
 		}
-		if branding != (Branding{}) || logo != nil {
-			change := LogoChange{}
-			if logo != nil {
-				change = LogoChange{Replace: true, Logo: Logo{Bytes: logo, ContentType: "image/png"}}
-			}
-			if _, err := settings.SaveBranding(ctx, orgID, branding, change); err != nil {
-				t.Fatalf("save proofing branding: %v", err)
-			}
-		}
+		saveProofingBranding(t, settings, orgID, branding, logo)
 		req, err := requests.Create(ctx, newStoredRequest(orgID, requester, subject))
 		if err != nil {
 			t.Fatalf("create request: %v", err)
@@ -145,19 +137,50 @@ func TestAppBrandingResolver(t *testing.T) {
 		if err != nil || got == nil || *got != want {
 			t.Errorf("%s: Branding = %+v, %v; want %+v", name, got, err, want)
 		}
-		logo, err := resolver.Logo(ctx, orgID, requestID)
-		switch {
-		case tc.wantLogo == nil && !errors.Is(err, ErrNoAppLogo):
-			t.Errorf("%s: Logo = %q, %v; want ErrNoAppLogo", name, logo.Bytes, err)
-		case tc.wantLogo != nil && (err != nil || !bytes.Equal(logo.Bytes, tc.wantLogo)):
-			t.Errorf("%s: Logo = %q, %v; want %q", name, logo.Bytes, err, tc.wantLogo)
-		}
-		if _, err := resolver.Branding(ctx, otherOrgID, requestID); !errors.Is(err, ErrRequestNotFound) {
-			t.Errorf("%s: Branding under another org = %v; want ErrRequestNotFound", name, err)
-		}
-		if _, err := resolver.Logo(ctx, otherOrgID, requestID); !errors.Is(err, ErrRequestNotFound) {
-			t.Errorf("%s: Logo under another org = %v; want ErrRequestNotFound", name, err)
-		}
+		assertAppLogo(t, resolver, name, orgID, requestID, tc.wantLogo)
+		assertNoAppBrandingUnder(t, resolver, name, otherOrgID, requestID)
+	}
+}
+
+// saveProofingBranding saves the proofing branding of orgID and, when logo is
+// set, its logo; it saves nothing when both are empty.
+func saveProofingBranding(t *testing.T, settings *OrgSettingsStore, orgID uuid.UUID, branding Branding, logo []byte) {
+	t.Helper()
+	if branding == (Branding{}) && logo == nil {
+		return
+	}
+	change := LogoChange{}
+	if logo != nil {
+		change = LogoChange{Replace: true, Logo: Logo{Bytes: logo, ContentType: "image/png"}}
+	}
+	if _, err := settings.SaveBranding(context.Background(), orgID, branding, change); err != nil {
+		t.Fatalf("save proofing branding: %v", err)
+	}
+}
+
+// assertAppLogo checks the logo the app gets for requestID at orgID: wantLogo,
+// or ErrNoAppLogo when that is nil.
+func assertAppLogo(t *testing.T, resolver *AppBrandingResolver, name string, orgID, requestID uuid.UUID, wantLogo []byte) {
+	t.Helper()
+	logo, err := resolver.Logo(context.Background(), orgID, requestID)
+	switch {
+	case wantLogo == nil && !errors.Is(err, ErrNoAppLogo):
+		t.Errorf("%s: Logo = %q, %v; want ErrNoAppLogo", name, logo.Bytes, err)
+	case wantLogo != nil && (err != nil || !bytes.Equal(logo.Bytes, wantLogo)):
+		t.Errorf("%s: Logo = %q, %v; want %q", name, logo.Bytes, err, wantLogo)
+	}
+}
+
+// assertNoAppBrandingUnder checks that requestID resolves no branding and no
+// logo under otherOrgID, an org it does not belong to.
+func assertNoAppBrandingUnder(t *testing.T, resolver *AppBrandingResolver, name string, otherOrgID, requestID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := resolver.Branding(ctx, otherOrgID, requestID); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("%s: Branding under another org = %v; want ErrRequestNotFound", name, err)
+	}
+	if _, err := resolver.Logo(ctx, otherOrgID, requestID); !errors.Is(err, ErrRequestNotFound) {
+		t.Errorf("%s: Logo under another org = %v; want ErrRequestNotFound", name, err)
 	}
 }
 

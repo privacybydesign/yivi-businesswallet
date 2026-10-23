@@ -118,6 +118,13 @@ const SEND_CHANNELS: {
   { value: "hosted", key: "link" },
 ];
 
+// The line above the form: what the delivery does.
+const HINT_KEYS = {
+  email: "hint",
+  on_screen: "hintOnScreen",
+  hosted: "hintLink",
+} as const satisfies Record<ProofingChannel, string>;
+
 function SendForm({
   slug,
   flows,
@@ -206,11 +213,7 @@ function SendForm({
   return (
     <div className="flex flex-col gap-4">
       <p className={HINT}>
-        {onScreen
-          ? t("identityProofing.send.hintOnScreen")
-          : delivery === "hosted"
-            ? t("identityProofing.send.hintLink")
-            : t("identityProofing.send.hint")}
+        {t(`identityProofing.send.${HINT_KEYS[delivery]}`)}
       </p>
       {sendable.length === 0 ? (
         <p className="text-ink-soft text-[13px]">

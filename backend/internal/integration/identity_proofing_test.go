@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
@@ -333,18 +335,24 @@ func TestExternalRequestHTTPFlow(t *testing.T) {
 		t.Errorf("stats = %+v, want one row for the flow with 2 sessions", stats)
 	}
 
-	// The request's timeline is its audit trail, oldest first.
+	assertRequestTimeline(t, env, base, created.ID)
+}
+
+// assertRequestTimeline checks that request id's timeline is its audit trail,
+// oldest first, and that an unknown request has none.
+func assertRequestTimeline(t *testing.T, env *testEnv, base, id string) {
+	t.Helper()
 	timeline := decodeJSON[struct {
 		Events []struct {
 			Action   string `json:"action"`
 			TargetID string `json:"targetId"`
 		} `json:"events"`
-	}](t, env.do(http.MethodGet, base+"/requests/"+created.ID+"/events", nil))
+	}](t, env.do(http.MethodGet, base+"/requests/"+id+"/events", nil))
 	if len(timeline.Events) != 2 || timeline.Events[0].Action != audit.IdentityProofingRequested ||
-		timeline.Events[1].Action != audit.IdentityProofingSessionCreated || timeline.Events[0].TargetID != created.ID {
+		timeline.Events[1].Action != audit.IdentityProofingSessionCreated || timeline.Events[0].TargetID != id {
 		t.Errorf("timeline = %+v; want requested, then session_created", timeline.Events)
 	}
-	resp = env.do(http.MethodGet, base+"/requests/00000000-0000-0000-0000-000000000000/events", nil)
+	resp := env.do(http.MethodGet, base+"/requests/00000000-0000-0000-0000-000000000000/events", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown request's timeline = %d, want 404", resp.StatusCode)
 	}
@@ -409,6 +417,16 @@ func TestMemberExternalRequest(t *testing.T) {
 	}
 
 	// The member's own two requests; the stats count external ones only.
+	assertMemberRequestLists(t, env, base, shared)
+
+	env.loginAs("admin@acme.test")
+	assertAdminRequestLists(t, env, base)
+}
+
+// assertMemberRequestLists checks that a member lists and counts only the two
+// requests they sent on the shared flow, one of them external.
+func assertMemberRequestLists(t *testing.T, env *testEnv, base string, shared proofingFlowResp) {
+	t.Helper()
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 2 {
 		t.Errorf("member requests = %+v, want the two they sent", list)
 	}
@@ -419,8 +437,12 @@ func TestMemberExternalRequest(t *testing.T) {
 	if len(stats.Rows) != 1 || stats.Rows[0].FlowID != shared.ID || stats.Rows[0].Sessions != 1 {
 		t.Errorf("member stats = %+v, want one session on the shared flow", stats)
 	}
+}
 
-	env.loginAs("admin@acme.test")
+// assertAdminRequestLists checks that an admin lists and counts all three
+// requests: the member's two and their own.
+func assertAdminRequestLists(t *testing.T, env *testEnv, base string) {
+	t.Helper()
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, base+"/requests", nil)); len(list) != 3 {
 		t.Errorf("admin requests = %+v, want all three", list)
 	}
@@ -432,7 +454,7 @@ func TestMemberExternalRequest(t *testing.T) {
 	}
 	wantProofingError(t, "unknown subject kind", env.do(http.MethodGet, base+"/requests?subjectKind=robot", nil),
 		http.StatusBadRequest, "invalid_input")
-	stats = decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
+	stats := decodeJSON[proofingStatsResp](t, env.do(http.MethodGet, base+"/stats", nil))
 	if len(stats.Rows) != 2 || stats.Rows[0].Sessions != 1 || stats.Rows[1].Sessions != 1 {
 		t.Errorf("admin stats = %+v, want one session on each flow", stats)
 	}
@@ -588,16 +610,24 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 		t.Errorf("flows = %+v, want a retention of %d days", flows, retentionDays+1)
 	}
 
+	assertOrgBranding(t, env, orgID, base, sessionTTLSeconds, retentionDays)
+}
+
+// assertOrgBranding saves the org's branding with a logo, checks it round trips
+// beside the session settings saved before (sessionTTLSeconds and
+// retentionDays), refuses bad fields, and keeps or removes the logo as asked.
+func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string, sessionTTLSeconds, retentionDays int) {
+	t.Helper()
 	logo := testLogoPNG(t)
 	form := map[string]string{
 		"displayName": "Acme Identity", "primaryColor": "#1f5b4a", "supportContact": "help@acme.test",
 		"privacyUrl": "https://acme.test/privacy", "hidePoweredBy": "true",
 	}
-	resp = env.putBranding("acme", form, logo)
+	resp := env.putBranding("acme", form, logo)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save branding = %d, want 200", resp.StatusCode)
 	}
-	settings = decodeJSON[proofingSettingsResp](t, resp)
+	settings := decodeJSON[proofingSettingsResp](t, resp)
 	b := settings.Branding
 	if b.DisplayName != "Acme Identity" || b.PrimaryColor != "#1f5b4a" || b.SupportContact != "help@acme.test" ||
 		b.PrivacyURL != "https://acme.test/privacy" || !b.HidePoweredBy || !strings.HasPrefix(b.LogoURI, base+"/settings/logo?v=") {
@@ -718,7 +748,16 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 		t.Errorf("api get session = %+v, want %s", got, session.ID)
 	}
 
-	// The key is the audit actor, not a member.
+	assertAPIKeyAuditActor(t, env, key)
+	assertAPIIdempotentSessions(t, env, key, session)
+	assertAPICancelAndErase(t, env, orgID, key)
+	assertAPIKeyRevocation(t, env, orgID, base, key)
+}
+
+// assertAPIKeyAuditActor checks that the latest request was audited with key
+// as its actor, not a member.
+func assertAPIKeyAuditActor(t *testing.T, env *testEnv, key proofingAPIKeyResp) {
+	t.Helper()
 	var actorUser *string
 	var actorLabel string
 	if err := env.pool.QueryRow(context.Background(), `SELECT actor_user_id::text, COALESCE(actor_label, '')
@@ -729,9 +768,14 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 	if actorUser != nil || actorLabel != "api_key:"+key.Prefix {
 		t.Errorf("requested actor = %v / %q, want no user and api_key:%s", actorUser, actorLabel, key.Prefix)
 	}
+}
 
-	// A retry with the same Idempotency-Key replays the first answer; the key
-	// with another body is refused.
+// assertAPIIdempotentSessions checks that a retry with the same
+// Idempotency-Key replays the first answer, kept sealed, and that the key with
+// another body is refused; then that key's sessions page from the newest,
+// ending with session.
+func assertAPIIdempotentSessions(t *testing.T, env *testEnv, key proofingAPIKeyResp, session proofingAPISessionResp) {
+	t.Helper()
 	idem := func(email string) *http.Response {
 		req, err := http.NewRequest(http.MethodPost, env.server.URL+"/api/v1/proofing/sessions",
 			strings.NewReader(`{"email":"`+email+`","sendMail":false}`))
@@ -755,7 +799,7 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 	if replayed := decodeJSON[proofingAPISessionResp](t, again); replayed.ID != first.ID {
 		t.Errorf("retry = %s, want the first session %s", replayed.ID, first.ID)
 	}
-	resp = idem("dave@example.org")
+	resp := idem("dave@example.org")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("key reused with another body = %d, want 422", resp.StatusCode)
 	}
@@ -782,15 +826,19 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 	if len(rest.Sessions) != 1 || rest.Sessions[0].ID != session.ID {
 		t.Errorf("next page = %+v; want the one session before it", rest.Sessions)
 	}
+}
 
-	// The org's software cancels a second session, then erases it.
+// assertAPICancelAndErase checks that the org's software cancels a second
+// session with key, then erases it, each once.
+func assertAPICancelAndErase(t *testing.T, env *testEnv, orgID uuid.UUID, key proofingAPIKeyResp) {
+	t.Helper()
 	second := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
 		map[string]any{"email": "bob@example.org", "sendMail": false}))
 	cancelURL := "/api/v1/proofing/sessions/" + second.ID + "/cancel"
 	if got := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, cancelURL, key.Secret, nil)); got.Status != "cancelled" {
 		t.Errorf("cancel = %+v, want cancelled", got)
 	}
-	resp = env.apiCall(http.MethodPost, cancelURL, key.Secret, nil)
+	resp := env.apiCall(http.MethodPost, cancelURL, key.Secret, nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("second cancel = %d, want 409", resp.StatusCode)
 	}
@@ -808,8 +856,13 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 			t.Errorf("%s audits = %d, want 1", action, n)
 		}
 	}
+}
 
-	// The org's list names the key as the sender.
+// assertAPIKeyRevocation checks that the org's list names key as the sender of
+// its three sessions, and that revoking key stops it, audited and still
+// listed.
+func assertAPIKeyRevocation(t *testing.T, env *testEnv, orgID uuid.UUID, base string, key proofingAPIKeyResp) {
+	t.Helper()
 	list := decodeJSON[[]struct {
 		ID         string `json:"id"`
 		APIKeyName string `json:"apiKeyName"`
@@ -818,7 +871,7 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 		t.Errorf("requests = %+v, want the three sent by the key", list)
 	}
 
-	resp = env.do(http.MethodDelete, base+"/api-keys/"+key.ID, nil)
+	resp := env.do(http.MethodDelete, base+"/api-keys/"+key.ID, nil)
 	if revoked := decodeJSON[proofingAPIKeyResp](t, resp); revoked.RevokedAt == "" {
 		t.Errorf("revoked key = %+v, want revokedAt", revoked)
 	}
@@ -834,7 +887,7 @@ func TestProofingAPIKeyFlow(t *testing.T) {
 			t.Errorf("%s audits = %d, want %d", action, n, want)
 		}
 	}
-	listed = decodeJSON[[]proofingAPIKeyResp](t, env.do(http.MethodGet, base+"/api-keys", nil))
+	listed := decodeJSON[[]proofingAPIKeyResp](t, env.do(http.MethodGet, base+"/api-keys", nil))
 	if len(listed) != 1 || listed[0].RevokedAt == "" {
 		t.Errorf("listed keys after revoking = %+v; want the revoked key still listed", listed)
 	}
@@ -888,6 +941,25 @@ func TestProofingAPIKeyScopesFlow(t *testing.T) {
 	}
 }
 
+// hostedBranding is the org's branding as a hosted page carries it.
+type hostedBranding struct {
+	DisplayName string `json:"displayName"`
+}
+
+// hostedView is the public hosted page of a session, as its subject reads it.
+type hostedView struct {
+	Status       string `json:"status"`
+	Started      bool   `json:"started"`
+	DeepLink     string `json:"deepLink"`
+	Organization struct {
+		Name     string         `json:"name"`
+		Branding hostedBranding `json:"branding"`
+	} `json:"organization"`
+	Flow struct {
+		Name string `json:"name"`
+	} `json:"flow"`
+}
+
 // A hosted session is a link: the subject opens the public page without an
 // account, starts once for the app they pick, and the page follows the outcome.
 func TestProofingHostedLinkFlow(t *testing.T) {
@@ -914,20 +986,6 @@ func TestProofingHostedLinkFlow(t *testing.T) {
 		t.Fatalf("hosted session = %+v; want a pending link to /p/<token>, no deep link, no mail", created)
 	}
 
-	type hostedView struct {
-		Status       string `json:"status"`
-		Started      bool   `json:"started"`
-		DeepLink     string `json:"deepLink"`
-		Organization struct {
-			Name     string `json:"name"`
-			Branding struct {
-				DisplayName string `json:"displayName"`
-			} `json:"branding"`
-		} `json:"organization"`
-		Flow struct {
-			Name string `json:"name"`
-		} `json:"flow"`
-	}
 	view := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token, "", nil))
 	if view.Status != "pending" || view.Started || view.Organization.Name != "Acme" || view.Flow.Name != "Passport only" {
 		t.Errorf("hosted page = %+v; want a pending, unstarted Acme page for the flow", view)
@@ -938,7 +996,16 @@ func TestProofingHostedLinkFlow(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	resp = env.apiCall(http.MethodPost, "/api/v1/proof/"+token+"/start", "", map[string]any{"method": "idem_app"})
+	assertHostedStartsOnce(t, env, token)
+	assertHostedPageBranded(t, env, token)
+	assertWalletHostedLink(t, env, flow.ID)
+}
+
+// assertHostedStartsOnce checks that the hosted page of token starts once, for
+// the app picked, and that its status then reads started.
+func assertHostedStartsOnce(t *testing.T, env *testEnv, token string) {
+	t.Helper()
+	resp := env.apiCall(http.MethodPost, "/api/v1/proof/"+token+"/start", "", map[string]any{"method": "idem_app"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("start = %d, want 201", resp.StatusCode)
 	}
@@ -953,21 +1020,29 @@ func TestProofingHostedLinkFlow(t *testing.T) {
 	if status := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token+"/status", "", nil)); !status.Started {
 		t.Errorf("status = %+v, want started", status)
 	}
+}
 
-	// The page carries the org's branding: its display name replaces the org's name.
-	resp = env.putBranding("acme", map[string]string{"displayName": "Acme Identity", "primaryColor": "#1f5b4a"}, nil)
+// assertHostedPageBranded checks that the hosted page of token carries the
+// org's branding: its display name replaces the org's name.
+func assertHostedPageBranded(t *testing.T, env *testEnv, token string) {
+	t.Helper()
+	resp := env.putBranding("acme", map[string]string{"displayName": "Acme Identity", "primaryColor": "#1f5b4a"}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save branding = %d, want 200", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	view = decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token, "", nil))
+	view := decodeJSON[hostedView](t, env.apiCall(http.MethodGet, "/api/v1/proof/"+token, "", nil))
 	if view.Organization.Name != "Acme Identity" || view.Organization.Branding.DisplayName != "Acme Identity" {
 		t.Errorf("branded hosted page = %+v; want the org's display name", view)
 	}
+}
 
-	// An admin makes the same link in the wallet, to hand the subject.
-	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", map[string]any{
-		"flowId": flow.ID, "channel": "hosted", "name": "Dibran Mulder",
+// assertWalletHostedLink checks that an admin makes the same link on flowID in
+// the wallet, to hand the subject.
+func assertWalletHostedLink(t *testing.T, env *testEnv, flowID string) {
+	t.Helper()
+	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/requests", map[string]any{
+		"flowId": flowID, "channel": "hosted", "name": "Dibran Mulder",
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("wallet hosted request = %d, want 201", resp.StatusCode)
@@ -1275,7 +1350,15 @@ func TestProofingWebhookHTTPFlow(t *testing.T) {
 		t.Errorf("webhook saved again = %+v; want one event and the same secret, not shown", again)
 	}
 
-	// A session the org's software creates queues its event for the endpoint.
+	assertWebhookQueuesEvents(t, env, base, endpoint)
+	assertWebhookRotatedAndRemoved(t, env, orgID, base, set.Secret)
+}
+
+// assertWebhookQueuesEvents checks that a session the org's software creates
+// queues its event for the endpoint, and that a test event goes first, with no
+// session.
+func assertWebhookQueuesEvents(t *testing.T, env *testEnv, base, endpoint string) {
+	t.Helper()
 	env.proofingDefaultFlow("acme")
 	key := env.proofingKey("acme", "Backend")
 	session := decodeJSON[proofingAPISessionResp](t, env.apiCall(http.MethodPost, "/api/v1/proofing/sessions", key.Secret,
@@ -1285,7 +1368,7 @@ func TestProofingWebhookHTTPFlow(t *testing.T) {
 		deliveries[0].EndpointURL != endpoint || deliveries[0].Status != proofing.DeliveryPending {
 		t.Errorf("deliveries = %+v; want the session.created of %s queued for the endpoint", deliveries, session.ID)
 	}
-	resp = env.postJSON(base+"/webhook/test", map[string]any{})
+	resp := env.postJSON(base+"/webhook/test", map[string]any{})
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("test event = %d, want 204", resp.StatusCode)
 	}
@@ -1294,13 +1377,19 @@ func TestProofingWebhookHTTPFlow(t *testing.T) {
 	if len(deliveries) != 2 || deliveries[0].Event != "test" || deliveries[0].SessionID != "" || deliveries[1].Event != "session.created" {
 		t.Errorf("deliveries after the test event = %+v; want it first, with no session", deliveries)
 	}
+}
 
-	resp = env.postJSON(base+"/webhook/rotate-secret", map[string]any{})
+// assertWebhookRotatedAndRemoved checks that the endpoint's secret, oldSecret
+// until now, is rotated, and that removing the endpoint drops what was still
+// queued for it, each change audited.
+func assertWebhookRotatedAndRemoved(t *testing.T, env *testEnv, orgID uuid.UUID, base, oldSecret string) {
+	t.Helper()
+	resp := env.postJSON(base+"/webhook/rotate-secret", map[string]any{})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rotate secret = %d, want 200", resp.StatusCode)
 	}
 	if rotated := decodeJSON[proofingWebhookResp](t, resp); !strings.HasPrefix(rotated.Secret, "whsec_") ||
-		rotated.Secret == set.Secret || !strings.HasSuffix(rotated.Secret, rotated.SecretLast4) {
+		rotated.Secret == oldSecret || !strings.HasSuffix(rotated.Secret, rotated.SecretLast4) {
 		t.Errorf("rotated webhook = %+v; want a new secret shown once", rotated)
 	}
 
@@ -1310,10 +1399,10 @@ func TestProofingWebhookHTTPFlow(t *testing.T) {
 		t.Fatalf("remove webhook = %d, want 204", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	if hook = decodeJSON[proofingWebhookResp](t, env.do(http.MethodGet, base+"/webhook", nil)); hook.Configured {
+	if hook := decodeJSON[proofingWebhookResp](t, env.do(http.MethodGet, base+"/webhook", nil)); hook.Configured {
 		t.Errorf("webhook after removing = %+v, want not configured", hook)
 	}
-	if deliveries = decodeJSON[[]proofingDeliveryResp](t, env.do(http.MethodGet, base+"/webhook/deliveries", nil)); len(deliveries) != 0 {
+	if deliveries := decodeJSON[[]proofingDeliveryResp](t, env.do(http.MethodGet, base+"/webhook/deliveries", nil)); len(deliveries) != 0 {
 		t.Errorf("deliveries after removing = %+v, want none", deliveries)
 	}
 	for action, want := range map[string]int{

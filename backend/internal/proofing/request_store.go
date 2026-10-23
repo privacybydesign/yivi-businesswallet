@@ -1166,23 +1166,9 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
 	}
-	var nameCT []byte
-	// retainSecs is how long the proofed name is kept, from the database's now().
-	var retainSecs *float64
-	if res.Name != "" {
-		if s.cipher == nil {
-			return ErrNoEncryptionKey
-		}
-		var err error
-		if nameCT, err = s.cipher.Encrypt([]byte(res.Name)); err != nil {
-			return fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
-		}
-		retention := req.NameRetention
-		if retention == 0 {
-			retention = proofedNameRetention
-		}
-		secs := retention.Seconds()
-		retainSecs = &secs
+	nameCT, retainSecs, err := s.sealProofedName(req, res.Name)
+	if err != nil {
+		return err
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE identity_proofing_requests SET
@@ -1205,14 +1191,7 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
-		after := withMethod(map[string]any{"status": string(status)}, res.Method)
-		for key, value := range map[string]string{
-			"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
-		} {
-			if value != "" {
-				after[key] = value
-			}
-		}
+		after := outcomeAuditFields(status, res)
 		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
@@ -1226,6 +1205,41 @@ func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
 	})
+}
+
+// sealProofedName seals the name a session proofed for req, with retainSecs
+// how long it is kept, counted from the database's now(). No name seals to
+// nothing.
+func (s *RequestStore) sealProofedName(req Request, name string) (nameCT []byte, retainSecs *float64, err error) {
+	if name == "" {
+		return nil, nil, nil
+	}
+	if s.cipher == nil {
+		return nil, nil, ErrNoEncryptionKey
+	}
+	if nameCT, err = s.cipher.Encrypt([]byte(name)); err != nil {
+		return nil, nil, fmt.Errorf("proofing: encrypt proofed name request %s: %w", req.ID, err)
+	}
+	retention := req.NameRetention
+	if retention == 0 {
+		retention = proofedNameRetention
+	}
+	secs := retention.Seconds()
+	return nameCT, &secs, nil
+}
+
+// outcomeAuditFields is the state a recorded outcome audits the request in:
+// its status and method, and the levels and error code the session gave.
+func outcomeAuditFields(status Status, res proofingprovider.Result) map[string]any {
+	after := withMethod(map[string]any{"status": string(status)}, res.Method)
+	for key, value := range map[string]string{
+		"assuranceLevel": res.AssuranceLevel, "eidasLevel": res.EIDASLevel, "errorCode": res.ErrorCode,
+	} {
+		if value != "" {
+			after[key] = value
+		}
+	}
+	return after
 }
 
 // ListPurgeDue returns up to limit requests past their purge time and any

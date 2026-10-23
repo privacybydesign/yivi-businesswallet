@@ -72,19 +72,22 @@ export function ApiKeysTab({ slug }: { slug: string }): React.JSX.Element {
             <Table.HeaderCell aria-hidden="true" />
           </Table.Head>
           <Table.Body>
-            {keys.isPending ? (
+            {keys.isPending && (
               <Table.State colSpan={KEY_COLUMNS}>
                 {t("common.loading")}
               </Table.State>
-            ) : keys.isError ? (
+            )}
+            {keys.isError && (
               <Table.State colSpan={KEY_COLUMNS}>
                 {proofingErrorMessage(keys.error, t)}
               </Table.State>
-            ) : keys.data.length === 0 ? (
+            )}
+            {keys.isSuccess && keys.data.length === 0 && (
               <Table.State colSpan={KEY_COLUMNS}>
                 {t("identityProofing.apiKeys.empty")}
               </Table.State>
-            ) : (
+            )}
+            {keys.isSuccess &&
               keys.data.map((key) => (
                 <Table.Row key={key.id}>
                   <Table.Cell className="font-semibold">{key.name}</Table.Cell>
@@ -120,8 +123,7 @@ export function ApiKeysTab({ slug }: { slug: string }): React.JSX.Element {
                     )}
                   </Table.Cell>
                 </Table.Row>
-              ))
-            )}
+              ))}
           </Table.Body>
         </Table>
       </Card>

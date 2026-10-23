@@ -46,9 +46,10 @@ export function WebhooksTab({ slug }: { slug: string }): React.JSX.Element {
   const hook = webhook.data;
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-      {!hook.configured && !editing ? (
+      {!hook.configured && !editing && (
         <DefaultEndpointCard onCustomize={() => setEditing(true)} />
-      ) : editing ? (
+      )}
+      {editing && (
         <EndpointForm
           slug={slug}
           webhook={hook}
@@ -60,7 +61,8 @@ export function WebhooksTab({ slug }: { slug: string }): React.JSX.Element {
             }
           }}
         />
-      ) : (
+      )}
+      {hook.configured && !editing && (
         <EndpointCard
           slug={slug}
           webhook={hook}
@@ -372,17 +374,19 @@ function DeliveriesCard({ slug }: { slug: string }): React.JSX.Element {
       <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
         {t("identityProofing.webhooks.recent")}
       </h2>
-      {deliveries.isError ? (
+      {deliveries.isError && (
         <p className={`${ERROR} px-5 py-4`}>
           {proofingErrorMessage(deliveries.error, t)}
         </p>
-      ) : rows.length === 0 ? (
+      )}
+      {!deliveries.isError && rows.length === 0 && (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {deliveries.isPending
             ? t("common.loading")
             : t("identityProofing.webhooks.noDeliveries")}
         </p>
-      ) : (
+      )}
+      {!deliveries.isError && rows.length > 0 && (
         <ul className="divide-line divide-y">
           {rows.map((d) => (
             <li
