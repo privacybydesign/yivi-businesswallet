@@ -2241,7 +2241,7 @@ describe("employment step", () => {
     const reasons = [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map(
       (m) => m[1],
     );
-    expect(reasons.length).toBe(4);
+    expect(reasons).toHaveLength(4);
     for (const reason of reasons) {
       expect(employmentRejectionReason(reason, t)).not.toBe(reason);
     }
@@ -2310,7 +2310,7 @@ describe("diploma step", () => {
     const reasons = sources.flatMap((source) =>
       [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map((m) => m[1]),
     );
-    expect(reasons.length).toBe(4);
+    expect(reasons).toHaveLength(4);
     for (const reason of reasons) {
       expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
     }
