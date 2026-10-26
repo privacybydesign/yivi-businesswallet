@@ -24,7 +24,7 @@ type Word struct {
 
 // Line is a group of words that share (approximately) the same baseline.
 type Line struct {
-	Top   float64
+	top   float64
 	Words []Word
 }
 
@@ -60,12 +60,12 @@ func GroupLines(words []Word) []Line {
 			current := &lines[len(lines)-1]
 			// Compare against the running maximum of the line so a slightly
 			// lower word (descenders) still joins the line.
-			if current.Top-w.Top <= lineTolerance {
+			if current.top-w.Top <= lineTolerance {
 				current.Words = append(current.Words, w)
 				continue
 			}
 		}
-		lines = append(lines, Line{Top: w.Top, Words: []Word{w}})
+		lines = append(lines, Line{top: w.Top, Words: []Word{w}})
 	}
 	for i := range lines {
 		sort.Slice(lines[i].Words, func(a, b int) bool {

@@ -471,14 +471,6 @@ func main() {
 	}
 }
 
-// newOpenID4VPPresenter wires the inbound-presentation slice. The Request Object
-// validator verifies the JAR's signature and x509_san_dns chain against irmago's
-// pinned Yivi relying-party anchors plus OPENID4VP_VERIFIER_TRUST_CHAIN;
-// UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out. The
-// service is returned alongside the handler because it is also the QERDS receive
-// path's collaborator (openid4vppresenter.Receiver, wired into qerdsService below).
-// requesterRoot is this deployment's own requester CA (newRequesterCA): its
-// organizations' requests to each other verify without configuration.
 // presenterDeps are what the inbound-presentation slice is built on.
 type presenterDeps struct {
 	pool          *pgxpool.Pool
@@ -488,6 +480,14 @@ type presenterDeps struct {
 	requesterRoot []byte
 }
 
+// newOpenID4VPPresenter wires the inbound-presentation slice. The Request Object
+// validator verifies the JAR's signature and x509_san_dns chain against irmago's
+// pinned Yivi relying-party anchors plus OPENID4VP_VERIFIER_TRUST_CHAIN;
+// UnverifiedDecoder (structural checks only) is the explicit dev / CI opt-out. The
+// service is returned alongside the handler because it is also the QERDS receive
+// path's collaborator (openid4vppresenter.Receiver, wired into qerdsService below).
+// requesterRoot is this deployment's own requester CA (newRequesterCA): its
+// organizations' requests to each other verify without configuration.
 func newOpenID4VPPresenter(cfg config.Config, deps presenterDeps, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
 	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
 	var validator openid4vppresenter.Validator
