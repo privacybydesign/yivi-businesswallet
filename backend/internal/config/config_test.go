@@ -406,6 +406,11 @@ func TestLoadRefusesPinnedForUWV(t *testing.T) {
 	if err != nil || stub.DiplomaTrustSource != DiplomaTrustPinned {
 		t.Errorf("pinned trust with the stub = %q, %v; want %q", stub.DiplomaTrustSource, err, DiplomaTrustPinned)
 	}
+	// Off checks no statement, so a production deploy can pin its roots.
+	off, err := loadWith(t, map[string]string{envDiplomaTrustSource: DiplomaTrustPinned, envEmploymentValidatorProvider: ProviderOff})
+	if err != nil || off.EmploymentValidatorProvider != ProviderOff {
+		t.Errorf("pinned trust with the check off = %q, %v; want %q", off.EmploymentValidatorProvider, err, ProviderOff)
+	}
 }
 
 // The online revocation check is on unless switched off: off, only the

@@ -581,6 +581,8 @@ export const en = {
       employmentClosed:
         "The Verzekeringsbericht can only be uploaded once, for a while after the identity check succeeded.",
       employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
+      noEmploymentChecker:
+        "This server checks no Verzekeringsbericht. Ask your administrator to set EMPLOYMENT_VALIDATOR_PROVIDER.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:

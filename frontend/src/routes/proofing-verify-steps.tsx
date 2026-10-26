@@ -893,6 +893,9 @@ function EmploymentStep({
   const fileInput = useRef<HTMLInputElement>(null);
   const [refused, setRefused] = useState<EmploymentVerdict>();
   const [kept, setKept] = useState<ProofingEmployment>();
+  // What the upload decided, for a screen reader: the statement below
+  // appears without moving focus.
+  const [announced, setAnnounced] = useState("");
   const keptReview = kept === undefined ? undefined : employmentReview(kept);
   const secondsLeft = useSecondsLeft(until);
   const done = employmentStepDone(kept, secondsLeft);
@@ -904,6 +907,11 @@ function EmploymentStep({
         if (verdict.accepted && verdict.employment !== undefined) {
           setKept(verdict.employment);
           setRefused(undefined);
+          setAnnounced(
+            t("identityProofing.employment.kept", {
+              date: formatDate(verdict.employment.statementDate),
+            }),
+          );
           onKept();
           return;
         }
@@ -931,12 +939,10 @@ function EmploymentStep({
         }}
       />
 
+      {/* Mounted throughout, so the accepted statement is announced. */}
+      <output className="sr-only">{announced}</output>
       {kept !== undefined && (
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3"
-        >
+        <div className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3">
           <Icon name="valid" className="text-success mt-0.5 shrink-0" />
           <span className="flex min-w-0 flex-col gap-1">
             <span className="text-ink text-[14px] font-semibold">

@@ -602,6 +602,8 @@ export const nl: Translation<typeof en> = {
         "Het Verzekeringsbericht kan maar één keer worden geüpload, kort na een geslaagde identiteitscontrole.",
       employmentNotAsked:
         "Deze controle vraagt niet om een Verzekeringsbericht.",
+      noEmploymentChecker:
+        "Deze server controleert geen Verzekeringsbericht. Vraag je beheerder EMPLOYMENT_VALIDATOR_PROVIDER in te stellen.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:

@@ -439,7 +439,7 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 
 		return s.audit.Record(ctx, q, audit.IdentityProofingRequested,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: in.ID.String(), OrgID: &in.OrgID},
-			audit.Created(in.auditFields(birthDateCT != nil, photoCT != nil)))
+			audit.Created(in.auditFields()))
 	})
 	if err != nil {
 		return Request{}, err
@@ -461,7 +461,7 @@ func (s *RequestStore) encryptText(what, plain string) ([]byte, error) {
 
 // auditFields is what identity_proofing.requested records of in: whether it
 // expects a subject and holds a reference photo, never the values.
-func (in NewStoredRequest) auditFields(expectsSubject, referencePhoto bool) map[string]any {
+func (in NewStoredRequest) auditFields() map[string]any {
 	fields := withAuditSubject(map[string]any{
 		"flowId": in.Flow.ID, "flowName": in.Flow.Name, "flowVersion": in.Flow.Version,
 		"channel": string(in.Channel),
@@ -475,10 +475,10 @@ func (in NewStoredRequest) auditFields(expectsSubject, referencePhoto bool) map[
 	if in.Employment.asked() {
 		fields["employment"] = string(in.Employment)
 	}
-	if expectsSubject {
+	if in.Subject.BirthDate != "" {
 		fields["expectsSubject"] = true
 	}
-	if referencePhoto {
+	if in.ReferencePhoto != nil {
 		fields["referencePhoto"] = true
 	}
 	fields = withMethod(fields, in.Method)
@@ -1334,16 +1334,25 @@ func scanMember(row pgx.Row) (Member, error) {
 // wallet put in review itself (Request.ReviewReason): the engine's outcome no
 // longer decides it, RecordWalletOutcome does.
 func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, false)
+	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByEngine)
 }
 
 // RecordWalletOutcome is RecordOutcome for the decision on a review the
 // wallet opened: the reviewer's, or its lapse.
 func (s *RequestStore) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, true)
+	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByWallet)
 }
 
-func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, wallet bool) error {
+// outcomeOrigin is who decides an outcome: the engine, or the wallet on a
+// review it opened itself. Each records only on its own kind of request.
+type outcomeOrigin string
+
+const (
+	outcomeByEngine outcomeOrigin = "engine"
+	outcomeByWallet outcomeOrigin = "wallet"
+)
+
+func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, origin outcomeOrigin) error {
 	action, ok := outcomeActions[status]
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
@@ -1364,7 +1373,7 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
 				AND (review_reason IS NOT NULL) = $11`
 		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), wallet)
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), origin == outcomeByWallet)
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
 		}

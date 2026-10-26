@@ -1360,6 +1360,7 @@ describe("proofingErrorMessage", () => {
     [422, "employment_needs_page", "employmentNeedsPage"],
     [409, "employment_closed", "employmentClosed"],
     [409, "employment_not_asked", "employmentNotAsked"],
+    [409, "no_employment_checker", "noEmploymentChecker"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -2188,27 +2189,30 @@ describe("employment step", () => {
       from: "",
       to: "",
     });
-    const statement = (employed: boolean, kinds: string[]) => ({
+    const statement = (kinds: string[]) => ({
       statementDate: "2026-10-15",
-      employed,
       relations: kinds.map(relation),
     });
-    expect(employmentReview(statement(true, ["employment"]))).toBeUndefined();
-    expect(
-      employmentReview(statement(true, ["sick_via_employer"])),
-    ).toBeUndefined();
-    expect(employmentReview(statement(true, ["employment", "benefit"]))).toBe(
+    const withJob = (kinds: string[]) => ({
+      ...statement(kinds),
+      employed: true,
+    });
+    const withoutJob = (kinds: string[]) => ({
+      ...statement(kinds),
+      employed: false,
+    });
+    expect(employmentReview(withJob(["employment"]))).toBeUndefined();
+    expect(employmentReview(withJob(["sick_via_employer"]))).toBeUndefined();
+    expect(employmentReview(withJob(["employment", "benefit"]))).toBe(
       "benefit",
     );
+    expect(employmentReview(withJob(["employment", "other_income"]))).toBe(
+      "otherIncome",
+    );
     expect(
-      employmentReview(statement(true, ["employment", "other_income"])),
-    ).toBe("otherIncome");
-    expect(
-      employmentReview(
-        statement(true, ["employment", "other_income", "benefit"]),
-      ),
+      employmentReview(withJob(["employment", "other_income", "benefit"])),
     ).toBe("benefit");
-    expect(employmentReview(statement(false, ["benefit"]))).toBe("noJob");
+    expect(employmentReview(withoutJob(["benefit"]))).toBe("noJob");
   });
 
   it("mails only a flow that asks for no Verzekeringsbericht", () => {

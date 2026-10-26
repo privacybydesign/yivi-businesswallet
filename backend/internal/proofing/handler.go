@@ -908,6 +908,7 @@ var errorResponses = []struct {
 	{ErrReferencePhotoRequired, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}},
 	{ErrDiplomasNeedPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}},
 	{ErrAddressNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}},
+	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
 	{ErrEmploymentNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}},
 	{ErrHostedDisabled, respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}},
 	{ErrProofingPaused, respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}},

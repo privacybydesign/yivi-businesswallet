@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -50,7 +51,8 @@ var (
 	// ErrEmploymentNeedsPage is an employment flow sent where its subject gets
 	// no page to upload on: by mail, or as a bare deep link.
 	ErrEmploymentNeedsPage = errors.New("proofing: a flow that asks for the Verzekeringsbericht runs on a page: show it on screen or send a hosted link")
-	// ErrNoEmploymentChecker is an upload on a deployment without a checker.
+	// ErrNoEmploymentChecker is an upload, or a flow requiring the step, on a
+	// deployment without a checker (EMPLOYMENT_VALIDATOR_PROVIDER=off).
 	ErrNoEmploymentChecker = errors.New("proofing: no Verzekeringsbericht checker configured")
 )
 
@@ -243,8 +245,8 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 // without a current job, or with a current benefit or other income, also moves the approved
 // request to needs_review (reviewReason), audited identity_proofing.needs_review, and sends
 // session.review_opened: the identity is proven, the rest is for a reviewer.
-// It is false, and changes nothing, when the request holds a statement already
-// or was erased.
+// It is false, and changes nothing, when the request holds a statement already,
+// is no longer approved, or was erased or cancelled.
 func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error) {
 	if s.cipher == nil {
 		return false, ErrNoEncryptionKey
@@ -263,7 +265,8 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
 			SET employment_ciphertext = $2, employment_added_at = now(), updated_at = now()
-			WHERE id = $1 AND purged_at IS NULL AND employment_ciphertext IS NULL`, req.ID, sealed)
+			WHERE id = $1 AND status = 'approved' AND purged_at IS NULL AND cancelled_at IS NULL
+				AND employment_ciphertext IS NULL`, req.ID, sealed)
 		if err != nil {
 			return fmt.Errorf("proofing: add employment request %s: %w", req.ID, err)
 		}
@@ -484,6 +487,10 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: employment is off or required", ErrInvalidInput)
 	}
+	// Without a checker no statement could ever be kept.
+	if mode.asked() && s.employmentChecker == nil {
+		return "", ErrNoEmploymentChecker
+	}
 	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
 		return "", err
 	}
@@ -581,5 +588,13 @@ func (s *Service) addEmployment(ctx context.Context, req Request, f DiplomaFile)
 		return EmploymentVerdict{}, ErrEmploymentClosed
 	}
 	verdict.Employment = &emp
+	// A paused org can decide nothing, so a review the statement opened is
+	// rejected at once; one that fails is left to the paused orgs' sweep.
+	if emp.reviewReason() != "" {
+		if _, err := s.rejectIfPaused(ctx, req); err != nil {
+			slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
+				slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		}
+	}
 	return verdict, nil
 }

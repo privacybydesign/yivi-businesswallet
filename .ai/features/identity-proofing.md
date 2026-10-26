@@ -1737,7 +1737,7 @@ only: the engine knows nothing of it.
     are only the boot fallback.
     - `pinned` holds only the PKIoverheid and certSIGN roots, and UWV's seal
       chains to QuoVadis: `pinned` with `EMPLOYMENT_VALIDATOR_PROVIDER=uwv` fails
-      the boot.
+      the boot. `off` (or `stub` in dev) lets `pinned` boot.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
@@ -2251,6 +2251,9 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   (`DEV_MODE` only, the dev stack's default) accepts every seal but still
   parses and matches for real. `cmd/api` builds both seal validators on one
   trust store (`newSealValidators`).
+  - `off` wires no checker: `SaveFlowEmployment` refuses `required` and an
+    upload is refused, both 409 `no_employment_checker`. It is the way to
+    run `DIPLOMA_TRUST_SOURCE=pinned`.
 - **The page** runs the steps after the approval as address, diplomas, then
   employment. An accepted statement stays on screen (date, seal valid, each
   employer and its months) until the subject continues, as the diploma step does;

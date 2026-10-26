@@ -335,8 +335,10 @@ const (
 
 	// ProviderUWV checks a Verzekeringsbericht's UWV seal for real, and is the
 	// default; ProviderStub accepts every statement's seal and runs only when
-	// set explicitly (the dev stack sets it, as for diplomas).
+	// set explicitly (the dev stack sets it, as for diplomas). ProviderOff
+	// checks none: no flow can then require the Verzekeringsbericht.
 	ProviderUWV                        = "uwv"
+	ProviderOff                        = "off"
 	defaultEmploymentValidatorProvider = ProviderUWV
 
 	// ProviderEngine runs identity proofing in the wallet's own engine (the
@@ -762,15 +764,16 @@ func loadDocumentValidators(c *Config) error {
 	}
 
 	c.EmploymentValidatorProvider = envOrDefault(envEmploymentValidatorProvider, defaultEmploymentValidatorProvider)
-	if c.EmploymentValidatorProvider != ProviderStub && c.EmploymentValidatorProvider != ProviderUWV {
-		return fmt.Errorf("config: %s must be %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV)
+	if !slices.Contains([]string{ProviderStub, ProviderUWV, ProviderOff}, c.EmploymentValidatorProvider) {
+		return fmt.Errorf("config: %s must be %q, %q or %q", envEmploymentValidatorProvider, ProviderStub, ProviderUWV, ProviderOff)
 	}
 
 	// The pinned roots hold only PKIoverheid and certSIGN, and UWV's seal
 	// chains to QuoVadis: that pairing would reject every statement.
 	if c.DiplomaTrustSource == DiplomaTrustPinned && c.EmploymentValidatorProvider == ProviderUWV {
-		return fmt.Errorf("config: %s=%q holds no root UWV's seal chains to, so %s=%q needs %s=%q",
-			envDiplomaTrustSource, DiplomaTrustPinned, envEmploymentValidatorProvider, ProviderUWV, envDiplomaTrustSource, DiplomaTrustEUTL)
+		return fmt.Errorf("config: %s=%q holds no root UWV's seal chains to, so %s=%q needs %s=%q (or %s=%q)",
+			envDiplomaTrustSource, DiplomaTrustPinned, envEmploymentValidatorProvider, ProviderUWV, envDiplomaTrustSource, DiplomaTrustEUTL,
+			envEmploymentValidatorProvider, ProviderOff)
 	}
 	return nil
 }

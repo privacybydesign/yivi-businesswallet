@@ -154,7 +154,7 @@ type vogValidatorProvider interface {
 }
 
 // sealValidators check the seal on an uploaded document: a diploma extract's
-// DUO signature and a Verzekeringsbericht's UWV seal.
+// DUO signature and a Verzekeringsbericht's UWV seal (none with ProviderOff).
 type sealValidators struct {
 	diploma, employment diploma.Validator
 }
@@ -200,6 +200,8 @@ func newSealValidators(ctx context.Context, cfg config.Config) (sealValidators, 
 	switch cfg.EmploymentValidatorProvider {
 	case config.ProviderStub:
 		out.employment = diploma.StubValidator{}
+	case config.ProviderOff:
+		// No checker: no flow can require the Verzekeringsbericht.
 	case config.ProviderUWV:
 		s, err := trustStore()
 		if err != nil {
@@ -1203,6 +1205,9 @@ func (w *wiring) setDocumentCheckers(ctx context.Context, proofingService *proof
 	}
 	proofingService.SetDiplomaChecker(diplomaChecker)
 
+	if sealValidators.employment == nil {
+		return nil
+	}
 	employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
 	if err := employmentChecker.Ping(ctx); err != nil {
 		return fmt.Errorf("employment validator ping: %w", err)

@@ -159,15 +159,16 @@ func TestAddEmploymentKeepsOnce(t *testing.T) {
 // No current job sends the approved request to review, which the wallet
 // decides itself: the engine approved the session and holds no review.
 func TestNoJobGoesToReview(t *testing.T) {
-	for _, approve := range []bool{true, false} {
-		checkNoJobReviewDecided(t, approve)
+	for _, want := range []Status{StatusApproved, StatusRejected} {
+		checkNoJobReviewDecided(t, want)
 	}
 }
 
 // checkNoJobReviewDecided keeps a statement without a job, then decides the
-// review it opens as approve says, in the wallet alone.
-func checkNoJobReviewDecided(t *testing.T, approve bool) {
+// review it opens to want, in the wallet alone.
+func checkNoJobReviewDecided(t *testing.T, want Status) {
 	t.Helper()
+	approve := want == StatusApproved
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
 	verdict, err := e.upload(req, "no job")
@@ -184,17 +185,30 @@ func checkNoJobReviewDecided(t *testing.T, approve bool) {
 	decided, err := e.svc.DecideReview(context.Background(), testOrg.ID, req.ID, "admin@example.org",
 		ReviewInput{Approve: approve, Reason: "checked the player's income"})
 	if err != nil {
-		t.Fatalf("DecideReview(approve %v): %v", approve, err)
-	}
-	want := StatusRejected
-	if approve {
-		want = StatusApproved
+		t.Fatalf("DecideReview to %s: %v", want, err)
 	}
 	if decided.Status != want || len(e.ips.decisions) != 0 {
 		t.Errorf("decided %s with %d engine decisions, want %s decided in the wallet alone", decided.Status, len(e.ips.decisions), want)
 	}
 	if !approve && decided.ErrorCode != ErrorReviewRejected {
 		t.Errorf("a rejection without a code = %q, want %s", decided.ErrorCode, ErrorReviewRejected)
+	}
+}
+
+// In a paused org nobody can decide the review a statement opens, so it is
+// rejected at once, as an engine review is.
+func TestNoJobReviewRejectedWhenPaused(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	pauses := withPauses(e.fixture)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	now := time.Now()
+	pauses.byOrg[testOrg.ID] = OrgPause{OrganizationID: testOrg.ID, PlatformPausedAt: &now}
+
+	if verdict, err := e.upload(req, "no job"); err != nil || verdict.Employment == nil {
+		t.Fatalf("a statement without a job = %+v, %v; want it kept", verdict, err)
+	}
+	if got := e.requests.stored; got.Status != StatusRejected || got.ErrorCode != ErrorOrgPaused {
+		t.Errorf("request = %s (%q), want rejected %s", got.Status, got.ErrorCode, ErrorOrgPaused)
 	}
 }
 
@@ -356,5 +370,18 @@ func TestEmploymentNeedsIdentity(t *testing.T) {
 	}
 	if _, err := e.svc.SaveFlowEmployment(context.Background(), testOrg, chipFlow.ID, "sometimes"); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("an unknown mode = %v, want ErrInvalidInput", err)
+	}
+}
+
+// A deployment that checks no statement (EMPLOYMENT_VALIDATOR_PROVIDER=off)
+// lets no flow require one, and can still switch the step off.
+func TestEmploymentRequiresChecker(t *testing.T) {
+	e := newEmploymentFixture(EmploymentOff)
+	e.svc.employmentChecker = nil
+	if _, err := e.svc.SaveFlowEmployment(context.Background(), testOrg, chipFlow.ID, EmploymentRequired); !errors.Is(err, ErrNoEmploymentChecker) {
+		t.Errorf("SaveFlowEmployment required without a checker = %v, want ErrNoEmploymentChecker", err)
+	}
+	if _, err := e.svc.SaveFlowEmployment(context.Background(), testOrg, chipFlow.ID, EmploymentOff); err != nil {
+		t.Errorf("SaveFlowEmployment off without a checker = %v, want saved", err)
 	}
 }

@@ -5453,7 +5453,7 @@ paths:
         `identity_proofing.flow_created` and `identity_proofing.flow_kind_configured`, without an
         actor), and one whose definition falls short of the wallet's gets it back in a new
         version. Neither is listed among the flows, and changing one (its versions, hosted page,
-        branding, diplomas or address) is 409 `data_request_flow`. Send one with `flowKind` on
+        branding, diplomas, address or employment) is 409 `data_request_flow`. Send one with `flowKind` on
         `POST .../requests`. A deployment without the Regula face check cannot create them (422
         `rejected_by_provider`).
       responses:
@@ -6580,7 +6580,9 @@ paths:
         name and date of birth (`dg1`), which the statement's holder is matched against (422
         `flow_no_identity`). A flow that asks for the statement cannot be mailed or sent as a
         bare deep link (422 `employment_needs_page`): show it on screen or create it `hosted`.
-        Audited `identity_proofing.flow_employment_configured` with before and after. A mode
+        A deployment that checks no statement (`EMPLOYMENT_VALIDATOR_PROVIDER=off`) refuses
+        `required` (409 `no_employment_checker`). Audited
+        `identity_proofing.flow_employment_configured` with before and after. A mode
         other than `off` or `required` is 400 `invalid_input`.
       requestBody:
         required: true
@@ -6611,6 +6613,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The flow is See my data or Delete my data, the wallet's own (`data_request_flow`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: The flow is not one of the organisation's (`flow_not_found`), or does not read the name and date of birth (`flow_no_identity`).
           content:

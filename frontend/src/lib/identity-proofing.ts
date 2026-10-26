@@ -1506,6 +1506,7 @@ const PROOFING_ERROR_KEYS = {
   employment_needs_page: "identityProofing.errors.employmentNeedsPage",
   employment_closed: "identityProofing.errors.employmentClosed",
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
+  no_employment_checker: "identityProofing.errors.noEmploymentChecker",
   flow_no_identity: "identityProofing.errors.flowNoIdentity",
   data_flow_for_member: "identityProofing.errors.dataFlowForMember",
   export_unavailable: "identityProofing.errors.exportUnavailable",

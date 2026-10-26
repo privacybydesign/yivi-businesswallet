@@ -247,6 +247,10 @@ func TestRejectMissingEmployment(t *testing.T) {
 	if n, err := f.requests.RejectMissingEmployment(ctx, time.Now(), 10); err != nil || n != 0 {
 		t.Errorf("a second run = %d, %v; want nothing left", n, err)
 	}
+	// An upload that lands after the rejection keeps nothing.
+	if added, err := f.requests.AddEmployment(ctx, missed, Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{}}); err != nil || added {
+		t.Errorf("AddEmployment on the rejected request = %v, %v; want refused", added, err)
+	}
 }
 
 // checkStatuses checks each request is stored with its status, and a rejected
