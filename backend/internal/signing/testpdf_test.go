@@ -95,7 +95,7 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 	ref := func(id int) string { return fmt.Sprintf("%d %d R", id, gen(id)) }
 
 	var kids bytes.Buffer
-	for i := 0; i < pages; i++ {
+	for i := range pages {
 		fmt.Fprintf(&kids, " %s", ref(pageID(i)))
 	}
 
@@ -110,7 +110,7 @@ func buildTestPDFWith(t *testing.T, opts testPDFOptions) []byte {
 			pages, kids.String(), testPageWidth, testPageHeight),
 		fontID: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 	}
-	for i := 0; i < pages; i++ {
+	for i := range pages {
 		contents := ref(contentID(i))
 		if opts.pageContents != nil {
 			contents = opts.pageContents(i, firstExtraID)

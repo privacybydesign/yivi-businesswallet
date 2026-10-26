@@ -2,8 +2,6 @@ package slackchannel
 
 import "testing"
 
-func ptr(s string) *string { return &s }
-
 // A save can only leave the row in a state the settings screen can render back.
 // Delivery on with no webhook is the one it cannot: GET would answer enabled with
 // hasWebhook false, which the screen shows as switched off.
@@ -25,14 +23,14 @@ func TestNextStateClampsDeliveryWithoutAWebhook(t *testing.T) {
 		{
 			name:          "clearing the webhook switches delivery off with it",
 			before:        state{hasWebhook: true, enabled: true},
-			in:            SettingsInput{WebhookURL: ptr(""), Enabled: true},
+			in:            SettingsInput{WebhookURL: new(""), Enabled: true},
 			setWebhook:    true,
 			hasNewWebhook: false,
 			want:          state{hasWebhook: false, enabled: false},
 		},
 		{
 			name:          "a first webhook can be enabled in the same save",
-			in:            SettingsInput{WebhookURL: ptr(webhook), Enabled: true},
+			in:            SettingsInput{WebhookURL: new(webhook), Enabled: true},
 			setWebhook:    true,
 			hasNewWebhook: true,
 			want:          state{hasWebhook: true, enabled: true},

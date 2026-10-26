@@ -228,8 +228,8 @@ func identityIssuedAt(vp map[string][]string) time.Time {
 // already did that; see the package doc); it only reads an already-trusted claim.
 func issuerIssuedAt(sdjwt string) (time.Time, bool) {
 	jwt := sdjwt
-	if i := strings.IndexByte(sdjwt, '~'); i >= 0 {
-		jwt = sdjwt[:i]
+	if before, _, ok := strings.Cut(sdjwt, "~"); ok {
+		jwt = before
 	}
 	segments := strings.Split(jwt, ".")
 	if len(segments) < 2 {

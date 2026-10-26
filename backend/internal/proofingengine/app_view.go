@@ -345,18 +345,18 @@ func (e *eventWaiters) release(sessionID string) {
 // appSessionChangeKey is what handleAppSessionEvents waits on: status,
 // completed steps, and the device slots, so a handover or an inactive device wakes every client.
 func (s *Server) appSessionChangeKey(sess session.Session, now time.Time) string {
-	states := ""
+	var states strings.Builder
 	for _, d := range []*session.DeviceAccess{sess.Access.Web, sess.Access.Native} {
 		if d != nil {
-			states += d.State
+			states.WriteString(d.State)
 			if s.deviceStale(d, now) {
-				states += ":stale"
+				states.WriteString(":stale")
 			}
 		}
-		states += ","
+		states.WriteString(",")
 	}
 	return string(sess.Status) + "|" + strings.Join(sess.CompletedSteps(), ",") +
-		"|" + strconv.Itoa(sess.Access.Generation) + "|" + states
+		"|" + strconv.Itoa(sess.Access.Generation) + "|" + states.String()
 }
 
 // nativeHandoffPending reports whether the browser should offer the Idem
