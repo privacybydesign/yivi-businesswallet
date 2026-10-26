@@ -157,7 +157,7 @@ export function AttestationTemplateForm({
   const nameError = attempted && trimmedName === "";
   const schemaError = attempted && !isEdit && schemaId === "";
 
-  function handleSubmit(event: React.SubmitEvent<HTMLFormElement>): void {
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAttempted(true);
     if (pending) {

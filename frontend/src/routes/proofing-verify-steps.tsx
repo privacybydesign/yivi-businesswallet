@@ -629,14 +629,13 @@ export function Session({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      {method === "yivi_app" && (
+      {method === "yivi_app" ? (
         <YiviSession
           target={target}
           sessionSecondsLeft={secondsLeft}
           onRestart={onRestart}
         />
-      )}
-      {method !== "yivi_app" && target.kind === "request" && (
+      ) : target.kind === "request" ? (
         <IdemOnScreen
           target={target}
           deepLink={deepLink}
@@ -644,8 +643,9 @@ export function Session({
           sessionSecondsLeft={secondsLeft}
           fallback={manualIdem}
         />
+      ) : (
+        manualIdem
       )}
-      {method !== "yivi_app" && target.kind !== "request" && manualIdem}
       {current.status === "in_progress" &&
         method === "idem_app" &&
         target.kind === "hosted" && (
@@ -654,57 +654,6 @@ export function Session({
           </p>
         )}
     </div>
-  );
-}
-
-// The opening of an upload step: the identity done, what to upload and the
-// three steps to get it, the first linking to where it is downloaded.
-function UploadStepIntro({
-  section,
-  link,
-}: Readonly<{
-  section: "diplomas" | "employment";
-  link: { href: string; label: string };
-}>): React.JSX.Element {
-  const { t } = useTranslation();
-  return (
-    <>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t(`identityProofing.${section}.identityDone`)}
-      </p>
-
-      <div className="flex flex-col gap-1">
-        <StepHeading>{t(`identityProofing.${section}.heading`)}</StepHeading>
-        <p className={HINT}>{t(`identityProofing.${section}.intro`)}</p>
-      </div>
-
-      <ol className="flex flex-col gap-2.5">
-        {(["login", "download", "upload"] as const).map((step, i) => (
-          <li key={step} className="flex items-start gap-3 text-[13.5px]">
-            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
-              {i + 1}
-            </span>
-            <span className="text-ink pt-0.5">
-              {t(`identityProofing.${section}.how.${step}`)}
-              {step === "login" && (
-                <>
-                  {" "}
-                  <a
-                    href={link.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-link font-semibold hover:underline"
-                  >
-                    {link.label}
-                  </a>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </>
   );
 }
 
@@ -756,24 +705,47 @@ function DiplomaStep({
     });
   }
 
-  let diplomaUploadLabel: string = t("identityProofing.diplomas.chooseAnother");
-  if (upload.isPending) {
-    diplomaUploadLabel = t("identityProofing.diplomas.checking");
-  } else if (held.length === 0) {
-    diplomaUploadLabel = t("identityProofing.diplomas.choose");
-  }
-
   return (
     <div className="flex w-full flex-col gap-5">
       {/* Mounted throughout, so each upload's verdicts are announced. */}
-      <output className="sr-only">{announced}</output>
-      <UploadStepIntro
-        section="diplomas"
-        link={{
-          href: MIJN_DUO_URL,
-          label: t("identityProofing.diplomas.how.openDuo"),
-        }}
-      />
+      <p role="status" className="sr-only">
+        {announced}
+      </p>
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t("identityProofing.diplomas.identityDone")}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
+        <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
+      </div>
+
+      <ol className="flex flex-col gap-2.5">
+        {(["login", "download", "upload"] as const).map((step, i) => (
+          <li key={step} className="flex items-start gap-3 text-[13.5px]">
+            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+              {i + 1}
+            </span>
+            <span className="text-ink pt-0.5">
+              {t(`identityProofing.diplomas.how.${step}`)}
+              {step === "login" && (
+                <>
+                  {" "}
+                  <a
+                    href={MIJN_DUO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link font-semibold hover:underline"
+                  >
+                    {t("identityProofing.diplomas.how.openDuo")}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
 
       {held.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -839,7 +811,11 @@ function DiplomaStep({
             loading={upload.isPending}
             onClick={() => fileInput.current?.click()}
           >
-            {diplomaUploadLabel}
+            {upload.isPending
+              ? t("identityProofing.diplomas.checking")
+              : held.length === 0
+                ? t("identityProofing.diplomas.choose")
+                : t("identityProofing.diplomas.chooseAnother")}
           </Button>
           {upload.isError && (
             <p role="alert" className={ERROR}>
@@ -931,13 +907,41 @@ function EmploymentStep({
 
   return (
     <div className="flex w-full flex-col gap-5">
-      <UploadStepIntro
-        section="employment"
-        link={{
-          href: MIJN_UWV_URL,
-          label: t("identityProofing.employment.how.openUwv"),
-        }}
-      />
+      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+        <Icon name="valid" className="text-success shrink-0" />
+        {t("identityProofing.employment.identityDone")}
+      </p>
+
+      <div className="flex flex-col gap-1">
+        <StepHeading>{t("identityProofing.employment.heading")}</StepHeading>
+        <p className={HINT}>{t("identityProofing.employment.intro")}</p>
+      </div>
+
+      <ol className="flex flex-col gap-2.5">
+        {(["login", "download", "upload"] as const).map((step, i) => (
+          <li key={step} className="flex items-start gap-3 text-[13.5px]">
+            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+              {i + 1}
+            </span>
+            <span className="text-ink pt-0.5">
+              {t(`identityProofing.employment.how.${step}`)}
+              {step === "login" && (
+                <>
+                  {" "}
+                  <a
+                    href={MIJN_UWV_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link font-semibold hover:underline"
+                  >
+                    {t("identityProofing.employment.how.openUwv")}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
 
       {/* Mounted throughout, so the accepted statement is announced. */}
       <output className="sr-only">{announced}</output>
@@ -1128,7 +1132,7 @@ function AddressStep({
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
 
-  function save(event: React.SubmitEvent<HTMLFormElement>): void {
+  function save(event: React.FormEvent): void {
     event.preventDefault();
     setTouched(true);
     if (missing.length > 0) return;
@@ -1684,11 +1688,7 @@ function Expired({
 }: Readonly<{ onRestart?: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <div
-      aria-live="polite"
-      aria-atomic="true"
-      className="flex flex-col items-center gap-4"
-    >
+    <div role="status" className="flex flex-col items-center gap-4">
       <QrPlaceholder
         label={t("identityProofing.onScreen.scan.expired")}
         expired

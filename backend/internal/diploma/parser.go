@@ -7,13 +7,12 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
-
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/pdftext"
 )
 
 // ErrNotADiploma is returned when the PDF does not look like a DUO diploma
@@ -31,7 +30,13 @@ type Parser interface {
 // Word is a positioned piece of text on a page. Coordinates are PDF user
 // space points: X grows to the right, Y grows upwards, so Top is larger than
 // Bottom and the first line of the page has the largest Top.
-type Word = pdftext.Word
+type Word struct {
+	Text   string
+	Left   float64
+	Top    float64
+	Right  float64
+	Bottom float64
+}
 
 const (
 	// pdfiumInstanceTimeout bounds how long a parse waits for a free instance.
@@ -213,6 +218,53 @@ func readPages(instance pdfium.Pdfium, pdf []byte) (*Pages, error) {
 	return pages, nil
 }
 
+// line is a group of words that share (approximately) the same baseline.
+type line struct {
+	top   float64
+	words []Word
+}
+
+func (l line) text() string {
+	parts := make([]string, len(l.words))
+	for i, w := range l.words {
+		parts[i] = w.Text
+	}
+	return strings.Join(parts, " ")
+}
+
+// lineTolerance is the maximum vertical distance (points) between two words on
+// the same line.
+const lineTolerance = 4.0
+
+func groupLines(words []Word) []line {
+	sorted := make([]Word, len(words))
+	copy(sorted, words)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Top != sorted[j].Top {
+			return sorted[i].Top > sorted[j].Top
+		}
+		return sorted[i].Left < sorted[j].Left
+	})
+
+	var lines []line
+	for _, w := range sorted {
+		if len(lines) > 0 {
+			current := &lines[len(lines)-1]
+			if current.top-w.Top <= lineTolerance {
+				current.words = append(current.words, w)
+				continue
+			}
+		}
+		lines = append(lines, line{top: w.Top, words: []Word{w}})
+	}
+	for i := range lines {
+		sort.Slice(lines[i].words, func(a, b int) bool {
+			return lines[i].words[a].Left < lines[i].words[b].Left
+		})
+	}
+	return lines
+}
+
 // Headings printed on the extract, in the order they appear.
 const (
 	headingRegister  = "Uit het register onderwijsdeelnemers"
@@ -241,56 +293,32 @@ var (
 // based: the extract is a sequence of headings ("DIPLOMA", "BEHAALD DOOR",
 // "UITGEGEVEN DOOR") each followed by the lines that belong to it.
 func extractDocument(pages *Pages) (*Document, error) {
-	lines := pdftext.GroupLines(pages.First)
+	lines := groupLines(pages.First)
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("%w: no text found", ErrNotADiploma)
 	}
-	texts := nonEmptyTexts(lines)
+	texts := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if t := strings.TrimSpace(l.text()); t != "" {
+			texts = append(texts, t)
+		}
+	}
 	if !containsLine(texts, headingRegister) {
 		return nil, fmt.Errorf("%w: register heading not found", ErrNotADiploma)
 	}
 
 	doc := &Document{Pages: 1 + len(pages.Rest), Profiles: []string{}}
-	for _, s := range splitSections(doc, texts) {
-		if err := applySection(doc, s); err != nil {
-			return nil, err
-		}
+
+	// Split the page into sections keyed by heading.
+	type section struct {
+		heading string
+		lines   []string
 	}
-	if err := checkComplete(doc); err != nil {
-		return nil, err
-	}
-	doc.HasGradeList = hasGradeList(pages.Rest)
-	return doc, nil
-}
-
-// sectionType keys the section that holds the qualification, whose heading is
-// one of documentTypes.
-const sectionType = "TYPE"
-
-// section is a heading and the lines printed under it.
-type section struct {
-	heading string
-	lines   []string
-}
-
-func nonEmptyTexts(lines []pdftext.Line) []string {
-	texts := make([]string, 0, len(lines))
-	for _, l := range lines {
-		if t := strings.TrimSpace(l.Text()); t != "" {
-			texts = append(texts, t)
-		}
-	}
-	return texts
-}
-
-// splitSections splits the page into sections keyed by heading, recording the
-// document type on doc as it passes its heading.
-func splitSections(doc *Document, texts []string) []section {
 	var sections []section
 	for _, t := range texts {
 		if title, ok := documentTypes[t]; ok {
 			doc.DocumentType = title
-			sections = append(sections, section{heading: sectionType})
+			sections = append(sections, section{heading: "TYPE"})
 			continue
 		}
 		switch t {
@@ -304,123 +332,131 @@ func splitSections(doc *Document, texts []string) []section {
 		current := &sections[len(sections)-1]
 		current.lines = append(current.lines, t)
 	}
-	return sections
-}
 
-func applySection(doc *Document, s section) error {
-	switch s.heading {
-	case sectionType:
-		doc.Qualification = strings.Join(s.lines, " ")
-	case headingProfile:
-		applyProfiles(doc, s.lines)
-	case headingAchieved:
-		return applyAchieved(doc, s.lines)
-	case headingIssued:
-		return applyIssued(doc, s.lines)
-	}
-	return nil
-}
-
-func applyProfiles(doc *Document, lines []string) {
-	for _, l := range lines {
-		profile := strings.TrimSpace(strings.TrimLeft(l, "•-* "))
-		profile = strings.TrimSpace(strings.TrimPrefix(profile, "Profiel"))
-		if profile != "" {
-			doc.Profiles = append(doc.Profiles, profile)
-		}
-	}
-}
-
-func applyAchieved(doc *Document, lines []string) error {
-	var name []string
-	for _, l := range lines {
-		if !strings.HasPrefix(l, labelBorn) {
-			name = append(name, l)
-			continue
-		}
-		born, err := parseDutchDate(strings.TrimSpace(strings.TrimPrefix(l, labelBorn)))
-		if err != nil {
-			return fmt.Errorf("%w: date of birth: %v", ErrNotADiploma, err)
-		}
-		doc.DateOfBirth = born
-	}
-	doc.FullName = strings.Join(name, " ")
-	return nil
-}
-
-func applyIssued(doc *Document, lines []string) error {
-	var institution []string
-	for _, l := range lines {
-		if !doc.DateAwarded.IsZero() {
-			// Everything after the award date is trailing information.
-			if err := applyTrailing(doc, l); err != nil {
-				return err
+	var err error
+	for _, s := range sections {
+		switch s.heading {
+		case "TYPE":
+			doc.Qualification = strings.Join(s.lines, " ")
+		case headingProfile:
+			for _, l := range s.lines {
+				profile := strings.TrimSpace(strings.TrimLeft(l, "•-* "))
+				profile = strings.TrimSpace(strings.TrimPrefix(profile, "Profiel"))
+				if profile != "" {
+					doc.Profiles = append(doc.Profiles, profile)
+				}
 			}
-			continue
-		}
-		if m := rePlaceDate.FindStringSubmatch(l); m != nil {
-			if t, err := parseDutchDate(m[2]); err == nil {
-				doc.PlaceOfIssue = strings.TrimSpace(m[1])
-				doc.DateAwarded = t
-				continue
+		case headingAchieved:
+			var name []string
+			for _, l := range s.lines {
+				if after, ok := strings.CutPrefix(l, labelBorn); ok {
+					if doc.DateOfBirth, err = parseDutchDate(strings.TrimSpace(after)); err != nil {
+						return nil, fmt.Errorf("%w: date of birth: %v", ErrNotADiploma, err)
+					}
+					continue
+				}
+				name = append(name, l)
 			}
+			doc.FullName = strings.Join(name, " ")
+		case headingIssued:
+			var institution []string
+			for _, l := range s.lines {
+				if doc.DateAwarded.IsZero() {
+					if m := rePlaceDate.FindStringSubmatch(l); m != nil {
+						if t, err := parseDutchDate(m[2]); err == nil {
+							doc.PlaceOfIssue = strings.TrimSpace(m[1])
+							doc.DateAwarded = t
+							continue
+						}
+					}
+					institution = append(institution, l)
+					continue
+				}
+				// Everything after the award date is trailing information.
+				if m := reLevel.FindStringSubmatch(l); m != nil {
+					doc.NLQFLevel, doc.EQFLevel = m[1], m[2]
+					continue
+				}
+				if after, ok := strings.CutPrefix(l, labelDownload); ok {
+					if doc.DownloadDate, err = parseDutchDate(strings.TrimSpace(after)); err != nil {
+						return nil, fmt.Errorf("%w: download date: %v", ErrNotADiploma, err)
+					}
+					continue
+				}
+				if m := reFooter.FindStringSubmatch(l); m != nil {
+					doc.DocumentNumber = m[1]
+					continue
+				}
+			}
+			doc.Institution = strings.Join(institution, " ")
 		}
-		institution = append(institution, l)
 	}
-	doc.Institution = strings.Join(institution, " ")
-	return nil
-}
 
-func applyTrailing(doc *Document, l string) error {
-	if m := reLevel.FindStringSubmatch(l); m != nil {
-		doc.NLQFLevel, doc.EQFLevel = m[1], m[2]
-		return nil
-	}
-	if strings.HasPrefix(l, labelDownload) {
-		downloaded, err := parseDutchDate(strings.TrimSpace(strings.TrimPrefix(l, labelDownload)))
-		if err != nil {
-			return fmt.Errorf("%w: download date: %v", ErrNotADiploma, err)
-		}
-		doc.DownloadDate = downloaded
-		return nil
-	}
-	if m := reFooter.FindStringSubmatch(l); m != nil {
-		doc.DocumentNumber = m[1]
-	}
-	return nil
-}
-
-func checkComplete(doc *Document) error {
 	if doc.DocumentType == "" || doc.Qualification == "" {
-		return fmt.Errorf("%w: qualification not found", ErrNotADiploma)
+		return nil, fmt.Errorf("%w: qualification not found", ErrNotADiploma)
 	}
 	if doc.FullName == "" || doc.DateOfBirth.IsZero() {
-		return fmt.Errorf("%w: holder not found", ErrNotADiploma)
+		return nil, fmt.Errorf("%w: holder not found", ErrNotADiploma)
 	}
 	if doc.Institution == "" || doc.DateAwarded.IsZero() {
-		return fmt.Errorf("%w: issuing institution not found", ErrNotADiploma)
+		return nil, fmt.Errorf("%w: issuing institution not found", ErrNotADiploma)
 	}
 	if doc.DocumentNumber == "" {
-		return fmt.Errorf("%w: document number not found", ErrNotADiploma)
+		return nil, fmt.Errorf("%w: document number not found", ErrNotADiploma)
 	}
-	return nil
-}
 
-func hasGradeList(rest []string) bool {
-	for _, page := range rest {
+	for _, page := range pages.Rest {
 		if strings.Contains(page, headingGradeList) {
-			return true
+			doc.HasGradeList = true
 		}
 	}
-	return false
+	return doc, nil
 }
 
 func containsLine(lines []string, want string) bool {
 	return slices.Contains(lines, want)
 }
 
-// parseDutchDate parses dates as printed on the extract ("3 februari 1980"),
-// which may end in a full stop.
+var dutchMonths = map[string]time.Month{
+	"januari": time.January, "februari": time.February, "maart": time.March,
+	"april": time.April, "mei": time.May, "juni": time.June, "juli": time.July,
+	"augustus": time.August, "september": time.September, "oktober": time.October,
+	"november": time.November, "december": time.December,
+	"jan": time.January, "feb": time.February, "mrt": time.March, "apr": time.April,
+	"jun": time.June, "jul": time.July, "aug": time.August, "sep": time.September,
+	"okt": time.October, "nov": time.November, "dec": time.December,
+}
+
+// parseDutchDate parses dates as printed on the extract ("3 februari 1980"); the
+// numeric forms "03-02-1980" and "1980-02-03" are accepted as well.
 func parseDutchDate(s string) (time.Time, error) {
-	return pdftext.ParseDutchDate(strings.TrimSuffix(strings.TrimSpace(s), "."))
+	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "."))
+	if s == "" {
+		return time.Time{}, errors.New("empty date")
+	}
+	for _, layout := range []string{"02-01-2006", "2006-01-02", "2-1-2006"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	parts := strings.Fields(s)
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("unrecognised date %q", s)
+	}
+	var day, year int
+	if _, err := fmt.Sscanf(parts[0], "%d", &day); err != nil {
+		return time.Time{}, fmt.Errorf("unrecognised day in %q", s)
+	}
+	month, ok := dutchMonths[strings.ToLower(parts[1])]
+	if !ok {
+		return time.Time{}, fmt.Errorf("unrecognised month in %q", s)
+	}
+	if _, err := fmt.Sscanf(parts[2], "%d", &year); err != nil {
+		return time.Time{}, fmt.Errorf("unrecognised year in %q", s)
+	}
+	t := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	if t.Day() != day {
+		return time.Time{}, fmt.Errorf("invalid day in %q", s)
+	}
+	return t, nil
 }

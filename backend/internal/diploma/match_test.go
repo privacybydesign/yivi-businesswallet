@@ -7,9 +7,6 @@ import (
 )
 
 func TestMatchFullName(t *testing.T) {
-	matched := Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true}
-	surnameDiffers := Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}}
-	givenNamesDiffer := Result{DateOfBirthMatch: true, SurnameMatch: true, Reasons: []string{"given names differ"}}
 	cases := []struct {
 		name      string
 		printed   string
@@ -20,62 +17,62 @@ func TestMatchFullName(t *testing.T) {
 		{
 			name: "BRP style", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna Maria", Prefix: "van der", Surname: "Berg", DateOfBirth: "03-02-1980"},
-			want:      matched,
+			want:      Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true},
 		},
 		{
 			name: "passport style, prefix in the last name", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "ANNA", Surname: "VAN DER BERG", DateOfBirth: "1980-02-03"},
-			want:      matched,
+			want:      Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true},
 		},
 		{
 			name: "trailing prefix", printed: "Anna van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Surname: "Berg van der", DateOfBirth: "1980-02-03"},
-			want:      matched,
+			want:      Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true},
 		},
 		{
 			name: "diacritics", printed: "Zoë Müller-Lüdenscheidt", dob: "1 januari 2000",
 			disclosed: Person{GivenNames: "ZOE", Surname: "MULLER LUDENSCHEIDT", DateOfBirth: "2000-01-01"},
-			want:      matched,
+			want:      Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true},
 		},
 		{
 			name: "other surname", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Surname: "Bergen", Prefix: "van der", DateOfBirth: "1980-02-03"},
-			want:      surnameDiffers,
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
 			name: "other prefix", printed: "Anna de Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Prefix: "van der", Surname: "Berg", DateOfBirth: "1980-02-03"},
-			want:      surnameDiffers,
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
 			name: "printed prefix, none disclosed", printed: "Anna van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Surname: "Berg", DateOfBirth: "1980-02-03"},
-			want:      surnameDiffers,
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
 			name: "printed prefix after two given names, none disclosed", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Surname: "Berg", DateOfBirth: "1980-02-03"},
-			want:      surnameDiffers,
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
 			name: "given name that is also a prefix word", printed: "An Van Nguyen", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "An Van", Surname: "Nguyen", DateOfBirth: "1980-02-03"},
-			want:      matched,
+			want:      Result{Matched: true, DateOfBirthMatch: true, SurnameMatch: true, GivenNamesMatch: true},
 		},
 		{
 			name: "part of a double surname", printed: "Anna Jansen-Smit", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna", Surname: "Smit", DateOfBirth: "1980-02-03"},
-			want:      surnameDiffers,
+			want:      Result{DateOfBirthMatch: true, GivenNamesMatch: true, Reasons: []string{"surname differs"}},
 		},
 		{
 			name: "other given name", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Maria", Surname: "van der Berg", DateOfBirth: "1980-02-03"},
-			want:      givenNamesDiffer,
+			want:      Result{DateOfBirthMatch: true, SurnameMatch: true, Reasons: []string{"given names differ"}},
 		},
 		{
 			name: "same first name, other second name", printed: "Anna Maria van der Berg", dob: "1980-02-03",
 			disclosed: Person{GivenNames: "Anna Sophie", Surname: "van der Berg", DateOfBirth: "1980-02-03"},
-			want:      givenNamesDiffer,
+			want:      Result{DateOfBirthMatch: true, SurnameMatch: true, Reasons: []string{"given names differ"}},
 		},
 		{
 			name: "only the surname printed", printed: "Berg", dob: "1980-02-03",

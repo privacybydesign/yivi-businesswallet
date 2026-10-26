@@ -58,7 +58,7 @@ export function isProofingLive(status: string): boolean {
 
 // Statuses a poll never recovers from: the caller may not read this session
 // (403), or it is gone (404). Polling on would only repeat the refusal.
-const FINAL_POLL_STATUSES: ReadonlySet<number> = new Set([403, 404]);
+const FINAL_POLL_STATUSES: readonly number[] = [403, 404];
 
 // Whether a verify page keeps polling its progress: until the first read, and
 // while the session is live, unless a read was refused for good.
@@ -83,7 +83,9 @@ export function reviewPollContinues(
 }
 
 function refusedForGood(error: Error | null): boolean {
-  return error instanceof ApiError && FINAL_POLL_STATUSES.has(error.status);
+  return (
+    error instanceof ApiError && FINAL_POLL_STATUSES.includes(error.status)
+  );
 }
 
 export function proofingStatusTone(status: string): ProofingStatusTone {
@@ -263,12 +265,7 @@ export const FACE_PROVIDERS = ["regula"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
 
 // The service's steps that capture the face (proofing.faceSteps).
-const FACE_STEPS = new Set([
-  "face_verification",
-  "selfie",
-  "liveness",
-  "face_match",
-]);
+const FACE_STEPS = ["face_verification", "selfie", "liveness", "face_match"];
 // The selfie location that takes the face in the browser
 // (proofing.selfieLocationBrowser).
 const SELFIE_LOCATION_BROWSER = "browser";
@@ -285,13 +282,13 @@ const YIVI_EIDAS_LEVEL = "low";
 // carry no claim for (AGE_OVER_CHOICES).
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
-  selfieLocation?: string;
-  requiredAssuranceLevel?: string;
+  selfieLocation?: string | undefined;
+  requiredAssuranceLevel?: string | undefined;
   requestedAttributes?: readonly string[];
   ageOver?: number;
 }): boolean {
   const needsReferencePhoto =
-    flow.steps.some((step) => FACE_STEPS.has(step)) &&
+    flow.steps.some((step) => FACE_STEPS.includes(step)) &&
     !flow.steps.includes(STEP_NFC_READ) &&
     flow.selfieLocation !== SELFIE_LOCATION_BROWSER;
   const levelMet =
@@ -743,16 +740,7 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     blurBsn: draft.blackOutBsn,
     keepFacePhotos: draft.keepFacePhotos,
   };
-  applyDraftOverrides(spec, draft, requestedAttributes);
-  return spec;
-}
 
-// Sets the spec's fields a draft only sends when it sets them.
-function applyDraftOverrides(
-  spec: ProofingFlowSpec,
-  draft: ProofingFlowDraft,
-  requestedAttributes: readonly string[],
-): void {
   if (draft.faceVerification) {
     spec.faceProvider = draft.faceProvider;
   }
@@ -777,6 +765,7 @@ function applyDraftOverrides(
   if (asksAge(draft)) {
     spec.ageOver = Number(draft.ageOver);
   }
+  return spec;
 }
 
 // The checks a draft requires: the chip's passive authentication, and chip
@@ -899,7 +888,7 @@ export function editedFlowSelection(
 export function requestSubject(request: {
   subjectName: string;
   subjectEmail: string;
-  proofedName?: string;
+  proofedName?: string | undefined;
 }): { name: string; verifiedAs: string | undefined } {
   const given = request.subjectName.trim();
   const proofed = request.proofedName?.trim() ?? "";
@@ -1473,69 +1462,100 @@ export function employmentReview(
 }
 
 // The copy an identity proofing API error shows, keyed on its stable code.
-const PROOFING_ERROR_KEYS = {
-  no_encryption_key: "identityProofing.errors.noEncryptionKey",
-  flow_not_found: "identityProofing.errors.flowNotFound",
-  flow_not_completable: "identityProofing.errors.flowNotCompletable",
-  flow_not_allowed: "identityProofing.errors.flowNotAllowed",
-  member_not_found: "identityProofing.errors.memberNotFound",
-  no_default_flow: "identityProofing.errors.noDefaultFlow",
-  proofing_paused: "identityProofing.errors.proofingPaused",
-  api_key_not_found: "identityProofing.errors.apiKeyNotFound",
-  session_not_found: "identityProofing.errors.sessionNotFound",
-  not_under_review: "identityProofing.errors.notUnderReview",
-  address_not_under_review: "identityProofing.errors.addressNotUnderReview",
-  own_review: "identityProofing.errors.ownReview",
-  reference_photo_required: "identityProofing.errors.referencePhotoRequired",
-  organization_not_found: "identityProofing.errors.organizationNotFound",
-  webhook_not_found: "identityProofing.errors.webhookNotFound",
-  link_started: "identityProofing.errors.linkStarted",
-  session_over: "identityProofing.errors.sessionOver",
-  device_active: "identityProofing.errors.deviceActive",
-  diplomas_need_page: "identityProofing.errors.diplomasNeedPage",
-  hosted_disabled: "identityProofing.errors.hostedDisabled",
-  redirect_not_allowed: "identityProofing.errors.redirectNotAllowed",
-  redirect_origin_in_use: "identityProofing.errors.redirectOriginInUse",
-  data_request_flow: "identityProofing.errors.dataRequestFlow",
-  diplomas_closed: "identityProofing.errors.diplomasClosed",
-  diplomas_not_asked: "identityProofing.errors.diplomasNotAsked",
-  address_needs_page: "identityProofing.errors.addressNeedsPage",
-  address_closed: "identityProofing.errors.addressClosed",
-  address_not_asked: "identityProofing.errors.addressNotAsked",
-  address_not_found: "identityProofing.errors.addressNotFound",
-  employment_needs_page: "identityProofing.errors.employmentNeedsPage",
-  employment_closed: "identityProofing.errors.employmentClosed",
-  employment_not_asked: "identityProofing.errors.employmentNotAsked",
-  no_employment_checker: "identityProofing.errors.noEmploymentChecker",
-  flow_no_identity: "identityProofing.errors.flowNoIdentity",
-  data_flow_for_member: "identityProofing.errors.dataFlowForMember",
-  export_unavailable: "identityProofing.errors.exportUnavailable",
-  reasons_missing: "identityProofing.errors.reasonsMissing",
-  // An admin by role whose mandate was withdrawn: the backend refuses every
-  // admin call, though the role still shows the admin's tabs.
-  mandate_withdrawn: "identityProofing.errors.mandateWithdrawn",
-  legal_retention: "identityProofing.errors.legalRetention",
-  // too_large is a diploma or Verzekeringsbericht upload's,
-  // payload_too_large a branding logo's.
-  too_large: "identityProofing.errors.tooLarge",
-  payload_too_large: "identityProofing.errors.tooLarge",
-} as const;
-
-const SERVER_MESSAGE_CODES = new Set([
-  "too_many_files",
-  "invalid_input",
-  "rejected_by_provider",
-]);
-
 export function proofingErrorMessage(error: unknown, t: TFunction): string {
-  const code = errorCode(error);
-  if (code !== null && Object.hasOwn(PROOFING_ERROR_KEYS, code)) {
-    return t(PROOFING_ERROR_KEYS[code as keyof typeof PROOFING_ERROR_KEYS]);
+  switch (errorCode(error)) {
+    case "no_encryption_key":
+      return t("identityProofing.errors.noEncryptionKey");
+    case "flow_not_found":
+      return t("identityProofing.errors.flowNotFound");
+    case "flow_not_completable":
+      return t("identityProofing.errors.flowNotCompletable");
+    case "flow_not_allowed":
+      return t("identityProofing.errors.flowNotAllowed");
+    case "member_not_found":
+      return t("identityProofing.errors.memberNotFound");
+    case "no_default_flow":
+      return t("identityProofing.errors.noDefaultFlow");
+    case "proofing_paused":
+      return t("identityProofing.errors.proofingPaused");
+    case "api_key_not_found":
+      return t("identityProofing.errors.apiKeyNotFound");
+    case "session_not_found":
+      return t("identityProofing.errors.sessionNotFound");
+    case "not_under_review":
+      return t("identityProofing.errors.notUnderReview");
+    case "own_review":
+      return t("identityProofing.errors.ownReview");
+    case "address_not_under_review":
+      return t("identityProofing.errors.addressNotUnderReview");
+    case "reference_photo_required":
+      return t("identityProofing.errors.referencePhotoRequired");
+    case "organization_not_found":
+      return t("identityProofing.errors.organizationNotFound");
+    case "webhook_not_found":
+      return t("identityProofing.errors.webhookNotFound");
+    case "link_started":
+      return t("identityProofing.errors.linkStarted");
+    case "session_over":
+      return t("identityProofing.errors.sessionOver");
+    case "device_active":
+      return t("identityProofing.errors.deviceActive");
+    case "diplomas_need_page":
+      return t("identityProofing.errors.diplomasNeedPage");
+    case "hosted_disabled":
+      return t("identityProofing.errors.hostedDisabled");
+    case "redirect_not_allowed":
+      return t("identityProofing.errors.redirectNotAllowed");
+    case "redirect_origin_in_use":
+      return t("identityProofing.errors.redirectOriginInUse");
+    case "data_request_flow":
+      return t("identityProofing.errors.dataRequestFlow");
+    case "diplomas_closed":
+      return t("identityProofing.errors.diplomasClosed");
+    case "diplomas_not_asked":
+      return t("identityProofing.errors.diplomasNotAsked");
+    case "address_needs_page":
+      return t("identityProofing.errors.addressNeedsPage");
+    case "address_closed":
+      return t("identityProofing.errors.addressClosed");
+    case "address_not_asked":
+      return t("identityProofing.errors.addressNotAsked");
+    case "address_not_found":
+      return t("identityProofing.errors.addressNotFound");
+    case "employment_needs_page":
+      return t("identityProofing.errors.employmentNeedsPage");
+    case "employment_closed":
+      return t("identityProofing.errors.employmentClosed");
+    case "employment_not_asked":
+      return t("identityProofing.errors.employmentNotAsked");
+    case "no_employment_checker":
+      return t("identityProofing.errors.noEmploymentChecker");
+    case "flow_no_identity":
+      return t("identityProofing.errors.flowNoIdentity");
+    case "data_flow_for_member":
+      return t("identityProofing.errors.dataFlowForMember");
+    case "export_unavailable":
+      return t("identityProofing.errors.exportUnavailable");
+    case "reasons_missing":
+      return t("identityProofing.errors.reasonsMissing");
+    // An admin by role whose mandate was withdrawn: the backend refuses every
+    // admin call, though the role still shows the admin's tabs.
+    case "mandate_withdrawn":
+      return t("identityProofing.errors.mandateWithdrawn");
+    case "legal_retention":
+      return t("identityProofing.errors.legalRetention");
+    // too_large is a diploma or Verzekeringsbericht upload's,
+    // payload_too_large a branding logo's.
+    case "too_large":
+    case "payload_too_large":
+      return t("identityProofing.errors.tooLarge");
+    case "too_many_files":
+    case "invalid_input":
+    case "rejected_by_provider":
+      return serverMessage(error) ?? t("identityProofing.errors.generic");
+    default:
+      return t("identityProofing.errors.generic");
   }
-  if (code !== null && SERVER_MESSAGE_CODES.has(code)) {
-    return serverMessage(error) ?? t("identityProofing.errors.generic");
-  }
-  return t("identityProofing.errors.generic");
 }
 
 // What a hosted link's subject is told when a call fails. The wallet's copy
@@ -1658,15 +1678,15 @@ export type ProofingStep =
   | typeof STEP_DOCUMENT_PHOTO
   | typeof STEP_FACE_VERIFICATION;
 
-const PROOFING_STEPS: ReadonlySet<string> = new Set([
+const PROOFING_STEPS: readonly string[] = [
   STEP_DOCUMENT_CAPTURE,
   STEP_NFC_READ,
   STEP_DOCUMENT_PHOTO,
   STEP_FACE_VERIFICATION,
-]);
+];
 
 export function isProofingStep(value: string): value is ProofingStep {
-  return PROOFING_STEPS.has(value);
+  return PROOFING_STEPS.includes(value);
 }
 
 // A flow version's steps in words, in the order the app runs them; a step the
@@ -1834,7 +1854,7 @@ const SECONDS_PAD = 2;
 export function sessionDurationSeconds(request: {
   status: string;
   createdAt: string;
-  completedAt?: string;
+  completedAt?: string | undefined;
   linkExpiresAt: string;
 }): number | undefined {
   const end =
@@ -2112,8 +2132,7 @@ export function readableTextOn(hex: string): "#ffffff" | "#000000" {
   const luminance = LUMINANCE_WEIGHTS.reduce((sum, weight, i) => {
     const start = 1 + i * HEX_PAIR;
     const c =
-      Number.parseInt(hex.slice(start, start + HEX_PAIR), HEX_RADIX) /
-      CHANNEL_MAX;
+      parseInt(hex.slice(start, start + HEX_PAIR), HEX_RADIX) / CHANNEL_MAX;
     const linear =
       c <= SRGB_LINEAR_LIMIT
         ? c / SRGB_LINEAR_DIVISOR
