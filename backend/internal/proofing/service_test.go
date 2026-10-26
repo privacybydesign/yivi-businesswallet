@@ -875,16 +875,21 @@ func TestCreateRequestValidates(t *testing.T) {
 		"not allowed":    {NewRequest{SubjectUserID: alex.UserID, FlowID: chipFlow.ID}, ErrFlowNotAllowed},
 	}
 	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()}, tc.in)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("err = %v, want %v", err, tc.want)
-			}
-			if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-				t.Errorf("a refused request created a session or sent mail")
-			}
-		})
+		t.Run(name, func(t *testing.T) { assertRequestRefused(t, Requester{UserID: uuid.New()}, tc.in, tc.want) })
+	}
+}
+
+// assertRequestRefused sends in as by and wants it refused with want, before
+// any session is opened or mail sent.
+func assertRequestRefused(t *testing.T, by Requester, in NewRequest, want error) {
+	t.Helper()
+	f := newFixture()
+	_, err := f.svc.CreateRequest(context.Background(), testOrg, by, in)
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want %v", err, want)
+	}
+	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
+		t.Errorf("a refused request created a session or sent mail")
 	}
 }
 
@@ -1303,16 +1308,7 @@ func TestExternalRequestValidates(t *testing.T) {
 		"not completable": {sam, NewRequest{SubjectEmail: "a@example.org", FlowID: browserFlow.ID}, ErrFlowNotCompletable},
 	}
 	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, tc.by, tc.in)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("err = %v, want %v", err, tc.want)
-			}
-			if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-				t.Errorf("a refused request created a session or sent mail")
-			}
-		})
+		t.Run(name, func(t *testing.T) { assertRequestRefused(t, tc.by, tc.in, tc.want) })
 	}
 }
 

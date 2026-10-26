@@ -38,17 +38,9 @@ func TestFlowAddressSavesAndAudits(t *testing.T) {
 }
 
 func TestAddressSealedUntilPurge(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newSealedFixture(t, EventSessionAddressAdded)
+	pool, requests, webhooks, orgID, in := f.pool, f.requests, f.webhooks, f.orgID, f.in
 	ctx := context.Background()
-	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionAddressAdded}); err != nil {
-		t.Fatalf("Save webhook: %v", err)
-	}
-	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
 	in.Address = AddressRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Address != AddressRequired {
@@ -313,4 +305,33 @@ func storeSelfDeclaredAddress(t *testing.T, requests *RequestStore, orgID, sentB
 		t.Fatalf("Get = %q, %v; want the address pending", pending.AddressReview, err)
 	}
 	return pending
+}
+
+// sealedFixture is an org whose webhook listens for one event, and a request
+// for an external person still to be created.
+type sealedFixture struct {
+	pool     *pgxpool.Pool
+	requests *RequestStore
+	webhooks *WebhookStore
+	orgID    uuid.UUID
+	in       NewStoredRequest
+}
+
+func newSealedFixture(t *testing.T, event string) sealedFixture {
+	t.Helper()
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	if _, _, err := webhooks.Save(context.Background(), orgID, "https://hooks.example.org/x", []string{event}); err != nil {
+		t.Fatalf("Save webhook: %v", err)
+	}
+	return sealedFixture{
+		pool:     pool,
+		requests: NewRequestStore(pool, audit.NewDBRecorder(), cipher),
+		webhooks: webhooks,
+		orgID:    orgID,
+		in:       newStoredRequest(orgID, sam, externalSubject("anna@example.org")),
+	}
 }

@@ -479,7 +479,16 @@ func main() {
 // path's collaborator (openid4vppresenter.Receiver, wired into qerdsService below).
 // requesterRoot is this deployment's own requester CA (newRequesterCA): its
 // organizations' requests to each other verify without configuration.
-func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit.Recorder, orgStore *organization.Store, holder eudiholder.Holder, requesterRoot []byte, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
+// presenterDeps are what the inbound-presentation slice is built on.
+type presenterDeps struct {
+	pool          *pgxpool.Pool
+	recorder      audit.Recorder
+	orgStore      *organization.Store
+	holder        eudiholder.Holder
+	requesterRoot []byte
+}
+
+func newOpenID4VPPresenter(cfg config.Config, deps presenterDeps, requireUser, authorize func(http.Handler) http.Handler) (*openid4vppresenter.Handler, *openid4vppresenter.Service, error) {
 	policy := openid4vppresenter.Policy{AllowInsecureHTTP: cfg.OpenID4VPPresenterAllowInsecureHTTP}
 	var validator openid4vppresenter.Validator
 	if cfg.OpenID4VPPresenterAllowUnverifiedRequests {
@@ -487,7 +496,7 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 			"requests arriving over QERDS are refused, since only a verified certificate can certify their sender")
 		validator = openid4vppresenter.NewUnverifiedDecoder(policy)
 	} else {
-		trustPEM := append([]byte(cfg.OpenID4VPVerifierTrustChain+"\n"), requesterRoot...)
+		trustPEM := append([]byte(cfg.OpenID4VPVerifierTrustChain+"\n"), deps.requesterRoot...)
 		trust, err := eudiholder.NewVerifierTrust(trustPEM, cfg.AttestationHolderStagingAnchors)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", "OPENID4VP_VERIFIER_TRUST_CHAIN", err)
@@ -497,9 +506,9 @@ func newOpenID4VPPresenter(cfg config.Config, pool *pgxpool.Pool, recorder audit
 	if cfg.OpenID4VPPresenterAutoPresent {
 		slog.Warn("OpenID4VP presentations complete immediately after organization selection (dev only; no consent layer)")
 	}
-	store := openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL)
+	store := openid4vppresenter.NewStore(deps.pool, deps.recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL)
 	svc := openid4vppresenter.NewService(
-		store, orgStore, holder,
+		store, deps.orgStore, deps.holder,
 		openid4vppresenter.NewFetcher(policy), validator, openid4vppresenter.NewResponder(policy),
 		cfg.OpenID4VPPresenterAutoPresent,
 	)
@@ -564,7 +573,93 @@ func run() error {
 	}
 	defer pool.Close()
 
-	verifier := openid4vpverifier.New(
+	w := &wiring{cfg: cfg, pool: pool}
+	defer w.close()
+	for _, build := range []func(context.Context) error{
+		w.buildAuth,
+		w.buildOrganizations,
+		w.buildMessaging,
+		w.buildAttestations,
+		w.buildNotifications,
+		w.buildIntegrations,
+		w.buildProofing,
+	} {
+		if err := build(ctx); err != nil {
+			return err
+		}
+	}
+	return serve(ctx, w.httpServer())
+}
+
+// wiring holds what run builds, stage by stage: each stage reads what the
+// earlier ones left here. closers are released, last first, when run returns.
+type wiring struct {
+	cfg     config.Config
+	pool    *pgxpool.Pool
+	closers []func()
+
+	verifier           *openid4vpverifier.Client
+	notificationStore  *notifications.Store
+	recorder           notifications.Recorder
+	userStore          *user.Store
+	sessionStore       *session.Store
+	platformAdmins     auth.PlatformAdmins
+	orgStore           *organization.Store
+	authService        *auth.Service
+	requireUser        func(http.Handler) http.Handler
+	orgService         *organization.Service
+	sessionIssuer      *auth.SessionIssuer
+	emailStore         *email.Store
+	emailService       *email.Service
+	mailLocale         email.Locale
+	themeSettingsStore *themesettings.Store
+	qerdsStore         *qerds.Store
+	qerdsService       *qerds.Service
+	proofingEngine     *proofingengine.Engine
+
+	authHandler           *auth.Handler
+	orgHandler            *organization.Handler
+	qerdsHandler          *qerds.Handler
+	walletHandler         *wallet.Handler
+	postguardHandler      *postguard.Handler
+	emailHandler          *email.Handler
+	issuerSettingsHandler *issuersettings.Handler
+	themeSettingsHandler  *themesettings.Handler
+	presenterHandler      *openid4vppresenter.Handler
+	requesterHandler      *openid4vprequester.Handler
+	attestationHandler    *attestation.Handler
+	wscaWalletHandler     *wscawallet.Handler
+	notificationsHandler  *notifications.Handler
+	slackHandler          *slackchannel.Handler
+	teamsHandler          *teamschannel.Handler
+	provisioningHandler   *provisioning.Handler
+	cscHandler            *csc.Handler
+	signingHandler        *signing.Handler
+	proofingHandler       *proofing.Handler
+	proofingApp           server.Registerer
+}
+
+func (w *wiring) close() {
+	for i := len(w.closers) - 1; i >= 0; i-- {
+		w.closers[i]()
+	}
+}
+
+// pinger is a provider with a readiness probe.
+type pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// probe runs p's readiness probe within timeout.
+func probe(ctx context.Context, timeout time.Duration, p pinger) error {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return p.Ping(probeCtx)
+}
+
+func (w *wiring) buildAuth(ctx context.Context) error {
+	cfg := w.cfg
+	w.verifier = openid4vpverifier.New(
 		cfg.EudiVerifierURL,
 		cfg.EudiIssuerChain,
 		cfg.EudiIntendedUseID,
@@ -576,9 +671,7 @@ func run() error {
 	// Fatal startup readiness gate: fail the process at boot rather than let a
 	// misconfigured verifier silently fail a user's first login (see Ping). The
 	// probe confirms the verifier accepts a presentation request of our shape.
-	probeCtx, probeCancel := context.WithTimeout(ctx, verifierProbeTimeout)
-	defer probeCancel()
-	if err := verifier.Ping(probeCtx); err != nil {
+	if err := probe(ctx, verifierProbeTimeout, w.verifier); err != nil {
 		return err
 	}
 
@@ -589,41 +682,45 @@ func run() error {
 	// one: the seeder (seeding pages nobody), the notification store itself, which
 	// cannot be handed a recorder that needs it, and the organization store the
 	// provisioning sync writes through (a bulk directory import would otherwise page
-	// every admin once per person — see below).
+	// every admin once per person — see buildIntegrations).
 	// The consequence of that second exception is that a notification.* action
 	// would never notify — which is fine as long as none is in the catalog, and a
 	// reason to think twice before putting one there.
-	notificationStore := notifications.NewStore(pool, audit.NewDBRecorder())
-	recorder := notifications.NewRecorder(audit.NewDBRecorder(), notificationStore)
+	w.notificationStore = notifications.NewStore(w.pool, audit.NewDBRecorder())
+	w.recorder = notifications.NewRecorder(audit.NewDBRecorder(), w.notificationStore)
 
-	userStore := user.NewStore(pool)
-	sessionStore := session.NewStore(pool, cfg.SessionTTL)
+	w.userStore = user.NewStore(w.pool)
+	w.sessionStore = session.NewStore(w.pool, cfg.SessionTTL)
 	cookieCfg := auth.CookieConfig{
 		Secure: cfg.SessionCookieSecure,
 		MaxAge: int(cfg.SessionTTL.Seconds()),
 	}
-	platformAdmins := auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
-	orgStore := organization.NewStore(pool, recorder)
-	presentationStore := presentation.NewStore(pool, cfg.PresentationTTL)
-	authService := auth.NewService(verifier, presentationStore, userStore, sessionStore, orgStore)
+	w.platformAdmins = auth.NewPlatformAdmins(cfg.PlatformAdminEmails)
+	w.orgStore = organization.NewStore(w.pool, w.recorder)
+	presentationStore := presentation.NewStore(w.pool, cfg.PresentationTTL)
+	w.authService = auth.NewService(w.verifier, presentationStore, w.userStore, w.sessionStore, w.orgStore)
 	if cfg.DevMode {
-		bootstrap := auth.NewDevBootstrap(pool, userStore, platformAdmins)
+		bootstrap := auth.NewDevBootstrap(w.pool, w.userStore, w.platformAdmins)
 		if err := bootstrap.Load(ctx); err != nil {
 			return err
 		}
-		authService.SetDevBootstrap(bootstrap)
+		w.authService.SetDevBootstrap(bootstrap)
 		slog.WarnContext(ctx, "DEV_MODE is on: stub providers may run, and the first unknown Yivi login becomes the platform admin")
 	}
-	authHandler := auth.NewHandler(authService, sessionStore, userStore, cookieCfg, platformAdmins)
+	w.authHandler = auth.NewHandler(w.authService, w.sessionStore, w.userStore, cookieCfg, w.platformAdmins)
 
-	startPruner(ctx, "sessions", cfg.SessionPruneEvery, sessionStore.DeleteExpired)
+	startPruner(ctx, "sessions", cfg.SessionPruneEvery, w.sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
-	startPruner(ctx, "openid4vp_transactions", cfg.SessionPruneEvery, openid4vppresenter.NewStore(pool, recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL).Prune)
+	startPruner(ctx, "openid4vp_transactions", cfg.SessionPruneEvery, openid4vppresenter.NewStore(w.pool, w.recorder, cfg.OpenID4VPTransactionTTL, cfg.OpenID4VPOrgRequestTTL).Prune)
 
-	requireUser := auth.RequireUser(sessionStore)
-	orgService := organization.NewService(userStore, orgStore, authService)
-	sessionIssuer := auth.NewSessionIssuer(sessionStore, cookieCfg)
+	w.requireUser = auth.RequireUser(w.sessionStore)
+	w.orgService = organization.NewService(w.userStore, w.orgStore, w.authService)
+	w.sessionIssuer = auth.NewSessionIssuer(w.sessionStore, cookieCfg)
+	return nil
+}
 
+func (w *wiring) buildOrganizations(ctx context.Context) error {
+	cfg := w.cfg
 	// Per-org e-mail (SMTP) for person-facing notifications (credential offers and
 	// member invitations). Built before the org handler so invitations deliver
 	// best-effort at invite / resend time.
@@ -631,98 +728,106 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	emailStore := email.NewStore(pool, recorder, emailCipher)
+	w.emailStore = email.NewStore(w.pool, w.recorder, emailCipher)
 	mailLocale, ok := email.ParseLocale(cfg.MailDefaultLocale)
 	if !ok {
 		return fmt.Errorf("MAIL_DEFAULT_LOCALE: unsupported locale %q (supported: %v)", cfg.MailDefaultLocale, email.Locales())
 	}
+	w.mailLocale = mailLocale
 	// Mail reuses the org's app palette (themesettings), so a tenant configures its
 	// branding once and outbound mail follows.
-	themeSettingsStore := themesettings.NewStore(pool, recorder)
+	w.themeSettingsStore = themesettings.NewStore(w.pool, w.recorder)
 	// An org on Microsoft 365 authenticates with an OAuth2 bearer token rather
 	// than a password (Microsoft has turned off Basic Authentication for SMTP
 	// AUTH), so the mail service needs a token source. It holds no deployment
 	// configuration of its own: the app registration is per-org, on the same
 	// settings row as the host and port.
-	emailService := email.NewService(emailStore, mailer.New(),
+	w.emailService = email.NewService(w.emailStore, mailer.New(),
 		mailoauth.NewMicrosoft(&http.Client{Timeout: mailOAuthHTTPTimeout}),
-		mailBranding{theme: themeSettingsStore}, mailLocale)
+		mailBranding{theme: w.themeSettingsStore}, mailLocale)
 
-	// Member screening / VOG (#242): validatie.nl real-time PDF check.
-	vogValidator, err := newVogValidatorProvider(cfg)
+	screeningService, err := w.newScreeningService(ctx)
 	if err != nil {
 		return err
 	}
+
+	// Built ahead of qerdsService/qerdsHandler below so the org handler can read
+	// an org's live default address for its Wallet card (#260) without this
+	// slice importing qerds, which already imports organization for org-scoped
+	// auth and would cycle.
+	w.qerdsStore = qerds.NewStore(w.pool, w.recorder)
+	w.orgHandler = organization.NewHandler(w.orgStore, w.orgService, screeningService, audit.NewReader(w.pool), w.sessionIssuer, w.emailService, cfg.AppBaseURL, w.requireUser, w.platformAdmins, qerdsDefaultAddress{w.qerdsStore})
+
+	// Daily re-identification reminder sweep (#240 §6): mails members whose
+	// identity is due soon or overdue, per each org's own policy.
+	organization.NewIdentityScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
+
+	// Daily VOG reminder sweep (#242 §6): mails members whose VOG is expiring
+	// soon or has expired, per each org's own screening policy.
+	organization.NewScreeningScheduler(w.orgStore, w.emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultScreeningScheduleInterval)
+	return nil
+}
+
+// newScreeningService builds member screening / VOG (#242): validatie.nl
+// real-time PDF check.
+func (w *wiring) newScreeningService(ctx context.Context) (*organization.ScreeningService, error) {
+	cfg := w.cfg
+	vogValidator, err := newVogValidatorProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
 	// Fatal readiness gate, mirroring every other provider: fail at boot if the
 	// configured VOG validator will not accept our requests.
-	vogProbeCtx, vogProbeCancel := context.WithTimeout(ctx, vogProbeTimeout)
-	defer vogProbeCancel()
-	if err := vogValidator.Ping(vogProbeCtx); err != nil {
-		return fmt.Errorf("vog validator ping: %w", err)
+	if err := probe(ctx, vogProbeTimeout, vogValidator); err != nil {
+		return nil, fmt.Errorf("vog validator ping: %w", err)
 	}
 	var vogReferenceHashKey []byte
 	if cfg.VogReferenceHashKey != "" {
 		vogReferenceHashKey, err = hex.DecodeString(cfg.VogReferenceHashKey)
 		if err != nil {
-			return fmt.Errorf("VOG_REFERENCE_HASH_KEY must be hex-encoded: %w", err)
+			return nil, fmt.Errorf("VOG_REFERENCE_HASH_KEY must be hex-encoded: %w", err)
 		}
 	}
 	// The VOG PDF parser is a PDFium WebAssembly pool; compiling the module
 	// takes seconds, so it is built once here rather than per upload.
 	vogParser, err := vog.NewPDFiumParser()
 	if err != nil {
-		return fmt.Errorf("vog parser: %w", err)
+		return nil, fmt.Errorf("vog parser: %w", err)
 	}
-	defer func() {
+	w.closers = append(w.closers, func() {
 		if err := vogParser.Close(); err != nil {
 			slog.Error("close vog parser", slog.String("error", err.Error()))
 		}
-	}()
-	screeningService := organization.NewScreeningService(orgStore, vogValidator, vogParser, authService, orgService, vogReferenceHashKey)
+	})
+	return organization.NewScreeningService(w.orgStore, vogValidator, vogParser, w.authService, w.orgService, vogReferenceHashKey), nil
+}
 
-	// Built ahead of qerdsService/qerdsHandler below so the org handler can read
-	// an org's live default address for its Wallet card (#260) without this
-	// slice importing qerds, which already imports organization for org-scoped
-	// auth and would cycle.
-	qerdsStore := qerds.NewStore(pool, recorder)
-	orgHandler := organization.NewHandler(orgStore, orgService, screeningService, audit.NewReader(pool), sessionIssuer, emailService, cfg.AppBaseURL, requireUser, platformAdmins, qerdsDefaultAddress{qerdsStore})
-
-	// Daily re-identification reminder sweep (#240 §6): mails members whose
-	// identity is due soon or overdue, per each org's own policy.
-	organization.NewIdentityScheduler(orgStore, emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultIdentityScheduleInterval)
-
-	// Daily VOG reminder sweep (#242 §6): mails members whose VOG is expiring
-	// soon or has expired, per each org's own screening policy.
-	organization.NewScreeningScheduler(orgStore, emailService, cfg.AppBaseURL).Start(ctx, organization.DefaultScreeningScheduleInterval)
-
+func (w *wiring) buildMessaging(ctx context.Context) error {
+	cfg := w.cfg
 	qerdsProv, err := newQerdsProvider(cfg)
 	if err != nil {
 		return err
 	}
 	// Fatal readiness gate, mirroring the IRMA probe: fail at boot if the QERDS
 	// provider will not accept our requests.
-	qerdsProbeCtx, qerdsProbeCancel := context.WithTimeout(ctx, qerdsProbeTimeout)
-	defer qerdsProbeCancel()
-	if err := qerdsProv.Ping(qerdsProbeCtx); err != nil {
+	if err := probe(ctx, qerdsProbeTimeout, qerdsProv); err != nil {
 		return fmt.Errorf("qerds provider ping: %w", err)
 	}
-	qerdsService := qerds.NewService(qerdsStore, qerdsStore, qerdsProv)
-	qerdsHandler := qerds.NewHandler(qerdsService, qerdsStore, qerdsStore, qerdsStore, requireUser, orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
+	w.qerdsService = qerds.NewService(w.qerdsStore, w.qerdsStore, qerdsProv)
+	w.qerdsHandler = qerds.NewHandler(w.qerdsService, w.qerdsStore, w.qerdsStore, w.qerdsStore, w.requireUser, w.orgHandler.Authorize, cfg.QerdsWebhookSecret, cfg.QerdsDefaultAddressDomain)
 
-	registry, err := newRegistryProvider(cfg, pool, recorder)
+	registry, err := newRegistryProvider(cfg, w.pool, w.recorder)
 	if err != nil {
 		return err
 	}
 	// Fatal readiness gate, mirroring the QERDS probe: fail at boot if the
 	// registry (KVK) provider will not accept our requests.
-	registryProbeCtx, registryProbeCancel := context.WithTimeout(ctx, qerdsProbeTimeout)
-	defer registryProbeCancel()
-	if err := registry.Ping(registryProbeCtx); err != nil {
+	if err := probe(ctx, qerdsProbeTimeout, registry); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(pool, recorder)
-	walletService := wallet.NewService(walletStore, registry, authService, userStore, qerdsStore, cfg.QerdsDefaultAddressDomain)
-	walletHandler := wallet.NewHandler(walletService, sessionIssuer, requireUser, orgHandler.Authorize)
+	walletStore := wallet.NewStore(w.pool, w.recorder)
+	walletService := wallet.NewService(walletStore, registry, w.authService, w.userStore, w.qerdsStore, cfg.QerdsDefaultAddressDomain)
+	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 
 	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
 	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
@@ -731,55 +836,45 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	postguardStore := postguard.NewStore(pool, recorder, postguardCipher)
+	postguardStore := postguard.NewStore(w.pool, w.recorder, postguardCipher)
 	postguardClient := postguard.NewClient(cfg.PostGuardSidecarURL, cfg.PostGuardSharedSecret, &http.Client{Timeout: postguardHTTPTimeout})
-	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: emailService}, cfg.PostGuardWebsiteURL)
-	postguardHandler := postguard.NewHandler(postguardService, requireUser, orgHandler.Authorize)
+	postguardService := postguard.NewService(postguardStore, postguardClient, postguardNotifier{email: w.emailService}, cfg.PostGuardWebsiteURL)
+	w.postguardHandler = postguard.NewHandler(postguardService, w.requireUser, w.orgHandler.Authorize)
 	slog.Info("postguard environment",
 		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
 		slog.String("pkgUrl", cfg.PostGuardPkgURL),
 		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
+	return nil
+}
 
+func (w *wiring) buildAttestations(ctx context.Context) error {
+	cfg := w.cfg
 	attIssuer, err := newAttestationIssuer(cfg)
 	if err != nil {
 		return err
 	}
 	// Fatal readiness gate, mirroring the verifier/QERDS probes: fail at boot if the
 	// issuer will not accept a credential offer of our shape.
-	issuerProbeCtx, issuerProbeCancel := context.WithTimeout(ctx, issuerProbeTimeout)
-	defer issuerProbeCancel()
-	if err := attIssuer.Ping(issuerProbeCtx); err != nil {
+	if err := probe(ctx, issuerProbeTimeout, attIssuer); err != nil {
 		return fmt.Errorf("attestation issuer ping: %w", err)
 	}
-	emailHandler := email.NewHandler(emailStore, emailService, requireUser, orgHandler.Authorize)
+	w.emailHandler = email.NewHandler(w.emailStore, w.emailService, w.requireUser, w.orgHandler.Authorize)
 
-	issuerSettingsStore := issuersettings.NewStore(pool, recorder)
-	issuerSettingsHandler := issuersettings.NewHandler(issuerSettingsStore, requireUser, orgHandler.Authorize)
+	issuerSettingsStore := issuersettings.NewStore(w.pool, w.recorder)
+	w.issuerSettingsHandler = issuersettings.NewHandler(issuerSettingsStore, w.requireUser, w.orgHandler.Authorize)
 
 	wscaCipher, err := crypto.NewCipher(cfg.AttestationHolderWSCAKEK)
 	if err != nil {
 		return err
 	}
-	wscaStore := wsca.NewStore(pool, wscaCipher)
+	wscaStore := wsca.NewStore(w.pool, wscaCipher)
 
-	themeSettingsHandler := themesettings.NewHandler(themeSettingsStore, requireUser, orgHandler.Authorize)
+	w.themeSettingsHandler = themesettings.NewHandler(w.themeSettingsStore, w.requireUser, w.orgHandler.Authorize)
 
-	attHolder, err := newAttestationHolder(cfg, wscaStore)
+	attHolder, err := w.openAttestationHolder(ctx, wscaStore)
 	if err != nil {
 		return err
 	}
-	// Fatal readiness gate, mirroring the issuer probe: fail at boot if the holder
-	// engine cannot open + migrate its per-org schema (irmago) against Postgres.
-	holderProbeCtx, holderProbeCancel := context.WithTimeout(ctx, holderProbeTimeout)
-	defer holderProbeCancel()
-	if err := attHolder.Ping(holderProbeCtx); err != nil {
-		return fmt.Errorf("attestation holder ping: %w", err)
-	}
-	defer func() {
-		if err := attHolder.Close(); err != nil {
-			slog.Error("closing attestation holder", slog.String("error", err.Error()))
-		}
-	}()
 
 	// Inbound OpenID4VP: an external verifier invoking the business wallet as
 	// the holder (#188), and — via the QERDS receiver wired into qerdsService
@@ -794,10 +889,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	presenterHandler, presenterService, err := newOpenID4VPPresenter(cfg, pool, recorder, orgStore, attHolder, requesterCA.RootPEM(), requireUser, orgHandler.Authorize)
+	presenterHandler, presenterService, err := newOpenID4VPPresenter(cfg, presenterDeps{
+		pool: w.pool, recorder: w.recorder, orgStore: w.orgStore, holder: attHolder, requesterRoot: requesterCA.RootPEM(),
+	}, w.requireUser, w.orgHandler.Authorize)
 	if err != nil {
 		return err
 	}
+	w.presenterHandler = presenterHandler
 	// The other direction (#271): an organization asks another for credentials
 	// under a certificate from requesterCA, sends the invocation over QERDS and
 	// verifies the answer against the same issuers its own holder trusts.
@@ -805,29 +903,88 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", "ATTESTATION_HOLDER_TRUST_CHAIN", err)
 	}
-	requesterHandler := openid4vprequester.NewHandler(
+	w.requesterHandler = openid4vprequester.NewHandler(
 		openid4vprequester.NewService(
-			openid4vprequester.NewStore(pool, recorder), qerdsService, requesterCA,
+			openid4vprequester.NewStore(w.pool, w.recorder), w.qerdsService, requesterCA,
 			relyingparty.NewTokenVerifier(requesterIssuerTrust),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
-		requireUser, orgHandler.Authorize)
+		w.requireUser, w.orgHandler.Authorize)
 
-	attestationStore := attestation.NewStore(pool, recorder)
+	attestationStore := attestation.NewStore(w.pool, w.recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
 	// attestation summary instead of raw envelope JSON; wired via a setter (like
 	// the inbound consumer below) because qerds.Handler is constructed before
 	// the attestation store exists.
-	qerdsHandler.SetOfferLookup(attestation.NewOfferAnnotator(attestationStore))
+	w.qerdsHandler.SetOfferLookup(attestation.NewOfferAnnotator(attestationStore))
 	// An inbound QERDS message carrying an OpenID4VCI credential offer is queued
 	// for the receiving org to accept or decline; accepting redeems it into the
 	// org's holder engine and indexes it (source=qerds).
+	trustedSenders := attestation.NewTrustedOfferSenders(cfg.QerdsTrustedOfferSenders, cfg.QerdsTrustedOfferParties)
+	logQerdsInboundPolicy(ctx, cfg, trustedSenders)
+	w.qerdsService.SetInboundConsumer(chainedInboundConsumer{
+		attestation.NewOfferReceiver(attestationStore, trustedSenders),
+		openid4vppresenter.NewReceiver(presenterService),
+	})
+
+	// Drain inbound for every provisioned address on a ticker, so a remote party's
+	// credential offer is received without an operator being logged in.
+	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
+	attestationService := attestation.NewService(
+		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{w.qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
+	)
+	// Re-read the issuer status list of every held credential, so a credential
+	// revoked after it was received stops reading as valid. Deploys come more
+	// often than the interval, so it also runs at boot.
+	startPrunerAtBoot(ctx, "attestation_held_status", heldStatusRecheckEvery, attestationService.RecheckAllHeld)
+	// Auto-issue an org's configured onboarding attestations when a member accepts
+	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
+	// the org service is constructed before the attestation service.
+	w.orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
+	w.attestationHandler = attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
+
+	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
+	// sealed-secret store + keystore layout with the holder redeem path so a wallet
+	// activated here is the one the redeem path signs with. Enabled (Configured())
+	// only when a wallet-provider URL is set.
+	wscaActivator := wscawallet.NewActivator(
+		cfg.AttestationHolderWSCAURL != "",
+		func(orgID uuid.UUID) (wscawallet.WalletClient, error) {
+			return newWSCAWalletClient(cfg, orgID)
+		},
+		wscaStore,
+	)
+	w.wscaWalletHandler = wscawallet.NewHandler(wscaActivator, w.requireUser, w.orgHandler.Authorize)
+	return nil
+}
+
+// openAttestationHolder opens the holder engine, closed when run returns.
+func (w *wiring) openAttestationHolder(ctx context.Context, wscaStore *wsca.Store) (eudiholder.Holder, error) {
+	attHolder, err := newAttestationHolder(w.cfg, wscaStore)
+	if err != nil {
+		return nil, err
+	}
+	// Fatal readiness gate, mirroring the issuer probe: fail at boot if the holder
+	// engine cannot open + migrate its per-org schema (irmago) against Postgres.
+	if err := probe(ctx, holderProbeTimeout, attHolder); err != nil {
+		return nil, fmt.Errorf("attestation holder ping: %w", err)
+	}
+	w.closers = append(w.closers, func() {
+		if err := attHolder.Close(); err != nil {
+			slog.Error("closing attestation holder", slog.String("error", err.Error()))
+		}
+	})
+	return attHolder, nil
+}
+
+// logQerdsInboundPolicy says at boot whose credential offers are queued and
+// whether the provider may push inbound messages.
+func logQerdsInboundPolicy(ctx context.Context, cfg config.Config, trustedSenders attestation.TrustedOfferSenders) {
 	// Two allowlists decide whose offers are queued at all: the AS4 party that
 	// delivered the message (verified by the gateway) and the originalSender
 	// address it claims (written by the sender). Unset trusts everyone, which is
 	// only safe while every sender is an org on this deployment — warn loudly,
 	// because peering with an external AS4 party (see partners/verid/) makes that
 	// assumption false.
-	trustedSenders := attestation.NewTrustedOfferSenders(cfg.QerdsTrustedOfferSenders, cfg.QerdsTrustedOfferParties)
 	if trustedSenders.PartiesConfigured() {
 		slog.InfoContext(ctx, "qerds credential-offer party allowlist active",
 			slog.Any("trustedParties", trustedSenders.Parties()))
@@ -845,10 +1002,6 @@ func run() error {
 			"offers from ANY sender address will be queued for acceptance. Set "+
 			"QERDS_TRUSTED_OFFER_SENDERS before peering with an external AS4 party.")
 	}
-	qerdsService.SetInboundConsumer(chainedInboundConsumer{
-		attestation.NewOfferReceiver(attestationStore, trustedSenders),
-		openid4vppresenter.NewReceiver(presenterService),
-	})
 
 	// The other inbound path is the push webhook, which serves only when a
 	// secret is configured (a secretless deployment 404s it). Say so at boot:
@@ -860,37 +1013,11 @@ func run() error {
 	} else {
 		slog.InfoContext(ctx, "qerds inbound webhook push enabled")
 	}
+}
 
-	// Drain inbound for every provisioned address on a ticker, so a remote party's
-	// credential offer is received without an operator being logged in.
-	startQerdsInboundPoller(ctx, qerdsService, cfg.QerdsInboundPollInterval)
-	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, emailService, qerdsOfferSender{qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
-	)
-	// Re-read the issuer status list of every held credential, so a credential
-	// revoked after it was received stops reading as valid. Deploys come more
-	// often than the interval, so it also runs at boot.
-	startPrunerAtBoot(ctx, "attestation_held_status", heldStatusRecheckEvery, attestationService.RecheckAllHeld)
-	// Auto-issue an org's configured onboarding attestations when a member accepts
-	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
-	// the org service is constructed before the attestation service.
-	orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	attestationHandler := attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, orgStore, attestationIssuerURL(cfg), requireUser, orgHandler.Authorize)
-
-	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
-	// sealed-secret store + keystore layout with the holder redeem path so a wallet
-	// activated here is the one the redeem path signs with. Enabled (Configured())
-	// only when a wallet-provider URL is set.
-	wscaActivator := wscawallet.NewActivator(
-		cfg.AttestationHolderWSCAURL != "",
-		func(orgID uuid.UUID) (wscawallet.WalletClient, error) {
-			return newWSCAWalletClient(cfg, orgID)
-		},
-		wscaStore,
-	)
-	wscaWalletHandler := wscawallet.NewHandler(wscaActivator, requireUser, orgHandler.Authorize)
-
-	notificationsHandler := notifications.NewHandler(notificationStore, requireUser, orgHandler.Authorize)
+func (w *wiring) buildNotifications(ctx context.Context) error {
+	cfg := w.cfg
+	w.notificationsHandler = notifications.NewHandler(w.notificationStore, w.requireUser, w.orgHandler.Authorize)
 
 	// Per-org Slack incoming webhook, the notification layer's second channel. The
 	// webhook URL is encrypted at rest under its own deployment key; without that key
@@ -899,9 +1026,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	slackStore := slackchannel.NewStore(pool, recorder, slackCipher)
-	slackChannel := slackchannel.New(slackStore, orgStore, cfg.AppBaseURL, mailLocale)
-	slackHandler := slackchannel.NewHandler(slackStore, slackChannel, requireUser, orgHandler.Authorize)
+	slackStore := slackchannel.NewStore(w.pool, w.recorder, slackCipher)
+	slackChannel := slackchannel.New(slackStore, w.orgStore, cfg.AppBaseURL, w.mailLocale)
+	w.slackHandler = slackchannel.NewHandler(slackStore, slackChannel, w.requireUser, w.orgHandler.Authorize)
 
 	// Per-org Microsoft Teams webhook, the notification layer's third channel. Same
 	// shape as Slack, on its own deployment key: without it an org cannot save one
@@ -910,19 +1037,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	teamsStore := teamschannel.NewStore(pool, recorder, teamsCipher)
-	teamsChannel := teamschannel.New(teamsStore, orgStore, cfg.AppBaseURL, mailLocale)
-	teamsHandler := teamschannel.NewHandler(teamsStore, teamsChannel, requireUser, orgHandler.Authorize)
+	teamsStore := teamschannel.NewStore(w.pool, w.recorder, teamsCipher)
+	teamsChannel := teamschannel.New(teamsStore, w.orgStore, cfg.AppBaseURL, w.mailLocale)
+	w.teamsHandler = teamschannel.NewHandler(teamsStore, teamsChannel, w.requireUser, w.orgHandler.Authorize)
 
 	// Drain the notification outbox out of band, into the channels registered here.
 	// A channel a deployment leaves out keeps the orgs' saved preference and delivers
 	// nothing until it is registered (see notifications.Dispatcher).
-	dispatcher := notifications.NewDispatcher(notificationStore, notificationStore)
-	dispatcher.Register(emailchannel.New(emailService, orgStore, cfg.AppBaseURL))
+	dispatcher := notifications.NewDispatcher(w.notificationStore, w.notificationStore)
+	dispatcher.Register(emailchannel.New(w.emailService, w.orgStore, cfg.AppBaseURL))
 	dispatcher.Register(slackChannel)
 	dispatcher.Register(teamsChannel)
 	dispatcher.Start(ctx, notifications.DefaultPollInterval)
+	return nil
+}
 
+func (w *wiring) buildIntegrations(ctx context.Context) error {
+	cfg := w.cfg
 	// Directory provisioning. Unlike the verifier/QERDS/registry there is no boot
 	// gate: the source is configured per organisation, not per deployment, so
 	// there is nothing to probe at startup and a tenant with an expired secret
@@ -932,7 +1063,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	provisioningStore := provisioning.NewStore(pool, recorder, provisioningCipher)
+	provisioningStore := provisioning.NewStore(w.pool, w.recorder, provisioningCipher)
 	// The sync writes memberships through its own organization store, built on the
 	// plain audit recorder rather than the notifications one. Its changes are
 	// audited exactly like a hand-made invite or off-boarding; they just do not page
@@ -941,10 +1072,10 @@ func run() error {
 	// five hundred people would mail every admin five hundred times for one act of
 	// configuration — and every leaver sweep after that in bursts. Same exception,
 	// and the same reason, as internal/seed. Pass `recorder` here to reverse it.
-	provisioningOrgStore := organization.NewStore(pool, audit.NewDBRecorder())
-	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, emailService, cfg.AppBaseURL)
+	provisioningOrgStore := organization.NewStore(w.pool, audit.NewDBRecorder())
+	provisioningService := provisioning.NewService(provisioningStore, provisioningOrgStore, provisioningOrgStore, w.emailService, cfg.AppBaseURL)
 	provisioningService.Register(provisioner.NewEntra(&http.Client{Timeout: provisioningHTTPTimeout}))
-	provisioningHandler := provisioning.NewHandler(provisioningStore, provisioningService, requireUser, orgHandler.Authorize)
+	w.provisioningHandler = provisioning.NewHandler(provisioningStore, provisioningService, w.requireUser, w.orgHandler.Authorize)
 	provisioning.NewScheduler(provisioningStore, provisioningService).Start(ctx, provisioning.DefaultSyncInterval)
 
 	// Per-org CSC signing-provider settings (a remote QTSP driven over the CSC API
@@ -955,24 +1086,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	cscStore := csc.NewStore(pool, recorder, cscCipher)
-	cscHandler := csc.NewHandler(cscStore, csc.NewClient(), requireUser, orgHandler.Authorize)
+	cscStore := csc.NewStore(w.pool, w.recorder, cscCipher)
+	w.cscHandler = csc.NewHandler(cscStore, csc.NewClient(), w.requireUser, w.orgHandler.Authorize)
 
 	// Qualified document signing: the business wallet as the RP-centric SCA driving
 	// the per-org CSC provider (base URL + OAuth client from cscStore). A request is
 	// co-signed by its selected signers — org members and external signees alike, each
 	// with their own linked credential — and, once fully signed, delivered to a
 	// recipient over email or QERDS.
-	signingStore := signing.NewStore(pool, recorder)
-	signingDelivery := signingDeliverer{email: emailService, qerds: qerdsService, orgs: orgStore}
-	signingNotify := signingNotifier{email: emailService, orgs: orgStore, appBaseURL: cfg.AppBaseURL}
+	signingStore := signing.NewStore(w.pool, w.recorder)
+	signingDelivery := signingDeliverer{email: w.emailService, qerds: w.qerdsService, orgs: w.orgStore}
+	signingNotify := signingNotifier{email: w.emailService, orgs: w.orgStore, appBaseURL: cfg.AppBaseURL}
 	// SigningRedirectURI is the QTSP-registered OAuth callback; empty falls back to
 	// the localhost default inside NewService (see signing.DefaultRedirectURI). A
 	// hosted deploy sets SIGNING_REDIRECT_URI to its own public callback.
-	signingHandler := signing.NewHandler(
-		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: orgStore}, signingOrgs{store: orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
-		requireUser, orgHandler.Authorize)
+	w.signingHandler = signing.NewHandler(
+		signing.NewService(signingStore, signingprovider.NewClient(), cscStore, signingMembers{store: w.orgStore}, signingOrgs{store: w.orgStore}, signingDelivery, signingNotify, cfg.SigningRedirectURI, cfg.AppBaseURL, cfg.SigningOAuthIssuerInternal),
+		w.requireUser, w.orgHandler.Authorize)
+	return nil
+}
 
+func (w *wiring) buildProofing(ctx context.Context) error {
+	cfg := w.cfg
 	// Identity proofing: the wallet's own engine runs every org's sessions, the
 	// org being its tenant. The deployment key seals the sessions' evidence and
 	// the webhook secrets; without it nothing can be sent
@@ -984,57 +1119,29 @@ func run() error {
 	if proofingCipher == nil {
 		slog.WarnContext(ctx, "identity proofing is off: IDENTITY_PROOFING_ENCRYPTION_KEY is not set, so no proofing request can be sent and no webhook is delivered")
 	}
-	proofingRequests := proofing.NewRequestStore(pool, recorder, proofingCipher)
-	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewOrgSettingsStore(pool, recorder),
-		proofing.NewFlowBrandingStore(pool, recorder), themeSettingsStore)
+	proofingRequests := proofing.NewRequestStore(w.pool, w.recorder, proofingCipher)
+	brandingResolver := proofing.NewAppBrandingResolver(proofingRequests, proofing.NewOrgSettingsStore(w.pool, w.recorder),
+		proofing.NewFlowBrandingStore(w.pool, w.recorder), w.themeSettingsStore)
 	branding := appBranding{brandingResolver}
 	// The proofing jobs outlive the HTTP drain, so the notices and webhook
 	// deliveries the last requests cause still go out; they stop when run
 	// returns, after it.
 	proofingJobs, stopProofingJobs := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopProofingJobs()
-	ips, proofingEngine, err := newProofingProvider(ctx, cfg, pool, proofingCipher, orgStore, deviceTrail{proofingRequests}, branding)
+	w.closers = append(w.closers, stopProofingJobs)
+	ips, proofingEngine, err := newProofingProvider(ctx, cfg, w.pool, proofingCipher, w.orgStore, deviceTrail{proofingRequests}, branding)
 	if err != nil {
 		return err
 	}
-	proofingWebhooks := proofing.NewWebhookStore(pool, recorder, proofingCipher)
+	proofingWebhooks := proofing.NewWebhookStore(w.pool, w.recorder, proofingCipher)
 	proofingService := proofing.NewService(
-		proofing.NewStores(pool, recorder, proofingCipher, proofingRequests, proofingWebhooks),
-		ips, verifier, emailService)
-	sealValidators, err := newSealValidators(ctx, cfg)
-	if err != nil {
+		proofing.NewStores(w.pool, w.recorder, proofingCipher, proofingRequests, proofingWebhooks),
+		ips, w.verifier, w.emailService)
+	if err := w.setDocumentCheckers(ctx, proofingService); err != nil {
 		return err
-	}
-	// A diploma extract is parsed on its own PDFium pool, apart from VOG's.
-	diplomaPool, err := newDiplomaPDFiumPool()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := diplomaPool.Close(); err != nil {
-			slog.Error("close diploma pdfium pool", slog.String("error", err.Error()))
-		}
-	}()
-	diplomaParser := diploma.NewPDFiumParser(diplomaPool)
-	diplomaChecker := diploma.NewChecker(sealValidators.diploma, diplomaParser)
-	if err := diplomaChecker.Ping(ctx); err != nil {
-		return fmt.Errorf("diploma validator ping: %w", err)
-	}
-	proofingService.SetDiplomaChecker(diplomaChecker)
-	// The same pool parses a Verzekeringsbericht; ProviderOff wires no checker.
-	if sealValidators.employment != nil {
-		employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
-		// EU lists down at boot: run on the pinned roots and answer 503 on upload until a reload, as diplomas do.
-		if err := employmentChecker.Ping(ctx); err != nil && !errors.Is(err, diploma.ErrTrustUnavailable) {
-			return fmt.Errorf("employment validator ping: %w", err)
-		}
-		proofingService.SetEmploymentChecker(employmentChecker)
 	}
 	// The address step checks a Dutch address against the BAG.
 	addressLookup := addresslookup.NewPDOK(cfg.AddressLookupURL, &http.Client{Timeout: addressLookupHTTPTimeout})
-	addressProbeCtx, addressProbeCancel := context.WithTimeout(ctx, addressLookupProbeTimeout)
-	defer addressProbeCancel()
-	if err := addressLookup.Ping(addressProbeCtx); err != nil {
+	if err := probe(ctx, addressLookupProbeTimeout, addressLookup); err != nil {
 		return fmt.Errorf("address lookup ping: %w", err)
 	}
 	proofingService.SetAddressLookup(addressLookup)
@@ -1046,57 +1153,99 @@ func run() error {
 	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
 		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(proofingJobs, sessionID) })
 	}
-	var proofingApp server.Registerer = noRoutes{}
+	w.proofingApp = noRoutes{}
 	if proofingEngine != nil {
 		proofingEngine.SetNotifier(proofingService.SessionChanged)
 		go proofingEngine.Run(proofingJobs)
-		proofingApp = proofingEngine
+		w.proofingEngine = proofingEngine
+		w.proofingApp = proofingEngine
 		startPruner(proofingJobs, "identity_proofing_engine_sessions", cfg.SessionPruneEvery, proofingEngine.Purge)
 		startPruner(proofingJobs, "identity_proofing_regula_sweep", cfg.SessionPruneEvery, proofingEngine.SweepRegula)
 	}
-	database.RunOnNotify(proofingJobs, pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
+	database.RunOnNotify(proofingJobs, w.pool, proofing.SessionChannel, "identity_proofing_deadlines", proofingService.ReconcileDue)
 	// Webhooks go out as their change commits, retries at their due time, to
 	// the org's endpoint (https, public addresses only). Without the key no
 	// secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
-		database.RunOnNotify(proofingJobs, pool, proofing.WebhookChannel, "identity_proofing_webhooks",
+		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks",
 			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
 	}
-	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
-	proofingIdempotency := proofing.NewIdempotencyStore(pool, proofingCipher)
-	proofingHandler.SetIdempotencyStore(proofingIdempotency)
-	proofingHandler.SetPlatformAdmins(platformAdmins)
-	proofingHandler.SetAppBranding(brandingResolver)
+	w.proofingHandler = proofing.NewHandler(proofingService, w.requireUser, w.orgHandler.Authorize)
+	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
+	w.proofingHandler.SetIdempotencyStore(proofingIdempotency)
+	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
+	w.proofingHandler.SetAppBranding(brandingResolver)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
+	return nil
+}
 
+// setDocumentCheckers gives the proofing service its diploma and
+// Verzekeringsbericht checks.
+func (w *wiring) setDocumentCheckers(ctx context.Context, proofingService *proofing.Service) error {
+	sealValidators, err := newSealValidators(ctx, w.cfg)
+	if err != nil {
+		return err
+	}
+	// A diploma extract or a Verzekeringsbericht is parsed on its own PDFium
+	// pool, apart from VOG's.
+	diplomaPool, err := newDiplomaPDFiumPool()
+	if err != nil {
+		return err
+	}
+	w.closers = append(w.closers, func() {
+		if err := diplomaPool.Close(); err != nil {
+			slog.Error("close diploma pdfium pool", slog.String("error", err.Error()))
+		}
+	})
+	diplomaParser := diploma.NewPDFiumParser(diplomaPool)
+	diplomaChecker := diploma.NewChecker(sealValidators.diploma, diplomaParser)
+	if err := diplomaChecker.Ping(ctx); err != nil {
+		return fmt.Errorf("diploma validator ping: %w", err)
+	}
+	proofingService.SetDiplomaChecker(diplomaChecker)
+
+	if sealValidators.employment == nil {
+		return nil
+	}
+	employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
+	// EU lists down at boot: run on the pinned roots and answer 503 on upload until a reload, as diplomas do.
+	if err := employmentChecker.Ping(ctx); err != nil && !errors.Is(err, diploma.ErrTrustUnavailable) {
+		return fmt.Errorf("employment validator ping: %w", err)
+	}
+	proofingService.SetEmploymentChecker(employmentChecker)
+	return nil
+}
+
+// httpServer serves every slice wired so far.
+func (w *wiring) httpServer() *http.Server {
 	handler := server.New(
-		pool,
-		cfg.StaticDir,
-		presenterHandler,
-		requesterHandler,
-		authHandler,
-		orgHandler,
-		qerdsHandler,
-		walletHandler,
-		postguardHandler,
-		emailHandler,
-		issuerSettingsHandler,
-		themeSettingsHandler,
-		attestationHandler,
-		wscaWalletHandler,
-		notificationsHandler,
-		slackHandler,
-		teamsHandler,
-		provisioningHandler,
-		cscHandler,
-		signingHandler,
-		proofingHandler,
-		proofingApp,
+		w.pool,
+		w.cfg.StaticDir,
+		w.presenterHandler,
+		w.requesterHandler,
+		w.authHandler,
+		w.orgHandler,
+		w.qerdsHandler,
+		w.walletHandler,
+		w.postguardHandler,
+		w.emailHandler,
+		w.issuerSettingsHandler,
+		w.themeSettingsHandler,
+		w.attestationHandler,
+		w.wscaWalletHandler,
+		w.notificationsHandler,
+		w.slackHandler,
+		w.teamsHandler,
+		w.provisioningHandler,
+		w.cscHandler,
+		w.signingHandler,
+		w.proofingHandler,
+		w.proofingApp,
 	)
 	// Outermost, so every route and the SPA's page headers see the client
 	// address the trusted proxies report.
-	handler = clientip.Middleware(clientip.NewResolver(cfg.TrustedProxies))(handler)
+	handler = clientip.Middleware(clientip.NewResolver(w.cfg.TrustedProxies))(handler)
 
 	httpServer := &http.Server{
 		Addr:              serverAddr,
@@ -1107,10 +1256,14 @@ func run() error {
 	}
 	// A waiting /events poll answers at once on shutdown instead of holding
 	// the drain past shutdownTimeout.
-	if proofingEngine != nil {
-		httpServer.RegisterOnShutdown(proofingEngine.StopWaiting)
+	if w.proofingEngine != nil {
+		httpServer.RegisterOnShutdown(w.proofingEngine.StopWaiting)
 	}
+	return httpServer
+}
 
+// serve runs httpServer until ctx ends, then drains it.
+func serve(ctx context.Context, httpServer *http.Server) error {
 	shutdownErr := make(chan error, 1)
 	go func() {
 		<-ctx.Done()

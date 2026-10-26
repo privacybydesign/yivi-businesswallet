@@ -105,17 +105,27 @@ func ownReview(req Request, reviewer uuid.UUID) bool {
 		(req.SubjectUserID != nil && *req.SubjectUserID == reviewer)
 }
 
-func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
-	in.Reason, in.ErrorCode = strings.TrimSpace(in.Reason), strings.TrimSpace(in.ErrorCode)
+// validate checks a trimmed in: a reason within maxReviewReasonLength, and an
+// error code only on a rejection, of reviewErrorCodePattern and, from a
+// reviewer, one of reviewerRejectCodes.
+func (in ReviewInput) validate() error {
 	switch {
 	case in.Reason == "" || utf8.RuneCountInString(in.Reason) > maxReviewReasonLength:
-		return Request{}, fmt.Errorf("%w: give a reason of at most %d characters", ErrInvalidInput, maxReviewReasonLength)
+		return fmt.Errorf("%w: give a reason of at most %d characters", ErrInvalidInput, maxReviewReasonLength)
 	case in.Approve && in.ErrorCode != "":
-		return Request{}, fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
+		return fmt.Errorf("%w: an error code is only for a rejection", ErrInvalidInput)
 	case in.ErrorCode != "" && !reviewErrorCodePattern.MatchString(in.ErrorCode):
-		return Request{}, fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
+		return fmt.Errorf("%w: an error code is 1-64 of A-Z, 0-9 and _", ErrInvalidInput)
 	case in.ReviewerID != uuid.Nil && in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode):
-		return Request{}, fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
+		return fmt.Errorf("%w: a reviewer's error code is one of %s", ErrInvalidInput, strings.Join(reviewerRejectCodes, ", "))
+	}
+	return nil
+}
+
+func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewer string, in ReviewInput) (Request, error) {
+	in.Reason, in.ErrorCode = strings.TrimSpace(in.Reason), strings.TrimSpace(in.ErrorCode)
+	if err := in.validate(); err != nil {
+		return Request{}, err
 	}
 	// Two reviewers deciding at once: the second waits, then reads it decided.
 	release, err := s.requests.LockReview(ctx, id)

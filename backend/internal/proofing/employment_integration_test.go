@@ -396,32 +396,3 @@ func TestIncomeBesideJobReview(t *testing.T) {
 		}
 	}
 }
-
-// sealedFixture is an org whose webhook listens for one event, and a request
-// for an external person still to be created.
-type sealedFixture struct {
-	pool     *pgxpool.Pool
-	requests *RequestStore
-	webhooks *WebhookStore
-	orgID    uuid.UUID
-	in       NewStoredRequest
-}
-
-func newSealedFixture(t *testing.T, event string) sealedFixture {
-	t.Helper()
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
-	if _, _, err := webhooks.Save(context.Background(), orgID, "https://hooks.example.org/x", []string{event}); err != nil {
-		t.Fatalf("Save webhook: %v", err)
-	}
-	return sealedFixture{
-		pool:     pool,
-		requests: NewRequestStore(pool, audit.NewDBRecorder(), cipher),
-		webhooks: webhooks,
-		orgID:    orgID,
-		in:       newStoredRequest(orgID, sam, externalSubject("anna@example.org")),
-	}
-}

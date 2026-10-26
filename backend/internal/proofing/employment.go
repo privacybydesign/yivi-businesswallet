@@ -17,7 +17,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/verify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
 // EmploymentMode is whether a flow has the employment step: once their
@@ -406,7 +405,7 @@ func (s *RequestStore) rejectDueWithoutEmployment(ctx context.Context, q databas
 	if err != nil {
 		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
 	}
-	reqs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Request, error) { return s.scanRequest(row) })
+	reqs, err := s.collectRequests(rows)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
 	}
@@ -512,23 +511,9 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if mode.asked() && s.employmentChecker == nil {
 		return "", ErrNoEmploymentChecker
 	}
-
-	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
-	if err != nil {
-		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
-	}
-	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
-	if i < 0 {
-		return "", ErrFlowNotFound
-	}
-
-	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
+	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
 		return "", err
 	}
-	if mode.asked() && !readsIdentity(flows[i]) {
-		return "", ErrFlowNoIdentity
-	}
-
 	return s.flowEmploymentSettings.Save(ctx, org.ID, flowID, mode)
 }
 

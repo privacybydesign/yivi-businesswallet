@@ -875,108 +875,84 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+// sealCheckUnavailable is a seal the checker could not check: the file is
+// not at fault.
+var sealCheckUnavailable = respond.APIError{Status: http.StatusServiceUnavailable, Code: "seal_check_unavailable", Message: "the seal cannot be checked right now: the trust lists or the revocation responder cannot be reached; try again later"}
+
+// errorResponses is the API error each sentinel maps to, matched in order.
+var errorResponses = []struct {
+	err      error
+	response respond.APIError
+}{
+	{ErrNoEncryptionKey, respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}},
+	{ErrFlowNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}},
+	{ErrFlowNotCompletable, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}},
+	{ErrMemberNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}},
+	{ErrAPIKeyNotFound, respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}},
+	{ErrRequestNotFound, respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}},
+	{ErrWebhookNotFound, respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}},
+	{ErrNoDefaultFlow, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "no_default_flow", Message: "name a flow: the organization has no default flow"}},
+	{ErrNoLogo, respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}},
+	{ErrFlowNotAllowed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}},
+	{ErrWrongMethod, respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}},
+	{ErrNotHosted, respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}},
+	{ErrResultNotReady, respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}},
+	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
+	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
+	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
+	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
+	{ErrOwnReview, respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}},
+	{ErrLinkStarted, respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}},
+	{ErrDiplomasNotAsked, respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}},
+	{ErrDiplomasClosed, respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity check: " + DiplomaUploadWindow.String()}},
+	{ErrAddressNotAsked, respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}},
+	{ErrAddressClosed, respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}},
+	{ErrEmploymentNotAsked, respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}},
+	{ErrEmploymentClosed, respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}},
+	{ErrAddressNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}},
+	{ErrAddressLookupUnavailable, respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}},
+	{ErrReferencePhotoRequired, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}},
+	{ErrDiplomasNeedPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}},
+	{ErrAddressNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}},
+	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
+	{diploma.ErrTrustUnavailable, sealCheckUnavailable},
+	{diploma.ErrRevocationUnavailable, sealCheckUnavailable},
+	{ErrEmploymentNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}},
+	{ErrHostedDisabled, respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}},
+	{ErrProofingPaused, respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}},
+	{ErrOrgNotFound, respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}},
+	{ErrFlowNoIdentity, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's or Verzekeringsbericht's holder is matched against them"}},
+	{ErrDataRequestFlow, respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}},
+	{ErrDataFlowForMember, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}},
+	{ErrLegalRetention, respond.APIError{Status: http.StatusConflict, Code: "legal_retention", Message: "a session within the organisation's legal retention cannot be erased yet"}},
+	{ErrExportUnavailable, respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}},
+	{ErrRedirectNotAllowed, respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}},
+	{ErrRedirectOriginInUse, respond.APIError{Status: http.StatusConflict, Code: "redirect_origin_in_use", Message: "a flow's return page is on a redirect origin this removes: change that flow's return page first"}},
+}
+
 func mapError(err error) error {
-	var rejected *proofingprovider.RejectedError
-	switch {
-	case err == nil:
+	if err == nil {
 		return nil
-	case errors.Is(err, ErrInvalidInput):
+	}
+	if errors.Is(err, ErrInvalidInput) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
-	case errors.Is(err, ErrReasonsMissing):
+	}
+	if errors.Is(err, ErrReasonsMissing) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}
-	case errors.Is(err, ErrNoEncryptionKey):
-		return &respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}
-	case errors.Is(err, ErrFlowNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}
-	case errors.Is(err, ErrFlowNotCompletable):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}
-	case errors.Is(err, ErrMemberNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}
-	case errors.Is(err, ErrAPIKeyNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}
-	case errors.Is(err, ErrRequestNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}
-	case errors.Is(err, ErrWebhookNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}
-	case errors.Is(err, ErrNoDefaultFlow):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "no_default_flow", Message: "name a flow: the organization has no default flow"}
-	case errors.Is(err, ErrNoLogo):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}
-	case errors.Is(err, ErrFlowNotAllowed):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}
-	case errors.Is(err, ErrWrongMethod):
-		return &respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}
-	case errors.Is(err, ErrNotHosted):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}
-	case errors.Is(err, ErrResultNotReady):
-		return &respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}
-	case errors.Is(err, ErrDeviceActive):
-		return &respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}
-	case errors.Is(err, ErrSessionOver):
-		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
-	case errors.Is(err, ErrNotUnderReview):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
-	case errors.Is(err, ErrAddressNotUnderReview):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}
-	case errors.Is(err, ErrOwnReview):
-		return &respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}
-	case errors.Is(err, ErrLinkStarted):
-		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
-	case errors.Is(err, ErrDiplomasNotAsked):
-		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}
-	case errors.Is(err, ErrDiplomasClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity check: " + DiplomaUploadWindow.String()}
-	case errors.Is(err, ErrAddressNotAsked):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}
-	case errors.Is(err, ErrAddressClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}
-	case errors.Is(err, ErrEmploymentNotAsked):
-		return &respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}
-	case errors.Is(err, ErrEmploymentClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}
-	case errors.Is(err, ErrAddressNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}
-	case errors.Is(err, ErrAddressLookupUnavailable):
-		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}
-	case errors.Is(err, ErrReferencePhotoRequired):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}
-	case errors.Is(err, ErrDiplomasNeedPage):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
-	case errors.Is(err, ErrAddressNeedsPage):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}
-	case errors.Is(err, ErrNoEmploymentChecker):
-		return &respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}
-	case errors.Is(err, diploma.ErrTrustUnavailable), errors.Is(err, diploma.ErrRevocationUnavailable):
-		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "seal_check_unavailable", Message: "the seal cannot be checked right now: the trust lists or the revocation responder cannot be reached; try again later"}
-	case errors.Is(err, ErrEmploymentNeedsPage):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}
-	case errors.Is(err, ErrHostedDisabled):
-		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
-	case errors.Is(err, ErrProofingPaused):
-		return &respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}
-	case errors.Is(err, ErrOrgNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
-	case errors.Is(err, ErrFlowNoIdentity):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's or Verzekeringsbericht's holder is matched against them"}
-	case errors.Is(err, ErrDataRequestFlow):
-		return &respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}
-	case errors.Is(err, ErrDataFlowForMember):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}
-	case errors.Is(err, ErrLegalRetention):
-		return &respond.APIError{Status: http.StatusConflict, Code: "legal_retention", Message: "a session within the organisation's legal retention cannot be erased yet"}
-	case errors.Is(err, ErrExportUnavailable):
-		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
-	case errors.Is(err, ErrRedirectNotAllowed):
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}
-	case errors.Is(err, ErrRedirectOriginInUse):
-		return &respond.APIError{Status: http.StatusConflict, Code: "redirect_origin_in_use", Message: "a flow's return page is on a redirect origin this removes: change that flow's return page first"}
-	case errors.As(err, &rejected):
+	}
+	for _, m := range errorResponses {
+		if errors.Is(err, m.err) {
+			response := m.response
+			return &response
+		}
+	}
+	var rejected *proofingprovider.RejectedError
+	if errors.As(err, &rejected) {
 		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "rejected_by_provider", Message: rejected.Message}
-	default:
-		return fmt.Errorf("identity proofing: %w", err)
 	}
+	return fmt.Errorf("identity proofing: %w", err)
 }
 
 // flowView is the flows a caller sees: every one for an admin, the ones
