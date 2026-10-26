@@ -50,8 +50,7 @@ jobs:
       check-go-mod-tidy: false
       test-command: |
         go build ./...
-        docker run --detach --name postgres --publish 5432:5432 \
-          --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=postgres --env POSTGRES_DB=postgres \
+        docker run --detach --name postgres --publish 5432:5432 --env POSTGRES_HOST_AUTH_METHOD=trust \
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 5 \
           postgres:17-alpine
         docker compose -f ../docker/ci/domibus.yml up -d --wait
@@ -59,7 +58,7 @@ jobs:
           [ "$(docker inspect --format '{{.State.Health.Status}}' postgres)" = healthy ] && break
           sleep 2
         done
-        TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' \
+        TEST_DATABASE_URL='postgres://postgres@localhost:5432/postgres?sslmode=disable' \
         QERDS_TEST_DOMIBUS_URL=http://localhost:8090/domibus \
           go test -tags=integration -race ./...
 
