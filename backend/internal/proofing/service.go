@@ -1603,9 +1603,14 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 // approval the wallet rejected (errorAssuranceNotMet, errorIdentityMismatch)
 // is read as that rejection, without the person or their images. A mismatch
 // is someone other than the expected person, whose identity is never shown.
+// An approval in a review the wallet opened is read as that review.
 func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
 	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved ||
 		(req.FlowKind.dataRequest() && req.Status == StatusNeedsReview) {
+		return identity
+	}
+	if req.Status == StatusNeedsReview && req.ReviewReason != "" {
+		identity.Status = proofingprovider.StatusNeedsReview
 		return identity
 	}
 	return proofingprovider.Identity{
