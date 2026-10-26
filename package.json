@@ -8,10 +8,10 @@
     "dev:reset": "tsx dev-setup --reset"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.6.5",
     "husky": "^9.1.7",
-    "lint-staged": "^17.0.7",
-    "tsx": "^4.22.4",
+    "lint-staged": "^17.6.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   },
   "lint-staged": {
