@@ -101,7 +101,7 @@ func (s *server) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims []string
-	for _, c := range strings.Split(r.PostFormValue("claims"), ",") {
+	for c := range strings.SplitSeq(r.PostFormValue("claims"), ",") {
 		if c = strings.TrimSpace(c); c != "" {
 			claims = append(claims, c)
 		}

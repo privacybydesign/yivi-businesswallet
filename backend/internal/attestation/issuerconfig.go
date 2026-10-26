@@ -3,6 +3,7 @@ package attestation
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/google/uuid"
@@ -248,9 +249,7 @@ func BuildIssuerBundle(instance, displayName, logoURI string, schemas []Schema, 
 			continue
 		}
 		ic := BuildIssuerConfig(s, issuerBase, schemaLogos[s.ID])
-		for k, v := range ic.Metadata {
-			configs[k] = v
-		}
+		maps.Copy(configs, ic.Metadata)
 		vcts = append(vcts, namedVCT{Name: vctSlug(vctSlugSource(s)), Document: ic.VCT})
 	}
 

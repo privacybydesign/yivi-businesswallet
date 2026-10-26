@@ -443,7 +443,7 @@ func validHost(host string) bool {
 	if host == "" || len(host) > maxHostLength {
 		return false
 	}
-	for _, label := range strings.Split(host, ".") {
+	for label := range strings.SplitSeq(host, ".") {
 		if label == "" || len(label) > maxLabelLength || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}

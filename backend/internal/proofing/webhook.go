@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,15 +118,16 @@ const SignatureHeader = "Yivi-Signature"
 // webhookSignature signs body at at under each of secrets, in order.
 func webhookSignature(secrets []string, at time.Time, body []byte) string {
 	t := strconv.FormatInt(at.Unix(), 10)
-	header := "t=" + t
+	var header strings.Builder
+	header.WriteString("t=" + t)
 	for _, secret := range secrets {
 		mac := hmac.New(sha256.New, []byte(secret))
 		mac.Write([]byte(t))
 		mac.Write([]byte("."))
 		mac.Write(body)
-		header += ",v1=" + hex.EncodeToString(mac.Sum(nil))
+		header.WriteString(",v1=" + hex.EncodeToString(mac.Sum(nil)))
 	}
-	return header
+	return header.String()
 }
 
 // webhookBody is what a delivery POSTs: the same bytes on every attempt, so a

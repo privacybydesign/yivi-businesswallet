@@ -81,7 +81,7 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 func printedTokens(fullName string) ([]nameToken, map[int]bool) {
 	var tokens []nameToken
 	wordStarts := map[int]bool{}
-	for _, word := range strings.Fields(fullName) {
+	for word := range strings.FieldsSeq(fullName) {
 		wordStarts[len(tokens)] = true
 		tokens = append(tokens, nameTokens(word)...)
 	}

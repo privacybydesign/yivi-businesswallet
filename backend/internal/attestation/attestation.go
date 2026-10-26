@@ -10,6 +10,7 @@ package attestation
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,12 +89,7 @@ var SupportedAttributeTypes = []string{
 }
 
 func isSupportedAttributeType(t string) bool {
-	for _, s := range SupportedAttributeTypes {
-		if s == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(SupportedAttributeTypes, t)
 }
 
 // Schema is a credential-type definition an organization can issue.

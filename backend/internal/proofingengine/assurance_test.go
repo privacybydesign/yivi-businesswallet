@@ -10,15 +10,13 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 // verifiedChip is a chip read whose Passive and Active Authentication verified.
 func verifiedChip() *chipChecksInfo {
 	return &chipChecksInfo{
 		PassiveAuthentication: &passiveAuthInfo{
-			SODSignatureValid: ptr(true), DataGroupHashesValid: ptr(true), CSCATrustChainValid: ptr(true),
+			SODSignatureValid: new(true), DataGroupHashesValid: new(true), CSCATrustChainValid: new(true),
 		},
-		ActiveAuthentication: &activeAuthInfo{Attempted: ptr(true), Passed: ptr(true)},
+		ActiveAuthentication: &activeAuthInfo{Attempted: new(true), Passed: new(true)},
 	}
 }
 
@@ -33,14 +31,14 @@ func chipWithoutAA() *chipChecksInfo {
 // response for.
 func chipAANotPerformed() *chipChecksInfo {
 	c := verifiedChip()
-	c.ActiveAuthentication = &activeAuthInfo{Attempted: ptr(false), Passed: ptr(false)}
+	c.ActiveAuthentication = &activeAuthInfo{Attempted: new(false), Passed: new(false)}
 	return c
 }
 
 // chipAAFailed is a verified chip whose AA response did not verify.
 func chipAAFailed() *chipChecksInfo {
 	c := verifiedChip()
-	c.ActiveAuthentication = &activeAuthInfo{Attempted: ptr(true), Passed: ptr(false)}
+	c.ActiveAuthentication = &activeAuthInfo{Attempted: new(true), Passed: new(false)}
 	return c
 }
 
@@ -61,7 +59,7 @@ func liveRegulaMatch() appResultRequest {
 // liveRegulaScore is a live face Regula matched with the given similarity.
 func liveRegulaScore(score float64) appResultRequest {
 	return appResultRequest{Biometrics: &biometricsInfo{
-		FaceMatchScore: &score, FaceVerified: ptr(true), LivenessResult: "passed", Engine: faceProviderRegula,
+		FaceMatchScore: &score, FaceVerified: new(true), LivenessResult: "passed", Engine: faceProviderRegula,
 	}}
 }
 
@@ -104,11 +102,11 @@ func documentPhotoFlow(required flow.AssuranceLevel) *flow.FlowDefinition {
 
 func TestEIDASAssuranceLevel(t *testing.T) {
 	untrusted := verifiedChip()
-	untrusted.PassiveAuthentication.CSCATrustChainValid = ptr(false)
+	untrusted.PassiveAuthentication.CSCATrustChainValid = new(false)
 	notLiveButMatched := liveRegulaMatch()
 	notLiveButMatched.Biometrics.LivenessResult = "failed"
 	onDevice := liveRegulaMatch()
-	onDevice.Biometrics.Engine, onDevice.Biometrics.LivenessScore = "on_device", ptr(0.9)
+	onDevice.Biometrics.Engine, onDevice.Biometrics.LivenessScore = "on_device", new(0.9)
 	noLivenessResult := liveRegulaMatch()
 	noLivenessResult.Biometrics.Engine, noLivenessResult.Biometrics.LivenessResult = "iris", ""
 
@@ -168,7 +166,7 @@ func TestEIDASAssuranceLevel(t *testing.T) {
 // not use, a signature that failed and one that verified.
 func TestChipAuthStates(t *testing.T) {
 	failed := verifiedChip()
-	failed.ActiveAuthentication.Passed = ptr(false)
+	failed.ActiveAuthentication.Passed = new(false)
 	for _, tc := range []struct {
 		name   string
 		checks *chipChecksInfo
@@ -219,7 +217,7 @@ func (f *livenessRegula) Match(context.Context, string, string) (regula.MatchRes
 // Regula matches only a live capture: a failed liveness leaves no match.
 func TestRegulaSkipsFailedLiveness(t *testing.T) {
 	const notLive = 1
-	client := &livenessRegula{taggedRegula: &taggedRegula{tags: map[string]string{"tx": "ips-ref"}}, status: ptr(notLive)}
+	client := &livenessRegula{taggedRegula: &taggedRegula{tags: map[string]string{"tx": "ips-ref"}}, status: new(notLive)}
 	v := regulaFaceVerifier{client: client}
 	ref := &faceReference{ImageBase64: "cG9ydHJhaXQ=", MimeType: "image/jpeg"}
 	out, err := v.Verify(context.Background(), session.Session{TenantReference: "ref"}, ref, liveCapture{TransactionID: "tx"})
@@ -235,9 +233,9 @@ func TestSessionOutcome(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	faceDone := session.Session{Steps: session.StepEvidence{Selfie: &session.SelfieStepEvidence{}}}
 	noMatch := liveRegulaMatch()
-	noMatch.Biometrics.FaceVerified = ptr(false)
+	noMatch.Biometrics.FaceVerified = new(false)
 	tampered := verifiedChip()
-	tampered.TamperDetected = ptr(true)
+	tampered.TamperDetected = new(true)
 
 	for _, tc := range []struct {
 		name         string
