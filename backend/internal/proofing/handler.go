@@ -369,7 +369,8 @@ type requestResponse struct {
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
 	// ReviewReason is why the wallet put the request in review after the
-	// identity was approved (no_current_employment, current_benefit, current_other_income); absent otherwise.
+	// identity was approved (no_current_employment, current_benefit,
+	// current_other_income); absent otherwise.
 	ReviewReason string `json:"reviewReason,omitempty"`
 	// FlowKind is what the session is for; a data request goes to review once
 	// the person is proven. DataExportUntil is until when an approved "see my

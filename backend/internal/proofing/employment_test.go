@@ -197,7 +197,7 @@ func checkNoJobReviewDecided(t *testing.T, want Status) {
 
 // In a paused org nobody can decide the review a statement opens, so it is
 // rejected at once, as an engine review is.
-func TestNoJobReviewRejectedWhenPaused(t *testing.T) {
+func TestNoJobReviewRejectedPaused(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	pauses := withPauses(e.fixture)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)

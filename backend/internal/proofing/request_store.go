@@ -1360,10 +1360,10 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
 		}
+		after := outcomeAuditFields(status, res)
 		if err := s.audit.Record(ctx, q, action,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
-				req.auditFields(outcomeAuditFields(status, res)))); err != nil {
+			audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}), req.auditFields(after))); err != nil {
 			return err
 		}
 		event, ok := outcomeEvents[status]

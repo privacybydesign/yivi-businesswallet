@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
@@ -52,7 +53,7 @@ func TestEmploymentSealedTillPurge(t *testing.T) {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 
-	if err := requests.RecordEmploymentRejected(ctx, req, "holder_mismatch", ""); err != nil {
+	if err := requests.RecordEmploymentRejected(ctx, req, employment.ReasonHolder, ""); err != nil {
 		t.Fatalf("RecordEmploymentRejected: %v", err)
 	}
 	emp := Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{{
@@ -136,7 +137,7 @@ func TestNoJobOpensReview(t *testing.T) {
 	approved := approvedRequest(t, f.requests, f.in, "s1")
 
 	emp := Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{{
-		Kind: "benefit", Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02", From: "2026-06-01", To: "2026-09-30",
+		Kind: string(employment.KindBenefit), Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02", From: "2026-06-01", To: "2026-09-30",
 	}}}
 	if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
 		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
@@ -274,8 +275,8 @@ func TestIncomeBesideJobReview(t *testing.T) {
 	for _, tc := range []struct {
 		kind, employer, number, want string
 	}{
-		{"benefit", "WW-Uitkering van UWV", "810220350L02", ReviewCurrentBenefit},
-		{"other_income", "PENSIOENFONDS", "111111111L01", ReviewCurrentOtherIncome},
+		{string(employment.KindBenefit), "WW-Uitkering van UWV", "810220350L02", ReviewCurrentBenefit},
+		{string(employment.KindOtherIncome), "PENSIOENFONDS", "111111111L01", ReviewCurrentOtherIncome},
 	} {
 		f := newSealedFixture(t, EventSessionReviewOpened)
 		ctx := context.Background()
@@ -283,7 +284,7 @@ func TestIncomeBesideJobReview(t *testing.T) {
 		approved := approvedRequest(t, f.requests, f.in, "s1")
 
 		emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
-			{Kind: "employment", Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
+			{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
 			{Kind: tc.kind, Employer: tc.employer, PayrollTaxNumber: tc.number, From: "2026-06-01", To: "2026-09-30"},
 		}}
 		if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {

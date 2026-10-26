@@ -491,7 +491,8 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 
 // linkLive reports whether a hosted link still has its subject at work:
 // waiting to start, its session running or in review, or an address,
-// diploma, employment or data export window open. A link past all of that only shows its outcome.
+// diploma, employment or data export window open. A link past all of that
+// only shows its outcome.
 func (r Request) linkLive(now time.Time) bool {
 	if r.PurgedAt != nil || r.CancelledAt != nil {
 		return false

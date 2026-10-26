@@ -243,11 +243,12 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 
 // AddEmployment seals emp on req, audited identity_proofing.employment_added
 // (without the relations), and sends session.employment_added. A statement
-// without a current job, or with a current benefit or other income, also moves the approved
-// request to needs_review (reviewReason), audited identity_proofing.needs_review, and sends
-// session.review_opened: the identity is proven, the rest is for a reviewer.
-// It is false, and changes nothing, when the request holds a statement already,
-// is no longer approved, or was erased or cancelled.
+// without a current job, or with a current benefit or other income, also
+// moves the approved request to needs_review (reviewReason), audited
+// identity_proofing.needs_review, and sends session.review_opened: the
+// identity is proven, the rest is for a reviewer. It is false, and changes
+// nothing, when the request holds a statement already, is no longer approved,
+// or was erased or cancelled.
 func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error) {
 	if s.cipher == nil {
 		return false, ErrNoEncryptionKey
@@ -322,6 +323,7 @@ func openWalletReview(ctx context.Context, q database.Querier, recorder audit.Re
 			req.auditFields(map[string]any{"status": string(StatusNeedsReview), "reviewReason": reason}))); err != nil {
 		return err
 	}
+
 	inReview := req
 	inReview.ReviewReason = reason
 	return enqueueRequestWebhook(ctx, q, req, EventSessionReviewOpened, sessionEventData(inReview, StatusNeedsReview))
@@ -478,9 +480,9 @@ func (s *Service) FlowEmployment(ctx context.Context, org Org, flowID string) (E
 }
 
 // SaveFlowEmployment sets one of the org's flows' EmploymentMode, not a data
-// request flow's: required only for a flow that reads the name and date of birth, which the
-// statement's holder is matched against. Requests already sent keep the mode
-// they were sent with.
+// request flow's: required only for a flow that reads the name and date of
+// birth, which the statement's holder is matched against. Requests already
+// sent keep the mode they were sent with.
 func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string, mode EmploymentMode) (EmploymentMode, error) {
 	if s.flowEmploymentSettings == nil {
 		return "", errors.New("proofing: no employment settings store configured")
@@ -492,6 +494,7 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if mode.asked() && s.employmentChecker == nil {
 		return "", ErrNoEmploymentChecker
 	}
+
 	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
 	if err != nil {
 		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
@@ -500,12 +503,14 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if i < 0 {
 		return "", ErrFlowNotFound
 	}
+
 	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return "", err
 	}
 	if mode.asked() && !readsIdentity(flows[i]) {
 		return "", ErrFlowNoIdentity
 	}
+
 	return s.flowEmploymentSettings.Save(ctx, org.ID, flowID, mode)
 }
 

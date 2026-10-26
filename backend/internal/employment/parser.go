@@ -181,6 +181,7 @@ func parseHolder(st *Statement, foot footer) error {
 	if first < 0 {
 		return fmt.Errorf("%w: holder %q prints no initials", ErrNotAStatement, foot.holder)
 	}
+
 	end := first
 	for end < len(words) && reInitials.MatchString(words[end]) {
 		for _, m := range reInitial.FindAllStringSubmatch(words[end], -1) {
@@ -188,6 +189,7 @@ func parseHolder(st *Statement, foot footer) error {
 		}
 		end++
 	}
+
 	st.Surname = strings.Join(words[end:], " ")
 	if st.Surname == "" {
 		return fmt.Errorf("%w: holder %q prints no surname", ErrNotAStatement, foot.holder)

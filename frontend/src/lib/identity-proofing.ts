@@ -740,7 +740,6 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     blurBsn: draft.blackOutBsn,
     keepFacePhotos: draft.keepFacePhotos,
   };
-
   if (draft.faceVerification) {
     spec.faceProvider = draft.faceProvider;
   }
@@ -2195,9 +2194,10 @@ export function sessionEventDetail(
 
 // What the send form does with the flow and channel it is given: the flow it
 // sends (a pick no longer sendable falls back to the default), how (a flow that
-// asks for diplomas, the address or employment cannot be mailed, so it runs on screen; one
-// whose "Allow sending this flow as a link" switch is off is neither mailed nor
-// a link, so it runs on screen too) and whether it can check for one person (a
+// asks for diplomas, the address or employment cannot be mailed, so it runs on
+// screen; one whose "Allow sending this flow as a link" switch is off is
+// neither mailed nor a link, so it runs on screen too) and whether it can
+// check for one person (a
 // flow reading name and date of birth). sendRequestFields has what the fields
 // send and lack.
 export function sendFormDecision<
