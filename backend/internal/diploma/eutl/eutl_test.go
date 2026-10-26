@@ -142,7 +142,7 @@ func TestCacheIsUsedWhenFresh(t *testing.T) {
 	srv = httptest.NewTLSServer(mux)
 	defer srv.Close()
 	dir := t.TempDir()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, err := Load(context.Background(), Options{LOTL: srv.URL + "/lotl.xml", HTTPClient: srv.Client(), CacheDir: dir}); err != nil {
 			t.Fatal(err)
 		}

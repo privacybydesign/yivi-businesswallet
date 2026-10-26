@@ -62,7 +62,7 @@ type confirmedRegula struct {
 
 func (f *confirmedRegula) GetLiveness(ctx context.Context, id string) (regula.LivenessTransaction, error) {
 	tx, err := f.taggedRegula.GetLiveness(ctx, id)
-	tx.Status = ptr(0)
+	tx.Status = new(0)
 	return tx, err
 }
 

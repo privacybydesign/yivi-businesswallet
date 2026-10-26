@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -61,9 +62,7 @@ func TestVerifyKeyBindingWithDIDKeyConfirmation(t *testing.T) {
 	}
 	for name, mutate := range bad {
 		claims := map[string]any{}
-		for k, v := range good {
-			claims[k] = v
-		}
+		maps.Copy(claims, good)
 		mutate(claims)
 		if err := verifyKeyBinding(sign(claims), sdJwt, issuerPayload, "n1", "x509_san_dns:verifier.test", now); err == nil {
 			t.Errorf("%s accepted", name)

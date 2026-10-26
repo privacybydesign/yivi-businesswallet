@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -61,9 +62,7 @@ func mimeHeader(field, filename string, extra textproto.MIMEHeader) textproto.MI
 	h := textproto.MIMEHeader{
 		"Content-Disposition": {`form-data; name="` + field + `"; filename="` + filename + `"`},
 	}
-	for k, v := range extra {
-		h[k] = v
-	}
+	maps.Copy(h, extra)
 	return h
 }
 

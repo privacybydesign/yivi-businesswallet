@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -305,8 +306,8 @@ func extractDocument(pages *Pages) (*Document, error) {
 		case headingAchieved:
 			var name []string
 			for _, l := range s.lines {
-				if strings.HasPrefix(l, labelBorn) {
-					if doc.DateOfBirth, err = parseDutchDate(strings.TrimSpace(strings.TrimPrefix(l, labelBorn))); err != nil {
+				if after, ok := strings.CutPrefix(l, labelBorn); ok {
+					if doc.DateOfBirth, err = parseDutchDate(strings.TrimSpace(after)); err != nil {
 						return nil, fmt.Errorf("%w: date of birth: %v", ErrNotADiploma, err)
 					}
 					continue
@@ -333,8 +334,8 @@ func extractDocument(pages *Pages) (*Document, error) {
 					doc.NLQFLevel, doc.EQFLevel = m[1], m[2]
 					continue
 				}
-				if strings.HasPrefix(l, labelDownload) {
-					if doc.DownloadDate, err = parseDutchDate(strings.TrimSpace(strings.TrimPrefix(l, labelDownload))); err != nil {
+				if after, ok := strings.CutPrefix(l, labelDownload); ok {
+					if doc.DownloadDate, err = parseDutchDate(strings.TrimSpace(after)); err != nil {
 						return nil, fmt.Errorf("%w: download date: %v", ErrNotADiploma, err)
 					}
 					continue
@@ -370,12 +371,7 @@ func extractDocument(pages *Pages) (*Document, error) {
 }
 
 func containsLine(lines []string, want string) bool {
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 var dutchMonths = map[string]time.Month{

@@ -48,7 +48,7 @@ func paraphText(name string) string {
 		return name
 	}
 	var initials []rune
-	for _, part := range strings.Fields(name) {
+	for part := range strings.FieldsSeq(name) {
 		initials = append(initials, []rune(part)[0])
 		if len(initials) == maxParaphChars {
 			break

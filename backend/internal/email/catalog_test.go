@@ -1,6 +1,7 @@
 package email
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -362,9 +363,7 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			broken := map[string]string{}
-			for k, v := range complete {
-				broken[k] = v
-			}
+			maps.Copy(broken, complete)
 			mutate(broken)
 			if err := validateSamples(broken); err == nil {
 				t.Errorf("validateSamples(%v) = nil, want an error", broken)

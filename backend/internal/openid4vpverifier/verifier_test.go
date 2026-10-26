@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -24,11 +25,12 @@ func disclosure(t *testing.T, name string, value any) string {
 // sdjwt builds a compact SD-JWT VC: issuer JWT ~ disclosures... ~ (KB trailer).
 func sdjwt(t *testing.T, disclosures ...string) string {
 	t.Helper()
-	s := "issuer.jwt.sig"
+	var s strings.Builder
+	s.WriteString("issuer.jwt.sig")
 	for _, d := range disclosures {
-		s += "~" + d
+		s.WriteString("~" + d)
 	}
-	return s + "~" // trailing '~' = empty key-binding slot
+	return s.String() + "~" // trailing '~' = empty key-binding slot
 }
 
 func TestParseDisclosuresFlattensAcrossCredentials(t *testing.T) {
