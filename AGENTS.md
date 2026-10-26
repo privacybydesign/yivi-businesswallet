@@ -44,10 +44,10 @@ cd backend && go tool golangci-lint fmt --diff && go vet ./... && go vet -tags=i
 
 The tagged `go vet` needs no database, and nothing else above compiles the
 `//go:build integration` files — without it a changed exported signature passes this whole
-sequence and still reddens `backend-integration-test`.
+sequence and still reddens CI's integration tests.
 
-CI also runs that job (`go test -tags=integration -race ./...` against a real Postgres) and
-`backend-build-wsca`; running it locally needs a Postgres, which
+CI also runs those (`go test -tags=integration -race ./...` against a real Postgres) and
+the `go-wsca` job; running the tagged tests locally needs a Postgres, which
 `.ai/conventions/BACKEND.md` sets up.
 
 ## General conventions

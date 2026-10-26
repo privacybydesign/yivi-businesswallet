@@ -448,7 +448,7 @@ offline marshalling tests pin was a real bug shaken out here. Coverage: `domibus
 envelope construction + response parsing offline (runs in the default `go test`), and
 `domibus_integration_test.go` (`//go:build integration`, gated on `QERDS_TEST_DOMIBUS_URL`) runs the
 real round-trip — upload PMode, `Ping`, `Send`, assert Domibus accepts and returns a provider ref.
-CI's `backend-integration-test` job now runs a Domibus + MySQL service pair so that test executes on
+CI's `go` status check now runs a Domibus + MySQL service pair so that test executes on
 every push; the **stub remains the config default** provider for dev/CI unit runs.
 
 ### What this branch implements

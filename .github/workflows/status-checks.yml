@@ -1,0 +1,175 @@
+# Status checks, using the shared workflows from privacybydesign/github-workflows.
+# The gate job "Status checks passed" is the one check to require.
+name: Status checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  frontend:
+    uses: privacybydesign/github-workflows/.github/workflows/node-checks.yml@v1
+    permissions:
+      contents: read
+    with:
+      working-directory: frontend
+      node-version: "26"
+      scripts: format lint typecheck test build
+      ignore-scripts: true
+
+  postguard-sidecar:
+    uses: privacybydesign/github-workflows/.github/workflows/node-checks.yml@v1
+    permissions:
+      contents: read
+    with:
+      working-directory: postguard-sidecar
+      node-version: "22" # the image runs node:22-slim
+      scripts: build # `tsc --build` type-checks and compiles
+      ignore-scripts: true
+
+  # Unit and integration tests (-tags=integration runs both) against
+  # PostgreSQL and the Domibus AS4 access point the live QERDS test needs.
+  # Domibus runs as the docker/ci/domibus.yml compose stack because it mounts
+  # the regenerated gateway keystores from the checkout (see that file).
+  go:
+    uses: privacybydesign/github-workflows/.github/workflows/go-checks.yml@v1
+    permissions:
+      contents: read
+    with:
+      working-directory: backend
+      # `go mod tidy` also resolves the wsca-tagged import of the private
+      # wallet-provider module, which only a Go workspace supplies (go-wsca
+      # below), so it cannot run on a plain checkout.
+      check-go-mod-tidy: false
+      test-command: |
+        go build ./...
+        docker run --detach --name postgres --publish 5432:5432 --env POSTGRES_HOST_AUTH_METHOD=trust \
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 5 \
+          postgres:17-alpine
+        docker compose -f ../docker/ci/domibus.yml up -d --wait
+        for _ in $(seq 60); do
+          [ "$(docker inspect --format '{{.State.Health.Status}}' postgres)" = healthy ] && break
+          sleep 2
+        done
+        TEST_DATABASE_URL='postgres://postgres@localhost:5432/postgres?sslmode=disable' \
+        QERDS_TEST_DOMIBUS_URL=http://localhost:8090/domibus \
+          go test -tags=integration -race ./...
+
+  # WSCA is opt-in and its client (walletmobile) is in the private
+  # wallet-provider module, so the go job builds without it. This job clones
+  # wallet-provider with the deploy key and builds/tests the `wsca`-tagged
+  # path through a Go workspace, so the WSCA code keeps compiling. It is a
+  # local job because a go-checks input cannot carry the deploy key.
+  go-wsca:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Clone the private wallet-provider module
+        env:
+          DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git clone git@github.com:privacybydesign/wallet-provider.git "$GITHUB_WORKSPACE/wallet-provider"
+          git -C "$GITHUB_WORKSPACE/wallet-provider" checkout 3f463ccc34aa617ce668cc2158de6e75b1e4967c
+          rm -f ~/.ssh/id_ed25519
+
+      - name: Create Go workspace (main module + wallet-provider clone)
+        run: |
+          GO_VERSION="$(go mod edit -json | python3 -c 'import json,sys;print(json.load(sys.stdin)["Go"])')"
+          {
+            echo "go ${GO_VERSION}"
+            echo
+            echo "use ."
+            echo
+            echo "use ../wallet-provider"
+          } > go.work
+
+      - run: go build -tags wsca ./...
+      - run: go test -tags wsca -race ./internal/eudiholder/ ./internal/wscawallet/
+
+  # Builds and scans the images without pushing them; Delivery pushes from main.
+  docker:
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Root context: the image bundles the built frontend with the Go API.
+          - component: business-wallet
+            context: .
+            dockerfile: backend/docker/production/Dockerfile
+          - component: postguard-sidecar
+            context: postguard-sidecar
+            dockerfile: postguard-sidecar/Dockerfile
+          - component: devverifier
+            context: backend
+            dockerfile: backend/docker/devverifier/Dockerfile
+    uses: privacybydesign/github-workflows/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+      attestations: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+      context: ${{ matrix.context }}
+      dockerfile: ${{ matrix.dockerfile }}
+      push-image: false
+    secrets:
+      # The business-wallet image builds the API with -tags wsca, which clones
+      # the private wallet-provider repo (RUN --mount=type=secret). Quoted so
+      # the multi-line SSH key stays one secret; ignored by the other images.
+      DOCKER_BUILD_SECRETS: |
+        "wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}"
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    uses: privacybydesign/github-workflows/.github/workflows/dependency-review.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+
+  workflow-lint:
+    uses: privacybydesign/github-workflows/.github/workflows/workflow-lint.yml@v1
+    permissions:
+      contents: read
+
+  passed:
+    name: Status checks passed
+    if: always()
+    needs: [frontend, postguard-sidecar, go, go-wsca, docker, dependency-review, workflow-lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: All required jobs succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if grep -qE '"(failure|cancelled)"' <<< "$RESULTS"; then exit 1; fi

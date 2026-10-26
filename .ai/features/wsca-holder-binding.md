@@ -240,7 +240,7 @@ use .
 use /path/to/wallet-provider
 ```
 
-CI's `backend-build-wsca` job clones the wallet-provider (via the
+CI's `go-wsca` job (Status checks) clones the wallet-provider (via the
 `WALLET_PROVIDER_DEPLOY_KEY` deploy key), writes that `go.work`, and runs
 `go build -tags wsca ./...` + the tagged tests. It is the only job that touches
 the private repo.
