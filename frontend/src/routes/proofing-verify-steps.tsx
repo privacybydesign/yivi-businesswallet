@@ -40,6 +40,7 @@ import type {
   ProofingYiviStart,
   VerifyTarget,
 } from "../api/identity-proofing";
+import { EMPLOYMENT_KIND } from "../api/identity-proofing";
 import {
   ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
@@ -974,12 +975,12 @@ function EmploymentStep({
                     className="text-ink text-[12.5px]"
                   >
                     <span className="font-semibold">{r.employer}</span>{" "}
-                    {r.kind === "benefit" && (
+                    {r.kind === EMPLOYMENT_KIND.benefit && (
                       <span className="text-ink-soft">
                         {t("identityProofing.employment.benefit")}{" "}
                       </span>
                     )}
-                    {r.kind === "other_income" && (
+                    {r.kind === EMPLOYMENT_KIND.otherIncome && (
                       <span className="text-ink-soft">
                         {t("identityProofing.employment.otherIncome")}{" "}
                       </span>

@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { ApiError } from "../api/http";
 import {
   DATA_REQUEST_KINDS,
+  EMPLOYMENT_KIND,
   MAX_LISTED_REQUESTS,
 } from "../api/identity-proofing";
 import type {
@@ -1453,8 +1454,9 @@ export function employmentReview(
   kept: ProofingEmployment,
 ): "noJob" | "benefit" | "otherIncome" | undefined {
   if (!kept.employed) return "noJob";
-  if (kept.relations.some((r) => r.kind === "benefit")) return "benefit";
-  if (kept.relations.some((r) => r.kind === "other_income")) {
+  if (kept.relations.some((r) => r.kind === EMPLOYMENT_KIND.benefit))
+    return "benefit";
+  if (kept.relations.some((r) => r.kind === EMPLOYMENT_KIND.otherIncome)) {
     return "otherIncome";
   }
   return undefined;

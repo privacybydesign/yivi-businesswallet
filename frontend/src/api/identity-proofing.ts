@@ -93,6 +93,15 @@ export type EmploymentMode = z.infer<typeof employmentModeSchema>;
 
 // The employment relations a UWV Verzekeringsbericht lists, as of the date
 // UWV made it; relations is empty when it lists none.
+// The relation kinds a Verzekeringsbericht holds, as the backend names them
+// (employment.Kind*).
+export const EMPLOYMENT_KIND = {
+  employment: "employment",
+  benefit: "benefit",
+  sickViaEmployer: "sick_via_employer",
+  otherIncome: "other_income",
+} as const;
+
 const proofingEmploymentSchema = z.object({
   statementDate: z.string(),
   // A current relation that is not a benefit; without one the session goes

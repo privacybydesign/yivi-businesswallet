@@ -17,7 +17,7 @@ import type {
   ProofingResult,
   ProofingSettings,
 } from "../api/identity-proofing";
-import { isDataRequest } from "../api/identity-proofing";
+import { EMPLOYMENT_KIND, isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import {
@@ -805,17 +805,17 @@ export function SessionEmployment({
                 >
                   <span className="text-ink flex items-center gap-2 text-[13px] font-semibold">
                     {r.employer}
-                    {r.kind === "benefit" && (
+                    {r.kind === EMPLOYMENT_KIND.benefit && (
                       <StatusText tone="amber">
                         {t("identityProofing.sessions.employment.benefit")}
                       </StatusText>
                     )}
-                    {r.kind === "other_income" && (
+                    {r.kind === EMPLOYMENT_KIND.otherIncome && (
                       <StatusText tone="amber">
                         {t("identityProofing.sessions.employment.otherIncome")}
                       </StatusText>
                     )}
-                    {r.kind === "sick_via_employer" && (
+                    {r.kind === EMPLOYMENT_KIND.sickViaEmployer && (
                       <StatusText>
                         {t(
                           "identityProofing.sessions.employment.sickViaEmployer",
