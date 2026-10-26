@@ -65,18 +65,19 @@ function levelOf(choice: LevelChoice): AssuranceLevel | "" {
   return choice === "none" ? "" : choice;
 }
 
-// Saves a setting that changed, then runs next; an unchanged one goes
-// straight to next.
-function saveIfChanged(
-  changed: boolean,
-  save: (onSuccess: () => void) => void,
+// Saves current when it differs from saved, then runs next; an unchanged
+// setting goes straight to next.
+function saveIfChanged<T>(
+  current: T,
+  saved: T,
+  save: (value: T, onSuccess: () => void) => void,
   next: () => void,
 ): void {
-  if (!changed) {
+  if (current === saved) {
     next();
     return;
   }
-  save(next);
+  save(current, next);
 }
 
 export type EditorMode = { kind: "new" } | { kind: "edit"; flow: EditableFlow };
@@ -186,22 +187,25 @@ export function FlowEditor({
     const saveSettings = (flowId: string, then: () => void): void => {
       const employmentThen = (): void =>
         saveIfChanged(
-          employment !== savedEmployment,
-          (onSuccess) =>
-            saveEmployment.mutate({ flowId, mode: employment }, { onSuccess }),
+          employment,
+          savedEmployment,
+          (mode, onSuccess) =>
+            saveEmployment.mutate({ flowId, mode }, { onSuccess }),
           then,
         );
       const addressThen = (): void =>
         saveIfChanged(
-          address !== savedAddress,
-          (onSuccess) =>
-            saveAddress.mutate({ flowId, mode: address }, { onSuccess }),
+          address,
+          savedAddress,
+          (mode, onSuccess) =>
+            saveAddress.mutate({ flowId, mode }, { onSuccess }),
           employmentThen,
         );
       saveIfChanged(
-        diplomas !== savedDiplomas,
-        (onSuccess) =>
-          saveDiplomas.mutate({ flowId, mode: diplomas }, { onSuccess }),
+        diplomas,
+        savedDiplomas,
+        (mode, onSuccess) =>
+          saveDiplomas.mutate({ flowId, mode }, { onSuccess }),
         addressThen,
       );
     };

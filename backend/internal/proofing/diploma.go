@@ -360,32 +360,32 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
 	}
-	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
+	flow, err := s.editableFlow(ctx, org, flowID)
+	if err != nil {
 		return "", err
+	}
+	if mode.asked() && !readsIdentity(flow) {
+		return "", ErrFlowNoIdentity
 	}
 	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
 }
 
-// checkFlowIdentity is ErrFlowNotFound for a flow that is not one of the
-// org's, ErrDataRequestFlow for a data request flow, and ErrFlowNoIdentity
-// when the setting is asked for but the flow does not read the name and date
-// of birth.
-func (s *Service) checkFlowIdentity(ctx context.Context, org Org, flowID string, asked bool) error {
+// editableFlow is one of the org's flows whose settings may change:
+// ErrFlowNotFound for a flow that is not one of the org's, and
+// ErrDataRequestFlow for a data request flow.
+func (s *Service) editableFlow(ctx context.Context, org Org, flowID string) (proofingprovider.Flow, error) {
 	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
 	if err != nil {
-		return fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
 	}
 	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
 	if i < 0 {
-		return ErrFlowNotFound
+		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
 	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
-		return err
+		return proofingprovider.Flow{}, err
 	}
-	if asked && !readsIdentity(flows[i]) {
-		return ErrFlowNoIdentity
-	}
-	return nil
+	return flows[i], nil
 }
 
 // RequestDiplomas returns the extracts each request holds.

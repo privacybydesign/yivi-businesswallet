@@ -511,8 +511,12 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 	if mode.asked() && s.employmentChecker == nil {
 		return "", ErrNoEmploymentChecker
 	}
-	if err := s.checkFlowIdentity(ctx, org, flowID, mode.asked()); err != nil {
+	flow, err := s.editableFlow(ctx, org, flowID)
+	if err != nil {
 		return "", err
+	}
+	if mode.asked() && !readsIdentity(flow) {
+		return "", ErrFlowNoIdentity
 	}
 	return s.flowEmploymentSettings.Save(ctx, org.ID, flowID, mode)
 }
