@@ -59,7 +59,7 @@ func (s *Service) DecideAddressReview(ctx context.Context, orgID, id, reviewerID
 	if err != nil {
 		return Request{}, err
 	}
-	if !scope.reaches(req) {
+	if !scope.reachesAddress(req) {
 		return Request{}, ErrRequestNotFound
 	}
 	if req.AddressReview != AddressReviewPending || req.PurgedAt != nil {

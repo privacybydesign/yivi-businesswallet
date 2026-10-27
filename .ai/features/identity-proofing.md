@@ -2055,9 +2055,12 @@ and on a Yivi app request against the registered (BRP) address too.
   - Only the address is reviewed: the session keeps its outcome, and the
     engine's session review is untouched (`address_review.go`).
   - `POST .../requests/{id}/address/review` `{decision: confirm|reject}`,
-    reviewer route. `ReviewScope.reaches` also reaches a pending address;
-    `ownReview` applies, except to a platform admin. A decided or erased one is 409
-    `address_not_under_review`.
+    reviewer route. `ownReview` applies, except to a platform admin. A
+    decided or erased one is 409 `address_not_under_review`.
+  - A reviewer reaches a pending address through `ReviewScope.reachesAddress`
+    (the request and this decision), never `reaches`: that one opens the
+    result, data-matches and export, so the check's identity and photos.
+  - A purged request never lists under `?addressReview=pending`.
   - Audited `address_reviewed`, webhook `session.address_reviewed`
     (`addressReview` in its data).
   - Decided on the Reviews page, never on the Sessions page:

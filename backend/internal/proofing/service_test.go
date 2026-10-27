@@ -2087,6 +2087,26 @@ func TestReviewScopeReaches(t *testing.T) {
 	}
 }
 
+// A pending self-declared address opens the request and its address to a
+// reviewer, never the result of the check it came with.
+func TestReviewScopeReachesAddress(t *testing.T) {
+	purgedAt := time.Now()
+	pending := Request{FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending}
+	purged := pending
+	purged.PurgedAt = &purgedAt
+	decided := pending
+	decided.AddressReview = AddressReviewConfirmed
+	if ReviewScopeReviews.reaches(pending) {
+		t.Error("a reviewer reaches the result of an approved check whose address waits")
+	}
+	if !ReviewScopeReviews.reachesAddress(pending) {
+		t.Error("a reviewer does not reach an address that waits")
+	}
+	if ReviewScopeReviews.reachesAddress(purged) || ReviewScopeReviews.reachesAddress(decided) {
+		t.Error("a reviewer reaches an address that no longer waits")
+	}
+}
+
 func TestOwnReview(t *testing.T) {
 	sender, subject, other := uuid.New(), uuid.New(), uuid.New()
 	check := Request{FlowKind: FlowIdentity, RequestedBy: &sender, SubjectUserID: &subject}

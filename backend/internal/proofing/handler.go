@@ -522,7 +522,7 @@ func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
 	if req.RequestedBy != nil && *req.RequestedBy == caller {
 		return true
 	}
-	return organization.MayReview(ctx) && ReviewScopeReviews.reaches(req)
+	return organization.MayReview(ctx) && ReviewScopeReviews.reachesAddress(req)
 }
 
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.

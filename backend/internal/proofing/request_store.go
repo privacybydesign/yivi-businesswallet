@@ -848,7 +848,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
-			AND ($11::text IS NULL OR r.address_review = $11)
+			AND ($11::text IS NULL OR (r.address_review = $11 AND r.purged_at IS NULL))
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
 		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), filter.AddressReview)

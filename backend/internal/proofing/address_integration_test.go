@@ -249,21 +249,7 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionAddressReviewed}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
 	}
-	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
-	in.Address = AddressRequired
-	req := createStarted(t, requests, in, "s1")
-	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
-		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
-		t.Fatalf("RecordOutcome: %v", err)
-	}
-	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
-	if added, err := requests.AddAddress(ctx, req, addr); err != nil || !added {
-		t.Fatalf("AddAddress = %v, %v; want added", added, err)
-	}
-	pending, err := requests.Get(ctx, orgID, req.ID)
-	if err != nil || pending.AddressReview != AddressReviewPending {
-		t.Fatalf("Get = %q, %v; want the address pending", pending.AddressReview, err)
-	}
+	pending := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
 	review := AddressReviewPending
 	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 1 {
 		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
@@ -275,7 +261,7 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected); err != nil || ok {
 		t.Errorf("DecideAddressReview again = %v, %v; want refused", ok, err)
 	}
-	got, err := requests.Get(ctx, orgID, req.ID)
+	got, err := requests.Get(ctx, orgID, pending.ID)
 	if err != nil || got.AddressReview != AddressReviewConfirmed || got.Status != StatusApproved {
 		t.Errorf("Get = %s %q, %v; want approved, address confirmed", got.Status, got.AddressReview, err)
 	}
@@ -286,4 +272,45 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressReviewed {
 		t.Errorf("deliveries = %+v, %v; want one session.address_reviewed", deliveries, err)
 	}
+}
+
+// A purged request's address is erased, so it no longer waits on the Reviews
+// page, however long its review was left pending.
+func TestPurgedAddressNotListedForReview(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	purged := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
+	if err := requests.Purge(ctx, purged, nil); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	review := AddressReviewPending
+	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 0 {
+		t.Errorf("List pending addresses = %d, %v; want none", len(listed), err)
+	}
+}
+
+// storeSelfDeclaredAddress is an approved external check whose address the
+// register (BAG) found, so it waits for a reviewer.
+func storeSelfDeclaredAddress(t *testing.T, requests *RequestStore, orgID, sentBy uuid.UUID, session string) Request {
+	t.Helper()
+	ctx := context.Background()
+	in := newStoredRequest(orgID, sentBy, externalSubject("anna@example.org"))
+	in.Address = AddressRequired
+	req := createStarted(t, requests, in, session)
+	if err := requests.RecordOutcome(ctx, req, session, StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
+	if added, err := requests.AddAddress(ctx, req, addr); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v; want added", added, err)
+	}
+	pending, err := requests.Get(ctx, orgID, req.ID)
+	if err != nil || pending.AddressReview != AddressReviewPending {
+		t.Fatalf("Get = %q, %v; want the address pending", pending.AddressReview, err)
+	}
+	return pending
 }
