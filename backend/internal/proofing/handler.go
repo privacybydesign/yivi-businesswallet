@@ -456,14 +456,24 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 		}
 		filter.DataRequests = true
 	}
-	if raw := query.Get("addressReview"); raw != "" {
-		review := AddressReview(raw)
-		if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
-			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
-		}
-		filter.AddressReview = &review
+	review, err := addressReviewFilterFrom(query.Get("addressReview"))
+	if err != nil {
+		return RequestFilter{}, err
 	}
+	filter.AddressReview = review
 	return filter, nil
+}
+
+// addressReviewFilterFrom reads ?addressReview: nil when absent.
+func addressReviewFilterFrom(raw string) (*AddressReview, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	review := AddressReview(raw)
+	if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
+		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
+	}
+	return &review, nil
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
@@ -492,6 +502,9 @@ func reviewScope(ctx context.Context) ReviewScope {
 	return ReviewScopeReviews
 }
 
+// invalidRequestIDMessage is the 400 to a request id parseRequestID cannot read.
+const invalidRequestIDMessage = "invalid request id"
+
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
 // API and webhooks show it (a ps_ id), so either can be looked up.
 func parseRequestID(s string) (uuid.UUID, error) {
@@ -507,7 +520,7 @@ func parseRequestID(s string) (uuid.UUID, error) {
 func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
-		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
 	if organization.ActsAsAdmin(r.Context()) {
 		return id, nil, nil
@@ -560,7 +573,7 @@ type reviewDecisionRequest struct {
 func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
 	var body reviewDecisionRequest
 	if err := decode(r, &body); err != nil {
@@ -591,7 +604,7 @@ type addressReviewRequest struct {
 func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
 	var body addressReviewRequest
 	if err := decode(r, &body); err != nil {
