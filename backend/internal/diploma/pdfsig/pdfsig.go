@@ -101,7 +101,7 @@ func Extract(pdf []byte) ([]Signature, error) {
 	var sigs []Signature
 	for _, m := range reByteRange.FindAllSubmatchIndex(pdf, -1) {
 		var s Signature
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			v, err := strconv.ParseInt(string(pdf[m[2+2*i]:m[3+2*i]]), 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("pdfsig: bad ByteRange: %w", err)

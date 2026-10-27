@@ -388,9 +388,7 @@ func TestConcurrentAcceptsRedeemTheOfferOnce(t *testing.T) {
 		errs     []error
 	)
 	for range accepts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := service.AcceptOffer(ctx, ruOrg, offerID)
 			mu.Lock()
 			defer mu.Unlock()
@@ -399,7 +397,7 @@ func TestConcurrentAcceptsRedeemTheOfferOnce(t *testing.T) {
 				return
 			}
 			accepted++
-		}()
+		})
 	}
 	wg.Wait()
 

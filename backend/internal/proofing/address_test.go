@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 )
 
 type fakeFlowAddresses struct{ modes map[string]AddressMode }
@@ -238,5 +239,46 @@ func TestLookUpAddress(t *testing.T) {
 	lookup.queries = nil
 	if _, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, "6511 AB", "12"); !errors.Is(err, ErrAddressClosed) || len(lookup.queries) != 0 {
 		t.Errorf("window passed = %v, asked %q; want ErrAddressClosed and nothing asked", err, lookup.queries)
+	}
+}
+
+// brpClaims are the registered address of testAddress as the Yivi app
+// discloses it.
+var brpClaims = map[string]string{
+	openid4vpverifier.ClaimAddressStreet: "Kerkstraat", openid4vpverifier.ClaimAddressHouseNumber: "12 A",
+	openid4vpverifier.ClaimAddressPostalCode: "6511AB", openid4vpverifier.ClaimAddressCity: "Nijmegen",
+}
+
+// discloseYiviAddress runs a Yivi request on a flow whose address mode is
+// mode, its disclosure carrying brpClaims.
+func discloseYiviAddress(t *testing.T, mode AddressMode) fixture {
+	t.Helper()
+	f := newAddressFixture(mode)
+	ctx := context.Background()
+	sent := f.sendYivi(t)
+	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("StartYivi: %v", err)
+	}
+	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
+		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"}, "address": brpClaims,
+	}}
+	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("YiviDisclosure: %v", err)
+	}
+	return f
+}
+
+func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
+	for _, tc := range []struct {
+		mode AddressMode
+		want openid4vpverifier.Scope
+	}{{AddressRequired, openid4vpverifier.ScopeProofingAddress}, {AddressOff, openid4vpverifier.ScopeProofing}} {
+		f := discloseYiviAddress(t, tc.mode)
+		if got := f.verifier.scopes[0]; got != tc.want {
+			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
+		}
+		if kept := f.requests.registeredAddress != nil; kept != tc.mode.asked() {
+			t.Errorf("address %s: registered address kept = %v", tc.mode, kept)
+		}
 	}
 }

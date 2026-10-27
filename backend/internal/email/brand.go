@@ -242,7 +242,7 @@ func readableForegroundAA(background string) string {
 // also has a lighten direction, for its dark-mode half; mail has no dark half.
 func adjustToContrast(color, background string) string {
 	current := color
-	for i := 0; i < adjustMaxSteps; i++ {
+	for range adjustMaxSteps {
 		if contrastRatio(current, background) >= aaContrast {
 			break
 		}

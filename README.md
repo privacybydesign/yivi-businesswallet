@@ -217,5 +217,7 @@ Install hooks once after cloning with `npm install` at the repo root.
 
 ## Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs format, lint, type-check, build,
-and test for both the frontend and backend on every push and pull request.
+GitHub Actions (`.github/workflows/status-checks.yml`, using the shared
+[privacybydesign/github-workflows](https://github.com/privacybydesign/github-workflows))
+runs format, lint, type-check, build, and test for both the frontend and backend
+on every push and pull request, and builds and scans the images on pull requests.

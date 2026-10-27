@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 func TestMandateStatus(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	hour := time.Hour
@@ -32,26 +30,26 @@ func TestMandateStatus(t *testing.T) {
 		},
 		{
 			name: "window closed is expired",
-			m:    Mandate{ValidFrom: now.Add(-2 * hour), ValidUntil: ptr(now.Add(-hour))},
+			m:    Mandate{ValidFrom: now.Add(-2 * hour), ValidUntil: new(now.Add(-hour))},
 			want: MandateStatusExpired,
 		},
 		{
 			name: "valid_until exactly now is expired",
-			m:    Mandate{ValidFrom: now.Add(-hour), ValidUntil: ptr(now)},
+			m:    Mandate{ValidFrom: now.Add(-hour), ValidUntil: new(now)},
 			want: MandateStatusExpired,
 		},
 		{
 			name: "revoked wins over expired",
 			m: Mandate{
 				ValidFrom:  now.Add(-2 * hour),
-				ValidUntil: ptr(now.Add(-hour)),
-				RevokedAt:  ptr(now.Add(-90 * time.Minute)),
+				ValidUntil: new(now.Add(-hour)),
+				RevokedAt:  new(now.Add(-90 * time.Minute)),
 			},
 			want: MandateStatusRevoked,
 		},
 		{
 			name: "revoked wins over active",
-			m:    Mandate{ValidFrom: now.Add(-hour), RevokedAt: ptr(now.Add(-time.Minute))},
+			m:    Mandate{ValidFrom: now.Add(-hour), RevokedAt: new(now.Add(-time.Minute))},
 			want: MandateStatusRevoked,
 		},
 	}
@@ -79,7 +77,7 @@ func TestClampToParent(t *testing.T) {
 	t.Run("administrative under full keeps its own window", func(t *testing.T) {
 		req := MandateGrant{
 			Type: MandateAdministrative, Scope: MandateScopeOrganization,
-			ValidFrom: now, ValidUntil: ptr(now.Add(day)),
+			ValidFrom: now, ValidUntil: new(now.Add(day)),
 		}
 		got, err := clampToParent(req, activeFull, now)
 		if err != nil {
@@ -107,10 +105,10 @@ func TestClampToParent(t *testing.T) {
 
 	t.Run("window is clamped to the parent's end", func(t *testing.T) {
 		parent := activeFull
-		parent.ValidUntil = ptr(now.Add(day))
+		parent.ValidUntil = new(now.Add(day))
 		req := MandateGrant{
 			Type: MandateAdministrative, Scope: MandateScopeOrganization,
-			ValidFrom: now, ValidUntil: ptr(now.Add(10 * day)),
+			ValidFrom: now, ValidUntil: new(now.Add(10 * day)),
 		}
 		got, err := clampToParent(req, parent, now)
 		if err != nil {
@@ -123,7 +121,7 @@ func TestClampToParent(t *testing.T) {
 
 	t.Run("an open-ended delegation inherits the parent's end", func(t *testing.T) {
 		parent := activeFull
-		parent.ValidUntil = ptr(now.Add(day))
+		parent.ValidUntil = new(now.Add(day))
 		req := MandateGrant{Type: MandateAdministrative, Scope: MandateScopeOrganization, ValidFrom: now}
 		got, err := clampToParent(req, parent, now)
 		if err != nil {
@@ -152,7 +150,7 @@ func TestClampToParent(t *testing.T) {
 
 	t.Run("a start after the parent's end leaves nothing to cut", func(t *testing.T) {
 		parent := activeFull
-		parent.ValidUntil = ptr(now.Add(day))
+		parent.ValidUntil = new(now.Add(day))
 		req := MandateGrant{
 			Type: MandateAdministrative, Scope: MandateScopeOrganization,
 			ValidFrom: now.Add(2 * day),
@@ -199,8 +197,8 @@ func TestClampToParent(t *testing.T) {
 
 	t.Run("nothing may be cut from an inactive parent", func(t *testing.T) {
 		for name, parent := range map[string]Mandate{
-			"revoked": {Type: MandateFull, Scope: MandateScopeOrganization, ValidFrom: now.Add(-day), RevokedAt: ptr(now.Add(-time.Hour))},
-			"expired": {Type: MandateFull, Scope: MandateScopeOrganization, ValidFrom: now.Add(-2 * day), ValidUntil: ptr(now.Add(-day))},
+			"revoked": {Type: MandateFull, Scope: MandateScopeOrganization, ValidFrom: now.Add(-day), RevokedAt: new(now.Add(-time.Hour))},
+			"expired": {Type: MandateFull, Scope: MandateScopeOrganization, ValidFrom: now.Add(-2 * day), ValidUntil: new(now.Add(-day))},
 			"pending": {Type: MandateFull, Scope: MandateScopeOrganization, ValidFrom: now.Add(day)},
 		} {
 			req := MandateGrant{Type: MandateAdministrative, Scope: MandateScopeOrganization, ValidFrom: now}
@@ -315,7 +313,7 @@ func TestValidateGrant(t *testing.T) {
 	t.Run("an empty window is rejected", func(t *testing.T) {
 		req := MandateGrant{
 			Type: MandateFull, Scope: MandateScopeOrganization,
-			ValidFrom: now, ValidUntil: ptr(now),
+			ValidFrom: now, ValidUntil: new(now),
 		}
 		if err := validateGrant(&req); !errors.Is(err, ErrMandateWindow) {
 			t.Errorf("err = %v, want ErrMandateWindow", err)

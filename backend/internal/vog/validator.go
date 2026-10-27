@@ -97,7 +97,7 @@ func (c *HTTPClient) Ping(ctx context.Context) error {
 // authentic or a final rejection - returns immediately without retrying.
 func (c *HTTPClient) Validate(ctx context.Context, pdf []byte) (ResponseCode, error) {
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		if attempt > 0 {
 			select {
 			case <-time.After(retryBackoff[attempt-1]):

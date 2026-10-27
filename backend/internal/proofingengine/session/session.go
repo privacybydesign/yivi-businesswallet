@@ -143,11 +143,11 @@ type Session struct {
 
 	// Access is which device holds each client slot, plus the pending handover
 	// grants.
-	Access Access `json:"access,omitempty"`
+	Access Access `json:"access"`
 
 	// Steps is the evidence collected per step, so a reload or a handover resumes
 	// where the subject left off. A nil field is a step not submitted yet.
-	Steps StepEvidence `json:"steps,omitempty"`
+	Steps StepEvidence `json:"steps"`
 	// FaceAttempts is how many face step attempts were reserved, each before
 	// the face provider was called.
 	FaceAttempts int `json:"faceAttempts,omitempty"`

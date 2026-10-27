@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -255,9 +256,7 @@ func decodeUnverified(raw string) (vct, issuer string, claims map[string]any) {
 		if b, err := base64.RawURLEncoding.DecodeString(jwtParts[1]); err == nil && json.Unmarshal(b, &payload) == nil {
 			vct, _ = payload["vct"].(string)
 			issuer, _ = payload["iss"].(string)
-			for k, v := range contentClaims(payload) {
-				claims[k] = v
-			}
+			maps.Copy(claims, contentClaims(payload))
 		}
 	}
 	// Disclosures sit between the issuer JWT and the (possibly empty) KB-JWT.

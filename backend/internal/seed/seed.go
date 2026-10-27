@@ -770,7 +770,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	}
 
 	invitationIDs := make([]uuid.UUID, 0, inviteCount)
-	for i := 0; i < inviteCount; i++ {
+	for i := range inviteCount {
 		first, last := faker.FirstName(), faker.LastName()
 		inviter := pickAdmin()
 		inv, err := orgs.CreateInvitation(actorCtx(inviter), organization.Invitation{

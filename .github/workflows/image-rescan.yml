@@ -1,0 +1,25 @@
+# Weekly re-scan of the PUBLISHED images (all platforms) for new CVEs.
+name: Image rescan
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rescan:
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [business-wallet, postguard-sidecar, devverifier]
+    uses: privacybydesign/github-workflows/.github/workflows/image-rescan.yml@v1
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+      tags: edge latest-release
+      severity-cutoff: high

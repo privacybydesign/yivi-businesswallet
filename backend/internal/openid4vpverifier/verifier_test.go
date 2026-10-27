@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -24,11 +25,12 @@ func disclosure(t *testing.T, name string, value any) string {
 // sdjwt builds a compact SD-JWT VC: issuer JWT ~ disclosures... ~ (KB trailer).
 func sdjwt(t *testing.T, disclosures ...string) string {
 	t.Helper()
-	s := "issuer.jwt.sig"
+	var s strings.Builder
+	s.WriteString("issuer.jwt.sig")
 	for _, d := range disclosures {
-		s += "~" + d
+		s.WriteString("~" + d)
 	}
-	return s + "~" // trailing '~' = empty key-binding slot
+	return s.String() + "~" // trailing '~' = empty key-binding slot
 }
 
 func TestParseDisclosuresFlattensAcrossCredentials(t *testing.T) {
@@ -207,6 +209,36 @@ func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
 		if !has(c, ClaimDateOfBirth) {
 			t.Errorf("%s without an age check does not ask the date of birth", c.ID)
 		}
+	}
+}
+
+// A flow asking the address adds the registered address as a set the wallet
+// may leave out, in the production scheme whatever the configured one.
+func TestProofingAddressQueryAsksRegisteredAddressOptionally(t *testing.T) {
+	q := stagingVCTs.queryFor(ScopeProofingAddress, nil)
+	if len(q.Credentials) != 4 || len(q.CredentialSets) != 2 {
+		t.Fatalf("proofing address query = %+v, want the identity and the address", q)
+	}
+	identity, address := q.CredentialSets[0], q.CredentialSets[1]
+	if identity.Required != nil {
+		t.Errorf("identity set required = %v, want it required", *identity.Required)
+	}
+	if address.Required == nil || *address.Required || !slices.Equal(address.Options[0], []string{credIDAddress}) {
+		t.Errorf("address set = %+v, want the address, not required", address)
+	}
+	c := q.Credentials[3]
+	if c.ID != credIDAddress || !slices.Equal(c.Meta.VctValues, []string{"pbdf.gemeente.address"}) || len(c.Claims) != 4 {
+		t.Errorf("address credential = %+v, want pbdf.gemeente.address with four claims", c)
+	}
+}
+
+func TestRegisteredAddress(t *testing.T) {
+	if _, ok := (Presentation{}).RegisteredAddress(); ok {
+		t.Error("RegisteredAddress answered for a presentation without it")
+	}
+	p := Presentation{ByCredential: map[string]map[string]string{credIDAddress: {ClaimAddressStreet: "Kerkstraat"}}}
+	if got, ok := p.RegisteredAddress(); !ok || got[ClaimAddressStreet] != "Kerkstraat" {
+		t.Errorf("RegisteredAddress = %v, %v", got, ok)
 	}
 }
 

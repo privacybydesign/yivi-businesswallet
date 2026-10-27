@@ -20,19 +20,27 @@ type vcts struct {
 	// live Justis statement - the org accepts that trade-off knowingly when it
 	// turns this method on (ScreeningSettings.AcceptYiviCredential).
 	vog string
+	// registeredAddress is the home address from the BRP, issued by Gemeente
+	// Nijmegen for anyone in the Netherlands. It exists only in the production
+	// scheme, so it does not follow the configured one.
+	registeredAddress string
 }
+
+// registeredAddressVCT is registeredAddress's vct in every scheme.
+const registeredAddressVCT = "pbdf.gemeente.address"
 
 func vctsFor(scheme string) vcts {
 	if scheme == "" {
 		scheme = defaultCredentialScheme
 	}
 	return vcts{
-		passport:        scheme + ".pbdf.passport",
-		idCard:          scheme + ".pbdf.idcard",
-		residencePermit: scheme + ".pbdf.residencepermit",
-		email:           scheme + ".sidn-pbdf.email",
-		phone:           scheme + ".sidn-pbdf.mobilenumber",
-		vog:             scheme + ".pbdf.vog",
+		passport:          scheme + ".pbdf.passport",
+		idCard:            scheme + ".pbdf.idcard",
+		residencePermit:   scheme + ".pbdf.residencepermit",
+		email:             scheme + ".sidn-pbdf.email",
+		phone:             scheme + ".sidn-pbdf.mobilenumber",
+		vog:               scheme + ".pbdf.vog",
+		registeredAddress: registeredAddressVCT,
 	}
 }
 
@@ -48,6 +56,7 @@ const (
 	credIDEmail           = "email"
 	credIDPhone           = "phone"
 	credIDVog             = "vog"
+	credIDAddress         = "address"
 
 	// QueryCredentialID is the DCQL credential id StartQuery uses for the one
 	// credential a template-built query asks for; Presentation.QueryClaims reads
@@ -86,6 +95,8 @@ type dcqlClaim struct {
 
 type dcqlCredentialSet struct {
 	Options [][]string `json:"options"`
+	// Required false lets the wallet leave the set out; absent is true.
+	Required *bool `json:"required,omitempty"`
 }
 
 func claimPaths(names ...string) []dcqlClaim {
@@ -119,6 +130,10 @@ const (
 	// identity proofing Yivi method (internal/proofing): its photo only when the
 	// flow keeps it.
 	ScopeProofing
+	// ScopeProofingAddress is ScopeProofing plus, optionally, the registered
+	// address (pbdf.gemeente.address), for a flow that asks the subject's
+	// postal address: what they enter is compared with it.
+	ScopeProofingAddress
 )
 
 func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
@@ -131,6 +146,8 @@ func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
 		return v.identityVogQuery(claims)
 	case ScopeProofing:
 		return v.proofingQuery(claims)
+	case ScopeProofingAddress:
+		return v.proofingAddressQuery(claims)
 	default:
 		return v.loginQuery()
 	}
@@ -251,4 +268,17 @@ func (v vcts) proofingQuery(extra []string) dcqlQuery {
 			{Options: [][]string{{credIDPassport}, {credIDIDCard}, {credIDResidencePermit}}},
 		},
 	}
+}
+
+// proofingAddressQuery is proofingQuery plus the registered address as a set
+// the wallet may leave out: a holder without it still proves who they are.
+func (v vcts) proofingAddressQuery(extra []string) dcqlQuery {
+	q := v.proofingQuery(extra)
+	optional := false
+	q.Credentials = append(q.Credentials, dcqlCredential{
+		ID: credIDAddress, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.registeredAddress}},
+		Claims: claimPaths(ClaimAddressStreet, ClaimAddressHouseNumber, ClaimAddressPostalCode, ClaimAddressCity),
+	})
+	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}, Required: &optional})
+	return q
 }
