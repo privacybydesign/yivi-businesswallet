@@ -47,8 +47,10 @@ type fakeRequests struct {
 	linkLookups int
 	reviews     []string
 	// stored is the last request created.
-	stored      *Request
-	resultReads int
+	stored *Request
+	// registeredAddress is stored's registered address, until an address is added.
+	registeredAddress *Address
+	resultReads       int
 	// page is what ListExternalPage answers from; pages records each cursor asked for.
 	page     []Request
 	pages    []*RequestCursor
@@ -232,8 +234,15 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectAddress != nil {
 		return false, nil
 	}
-	f.stored.SubjectAddress = &addr
+	f.stored.SubjectAddress, f.registeredAddress = &addr, nil
 	return true, nil
+}
+
+func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr Address) error {
+	if f.stored != nil && f.stored.ID == req.ID && f.stored.SubjectAddress == nil {
+		f.registeredAddress = &addr
+	}
+	return nil
 }
 
 func (f *fakeRequests) LockReview(context.Context, uuid.UUID) (func(), error) {
@@ -564,16 +573,18 @@ type fakeVerifier struct {
 	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
-	// claims are each start's extra claims.
+	// claims are each start's extra claims, scopes each start's scope.
 	claims [][]string
+	scopes []openid4vpverifier.Scope
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
-	if scope != openid4vpverifier.ScopeProofing {
+	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress {
 		return openid4vpverifier.Session{}, errors.New("unexpected scope")
 	}
 	f.started++
 	f.claims = append(f.claims, claims)
+	f.scopes = append(f.scopes, scope)
 	return openid4vpverifier.Session{TransactionID: "tx-" + strconv.Itoa(f.started), WalletLink: "openid4vp://?request_uri=x"}, nil
 }
 

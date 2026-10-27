@@ -34,6 +34,12 @@ const (
 	// ClaimPhoto is the passport, id-card and residence-permit portrait, base64 (ScopeProofing).
 	ClaimPhoto = "photo"
 
+	// pbdf.gemeente.address claim keys (ScopeProofingAddress).
+	ClaimAddressStreet      = "street"
+	ClaimAddressHouseNumber = "houseNumber"
+	ClaimAddressPostalCode  = "zipcode"
+	ClaimAddressCity        = "city"
+
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because
 	// they come from a different credential's own attribute names.
@@ -73,7 +79,7 @@ type Presentation struct {
 	Claims map[string]string
 	// ByCredential holds each requested credential's own disclosed claims,
 	// keyed by the DCQL credential id (passport, idcard, residencepermit, email,
-	// phone, vog).
+	// phone, vog, address).
 	// Needed because two credentials in one presentation may disclose the same
 	// claim name - both the identity credential and pbdf.vog carry a
 	// dateOfBirth - and Claims keeps only one of them, in map-iteration order.
@@ -124,6 +130,13 @@ func (p Presentation) Document() (IdentityDocument, bool) {
 		}
 	}
 	return IdentityDocument{}, false
+}
+
+// RegisteredAddress returns the claims of the registered address
+// (ScopeProofingAddress); false when the wallet left it out.
+func (p Presentation) RegisteredAddress() (map[string]string, bool) {
+	claims, ok := p.ByCredential[credIDAddress]
+	return claims, ok
 }
 
 // VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.
