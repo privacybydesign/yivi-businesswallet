@@ -6731,8 +6731,10 @@ paths:
         request whose disclosure carried the registered (BRP) address, the address is then
         compared with it instead: the same postal code and house number (with any letter or
         addition) is `registered`, anything else `registered_mismatch`, carrying the registered address as
-        `registered`, and rejects the approved session with `ADDRESS_MISMATCH`. The address is kept sealed and shown with the request; audited
-        `identity_proofing.address_added` without the address (webhook
+        `registered`, and rejects the approved session with `ADDRESS_MISMATCH`. Only
+        `registered` confirms where the person lives; every other address is self-declared,
+        `verified` included. The address is kept sealed and shown with the request; audited
+        `identity_proofing.address_added` with its `verification` but without the address (webhook
         `session.address_added`, which carries it).
       requestBody:
         required: true
@@ -11590,8 +11592,10 @@ components:
             register and written as the register writes it, `unchecked` has a Dutch postal code
             but the register could not be reached, `unsupported` is outside the Netherlands.
             `registered` is the registered (BRP) address the subject's Yivi app disclosed,
-            `registered_mismatch` differs from it. Absent on an address kept before addresses
-            were checked; ignored in a request body.
+            `registered_mismatch` differs from it. Only `registered` confirms where the person
+            lives; the others are self-declared, `verified` too (the address exists, not that the
+            person lives there). Absent on an address kept before addresses were checked; ignored
+            in a request body.
         registered:
           readOnly: true
           description: >-

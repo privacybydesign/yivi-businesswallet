@@ -2045,6 +2045,12 @@ and on a Yivi app request against the registered (BRP) address too.
     the number itself apart so 12-1 is not 121) is `registered`, anything else
     `registered_mismatch`, the address then carrying the BRP one as
     `registered`. The Sessions page shows both.
+  - Only `registered` confirms where the person lives. Every other result is
+    self-declared, `verified` included (the address exists, nothing more); an
+    Idem request is always self-declared. `address_added` audits the result
+    as `verification`, never the address.
+  - A match the BAG did not check (`unchecked`) is kept as the BRP address,
+    so a made-up street with the right postal code and number is not.
   - A mismatch rejects the approved request with `ADDRESS_MISMATCH`
     (`rejectAddressMismatch`, in `AddAddress`'s transaction): audited
     `rejected`, sent as `session.failed` after `session.address_added`.

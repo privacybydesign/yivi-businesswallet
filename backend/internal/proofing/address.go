@@ -234,7 +234,7 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 }
 
 // AddAddress seals addr on req, audited identity_proofing.address_added
-// (without the address), and sends session.address_added. An
+// (with its verification, without the address), and sends session.address_added. An
 // AddressRegisteredMismatch also rejects the approved request with
 // errorAddressMismatch. It is false, and changes nothing, when the request
 // holds an address already or was erased.
@@ -267,7 +267,7 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingAddressAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(map[string]any{}))); err != nil {
+			audit.Created(req.auditFields(map[string]any{"verification": string(addr.Verification)}))); err != nil {
 			return err
 		}
 
@@ -542,8 +542,10 @@ func registeredAddress(claims map[string]string) Address {
 // compareRegistered marks addr, as verifyAddress kept it, against the
 // registered address the subject's Yivi app disclosed, by postal code and
 // house number, which name one Dutch address. Street and city are left out:
-// the BRP may shorten a name the BAG writes in full. A registered address
-// without both (the card's house number is optional) leaves addr as it is.
+// the BRP may shorten a name the BAG writes in full. A match the BAG did not
+// check is kept as the registered address, so a made-up street is not. A
+// registered address without both (the card's house number is optional)
+// leaves addr as it is.
 func compareRegistered(addr, registered Address) Address {
 	brp, ok := addresslookup.PostalCode(registered.PostalCode)
 	brpNumber, numbered := addresslookup.HouseNumber(registered.HouseNumber)
@@ -554,6 +556,9 @@ func compareRegistered(addr, registered Address) Address {
 	// The number apart, so 12-1 is not 121.
 	enteredNumber, _ := addresslookup.HouseNumber(addr.HouseNumber)
 	if entered == brp && enteredNumber == brpNumber && addressKey(addr.HouseNumber) == addressKey(registered.HouseNumber) {
+		if addr.Verification != AddressVerified {
+			addr = registered
+		}
 		addr.Verification = AddressRegistered
 		return addr
 	}

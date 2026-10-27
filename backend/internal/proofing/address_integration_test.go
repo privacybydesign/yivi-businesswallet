@@ -127,6 +127,12 @@ func TestAddressMismatchRejects(t *testing.T) {
 	if auditCount(t, pool, audit.IdentityProofingRejected) != 1 {
 		t.Error("want one rejected event")
 	}
+	var audited bool
+	if err := pool.QueryRow(ctx, `SELECT metadata::text LIKE '%"verification": "registered_mismatch"%'
+		AND metadata::text NOT LIKE '%Molenstraat%' FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingAddressAdded).Scan(&audited); err != nil || !audited {
+		t.Errorf("address_added audits the verification without the address (%v)", err)
+	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("deliveries = %+v, %v; want session.address_added and session.failed", deliveries, err)

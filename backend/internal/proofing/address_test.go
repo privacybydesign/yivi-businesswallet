@@ -301,6 +301,7 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 	other := Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}
 	cases := []struct {
 		name       string
+		lookup     *fakeAddressLookup
 		registered map[string]string
 		address    Address
 		want       Address
@@ -308,13 +309,20 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 		wantCode   string
 	}{
 		{
-			"same, as written otherwise", brpClaims,
+			"same, the register written its way", &fakeAddressLookup{found: []addresslookup.Address{registerAddress}},
+			withClaim(openid4vpverifier.ClaimAddressStreet, "Kerkstr"),
 			Address{Street: "kerkstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nijmegen", Country: "NL"},
-			Address{Street: "kerkstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nijmegen", Country: "NL", Verification: AddressRegistered},
+			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered},
 			StatusApproved, "",
 		},
 		{
-			"another address", brpClaims, other,
+			"same, unchecked, made-up street", nil, brpClaims,
+			Address{Street: "Nepstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nergenshuizen", Country: "NL"},
+			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered},
+			StatusApproved, "",
+		},
+		{
+			"another address", nil, brpClaims, other,
 			Address{
 				Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL",
 				Verification: AddressRegisteredMismatch, Registered: &registered,
@@ -322,13 +330,7 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 			StatusRejected, errorAddressMismatch,
 		},
 		{
-			"street shortened in the BRP", withClaim(openid4vpverifier.ClaimAddressStreet, "Kerkstr"),
-			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
-			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL", Verification: AddressRegistered},
-			StatusApproved, "",
-		},
-		{
-			"addition taken for the number", withClaim(openid4vpverifier.ClaimAddressHouseNumber, "12-1"),
+			"addition taken for the number", nil, withClaim(openid4vpverifier.ClaimAddressHouseNumber, "12-1"),
 			Address{Street: "Kerkstraat", HouseNumber: "121", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
 			Address{
 				Street: "Kerkstraat", HouseNumber: "121", PostalCode: "6511AB", City: "Nijmegen", Country: "NL",
@@ -338,12 +340,12 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 			StatusRejected, errorAddressMismatch,
 		},
 		{
-			"no house number on the card", withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""), other,
+			"no house number on the card", nil, withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""), other,
 			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
 			StatusApproved, "",
 		},
 		{
-			"not disclosed", nil, other,
+			"not disclosed", nil, nil, other,
 			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
 			StatusApproved, "",
 		},
@@ -351,6 +353,9 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := discloseYiviAddress(t, AddressRequired, tc.registered)
+			if tc.lookup != nil {
+				f.svc.addressLookup = tc.lookup
+			}
 			got, err := f.svc.AddAddress(context.Background(), testOrg.ID, f.requests.stored.ID, nil, tc.address)
 			if err != nil {
 				t.Fatalf("AddAddress: %v", err)

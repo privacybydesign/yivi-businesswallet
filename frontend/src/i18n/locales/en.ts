@@ -935,13 +935,14 @@ export const en = {
         none: "No address entered.",
         missing: "No address",
         declared: "As the person entered it; not checked against a document.",
-        verified: "Found in the Dutch address register (BAG).",
+        verified:
+          "Self-declared: the address exists in the Dutch address register (BAG), but is not confirmed as where the person lives.",
         unchecked:
           "As the person entered it; the Dutch address register could not be reached to check it.",
         unsupported:
           "As the person entered it; only Dutch addresses are checked against a register.",
         registered:
-          "The same as the registered address (BRP) the person shared from the Yivi app.",
+          "Confirmed: the same as the registered address (BRP) the person shared from the Yivi app.",
         registeredMismatch:
           "Differs from the registered address (BRP) the person shared from the Yivi app. The session was rejected.",
         registeredTitle: "Registered address (BRP)",

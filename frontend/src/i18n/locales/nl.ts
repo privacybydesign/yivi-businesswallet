@@ -961,13 +961,14 @@ export const nl: Translation<typeof en> = {
         missing: "Geen adres",
         declared:
           "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
-        verified: "Gevonden in de Nederlandse adresregistratie (BAG).",
+        verified:
+          "Zelf opgegeven: het adres bestaat in de Nederlandse adresregistratie (BAG), maar is niet bevestigd als woonadres van de persoon.",
         unchecked:
           "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
         unsupported:
           "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
         registered:
-          "Gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
+          "Bevestigd: gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
         registeredMismatch:
           "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. De sessie is afgewezen.",
         registeredTitle: "Woonadres (BRP)",
