@@ -793,6 +793,11 @@ const orgPausedReviewer = "system: organisation paused"
 // identity read off the document is not that name and birth date.
 const errorIdentityMismatch = "IDENTITY_MISMATCH"
 
+// errorAddressMismatch is the error code the wallet records when the address
+// the subject entered after approval is not the registered (BRP) address
+// their Yivi app disclosed.
+const errorAddressMismatch = "ADDRESS_MISMATCH"
+
 // birthDateLayout is how a request's expected birth date is written.
 const birthDateLayout = time.DateOnly
 

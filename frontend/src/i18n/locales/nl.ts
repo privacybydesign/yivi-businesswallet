@@ -538,6 +538,8 @@ export const nl: Translation<typeof en> = {
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
+      addressMismatch:
+        "het ingevulde adres is niet het woonadres uit de BRP dat vanuit de Yivi-app is gedeeld",
       unknown: "de controle is niet geslaagd ({{code}})",
       evidenceNotAsRequested:
         "een beoordelaar vond dat wat is aangeleverd niet is wat gevraagd was",
@@ -964,6 +966,11 @@ export const nl: Translation<typeof en> = {
           "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
         unsupported:
           "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
+        registered:
+          "Gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
+        registeredMismatch:
+          "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. De sessie is afgewezen.",
+        registeredTitle: "Woonadres (BRP)",
       },
       diplomas: {
         title: "Diploma's",

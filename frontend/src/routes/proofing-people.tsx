@@ -11,6 +11,7 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
+  ProofingAddressInput,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
@@ -581,16 +582,34 @@ function SessionAddress({
       {a === undefined ? (
         <p className={HINT}>{t("identityProofing.sessions.address.none")}</p>
       ) : (
-        <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
-          {`${a.street} ${a.houseNumber}`}
-          <br />
-          {`${a.postalCode} ${a.city}`}
-          <br />
-          {a.country}
-        </address>
+        <PostalAddress address={a} />
       )}
       <p className={HINT}>{addressVerificationNote(a?.verification, t)}</p>
+      {a?.registered !== undefined && (
+        <>
+          <h4 className="text-ink text-[13px] font-semibold">
+            {t("identityProofing.sessions.address.registeredTitle")}
+          </h4>
+          <PostalAddress address={a.registered} />
+        </>
+      )}
     </div>
+  );
+}
+
+function PostalAddress({
+  address: a,
+}: Readonly<{
+  address: ProofingAddressInput;
+}>): React.JSX.Element {
+  return (
+    <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
+      {`${a.street} ${a.houseNumber}`}
+      <br />
+      {`${a.postalCode} ${a.city}`}
+      <br />
+      {a.country}
+    </address>
   );
 }
 

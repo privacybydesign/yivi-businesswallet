@@ -1407,6 +1407,8 @@ describe("addressVerificationNote", () => {
     ["verified", "verified"],
     ["unchecked", "unchecked"],
     ["unsupported", "unsupported"],
+    ["registered", "registered"],
+    ["registered_mismatch", "registeredMismatch"],
     [undefined, "declared"],
   ] as const)("says how a %s address was checked", (verification, key) => {
     const copy = t(`identityProofing.sessions.address.${key}`);

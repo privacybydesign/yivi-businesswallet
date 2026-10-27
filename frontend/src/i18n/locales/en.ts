@@ -518,6 +518,8 @@ export const en = {
         "identity proofing was paused while the session waited for review; try again later",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
+      addressMismatch:
+        "the address entered is not the registered address (BRP) shared from the Yivi app",
       unknown: "the check did not pass ({{code}})",
       evidenceNotAsRequested:
         "a reviewer found that what was sent is not what was asked for",
@@ -938,6 +940,11 @@ export const en = {
           "As the person entered it; the Dutch address register could not be reached to check it.",
         unsupported:
           "As the person entered it; only Dutch addresses are checked against a register.",
+        registered:
+          "The same as the registered address (BRP) the person shared from the Yivi app.",
+        registeredMismatch:
+          "Differs from the registered address (BRP) the person shared from the Yivi app. The session was rejected.",
+        registeredTitle: "Registered address (BRP)",
       },
       diplomas: {
         title: "Diplomas",

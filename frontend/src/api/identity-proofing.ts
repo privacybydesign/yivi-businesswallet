@@ -39,24 +39,39 @@ const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;
 
 // How an address was checked when it was kept: found in the Dutch address
-// register, Dutch but the register could not be asked, or outside the
-// Netherlands. An address kept before addresses were checked has none.
-const ADDRESS_VERIFICATIONS = ["verified", "unchecked", "unsupported"] as const;
+// register, Dutch but the register could not be asked, outside the
+// Netherlands, or the same as or other than the registered (BRP) address the
+// Yivi app disclosed. An address kept before addresses were checked has none.
+const ADDRESS_VERIFICATIONS = [
+  "verified",
+  "unchecked",
+  "unsupported",
+  "registered",
+  "registered_mismatch",
+] as const;
 export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
 
-// The postal address a subject entered.
-const proofingAddressSchema = z.object({
+const postalAddressSchema = z.object({
   street: z.string(),
   houseNumber: z.string(),
   postalCode: z.string(),
   city: z.string(),
   country: z.string(),
+});
+
+// The postal address a subject entered; registered is the BRP address a
+// registered_mismatch differs from.
+const proofingAddressSchema = postalAddressSchema.extend({
   verification: z.enum(ADDRESS_VERIFICATIONS).optional().catch(undefined),
+  registered: postalAddressSchema.optional(),
 });
 
 export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
 // What the address step sends; the backend sets the verification.
-export type ProofingAddressInput = Omit<ProofingAddress, "verification">;
+export type ProofingAddressInput = Omit<
+  ProofingAddress,
+  "verification" | "registered"
+>;
 
 // An address as the Dutch address register writes it.
 const registerAddressSchema = z.object({

@@ -1014,6 +1014,10 @@ export function addressVerificationNote(
       return t("identityProofing.sessions.address.unchecked");
     case "unsupported":
       return t("identityProofing.sessions.address.unsupported");
+    case "registered":
+      return t("identityProofing.sessions.address.registered");
+    case "registered_mismatch":
+      return t("identityProofing.sessions.address.registeredMismatch");
     case undefined:
       return t("identityProofing.sessions.address.declared");
   }
@@ -1044,6 +1048,7 @@ const REJECTION_REASON_KEYS = {
   DOC_EXPIRED: "docExpired",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
+  ADDRESS_MISMATCH: "addressMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
   REVIEW_NOT_HOLDER: "reviewNotHolder",
   REVIEW_ALTERED: "reviewAltered",

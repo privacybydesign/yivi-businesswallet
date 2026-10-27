@@ -113,8 +113,8 @@ tags:
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`, `ORG_PAUSED` and
-      `LEGAL_RETENTION`; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
+      sets `IDENTITY_MISMATCH`, `ADDRESS_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`,
+      `ORG_PAUSED` and `LEGAL_RETENTION`; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
       (it looks altered), `EVIDENCE_NOT_AS_REQUESTED` (it is not what was asked for) or
       `MANUAL_REVIEW_REJECTED` (something else); the session itself is rejected for `FACE_NO_MATCH`,
       `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
@@ -6727,8 +6727,11 @@ paths:
         register (the BAG): one it has is kept as the register writes its street, house number,
         postal code and city (`verification: verified`), one it lacks is 422
         `address_not_found`; while the register cannot be reached it is kept as entered
-        (`unchecked`). Any other address is kept as entered (`unsupported`). The
-        address is kept sealed and shown with the request; audited
+        (`unchecked`). Any other address is kept as entered (`unsupported`). On a Yivi app
+        request whose disclosure carried the registered (BRP) address, the address is then
+        compared with it instead: the same postal code and house number (with any letter or
+        addition) is `registered`, anything else `registered_mismatch`, carrying the registered address as
+        `registered`, and rejects the approved session with `ADDRESS_MISMATCH`. The address is kept sealed and shown with the request; audited
         `identity_proofing.address_added` without the address (webhook
         `session.address_added`, which carries it).
       requestBody:
@@ -8556,7 +8559,9 @@ paths:
         read off the document (`proofedName`) until the organisation's data retention clears
         it. `expectedSubject: true` is a session created for one person (`name` with
         `birthDate`). Rejection codes the wallet itself sets: `IDENTITY_MISMATCH` (the
-        document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
+        document is another person's), `ADDRESS_MISMATCH` (the address entered after approval
+        is not the registered (BRP) address the Yivi app disclosed: the approved session is
+        then rejected), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         a calendar month after the person was proven, an identity check within the data
         retention), `LEGAL_RETENTION` (an
@@ -11579,12 +11584,21 @@ components:
         verification:
           type: string
           readOnly: true
-          enum: [verified, unchecked, unsupported]
+          enum: [verified, unchecked, unsupported, registered, registered_mismatch]
           description: >-
             How the address was checked when it was kept: `verified` is in the Dutch address
             register and written as the register writes it, `unchecked` has a Dutch postal code
             but the register could not be reached, `unsupported` is outside the Netherlands.
-            Absent on an address kept before addresses were checked; ignored in a request body.
+            `registered` is the registered (BRP) address the subject's Yivi app disclosed,
+            `registered_mismatch` differs from it. Absent on an address kept before addresses
+            were checked; ignored in a request body.
+        registered:
+          readOnly: true
+          description: >-
+            The registered (BRP) address a `registered_mismatch` differs from, as the Yivi
+            app disclosed it. Ignored in a request body.
+          allOf:
+            - $ref: '#/components/schemas/ProofingAddress'
       required: [street, houseNumber, postalCode, city, country]
     ProofingAddressLookup:
       type: object

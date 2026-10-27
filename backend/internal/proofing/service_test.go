@@ -245,6 +245,10 @@ func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr
 	return nil
 }
 
+func (f *fakeRequests) RegisteredAddress(context.Context, uuid.UUID) (*Address, error) {
+	return f.registeredAddress, nil
+}
+
 func (f *fakeRequests) LockReview(context.Context, uuid.UUID) (func(), error) {
 	return func() {}, nil
 }

@@ -3,6 +3,8 @@ package proofing
 import (
 	"context"
 	"errors"
+	"maps"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -250,8 +252,8 @@ var brpClaims = map[string]string{
 }
 
 // discloseYiviAddress runs a Yivi request on a flow whose address mode is
-// mode, its disclosure carrying brpClaims.
-func discloseYiviAddress(t *testing.T, mode AddressMode) fixture {
+// mode, its disclosure carrying registered when set, and approves it.
+func discloseYiviAddress(t *testing.T, mode AddressMode, registered map[string]string) fixture {
 	t.Helper()
 	f := newAddressFixture(mode)
 	ctx := context.Background()
@@ -259,12 +261,16 @@ func discloseYiviAddress(t *testing.T, mode AddressMode) fixture {
 	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
 		t.Fatalf("StartYivi: %v", err)
 	}
-	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
-		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"}, "address": brpClaims,
-	}}
+	byCredential := map[string]map[string]string{"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"}}
+	if registered != nil {
+		byCredential["address"] = registered
+	}
+	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: byCredential}
 	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
 		t.Fatalf("YiviDisclosure: %v", err)
 	}
+	completed := time.Now()
+	f.requests.stored.Status, f.requests.stored.CompletedAt = StatusApproved, &completed
 	return f
 }
 
@@ -273,12 +279,91 @@ func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
 		mode AddressMode
 		want openid4vpverifier.Scope
 	}{{AddressRequired, openid4vpverifier.ScopeProofingAddress}, {AddressOff, openid4vpverifier.ScopeProofing}} {
-		f := discloseYiviAddress(t, tc.mode)
+		f := discloseYiviAddress(t, tc.mode, brpClaims)
 		if got := f.verifier.scopes[0]; got != tc.want {
 			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
 		}
 		if kept := f.requests.registeredAddress != nil; kept != tc.mode.asked() {
 			t.Errorf("address %s: registered address kept = %v", tc.mode, kept)
 		}
+	}
+}
+
+// withClaim is brpClaims with claim set to value.
+func withClaim(claim, value string) map[string]string {
+	claims := maps.Clone(brpClaims)
+	claims[claim] = value
+	return claims
+}
+
+func TestAddAddressComparedWithRegistered(t *testing.T) {
+	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "Nederland"}
+	other := Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL"}
+	cases := []struct {
+		name       string
+		registered map[string]string
+		address    Address
+		want       Address
+		wantStatus Status
+		wantCode   string
+	}{
+		{
+			"same, as written otherwise", brpClaims,
+			Address{Street: "kerkstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nijmegen", Country: "NL"},
+			Address{Street: "kerkstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nijmegen", Country: "NL", Verification: AddressRegistered},
+			StatusApproved, "",
+		},
+		{
+			"another address", brpClaims, other,
+			Address{
+				Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL",
+				Verification: AddressRegisteredMismatch, Registered: &registered,
+			},
+			StatusRejected, errorAddressMismatch,
+		},
+		{
+			"street shortened in the BRP", withClaim(openid4vpverifier.ClaimAddressStreet, "Kerkstr"),
+			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
+			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL", Verification: AddressRegistered},
+			StatusApproved, "",
+		},
+		{
+			"addition taken for the number", withClaim(openid4vpverifier.ClaimAddressHouseNumber, "12-1"),
+			Address{Street: "Kerkstraat", HouseNumber: "121", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
+			Address{
+				Street: "Kerkstraat", HouseNumber: "121", PostalCode: "6511AB", City: "Nijmegen", Country: "NL",
+				Verification: AddressRegisteredMismatch,
+				Registered:   &Address{Street: "Kerkstraat", HouseNumber: "12-1", PostalCode: "6511AB", City: "Nijmegen", Country: "Nederland"},
+			},
+			StatusRejected, errorAddressMismatch,
+		},
+		{
+			"no house number on the card", withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""), other,
+			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
+			StatusApproved, "",
+		},
+		{
+			"not disclosed", nil, other,
+			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
+			StatusApproved, "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := discloseYiviAddress(t, AddressRequired, tc.registered)
+			got, err := f.svc.AddAddress(context.Background(), testOrg.ID, f.requests.stored.ID, nil, tc.address)
+			if err != nil {
+				t.Fatalf("AddAddress: %v", err)
+			}
+			if !reflect.DeepEqual(*got.SubjectAddress, tc.want) {
+				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
+			}
+			if got.Status != tc.wantStatus || got.ErrorCode != tc.wantCode {
+				t.Errorf("status = %s %q, want %s %q", got.Status, got.ErrorCode, tc.wantStatus, tc.wantCode)
+			}
+			if f.requests.registeredAddress != nil {
+				t.Error("registered address kept after the address was added")
+			}
+		})
 	}
 }
