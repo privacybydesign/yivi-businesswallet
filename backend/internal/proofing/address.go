@@ -86,7 +86,7 @@ const (
 	// register addresses are checked against.
 	AddressUnsupported AddressVerification = "unsupported"
 	// AddressRegistered is the registered (BRP) address the subject's Yivi app
-	// disclosed: same postal code, house number and street.
+	// disclosed: same postal code and house number.
 	AddressRegistered AddressVerification = "registered"
 	// AddressRegisteredMismatch differs from the registered address the Yivi
 	// app disclosed, which the address carries as Registered.
@@ -150,6 +150,10 @@ func (a Address) normalized() (Address, error) {
 // webhookAddressKey is where a session.address_added delivery carries the
 // address; Purge drops it from the request's deliveries.
 const webhookAddressKey = "address"
+
+// webhookAddressReviewKey is where a session.address_reviewed delivery
+// carries the decision.
+const webhookAddressReviewKey = "addressReview"
 
 type flowAddressStore interface {
 	Get(ctx context.Context, orgID uuid.UUID, flowID string) (AddressMode, error)
@@ -236,7 +240,8 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 // AddAddress seals addr on req, audited identity_proofing.address_added
 // (with its verification, without the address), and sends session.address_added. An
 // AddressRegisteredMismatch also rejects the approved request with
-// errorAddressMismatch. It is false, and changes nothing, when the request
+// errorAddressMismatch, and a self-declared one waits for a reviewer
+// (AddressReviewPending). It is false, and changes nothing, when the request
 // holds an address already or was erased.
 func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address) (bool, error) {
 	if s.cipher == nil {
@@ -255,8 +260,9 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	added := false
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL, updated_at = now()
-			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed)
+			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL,
+				address_review = $3, updated_at = now()
+			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed, addressReviewOf(addr))
 		if err != nil {
 			return fmt.Errorf("proofing: add address request %s: %w", req.ID, err)
 		}
@@ -481,6 +487,9 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
 	if addr.Verification == AddressRegisteredMismatch {
 		req.Status, req.ErrorCode = StatusRejected, errorAddressMismatch
+	}
+	if review := addressReviewOf(addr); review != nil {
+		req.AddressReview = *review
 	}
 	return req, nil
 }

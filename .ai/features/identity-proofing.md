@@ -2050,6 +2050,23 @@ and on a Yivi app request against the registered (BRP) address too.
     self-declared, `verified` included (the address exists, nothing more); an
     Idem request is always self-declared. `address_added` audits the result
     as `verification`, never the address.
+- **Address review**: a self-declared address waits for a reviewer
+  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`).
+  - Only the address is reviewed: the session keeps its outcome, and the
+    engine's session review is untouched (`address_review.go`).
+  - `POST .../requests/{id}/address/review` `{decision: confirm|reject}`,
+    reviewer route. `ReviewScope.reaches` also reaches a pending address;
+    `ownReview` applies, except to a platform admin. A decided or erased one is 409
+    `address_not_under_review`.
+  - Audited `address_reviewed`, webhook `session.address_reviewed`
+    (`addressReview` in its data).
+  - Decided on the Reviews page, never on the Sessions page:
+    - The waiting list reads `?addressReview=pending` beside
+      `?status=needs_review` (`useWaitingReviewsQuery`); a reviewer lists it
+      org-wide (`listsEveryRequest`). It counts under "Identity checks".
+    - `isAddressReview` sends its page to `routes/address-review.tsx`: the
+      address, the approved check, Confirm / Reject.
+    - The Sessions page only shows the status, with a link to the review.
   - A match the BAG did not check (`unchecked`) is kept as the BRP address,
     so a made-up street with the right postal code and number is not.
   - A mismatch rejects the approved request with `ADDRESS_MISMATCH`

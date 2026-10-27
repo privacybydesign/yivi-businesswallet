@@ -236,3 +236,54 @@ func TestRegisteredAddressSealedUntilAddressOrPurge(t *testing.T) {
 		t.Errorf("after purge registered address = %+v, %v; want none", got, err)
 	}
 }
+
+func TestSelfDeclaredAddressReviewStored(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	reviewer := makeUser(t, pool, "rita@example.org")
+	ctx := context.Background()
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionAddressReviewed}); err != nil {
+		t.Fatalf("Save webhook: %v", err)
+	}
+	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
+	in.Address = AddressRequired
+	req := createStarted(t, requests, in, "s1")
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
+	if added, err := requests.AddAddress(ctx, req, addr); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v; want added", added, err)
+	}
+	pending, err := requests.Get(ctx, orgID, req.ID)
+	if err != nil || pending.AddressReview != AddressReviewPending {
+		t.Fatalf("Get = %q, %v; want the address pending", pending.AddressReview, err)
+	}
+	review := AddressReviewPending
+	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 1 {
+		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
+	}
+
+	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed); err != nil || !ok {
+		t.Fatalf("DecideAddressReview = %v, %v; want decided", ok, err)
+	}
+	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected); err != nil || ok {
+		t.Errorf("DecideAddressReview again = %v, %v; want refused", ok, err)
+	}
+	got, err := requests.Get(ctx, orgID, req.ID)
+	if err != nil || got.AddressReview != AddressReviewConfirmed || got.Status != StatusApproved {
+		t.Errorf("Get = %s %q, %v; want approved, address confirmed", got.Status, got.AddressReview, err)
+	}
+	if auditCount(t, pool, audit.IdentityProofingAddressReviewed) != 1 {
+		t.Error("want one address_reviewed event")
+	}
+	deliveries, err := webhooks.Deliveries(ctx, orgID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressReviewed {
+		t.Errorf("deliveries = %+v, %v; want one session.address_reviewed", deliveries, err)
+	}
+}

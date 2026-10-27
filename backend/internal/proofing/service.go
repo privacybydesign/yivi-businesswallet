@@ -94,6 +94,7 @@ type requestStore interface {
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr Address) error
+	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview) (bool, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 

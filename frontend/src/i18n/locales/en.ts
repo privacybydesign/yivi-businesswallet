@@ -542,6 +542,8 @@ export const en = {
         "This session is no longer waiting for review: someone may have decided it already.",
       ownReview:
         "You sent this check, or it is about you, so another reviewer decides it.",
+      addressNotUnderReview:
+        "This address is no longer waiting for review: someone may have decided it already.",
       referencePhotoRequired:
         "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
@@ -946,6 +948,14 @@ export const en = {
         registeredMismatch:
           "Differs from the registered address (BRP) the person shared from the Yivi app. The session was rejected.",
         registeredTitle: "Registered address (BRP)",
+        reviewPending:
+          "Waiting for a reviewer to confirm the address. The identity check is not affected.",
+        reviewConfirmed: "A reviewer confirmed the address.",
+        reviewRejected:
+          "A reviewer rejected the address. The identity check is not affected.",
+        openReview: "Open the review",
+        confirm: "Confirm address",
+        reject: "Reject address",
       },
       diplomas: {
         title: "Diplomas",
@@ -1136,6 +1146,20 @@ export const en = {
       empty: "Nothing waits for a decision.",
       emptyClosed: "No data request has been closed yet.",
       identityCheck: "Identity check",
+      addressCheck: "Address",
+      address: {
+        title: "Review an address",
+        whyTitle: "Why this waits for you",
+        why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
+        checkTitle: "Identity check",
+        checkHint:
+          "The identity check itself is approved. Your decision only concerns the address.",
+        method: "Checked with",
+        level: "Assurance level",
+        decisionTitle: "Decision",
+        confirmed: "The address was confirmed.",
+        rejected: "The address was rejected.",
+      },
       requestedBy: "Requested by {{name}}",
       provenWith: {
         idem_app: "Proven with the Idem app",
@@ -1145,6 +1169,7 @@ export const en = {
       },
       why: {
         identity: "Part of it is not signed or sourced",
+        address: "Self-declared address, no register confirms it",
         data_access: "A reviewer approves every request to see data",
         data_erasure: "A reviewer approves every request to delete data",
       },
@@ -2253,6 +2278,7 @@ export const en = {
       identityProofingFlowAddressConfigured:
         "Changed whether a flow asks for the address",
       identityProofingAddressAdded: "Entered an address",
+      identityProofingAddressReviewed: "Reviewed an address",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",

@@ -242,6 +242,9 @@ const proofingRequestSchema = z.object({
   addressMode: addressModeSchema,
   address: proofingAddressSchema.optional(),
   addressUntil: z.string().optional(),
+  // A self-declared address waits for a reviewer: pending until confirmed or
+  // rejected. The session keeps its outcome.
+  addressReview: z.enum(["pending", "confirmed", "rejected"]).optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -785,6 +788,7 @@ export function getProofingRequests(
     flowId?: string;
     status?: ListedStatus;
     flowKind?: "data_request";
+    addressReview?: "pending" | "confirmed" | "rejected";
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -794,6 +798,7 @@ export function getProofingRequests(
   if (filter.flowId) params.set("flowId", filter.flowId);
   if (filter.status) params.set("status", filter.status);
   if (filter.flowKind) params.set("flowKind", filter.flowKind);
+  if (filter.addressReview) params.set("addressReview", filter.addressReview);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -1499,6 +1504,25 @@ export interface ProofingReviewInput {
   reason: string;
   errorCode?: string;
   requestIds?: string[];
+}
+
+// A reviewer's decision on a self-declared address; the session keeps its
+// outcome.
+export function decideAddressReview(
+  slug: string,
+  requestId: string,
+  decision: "confirm" | "reject",
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/address/review`,
+    {
+      schema: proofingRequestSchema,
+      method: "POST",
+      body: { decision },
+      signal,
+    },
+  );
 }
 
 export function decideProofingReview(

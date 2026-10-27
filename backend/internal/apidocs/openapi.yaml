@@ -5593,9 +5593,20 @@ paths:
             type: string
             enum: [data_request]
           description: Only the data requests, "See my data" (`data_access`) and "Delete my data" (`data_erasure`).
+        - name: addressReview
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, confirmed, rejected]
+          description: >-
+            Only the requests whose self-declared address stands so with a reviewer. A member with
+            the reviewer right lists `pending` for the whole organisation.
       responses:
         '200':
-          description: The requests, newest first; for `status=needs_review` the longest in review first.
+          description: >-
+            The requests, newest first; for `status=needs_review` the longest in review first, for
+            `addressReview=pending` the longest waiting first.
           content:
             application/json:
               schema:
@@ -6733,7 +6744,8 @@ paths:
         addition) is `registered`, anything else `registered_mismatch`, carrying the registered address as
         `registered`, and rejects the approved session with `ADDRESS_MISMATCH`. Only
         `registered` confirms where the person lives; every other address is self-declared,
-        `verified` included. The address is kept sealed and shown with the request; audited
+        `verified` included, and waits for a reviewer (`addressReview: pending`, see
+        `.../address/review`). The address is kept sealed and shown with the request; audited
         `identity_proofing.address_added` with its `verification` but without the address (webhook
         `session.address_added`, which carries it).
       requestBody:
@@ -6834,6 +6846,76 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           description: The Dutch address register cannot be reached (`address_lookup_unavailable`); the address is entered in full.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/address/review:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Confirm or reject a self-declared address
+      description: >-
+        Requires an administrator role in the organisation, or the reviewer right. An address
+        nothing confirmed as where the person lives (any `verification` but `registered` and
+        `registered_mismatch`, so every Idem app address) waits for a reviewer as
+        `addressReview: pending`. `decision` is `confirm` or `reject`. Only the address is
+        decided: the session keeps its outcome. Audited `identity_proofing.address_reviewed`, sent
+        as webhook `session.address_reviewed`. The answer is the request. An address that waits
+        for no review, decided already or erased, is 409 `address_not_under_review`; one on a
+        request the caller sent, or about the caller, is 403 `own_review`, except for a platform
+        admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [confirm, reject]
+            examples:
+              confirm:
+                summary: Confirm
+                value:
+                  decision: confirm
+      responses:
+        '200':
+          description: The request after the decision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Not an administrator or reviewer (`forbidden`), or a request the caller sent or is the
+            subject of (`own_review`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The address waits for no review (`address_not_under_review`).
           content:
             application/json:
               schema:
@@ -7462,7 +7544,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed]
                     maxAttempts: 8
                 none:
                   summary: No endpoint
@@ -7472,7 +7554,7 @@ paths:
                     health:
                       state: not_configured
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed]
                     maxAttempts: 8
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -7528,7 +7610,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed]
                     maxAttempts: 8
                     secret: whsec_4tY8mK2qN6vB1xC9zR3wP7sL5dF0gH8jA2eU6iO4x9Qa
         '400':
@@ -11044,7 +11126,7 @@ components:
           description: The delivery's id; the same on every retry.
         type:
           type: string
-          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, test]
+          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, test]
         createdAt:
           type: string
           format: date-time
@@ -11722,6 +11804,13 @@ components:
           type: string
           format: date-time
           description: When the person can last enter their address; absent until the identity is approved, and once they did.
+        addressReview:
+          type: string
+          readOnly: true
+          enum: [pending, confirmed, rejected]
+          description: >-
+            A self-declared address's review: `pending` until a reviewer confirms or rejects it.
+            Absent on a registered (BRP) address, and without an address.
         expectedSubject:
           type: boolean
         flowKind:
@@ -12321,7 +12410,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added]
+            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed]
       required: [url, events]
     ProofingWebhookDeliveryList:
       type: array

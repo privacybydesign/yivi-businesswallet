@@ -63,7 +63,8 @@ const (
 // reaches reports whether the scope reaches req. One it does not is
 // ErrRequestNotFound, so the caller learns nothing of it.
 func (sc ReviewScope) reaches(req Request) bool {
-	return sc == ReviewScopeAll || req.Status == StatusNeedsReview || req.FlowKind.dataRequest()
+	return sc == ReviewScopeAll || req.Status == StatusNeedsReview || req.FlowKind.dataRequest() ||
+		req.AddressReview == AddressReviewPending
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with

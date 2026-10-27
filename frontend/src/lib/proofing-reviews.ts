@@ -47,10 +47,24 @@ export function reviewTabFrom(raw: string | null): ReviewTab {
   return REVIEW_TABS.find((tab) => tab === raw) ?? DEFAULT_REVIEW_TAB;
 }
 
-// Whether the request waits for a decision: a purged one has no person left
-// to decide on.
+// Whether the request waits for a decision on its self-declared address
+// alone: the check itself is decided.
+export function isAddressReview(request: ProofingRequest): boolean {
+  return (
+    request.flowKind === "identity" &&
+    request.status !== "needs_review" &&
+    request.addressReview !== undefined
+  );
+}
+
+// Whether the request waits for a decision: in review, or its address is. A
+// purged one has no person left to decide on.
 function isWaiting(request: ProofingRequest): boolean {
-  return request.status === "needs_review" && request.purgedAt === undefined;
+  return (
+    (request.status === "needs_review" ||
+      request.addressReview === "pending") &&
+    request.purgedAt === undefined
+  );
 }
 
 // When it went to review: the person was proven, or the check ended its steps.

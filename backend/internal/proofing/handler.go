@@ -118,6 +118,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address/review", reviewer(respond.HandlerFunc(h.decideAddressReview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
@@ -344,6 +345,9 @@ type requestResponse struct {
 	AddressMode  AddressMode `json:"addressMode"`
 	Address      *Address    `json:"address,omitempty"`
 	AddressUntil *time.Time  `json:"addressUntil,omitempty"`
+	// AddressReview is a self-declared address's review: pending, confirmed
+	// or rejected.
+	AddressReview AddressReview `json:"addressReview,omitempty"`
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
@@ -363,7 +367,7 @@ func (r requestResponse) withDiplomas(diplomas []Diploma) requestResponse {
 func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
-		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req),
+		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -452,13 +456,21 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 		}
 		filter.DataRequests = true
 	}
+	if raw := query.Get("addressReview"); raw != "" {
+		review := AddressReview(raw)
+		if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
+			return RequestFilter{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
+		}
+		filter.AddressReview = &review
+	}
 	return filter, nil
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request). Any other list is the ones they sent.
+// requests (?flowKind=data_request), or the addresses waiting for one
+// (?addressReview=pending). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -466,7 +478,8 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if !organization.MayReview(ctx) {
 		return false
 	}
-	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview)
+	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
+		(filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending)
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -562,6 +575,34 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
 			ReviewerID: caller.ID, Scope: reviewScope(r.Context()),
 		})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	return nil
+}
+
+// addressReviewRequest is a reviewer's decision on a self-declared address:
+// decision "confirm" or "reject".
+type addressReviewRequest struct {
+	Decision string `json:"decision"`
+}
+
+func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseRequestID(r.PathValue("requestID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+	}
+	var body addressReviewRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if body.Decision != "confirm" && body.Decision != "reject" {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is confirm or reject"}
+	}
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, caller.ID,
+		reviewScope(r.Context()), body.Decision == "confirm", h.platformAdmins.Has(caller.Email))
 	if err != nil {
 		return mapError(err)
 	}
@@ -834,6 +875,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
 	case errors.Is(err, ErrNotUnderReview):
 		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
+	case errors.Is(err, ErrAddressNotUnderReview):
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}
 	case errors.Is(err, ErrOwnReview):
 		return &respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}
 	case errors.Is(err, ErrLinkStarted):

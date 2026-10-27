@@ -11,7 +11,6 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
-  ProofingAddressInput,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
@@ -57,7 +56,7 @@ import {
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
 import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
-import { ResultText } from "./proofing-ui";
+import { PostalAddress, ResultText } from "./proofing-ui";
 import { DataRequestNote } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
@@ -509,7 +508,11 @@ function SessionRow({
                   </p>
                 )}
                 {request.addressMode !== "off" && (
-                  <SessionAddress request={request} />
+                  <SessionAddress
+                    slug={slug}
+                    request={request}
+                    isAdmin={isAdmin}
+                  />
                 )}
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
@@ -566,11 +569,16 @@ function AddressNote({
   return null;
 }
 
-// The postal address the subject entered, and how it was checked.
+// The postal address the subject entered, how it was checked, and where a
+// self-declared one stands with a reviewer.
 function SessionAddress({
+  slug,
   request,
+  isAdmin,
 }: Readonly<{
+  slug: string;
   request: ProofingRequest;
+  isAdmin: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const a = request.address;
@@ -593,23 +601,50 @@ function SessionAddress({
           <PostalAddress address={a.registered} />
         </>
       )}
+      {request.addressReview !== undefined && (
+        <AddressReviewNote slug={slug} request={request} isAdmin={isAdmin} />
+      )}
     </div>
   );
 }
 
-function PostalAddress({
-  address: a,
+const ADDRESS_REVIEW_KEYS = {
+  pending: "reviewPending",
+  confirmed: "reviewConfirmed",
+  rejected: "reviewRejected",
+} as const;
+
+// Where a self-declared address stands with a reviewer. It is decided on the
+// Reviews page, which an admin opens from here while it waits.
+function AddressReviewNote({
+  slug,
+  request,
+  isAdmin,
 }: Readonly<{
-  address: ProofingAddressInput;
-}>): React.JSX.Element {
+  slug: string;
+  request: ProofingRequest;
+  isAdmin: boolean;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const review = request.addressReview;
+  if (review === undefined) {
+    return null;
+  }
   return (
-    <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
-      {`${a.street} ${a.houseNumber}`}
-      <br />
-      {`${a.postalCode} ${a.city}`}
-      <br />
-      {a.country}
-    </address>
+    <p className={HINT}>
+      {t(`identityProofing.sessions.address.${ADDRESS_REVIEW_KEYS[review]}`)}
+      {isAdmin && review === "pending" && (
+        <>
+          {" "}
+          <Link
+            to={reviewPath(slug, request.id)}
+            className="text-link underline"
+          >
+            {t("identityProofing.sessions.address.openReview")}
+          </Link>
+        </>
+      )}
+    </p>
   );
 }
 

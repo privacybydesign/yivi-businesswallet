@@ -1407,6 +1407,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.notUnderReview");
     case "own_review":
       return t("identityProofing.errors.ownReview");
+    case "address_not_under_review":
+      return t("identityProofing.errors.addressNotUnderReview");
     case "reference_photo_required":
       return t("identityProofing.errors.referencePhotoRequired");
     case "organization_not_found":

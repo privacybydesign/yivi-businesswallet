@@ -235,6 +235,17 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 		return false, nil
 	}
 	f.stored.SubjectAddress, f.registeredAddress = &addr, nil
+	if review := addressReviewOf(addr); review != nil {
+		f.stored.AddressReview = *review
+	}
+	return true, nil
+}
+
+func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview) (bool, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
+		return false, nil
+	}
+	f.stored.AddressReview = decided
 	return true, nil
 }
 

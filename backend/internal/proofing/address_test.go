@@ -372,3 +372,53 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 		})
 	}
 }
+
+func TestSelfDeclaredAddressReviewed(t *testing.T) {
+	ctx := context.Background()
+	f := newAddressFixture(AddressRequired)
+	req := sendApprovedAddress(t, f, time.Minute)
+	got, err := f.svc.AddAddress(ctx, testOrg.ID, req.ID, nil, testAddress)
+	if err != nil {
+		t.Fatalf("AddAddress: %v", err)
+	}
+	if got.AddressReview != AddressReviewPending || got.Status != StatusApproved {
+		t.Fatalf("after AddAddress = %s, %s; want approved, address pending", got.Status, got.AddressReview)
+	}
+
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, alex.UserID, ReviewScopeReviews, true, false); !errors.Is(err, ErrOwnReview) {
+		t.Errorf("subject deciding = %v; want ErrOwnReview", err)
+	}
+	decided, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, uuid.New(), ReviewScopeReviews, false, false)
+	if err != nil || decided.AddressReview != AddressReviewRejected || decided.Status != StatusApproved {
+		t.Fatalf("DecideAddressReview = %s, %s, %v; want approved, address rejected", decided.Status, decided.AddressReview, err)
+	}
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, uuid.New(), ReviewScopeAll, true, false); !errors.Is(err, ErrAddressNotUnderReview) {
+		t.Errorf("deciding again = %v; want ErrAddressNotUnderReview", err)
+	}
+}
+
+func TestRegisteredAddressNotReviewed(t *testing.T) {
+	ctx := context.Background()
+	f := discloseYiviAddress(t, AddressRequired, brpClaims)
+	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"}
+	got, err := f.svc.AddAddress(ctx, testOrg.ID, f.requests.stored.ID, nil, registered)
+	if err != nil || got.AddressReview != "" {
+		t.Fatalf("AddAddress = %q, %v; want no review", got.AddressReview, err)
+	}
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, uuid.New(), ReviewScopeAll, true, false); !errors.Is(err, ErrAddressNotUnderReview) {
+		t.Errorf("DecideAddressReview = %v; want ErrAddressNotUnderReview", err)
+	}
+}
+
+func TestPlatformAdminReviewsOwnAddress(t *testing.T) {
+	ctx := context.Background()
+	f := newAddressFixture(AddressRequired)
+	req := sendApprovedAddress(t, f, time.Minute)
+	if _, err := f.svc.AddAddress(ctx, testOrg.ID, req.ID, nil, testAddress); err != nil {
+		t.Fatalf("AddAddress: %v", err)
+	}
+	got, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, alex.UserID, ReviewScopeAll, true, true)
+	if err != nil || got.AddressReview != AddressReviewConfirmed {
+		t.Errorf("platform admin deciding their own = %q, %v; want confirmed", got.AddressReview, err)
+	}
+}

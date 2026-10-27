@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import type {
+  ProofingAddressInput,
   ProofingBranding,
   ProofingRequest,
   WebhookHealth,
@@ -252,5 +253,22 @@ export function SecretReveal({
       )}
       {footnote && <p className="text-ink-soft mt-3 text-[13px]">{footnote}</p>}
     </Modal>
+  );
+}
+
+// A postal address as the person entered it, or as a register writes it.
+export function PostalAddress({
+  address: a,
+}: Readonly<{
+  address: ProofingAddressInput;
+}>): React.JSX.Element {
+  return (
+    <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
+      {`${a.street} ${a.houseNumber}`}
+      <br />
+      {`${a.postalCode} ${a.city}`}
+      <br />
+      {a.country}
+    </address>
   );
 }

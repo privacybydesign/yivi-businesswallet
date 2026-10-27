@@ -410,6 +410,8 @@ type Request struct {
 	Address        AddressMode
 	SubjectAddress *Address
 	AddressAddedAt *time.Time
+	// AddressReview is a self-declared address's review; empty for none.
+	AddressReview AddressReview
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -582,6 +584,9 @@ type RequestFilter struct {
 	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
 	// the list's cap then counts only those.
 	DataRequests bool
+	// AddressReview narrows to the requests whose address stands so with a
+	// reviewer; pending ones are listed the longest waiting first.
+	AddressReview *AddressReview
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

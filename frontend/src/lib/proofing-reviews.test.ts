@@ -14,6 +14,7 @@ import {
   checkDecisionInput,
   checkDecisionProblems,
   closedRequests,
+  isAddressReview,
   ownReview,
   personName,
   provenWithParts,
@@ -358,5 +359,34 @@ describe("provenWithParts", () => {
       provenWithParts({ type: "reference_photo", faceMatch: 0.9 }),
     ).toEqual(["faceMatch"]);
     expect(provenWithParts(undefined)).toEqual([]);
+  });
+});
+
+describe("address reviews", () => {
+  const address = request({
+    id: "address",
+    status: "approved",
+    addressMode: "required",
+    addressReview: "pending",
+    completedAt: "2026-10-17T09:00:00Z",
+  });
+
+  it("waits while the address is pending, beside the checks in review", () => {
+    const decided = request({
+      id: "decided",
+      status: "approved",
+      addressReview: "confirmed",
+    });
+    expect(
+      waitingOldestFirst([address, decided, request()]).map((r) => r.id),
+    ).toEqual(["r1", "address"]);
+  });
+
+  it("is an address review only once the check is decided", () => {
+    expect(isAddressReview(address)).toBe(true);
+    expect(isAddressReview(request())).toBe(false);
+    expect(
+      isAddressReview(request({ flowKind: "data_access", status: "approved" })),
+    ).toBe(false);
   });
 });

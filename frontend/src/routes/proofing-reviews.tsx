@@ -24,6 +24,7 @@ import {
   REVIEW_TABS,
   answerBy,
   closedRequests,
+  isAddressReview,
   personName,
   reviewCounts,
   reviewPath,
@@ -263,6 +264,14 @@ function WhatCell({
       </Table.Cell>
     );
   }
+  if (isAddressReview(request)) {
+    return (
+      <Table.Cell>
+        {t("identityProofing.reviews.addressCheck")}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
   return (
     <Table.Cell>
       {t("identityProofing.reviews.identityCheck")}
@@ -294,7 +303,9 @@ function WaitingRow({
       </PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        {t(`identityProofing.reviews.why.${request.flowKind}`)}
+        {isAddressReview(request)
+          ? t("identityProofing.reviews.why.address")
+          : t(`identityProofing.reviews.why.${request.flowKind}`)}
       </Table.Cell>
       <Table.Cell className="whitespace-nowrap">
         {formatWhen(waitingSince(request))}
