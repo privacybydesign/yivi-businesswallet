@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -124,6 +125,14 @@ func TestAddressMismatchRejects(t *testing.T) {
 	if got.SubjectAddress == nil || got.SubjectAddress.Registered == nil || *got.SubjectAddress.Registered != registered {
 		t.Errorf("address = %+v; want it kept with the registered one", got.SubjectAddress)
 	}
+	assertMismatchReported(t, pool, webhooks, orgID)
+}
+
+// assertMismatchReported checks that a rejected address mismatch is audited,
+// its verification without the address, and sent as both webhooks.
+func assertMismatchReported(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookStore, orgID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
 	if auditCount(t, pool, audit.IdentityProofingRejected) != 1 {
 		t.Error("want one rejected event")
 	}
@@ -141,6 +150,29 @@ func TestAddressMismatchRejects(t *testing.T) {
 	if !events[EventSessionAddressAdded] || !events[EventSessionFailed] {
 		t.Errorf("deliveries = %v; want session.address_added and session.failed", events)
 	}
+}
+
+// startWithRegistered sends a request in an org of its own, as createStarted
+// finds it as the org's one request, and keeps registered on it sealed.
+func startWithRegistered(t *testing.T, pool *pgxpool.Pool, requests *RequestStore, sender uuid.UUID, org, sessionID string, registered Address) Request {
+	t.Helper()
+	ctx := context.Background()
+	in := newStoredRequest(makeOrg(t, pool, org), sender, externalSubject("anna@example.org"))
+	in.Address = AddressRequired
+	req := createStarted(t, requests, in, sessionID)
+	if err := requests.SetRegisteredAddress(ctx, req, registered); err != nil {
+		t.Fatalf("SetRegisteredAddress: %v", err)
+	}
+	got, err := requests.RegisteredAddress(ctx, req.ID)
+	if err != nil || got == nil || *got != registered {
+		t.Fatalf("RegisteredAddress = %+v, %v; want it kept", got, err)
+	}
+	var plain bool
+	if err := pool.QueryRow(ctx, `SELECT position('Kerkstraat' in encode(registered_address_ciphertext, 'escape')) > 0
+		FROM identity_proofing_requests WHERE id = $1`, req.ID).Scan(&plain); err != nil || plain {
+		t.Errorf("registered address stored in the clear (%v)", err)
+	}
+	return req
 }
 
 // assertAddressPurged purges req and checks that neither it nor a webhook
@@ -169,25 +201,8 @@ func TestRegisteredAddressSealedUntilAddressOrPurge(t *testing.T) {
 	ctx := context.Background()
 	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "Nederland"}
 
-	// start sends a request in an org of its own, as createStarted finds it
-	// as the org's one request.
 	start := func(org, sessionID string) Request {
-		in := newStoredRequest(makeOrg(t, pool, org), sam, externalSubject("anna@example.org"))
-		in.Address = AddressRequired
-		req := createStarted(t, requests, in, sessionID)
-		if err := requests.SetRegisteredAddress(ctx, req, registered); err != nil {
-			t.Fatalf("SetRegisteredAddress: %v", err)
-		}
-		got, err := requests.RegisteredAddress(ctx, req.ID)
-		if err != nil || got == nil || *got != registered {
-			t.Fatalf("RegisteredAddress = %+v, %v; want it kept", got, err)
-		}
-		var plain bool
-		if err := pool.QueryRow(ctx, `SELECT position('Kerkstraat' in encode(registered_address_ciphertext, 'escape')) > 0
-			FROM identity_proofing_requests WHERE id = $1`, req.ID).Scan(&plain); err != nil || plain {
-			t.Errorf("registered address stored in the clear (%v)", err)
-		}
-		return req
+		return startWithRegistered(t, pool, requests, sam, org, sessionID, registered)
 	}
 
 	added := start("acme", "s1")
