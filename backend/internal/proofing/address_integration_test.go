@@ -94,6 +94,11 @@ func TestAddressMismatchRejects(t *testing.T) {
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO identity_proofing_settings
+		(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl)
+		VALUES ($1, 12, 'a', 'b')`, orgID); err != nil {
+		t.Fatalf("set legal retention: %v", err)
+	}
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x",
 		[]string{EventSessionAddressAdded, EventSessionFailed}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
@@ -124,6 +129,10 @@ func TestAddressMismatchRejects(t *testing.T) {
 	}
 	if got.SubjectAddress == nil || got.SubjectAddress.Registered == nil || *got.SubjectAddress.Registered != registered {
 		t.Errorf("address = %+v; want it kept with the registered one", got.SubjectAddress)
+	}
+	// The identity was proven: the legal retention still holds it.
+	if until, err := requests.HeldUntil(ctx, orgID, req.ID); err != nil || until == nil {
+		t.Errorf("HeldUntil = %v, %v; want held", until, err)
 	}
 	assertMismatchReported(t, pool, webhooks, orgID)
 }

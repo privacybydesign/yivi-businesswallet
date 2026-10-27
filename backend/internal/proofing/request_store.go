@@ -86,9 +86,11 @@ const settledAt = `COALESCE(r.cancelled_at, r.ips_session_ended_at,
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)`
 
 // legalHeld is an external identity check its org's legal retention holds: an
-// approved one, which proved who the person is. An unstarted, expired,
-// cancelled or rejected check proved nobody, so the law keeps nothing of it.
-const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND r.status = 'approved'`
+// approved one, which proved who the person is, or one rejected only for its
+// address after that (errorAddressMismatch). An unstarted, expired, cancelled
+// or otherwise rejected check proved nobody, so the law keeps nothing of it.
+const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND (r.status = 'approved'
+		OR (r.status = 'rejected' AND r.error_code = '` + errorAddressMismatch + `'))`
 
 // legalHeldUntil is when an external identity check the legal retention holds
 // (legalHeld) may be erased: that long after it ended. NULL for any other

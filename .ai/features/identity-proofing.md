@@ -1050,9 +1050,10 @@ post-review outcome stay the system's.
     privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
     the data of every approved identity check, counted from the end of the
     check, with the reason shown to the person in each language. It holds only
-    an approved external identity check (`legalHeld`): one that was rejected,
-    expired, cancelled or never started proved nobody, so it is purged at its
-    own retention and blocks no erasure. It is the floor of such a check's
+    an approved external identity check (`legalHeld`), or one rejected only for
+    its address after approval (`ADDRESS_MISMATCH`, the identity was proven):
+    one otherwise rejected, expired, cancelled or never started proved nobody,
+    so it is purged at its own retention and blocks no erasure. It is the floor of such a check's
     retention (§10): the check is purged at the later of its flow's or the
     org's retention and the legal period, and the engine session, the proofed
     name (once approved, `RecordOutcome`) and the days a person is told follow
