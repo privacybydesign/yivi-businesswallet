@@ -139,6 +139,7 @@ below from it, so on prod they read `pbdf.pbdf.passport`, `pbdf.sidn-pbdf.email`
 | Identity (residence permit) | `pbdf-staging.pbdf.residencepermit` | same set as passport |
 | Email (account key) | `pbdf-staging.sidn-pbdf.email` | email, domain |
 | Phone | `pbdf-staging.sidn-pbdf.mobilenumber` | mobilenumber |
+| Registered address (proofing, optional) | `pbdf.gemeente.address` in every scheme | street, houseNumber, zipcode, city |
 
 **Login DCQL** = one identity credential (passport **OR** id-card **OR** residence permit, via
 `credential_sets.options`, demo `verifiers.ts:139`) **AND** email **AND** mobilenumber:

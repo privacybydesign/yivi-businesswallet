@@ -1979,6 +1979,7 @@ hosted page.
 For onboarding that needs where the person lives. Wallet-side only, like the
 diplomas (§12): the engine knows nothing of it. The address is what the subject
 declares, never read off a document; a Dutch one is checked against the BAG.
+A Yivi app request also asks the registered (BRP) address.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
   `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
@@ -2022,6 +2023,24 @@ declares, never read off a document; a Dutch one is checked against the BAG.
   - Any other address: kept as entered, `unsupported`.
   - An address kept before this has no `verification`; the page shows it as
     declared.
+- **Registered address** (BRP), Yivi app only: the Idem app has no way to the
+  BRP yet.
+  - A request that asks the address starts its disclosure as
+    `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
+    houseNumber, zipcode, city) as an optional credential set
+    (`required: false`), so a holder without it still proves who they are.
+    - Issued by Gemeente Nijmegen after a DigiD login, for anyone in the
+      Netherlands, as SD-JWT VC since 2026-06-01: a card loaded before then
+      needs reloading.
+    - Only in the production `pbdf` scheme, so its vct never follows
+      `EUDI_CREDENTIAL_SCHEME`. Staging asks `pbdf-staging` identity plus the
+      production address in one presentation.
+    - The verifier must list `pbdf.gemeente.address` in
+      `verifier_attestation_vcts` (`openid4vc-poc-ops`).
+  - `yiviDisclosure` seals it in `registered_address_ciphertext` before the
+    engine decides, so the page never enters an address before it is there.
+    `AddAddress` and `Purge` clear it.
+  - Nothing reads it yet: the entered address keeps its BAG result.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
   at boot. A lookup the register cannot answer is 503
   `address_lookup_unavailable`; the page asks for street and city by hand.

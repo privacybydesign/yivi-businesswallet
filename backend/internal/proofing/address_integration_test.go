@@ -103,3 +103,54 @@ func assertAddressPurged(t *testing.T, pool *pgxpool.Pool, requests *RequestStor
 		t.Errorf("deliveries still carrying the address = %d (%v), want none", left, err)
 	}
 }
+
+func TestRegisteredAddressSealedUntilAddressOrPurge(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "Nederland"}
+
+	// start sends a request in an org of its own, as createStarted finds it
+	// as the org's one request.
+	start := func(org, sessionID string) Request {
+		in := newStoredRequest(makeOrg(t, pool, org), sam, externalSubject("anna@example.org"))
+		in.Address = AddressRequired
+		req := createStarted(t, requests, in, sessionID)
+		if err := requests.SetRegisteredAddress(ctx, req, registered); err != nil {
+			t.Fatalf("SetRegisteredAddress: %v", err)
+		}
+		got, err := requests.RegisteredAddress(ctx, req.ID)
+		if err != nil || got == nil || *got != registered {
+			t.Fatalf("RegisteredAddress = %+v, %v; want it kept", got, err)
+		}
+		var plain bool
+		if err := pool.QueryRow(ctx, `SELECT position('Kerkstraat' in encode(registered_address_ciphertext, 'escape')) > 0
+			FROM identity_proofing_requests WHERE id = $1`, req.ID).Scan(&plain); err != nil || plain {
+			t.Errorf("registered address stored in the clear (%v)", err)
+		}
+		return req
+	}
+
+	added := start("acme", "s1")
+	if ok, err := requests.AddAddress(ctx, added, registered); err != nil || !ok {
+		t.Fatalf("AddAddress = %v, %v; want added", ok, err)
+	}
+	if got, err := requests.RegisteredAddress(ctx, added.ID); err != nil || got != nil {
+		t.Errorf("after AddAddress registered address = %+v, %v; want none", got, err)
+	}
+	if err := requests.SetRegisteredAddress(ctx, added, registered); err != nil {
+		t.Fatalf("SetRegisteredAddress after AddAddress: %v", err)
+	}
+	if got, _ := requests.RegisteredAddress(ctx, added.ID); got != nil {
+		t.Error("a registered address was kept once the address was added")
+	}
+
+	purged := start("beta", "s2")
+	if err := requests.Purge(ctx, purged, nil); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if got, err := requests.RegisteredAddress(ctx, purged.ID); err != nil || got != nil {
+		t.Errorf("after purge registered address = %+v, %v; want none", got, err)
+	}
+}

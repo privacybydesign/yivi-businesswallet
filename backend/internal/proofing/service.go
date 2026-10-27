@@ -93,6 +93,7 @@ type requestStore interface {
 	ListOpenReviews(ctx context.Context, orgID uuid.UUID) ([]Request, error)
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
+	SetRegisteredAddress(ctx context.Context, req Request, addr Address) error
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -1825,7 +1826,9 @@ type YiviStart struct {
 }
 
 // StartYivi starts (or, after a cancel in the app, restarts) the OpenID4VP
-// disclosure of an on-screen Yivi request's passport or id-card and its photo.
+// disclosure of an on-screen Yivi request's passport or id-card and its photo,
+// and, when the request asks the address, the registered address if the
+// subject holds it.
 // The verifier's transaction stays on the request, server-side.
 func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (YiviStart, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
@@ -1840,7 +1843,11 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 	if err != nil {
 		return YiviStart{}, err
 	}
-	started, err := s.verifier.StartPresentation(ctx, openid4vpverifier.ScopeProofing, claims...)
+	scope := openid4vpverifier.ScopeProofing
+	if req.Address.asked() {
+		scope = openid4vpverifier.ScopeProofingAddress
+	}
+	started, err := s.verifier.StartPresentation(ctx, scope, claims...)
 	if err != nil {
 		return YiviStart{}, err
 	}
@@ -1887,7 +1894,8 @@ func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error)
 // YiviDisclosure hands the subject's finished disclosure to the engine, which
 // decides the session with it, or answers ErrDisclosurePending while the
 // subject has not finished in the Yivi app. The decision is recorded at once.
-// The photo and claims pass through and are not kept.
+// The photo and claims pass through and are not kept; a registered address is
+// kept sealed until an address is entered.
 func (s *Service) YiviDisclosure(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviDisclosure, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -1910,6 +1918,13 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	doc, ok := presentation.Document()
 	if !ok {
 		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
+	}
+	// Kept before the engine decides, so it is there before the page can
+	// enter an address.
+	if claims, ok := presentation.RegisteredAddress(); ok && req.Address.asked() {
+		if err := s.requests.SetRegisteredAddress(ctx, req, registeredAddress(claims)); err != nil {
+			return proofingprovider.YiviDisclosure{}, err
+		}
 	}
 	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)

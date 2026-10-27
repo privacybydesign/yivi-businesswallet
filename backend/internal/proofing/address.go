@@ -17,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 )
 
 // AddressMode is whether a flow has the address step: once their identity is
@@ -243,7 +244,7 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	added := false
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET address_ciphertext = $2, address_added_at = now(), updated_at = now()
+			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL, updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed)
 		if err != nil {
 			return fmt.Errorf("proofing: add address request %s: %w", req.ID, err)
@@ -269,7 +270,45 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	return added, nil
 }
 
-// decryptAddress opens an address sealed by AddAddress.
+// SetRegisteredAddress seals the registered address a Yivi disclosure carried
+// on req, until AddAddress keeps the entered one. It changes
+// nothing once an address was entered or the request was erased.
+func (s *RequestStore) SetRegisteredAddress(ctx context.Context, req Request, addr Address) error {
+	if s.cipher == nil {
+		return ErrNoEncryptionKey
+	}
+	plain, err := json.Marshal(addr)
+	if err != nil {
+		return fmt.Errorf("proofing: marshal registered address request %s: %w", req.ID, err)
+	}
+	sealed, err := s.cipher.Encrypt(plain)
+	if err != nil {
+		return fmt.Errorf("proofing: encrypt registered address request %s: %w", req.ID, err)
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_requests
+		SET registered_address_ciphertext = $2, updated_at = now()
+		WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed); err != nil {
+		return fmt.Errorf("proofing: set registered address request %s: %w", req.ID, err)
+	}
+	return nil
+}
+
+// RegisteredAddress is the registered address SetRegisteredAddress kept on
+// the request; nil when it has none.
+func (s *RequestStore) RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error) {
+	var sealed []byte
+	err := s.db.QueryRow(ctx, `SELECT registered_address_ciphertext FROM identity_proofing_requests
+		WHERE id = $1`, id).Scan(&sealed)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && sealed == nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("proofing: read registered address request %s: %w", id, err)
+	}
+	return s.decryptAddress(id, sealed)
+}
+
+// decryptAddress opens an address sealed by AddAddress or SetRegisteredAddress.
 func (s *RequestStore) decryptAddress(id uuid.UUID, sealed []byte) (*Address, error) {
 	if s.cipher == nil {
 		return nil, ErrNoEncryptionKey
@@ -434,6 +473,16 @@ func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, err
 		}
 	}
 	return Address{}, ErrAddressNotFound
+}
+
+// registeredAddress is the registered address a Yivi disclosure carried, as
+// claims of pbdf.gemeente.address.
+func registeredAddress(claims map[string]string) Address {
+	return Address{
+		Street: claims[openid4vpverifier.ClaimAddressStreet], HouseNumber: claims[openid4vpverifier.ClaimAddressHouseNumber],
+		PostalCode: claims[openid4vpverifier.ClaimAddressPostalCode], City: claims[openid4vpverifier.ClaimAddressCity],
+		Country: registerCountry,
+	}
 }
 
 // addressKey is a street or house number as compared with the register's:
