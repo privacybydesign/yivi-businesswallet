@@ -466,11 +466,11 @@ function TypeAttributes({
   row,
   catalog,
   onChange,
-}: {
+}: Readonly<{
   row: CredentialRow;
   catalog: CredentialType[];
   onChange: (picked: string[]) => void;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   const type = findType(catalog, row.typeKey);
   if (!type) return null;
@@ -640,8 +640,8 @@ function RequestForm({
               className="border-line rounded-yivi flex flex-col gap-2 border p-3"
             >
               <div className="flex items-center gap-2">
-                <select
-                  className={`${control(controlState(errors.rows[index]))} h-9`}
+                <Select
+                  state={controlState(errors.rows[index])}
                   value={row.typeKey}
                   onChange={(event) =>
                     updateRow(index, {
@@ -674,7 +674,7 @@ function RequestForm({
                   <option value={OTHER_TYPE}>
                     {t("credentialRequests.form.otherType")}
                   </option>
-                </select>
+                </Select>
                 {rows.length > 1 && (
                   <Button
                     variant="dangerGhost"
