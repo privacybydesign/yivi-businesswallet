@@ -87,8 +87,8 @@ type Employment struct {
 // contract: From is the first day of its first month on the statement (since
 // when), To the last day of its newest month reported (YYYY-MM-DD).
 type EmploymentRelation struct {
-	// Kind is employment, benefit (paid by UWV), sick_via_employer or
-	// other_income (paid without hours worked).
+	// Kind is employment (sick pay through the employer too), benefit (paid
+	// by UWV, Employer "UWV") or other_income (paid without hours worked).
 	Kind             string `json:"kind"`
 	Employer         string `json:"employer"`
 	PayrollTaxNumber string `json:"payrollTaxNumber"`
