@@ -87,7 +87,8 @@ export function Modal({
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         className={[
-          "rounded-card bg-surface shadow-card my-8 flex w-full flex-col border",
+          // text-ink: a modal opened from the top bar would take its light text.
+          "rounded-card bg-surface text-ink shadow-card my-8 flex w-full flex-col border",
           "border-line",
           wide ? "max-w-2xl" : "max-w-lg",
         ].join(" ")}

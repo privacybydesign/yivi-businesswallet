@@ -138,6 +138,7 @@ type pauseStore interface {
 type flowHostedStore interface {
 	Get(ctx context.Context, orgID uuid.UUID, flowID string) (FlowHosted, error)
 	Disabled(ctx context.Context, orgID uuid.UUID) ([]string, error)
+	ReturnURLs(ctx context.Context, orgID uuid.UUID) (map[string]string, error)
 	Save(ctx context.Context, orgID uuid.UUID, flowID string, f FlowHosted) (FlowHosted, error)
 }
 
@@ -392,6 +393,10 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 	if err != nil {
 		return nil, err
 	}
+	returnURLs, err := s.flowReturnURLs(ctx, org.ID)
+	if err != nil {
+		return nil, err
+	}
 	settings, err := s.orgSettings.Get(ctx, org.ID)
 	if err != nil {
 		return nil, err
@@ -401,6 +406,7 @@ func (s *Service) orgFlows(ctx context.Context, org Org, tenant proofingprovider
 		of := OrgFlow{
 			Flow: f, Allowed: slices.Contains(sel.FlowIDs, f.ID) && flowCompletable(f), Default: f.ID == sel.DefaultFlowID,
 			Diplomas: DiplomasOff, Address: AddressOff, Kind: FlowIdentity, HostedEnabled: !slices.Contains(unhosted, f.ID),
+			HostedReturnURL: returnURLs[f.ID],
 		}
 		if kind, ok := kinds[f.ID]; ok {
 			of.Kind = kind
@@ -834,7 +840,8 @@ func (s *Service) discardSession(ctx context.Context, tenant proofingprovider.Te
 
 // createHosted stores a hosted request with its link and no the engine session yet:
 // the subject starts one from the page (StartHosted) until hostedLinkTTL. Its
-// redirect must be on one of the org's allowed origins.
+// redirect, else the flow's return page unless NoRedirect, must be on one of
+// the org's allowed origins.
 func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in NewRequest, subject Subject,
 	settings Settings, flow proofingprovider.Flow, diplomas DiplomaMode, address AddressMode, kind FlowKind, photo *proofingprovider.Image,
 ) (Sent, error) {
@@ -851,11 +858,15 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 	if in.Language != "" && !hosted.Offers(in.Language) {
 		return Sent{}, fmt.Errorf("%w: this flow's hosted page is not offered in %q", ErrInvalidInput, in.Language)
 	}
-	if in.RedirectURL != "" {
+	redirect := in.RedirectURL
+	if redirect == "" && !in.NoRedirect {
+		redirect = hosted.ReturnURL
+	}
+	if redirect != "" {
 		if hosted.Completion == CompletionDone {
 			return Sent{}, fmt.Errorf("%w: this flow's hosted page ends on its own thank-you page, without a redirect", ErrInvalidInput)
 		}
-		if err := checkRedirect(in.RedirectURL, settings); err != nil {
+		if err := checkRedirect(redirect, settings); err != nil {
 			return Sent{}, err
 		}
 	}
@@ -866,7 +877,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
 		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
-		LinkTokenHash: hash, RedirectURL: in.RedirectURL, Language: in.Language,
+		LinkTokenHash: hash, RedirectURL: redirect, Language: in.Language,
 		Diplomas: diplomas, Address: address, FlowKind: kind, ReferencePhoto: photo,
 	})
 	if err != nil {
@@ -905,8 +916,10 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: flowKind is identity, data_access or data_erasure", ErrInvalidInput)
 	case in.FlowKind.dataRequest() && !in.external():
 		return NewRequest{}, ErrDataFlowForMember
-	case in.RedirectURL != "" && in.Channel != ChannelHosted:
+	case (in.RedirectURL != "" || in.NoRedirect) && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: only a hosted session redirects its subject", ErrInvalidInput)
+	case in.RedirectURL != "" && in.NoRedirect:
+		return NewRequest{}, fmt.Errorf("%w: a request without a redirect names no redirectUrl", ErrInvalidInput)
 	}
 	return in, nil
 }
@@ -2209,6 +2222,9 @@ func (s *Service) UpdateSettings(ctx context.Context, orgID uuid.UUID, change Se
 	if change.RedirectOrigins != nil {
 		normalized, err := normalizeOrigins(*change.RedirectOrigins)
 		if err != nil {
+			return Settings{}, err
+		}
+		if err := s.refuseOriginsInUse(ctx, orgID, normalized); err != nil {
 			return Settings{}, err
 		}
 		origins = &normalized

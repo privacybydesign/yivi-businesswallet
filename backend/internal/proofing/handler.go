@@ -172,6 +172,9 @@ type flowResponse struct {
 	// off, the Verify a person dialog offers only Show on this screen. Absent
 	// on a single version, as DiplomaMode.
 	HostedEnabled *bool `json:"hostedEnabled,omitempty"`
+	// HostedReturnURL is the page the flow's links send their subject back
+	// to; absent for none and on a single version.
+	HostedReturnURL string `json:"hostedReturnUrl,omitempty"`
 	// RetentionDays is how many days an external person's data is kept at most
 	// on this flow, as the on-screen page tells them; absent on a single version.
 	RetentionDays int `json:"retentionDays,omitempty"`
@@ -191,7 +194,7 @@ func newFlowResponse(f OrgFlow) flowResponse {
 // settings for it.
 func newListedFlowResponse(f OrgFlow) flowResponse {
 	out := newFlowResponse(f)
-	out.HostedEnabled = &f.HostedEnabled
+	out.HostedEnabled, out.HostedReturnURL = &f.HostedEnabled, f.HostedReturnURL
 	return out
 }
 
@@ -696,6 +699,9 @@ type createRequestRequest struct {
 	// BirthDate (YYYY-MM-DD) with Name makes an external request one for
 	// that person only.
 	BirthDate string `json:"birthDate"`
+	// Redirect false ends a link on its own done screen, though its flow has
+	// a return page.
+	Redirect *bool `json:"redirect"`
 }
 
 type createRequestResponse struct {
@@ -723,6 +729,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 			SubjectUserID: body.UserID,
 			SubjectEmail:  body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
 			FlowKind: body.FlowKind, Method: body.Method, Channel: body.Channel, Language: body.Language,
+			NoRedirect: body.Redirect != nil && !*body.Redirect,
 		})
 	if err != nil {
 		return mapError(err)
@@ -874,6 +881,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
 	case errors.Is(err, ErrRedirectNotAllowed):
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}
+	case errors.Is(err, ErrRedirectOriginInUse):
+		return &respond.APIError{Status: http.StatusConflict, Code: "redirect_origin_in_use", Message: "a flow's return page is on a redirect origin this removes: change that flow's return page first"}
 	case errors.As(err, &rejected):
 		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.

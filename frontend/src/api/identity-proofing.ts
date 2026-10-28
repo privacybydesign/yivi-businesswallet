@@ -182,6 +182,9 @@ const proofingFlowSchema = z.object({
   // form offers only Show on this screen. Absent on a single version, as
   // diplomaMode.
   hostedEnabled: z.boolean().optional(),
+  // The page the flow's links send the person back to. Absent for none and on
+  // a single version, as diplomaMode.
+  hostedReturnUrl: z.string().optional(),
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
@@ -299,6 +302,9 @@ export type ProofingRequestInput =
       birthDate?: string;
       method?: ProofingMethod;
       channel?: ProofingChannel;
+      // False ends a link on its own thank-you page, though its flow has a
+      // return page.
+      redirect?: boolean;
     } & ({ flowId: string } | { flowKind: DataRequestKind }));
 
 // How the org's "delete my data" requests are decided once the person is
@@ -608,11 +614,13 @@ function flowBase(slug: string, flowId: string): string {
 }
 
 // How a flow's hosted page behaves: whether links may be made for it, the
-// languages it offers (empty: every one), and how it ends.
+// languages it offers (empty: every one), how it ends, and the page its links
+// go back to (empty: none).
 const proofingFlowHostedSchema = z.object({
   enabled: z.boolean(),
   locales: z.array(z.string()),
   completion: z.enum(["redirect", "done"]).catch("done"),
+  returnUrl: z.string(),
 });
 
 export type ProofingFlowHosted = z.infer<typeof proofingFlowHostedSchema>;

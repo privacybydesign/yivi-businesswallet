@@ -327,7 +327,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	var out hostedViewResponse
 	out.hostedProgressResponse = newHostedProgress(hosted.Request, time.Now())
 	out.SessionID = publicSessionID(hosted.Request.ID)
-	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
+	out.RedirectURL = liveRedirect(hosted.Request.RedirectURL, hosted.Settings, hosted.FlowSettings)
+	out.Language = string(hosted.Request.Language)
 
 	st := hosted.Settings
 	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)

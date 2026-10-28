@@ -6081,8 +6081,10 @@ paths:
         Requires an administrator role in the organisation. `enabled` (hosted links may be made
         for the flow), `locales` (`en`/`nl` the page offers; empty is every one) and
         `completion`: `redirect` (the session's `redirectUrl` when it has one, else the page's
-        own thank-you screen) or `done` (always the thank-you screen). A flow never set reads
-        `enabled: true, locales: [], completion: redirect`.
+        own thank-you screen) or `done` (always the thank-you screen), and `returnUrl`: the
+        page a link for the flow is made with as its `redirectUrl` when it names none of its
+        own (empty for none). A flow never set reads `enabled: true, locales: [], completion:
+        redirect, returnUrl: ""`.
       responses:
         '200':
           description: The flow's hosted page settings.
@@ -6097,6 +6099,7 @@ paths:
                     enabled: true
                     locales: []
                     completion: redirect
+                    returnUrl: ""
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -6112,7 +6115,11 @@ paths:
       summary: Save a flow's hosted page settings
       description: >-
         Requires an administrator role in the organisation. Body `{enabled, locales,
-        completion}` as read. A hosted session on a flow with its page off is 409
+        completion, returnUrl}` as read; an absent `returnUrl` removes the return page. A
+        `returnUrl` must be on one of the organisation's `allowedRedirectOrigins` (else 400
+        `redirect_not_allowed`), and a `done` flow has none (400 `invalid_input`). A link made
+        after the save takes the new return page; one made before keeps its own. A hosted
+        session on a flow with its page off is 409
         `hosted_disabled`; one with a `redirectUrl` on a `done` flow, or a `language` the flow
         does not offer, is 400. Audited `identity_proofing.flow_hosted_configured` with before
         and after. A missing `enabled` is 400 `invalid_body`; a `completion` other than
@@ -6133,6 +6140,13 @@ paths:
                   enabled: true
                   locales: [nl]
                   completion: done
+              returnPage:
+                summary: Back to the portal once the check ends
+                value:
+                  enabled: true
+                  locales: []
+                  completion: redirect
+                  returnUrl: https://portal.example.nl/verified
       responses:
         '200':
           description: The saved settings.
@@ -6147,6 +6161,7 @@ paths:
                     enabled: true
                     locales: [nl]
                     completion: done
+                    returnUrl: ""
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -7173,6 +7188,8 @@ paths:
         their sessions follows. `allowedRedirectOrigins` replaces the origins
         (`https://host[:port]`, or `http` on a loopback host; the host a DNS name or an IP
         address; at most 10) a hosted page may send its subject back to and be embedded on.
+        Leaving out the origin of a flow's return page is 409 `redirect_origin_in_use`:
+        change that flow's return page first.
         An absent field is left as it is; a body with none is 400 `invalid_body`, and a value
         outside these options 400 `invalid_input`. Every field is checked before any is saved,
         so a refused update changes nothing. The answer is the settings after the change.
@@ -7205,6 +7222,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: A flow's return page is on an origin the change leaves out (`redirect_origin_in_use`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/settings/branding:
     parameters:
       - name: slug
@@ -8389,7 +8412,11 @@ paths:
         and starts once from; nothing is mailed. `redirectUrl`, only with
         `hosted: true`, is where the page sends the subject once the session settles, with
         `?session=<id>&status=<status>` added; its origin must be one of the organisation's
-        `allowedRedirectOrigins` (else 400 `redirect_not_allowed`). `birthDate`
+        `allowedRedirectOrigins` (else 400 `redirect_not_allowed`). Without one, the link
+        takes the flow's return page (`returnUrl` in its hosted page settings), if it has one;
+        `redirect: false` leaves that out too, so the page ends on its own thank-you screen.
+        The page redirects only while the origin is still allowed and the flow still ends on
+        a redirect. `birthDate`
         (YYYY-MM-DD, with `name`) makes the session one for that person only, as for an
         account recovery: the name and birth date read off the document must match, else
         the session is `rejected` with `errorCode` `IDENTITY_MISMATCH`. The session and its
@@ -10786,7 +10813,13 @@ components:
           description: >-
             With `hosted`, where the page sends the person once the session settles, with
             `?session=<id>&status=<status>` added. Its origin must be one of the organisation's
-            allowed redirect origins.
+            allowed redirect origins. Absent takes the flow's return page, if it has one.
+        redirect:
+          type: boolean
+          default: true
+          description: >-
+            With `hosted`, false ends the page on its own thank-you screen even when the flow
+            has a return page. Not with a `redirectUrl` (400 `invalid_input`).
     ProofingApiSession:
       type: object
       description: A session as stored, with its outcome. Never document data beyond the proofed name.
@@ -11307,9 +11340,10 @@ components:
     ProofingFlow:
       description: >-
         A flow version as the organisation sees it. `allowed`, `default`, `diplomaMode`,
-        `kind`, `hostedEnabled` and `retentionDays` are only meaningful in a flow list; a single
-        version (create, edit, versions, activate) reads `allowed` and `default` false and
-        leaves `diplomaMode`, `kind`, `hostedEnabled` and `retentionDays` out.
+        `kind`, `hostedEnabled`, `hostedReturnUrl` and `retentionDays` are only meaningful in a
+        flow list; a single version (create, edit, versions, activate) reads `allowed` and
+        `default` false and leaves `diplomaMode`, `kind`, `hostedEnabled`, `hostedReturnUrl`
+        and `retentionDays` out.
       allOf:
         - $ref: '#/components/schemas/ProofingFlowSpec'
         - type: object
@@ -11359,6 +11393,11 @@ components:
                 The flow's "Allow sending this flow as a link" switch (its hosted page's
                 `enabled`): off, the wallet's Verify a person dialog offers only Show on this
                 screen. Absent on a single version.
+            hostedReturnUrl:
+              type: string
+              description: >-
+                The flow's return page (its hosted page's `returnUrl`), where its links send the
+                person once the session settles. Absent for none and on a single version.
             retentionDays:
               type: integer
               description: >-
@@ -11401,7 +11440,12 @@ components:
         completion:
           type: string
           enum: [redirect, done]
-      required: [enabled, locales, completion]
+        returnUrl:
+          type: string
+          description: >-
+            Where a link for the flow sends the person when it names no `redirectUrl` of its
+            own; empty for none.
+      required: [enabled, locales, completion, returnUrl]
     ProofingFlowHostedUpdate:
       type: object
       additionalProperties: false
@@ -11417,6 +11461,11 @@ components:
         completion:
           type: string
           enum: [redirect, done]
+        returnUrl:
+          type: string
+          description: >-
+            On one of the organisation's allowed redirect origins, and only with `completion:
+            redirect`. Absent or empty removes the return page.
       required: [enabled, completion]
     ProofingDataMatches:
       type: object
@@ -11762,6 +11811,12 @@ components:
         birthDate:
           type: string
           format: date
+        redirect:
+          type: boolean
+          default: true
+          description: >-
+            With `channel: hosted`, false ends the link on its own thank-you screen though the
+            flow has a return page (`hostedReturnUrl`).
     ProofingCreatedRequest:
       allOf:
         - $ref: '#/components/schemas/ProofingRequest'

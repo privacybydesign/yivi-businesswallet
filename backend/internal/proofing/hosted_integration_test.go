@@ -4,6 +4,7 @@ package proofing
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -70,6 +71,24 @@ func TestFlowHostedStore(t *testing.T) {
 	}
 	if other, _ := store.Get(ctx, orgID, "flow-2"); !other.Enabled {
 		t.Errorf("another flow = %+v, want the defaults", other)
+	}
+
+	const returnPage = "https://portal.acme.example/verified"
+	if _, err := store.Save(ctx, orgID, "flow-2", FlowHosted{
+		Enabled: true, Locales: []email.Locale{}, Completion: CompletionRedirect, ReturnURL: returnPage,
+	}); err != nil {
+		t.Fatalf("Save(return page): %v", err)
+	}
+	if got, err := store.Get(ctx, orgID, "flow-2"); err != nil || got.ReturnURL != returnPage {
+		t.Errorf("Get = %+v, %v; want the return page", got, err)
+	}
+	if got, err := store.ReturnURLs(ctx, orgID); err != nil || !maps.Equal(got, map[string]string{"flow-2": returnPage}) {
+		t.Errorf("ReturnURLs = %v, %v; want flow-2's only", got, err)
+	}
+	if _, err := store.Save(ctx, orgID, "flow-2", FlowHosted{
+		Enabled: true, Locales: []email.Locale{}, Completion: CompletionDone, ReturnURL: returnPage,
+	}); err == nil {
+		t.Error("a return page on a thank-you-page flow was stored, want the check to refuse it")
 	}
 }
 
