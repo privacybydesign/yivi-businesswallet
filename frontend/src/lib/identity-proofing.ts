@@ -1014,6 +1014,10 @@ export function addressVerificationNote(
       return t("identityProofing.sessions.address.unchecked");
     case "unsupported":
       return t("identityProofing.sessions.address.unsupported");
+    case "registered":
+      return t("identityProofing.sessions.address.registered");
+    case "registered_mismatch":
+      return t("identityProofing.sessions.address.registeredMismatch");
     case undefined:
       return t("identityProofing.sessions.address.declared");
   }
@@ -1044,6 +1048,7 @@ const REJECTION_REASON_KEYS = {
   DOC_EXPIRED: "docExpired",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
+  ADDRESS_MISMATCH: "addressMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
   REVIEW_NOT_HOLDER: "reviewNotHolder",
   REVIEW_ALTERED: "reviewAltered",
@@ -1402,6 +1407,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.notUnderReview");
     case "own_review":
       return t("identityProofing.errors.ownReview");
+    case "address_not_under_review":
+      return t("identityProofing.errors.addressNotUnderReview");
     case "reference_photo_required":
       return t("identityProofing.errors.referencePhotoRequired");
     case "organization_not_found":

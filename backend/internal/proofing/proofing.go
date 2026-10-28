@@ -410,6 +410,8 @@ type Request struct {
 	Address        AddressMode
 	SubjectAddress *Address
 	AddressAddedAt *time.Time
+	// AddressReview is a self-declared address's review; empty for none.
+	AddressReview AddressReview
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -585,6 +587,9 @@ type RequestFilter struct {
 	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
 	// the list's cap then counts only those.
 	DataRequests bool
+	// AddressReview narrows to the requests whose address stands so with a
+	// reviewer; pending ones are listed the longest waiting first.
+	AddressReview *AddressReview
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member
@@ -798,6 +803,11 @@ const orgPausedReviewer = "system: organisation paused"
 // for one known person (ExpectsSubject) is approved for someone else: the
 // identity read off the document is not that name and birth date.
 const errorIdentityMismatch = "IDENTITY_MISMATCH"
+
+// errorAddressMismatch is the error code the wallet records when the address
+// the subject entered after approval is not the registered (BRP) address
+// their Yivi app disclosed.
+const errorAddressMismatch = "ADDRESS_MISMATCH"
 
 // birthDateLayout is how a request's expected birth date is written.
 const birthDateLayout = time.DateOnly

@@ -232,10 +232,12 @@ const (
 	IdentityProofingDiplomaAdded           = "identity_proofing.diploma_added"
 	IdentityProofingDiplomaRejected        = "identity_proofing.diploma_rejected"
 
-	// whether a flow asks for the subject's postal address, and the address a
-	// subject entered (never its content)
+	// whether a flow asks for the subject's postal address, the address a
+	// subject entered (never its content), and a reviewer's decision on a
+	// self-declared one
 	IdentityProofingFlowAddressConfigured = "identity_proofing.flow_address_configured"
 	IdentityProofingAddressAdded          = "identity_proofing.address_added"
+	IdentityProofingAddressReviewed       = "identity_proofing.address_reviewed"
 )
 
 const (

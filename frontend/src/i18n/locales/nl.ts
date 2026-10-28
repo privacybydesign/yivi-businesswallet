@@ -538,6 +538,8 @@ export const nl: Translation<typeof en> = {
         "identiteitsverificatie werd gepauzeerd terwijl de sessie op beoordeling wachtte; probeer het later opnieuw",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
+      addressMismatch:
+        "het ingevulde adres is niet het woonadres uit de BRP dat vanuit de Yivi-app is gedeeld",
       unknown: "de controle is niet geslaagd ({{code}})",
       evidenceNotAsRequested:
         "een beoordelaar vond dat wat is aangeleverd niet is wat gevraagd was",
@@ -561,6 +563,8 @@ export const nl: Translation<typeof en> = {
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
       ownReview:
         "Je hebt deze controle zelf verstuurd, of ze gaat over jou, dus een andere beoordelaar beslist erover.",
+      addressNotUnderReview:
+        "Dit adres wacht niet meer op beoordeling: misschien heeft iemand het al beoordeeld.",
       referencePhotoRequired:
         "Deze flow vergelijkt het gezicht met je eigen foto van de persoon, die alleen via de API kan worden meegestuurd. Kies een andere flow.",
       organizationNotFound: "Die organisatie bestaat niet.",
@@ -967,11 +971,25 @@ export const nl: Translation<typeof en> = {
         missing: "Geen adres",
         declared:
           "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
-        verified: "Gevonden in de Nederlandse adresregistratie (BAG).",
+        verified:
+          "Zelf opgegeven: het adres bestaat in de Nederlandse adresregistratie (BAG), maar is niet bevestigd als woonadres van de persoon.",
         unchecked:
           "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
         unsupported:
           "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
+        registered:
+          "Bevestigd: gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
+        registeredMismatch:
+          "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. De sessie is afgewezen.",
+        registeredTitle: "Woonadres (BRP)",
+        reviewPending:
+          "Wacht op een beoordelaar die het adres bevestigt. De identiteitscontrole verandert niet.",
+        reviewConfirmed: "Een beoordelaar heeft het adres bevestigd.",
+        reviewRejected:
+          "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+        openReview: "Open de beoordeling",
+        confirm: "Adres bevestigen",
+        reject: "Adres afwijzen",
       },
       diplomas: {
         title: "Diploma's",
@@ -1165,6 +1183,20 @@ export const nl: Translation<typeof en> = {
       empty: "Er wacht niets op een besluit.",
       emptyClosed: "Er is nog geen gegevensverzoek afgehandeld.",
       identityCheck: "Identiteitscontrole",
+      addressCheck: "Adres",
+      address: {
+        title: "Adres beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
+        checkTitle: "Identiteitscontrole",
+        checkHint:
+          "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het adres.",
+        method: "Gecontroleerd met",
+        level: "Betrouwbaarheidsniveau",
+        decisionTitle: "Besluit",
+        confirmed: "Het adres is bevestigd.",
+        rejected: "Het adres is afgewezen.",
+      },
       requestedBy: "Aangevraagd door {{name}}",
       provenWith: {
         idem_app: "Bewezen met de Idem-app",
@@ -1174,6 +1206,7 @@ export const nl: Translation<typeof en> = {
       },
       why: {
         identity: "Een deel is niet ondertekend of uit een bron gehaald",
+        address: "Zelf opgegeven adres, geen register bevestigt het",
         data_access:
           "Een beoordelaar keurt elk verzoek om gegevens in te zien goed",
         data_erasure:
@@ -2314,6 +2347,7 @@ export const nl: Translation<typeof en> = {
       identityProofingFlowAddressConfigured:
         "Gewijzigd of een flow om het adres vraagt",
       identityProofingAddressAdded: "Adres ingevuld",
+      identityProofingAddressReviewed: "Adres beoordeeld",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",

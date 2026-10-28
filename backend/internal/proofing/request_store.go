@@ -44,7 +44,8 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
-	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at, ` + purgeAtColumn
+	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
+	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -86,9 +87,11 @@ const settledAt = `COALESCE(r.cancelled_at, r.ips_session_ended_at,
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)`
 
 // legalHeld is an external identity check its org's legal retention holds: an
-// approved one, which proved who the person is. An unstarted, expired,
-// cancelled or rejected check proved nobody, so the law keeps nothing of it.
-const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND r.status = 'approved'`
+// approved one, which proved who the person is, or one rejected only for its
+// address after that (errorAddressMismatch). An unstarted, expired, cancelled
+// or otherwise rejected check proved nobody, so the law keeps nothing of it.
+const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND (r.status = 'approved'
+		OR (r.status = 'rejected' AND r.error_code = '` + errorAddressMismatch + `'))`
 
 // legalHeldUntil is when an external identity check the legal retention holds
 // (legalHeld) may be erased: that long after it ended. NULL for any other
@@ -239,7 +242,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -835,6 +838,9 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 		// When it went to review (completed_at), as waitingSince on the page.
 		order = `COALESCE(r.completed_at, r.created_at), r.created_at`
 	}
+	if filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending {
+		order = `r.address_added_at, r.created_at`
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
@@ -842,9 +848,10 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
+			AND ($11::text IS NULL OR (r.address_review = $11 AND r.purged_at IS NULL))
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
-		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure))
+		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), filter.AddressReview)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}

@@ -45,7 +45,10 @@ const (
 	// EventSessionAddressAdded is sent when the subject entered their postal
 	// address after their identity was approved.
 	EventSessionAddressAdded = "session.address_added"
-	EventTest                = "test"
+	// EventSessionAddressReviewed is sent when a reviewer confirmed or
+	// rejected a self-declared address.
+	EventSessionAddressReviewed = "session.address_reviewed"
+	EventTest                   = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
@@ -53,6 +56,7 @@ var WebhookEvents = []string{
 	EventSessionCreated, EventSessionStarted, EventSessionHandover,
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
 	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
+	EventSessionAddressReviewed,
 }
 
 // outcomeEvents is the webhook event each recorded outcome sends.

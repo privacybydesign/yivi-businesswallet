@@ -1344,6 +1344,7 @@ describe("proofingErrorMessage", () => {
     [404, "api_key_not_found", "apiKeyNotFound"],
     [404, "session_not_found", "sessionNotFound"],
     [409, "not_under_review", "notUnderReview"],
+    [409, "address_not_under_review", "addressNotUnderReview"],
     [422, "reference_photo_required", "referencePhotoRequired"],
     [404, "organization_not_found", "organizationNotFound"],
     [404, "webhook_not_found", "webhookNotFound"],
@@ -1408,6 +1409,8 @@ describe("addressVerificationNote", () => {
     ["verified", "verified"],
     ["unchecked", "unchecked"],
     ["unsupported", "unsupported"],
+    ["registered", "registered"],
+    ["registered_mismatch", "registeredMismatch"],
     [undefined, "declared"],
   ] as const)("says how a %s address was checked", (verification, key) => {
     const copy = t(`identityProofing.sessions.address.${key}`);

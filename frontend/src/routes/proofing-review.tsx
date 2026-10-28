@@ -7,9 +7,11 @@ import { proofingErrorMessage } from "../lib/identity-proofing";
 import { TopBar } from "../ui";
 import { DataRequestReview } from "./data-request-review";
 import { IdentityCheckReview } from "./identity-check-review";
+import { AddressReview } from "./address-review";
+import { isAddressReview } from "../lib/proofing-reviews";
 
 // One thing that waits for a decision, or was decided: the page of an identity
-// check or of a data request. For an admin and a member with the reviewer right.
+// check, of a self-declared address, or of a data request. For an admin and a member with the reviewer right.
 export default function ProofingReview(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug, requestId } = useParams();
@@ -21,6 +23,9 @@ export default function ProofingReview(): React.JSX.Element {
   const request = useProofingRequestQuery(slug, id, { enabled: canReview });
 
   const { data } = request;
+  if (data && isAddressReview(data)) {
+    return <AddressReview slug={slug} request={data} />;
+  }
   if (data) {
     return data.flowKind === "identity" ? (
       <IdentityCheckReview slug={slug} request={data} />

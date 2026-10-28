@@ -34,6 +34,7 @@ import {
   getProofingRequest,
   getProofingApp,
   getHostedProofing,
+  decideAddressReview,
   decideProofingReview,
   getProofingDataMatches,
   getDataRequestFlows,
@@ -492,8 +493,15 @@ export function useWaitingReviewsQuery(
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
-    queryFn: ({ signal }) =>
-      getProofingRequests(slug, { status: "needs_review" }, signal),
+    // Two reads: the checks and data requests in review, and the addresses
+    // waiting for a reviewer, each under its own cap.
+    queryFn: async ({ signal }) => {
+      const [inReview, addresses] = await Promise.all([
+        getProofingRequests(slug, { status: "needs_review" }, signal),
+        getProofingRequests(slug, { addressReview: "pending" }, signal),
+      ]);
+      return [...inReview, ...addresses];
+    },
     enabled: options.enabled && slug !== "",
     refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
   });
@@ -1074,6 +1082,19 @@ export function refreshAfterReviewDecision(
   void queryClient.invalidateQueries({
     queryKey: proofingRequestResultQueryKey(slug, requestId),
     refetchType: "none",
+  });
+}
+
+// Confirms or rejects a self-declared address; the lists follow.
+export function useDecideAddressReviewMutation(
+  slug: string,
+  requestId: string,
+): UseMutationResult<ProofingRequest, Error, "confirm" | "reject"> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (decision) => decideAddressReview(slug, requestId, decision),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });
 }
 

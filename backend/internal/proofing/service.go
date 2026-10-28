@@ -94,6 +94,8 @@ type requestStore interface {
 	LockReview(ctx context.Context, id uuid.UUID) (func(), error)
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr Address) error
+	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview) (bool, error)
+	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 
 // eventReader reads the audit trail (implemented by *audit.Reader).
@@ -1908,7 +1910,7 @@ func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error)
 // decides the session with it, or answers ErrDisclosurePending while the
 // subject has not finished in the Yivi app. The decision is recorded at once.
 // The photo and claims pass through and are not kept; a registered address is
-// kept sealed until an address is entered.
+// kept sealed until the entered one is compared with it.
 func (s *Service) YiviDisclosure(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.YiviDisclosure, error) {
 	req, sess, err := s.yiviSession(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -1932,8 +1934,8 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if !ok {
 		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
 	}
-	// Kept before the engine decides, so it is there before the page can
-	// enter an address.
+	// Kept before the engine decides, so the page never enters an address
+	// before it is there to compare with.
 	if claims, ok := presentation.RegisteredAddress(); ok && req.Address.asked() {
 		if err := s.requests.SetRegisteredAddress(ctx, req, registeredAddress(claims)); err != nil {
 			return proofingprovider.YiviDisclosure{}, err

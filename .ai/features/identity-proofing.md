@@ -1051,9 +1051,10 @@ post-review outcome stay the system's.
     privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
     the data of every approved identity check, counted from the end of the
     check, with the reason shown to the person in each language. It holds only
-    an approved external identity check (`legalHeld`): one that was rejected,
-    expired, cancelled or never started proved nobody, so it is purged at its
-    own retention and blocks no erasure. It is the floor of such a check's
+    an approved external identity check (`legalHeld`), or one rejected only for
+    its address after approval (`ADDRESS_MISMATCH`, the identity was proven):
+    one otherwise rejected, expired, cancelled or never started proved nobody,
+    so it is purged at its own retention and blocks no erasure. It is the floor of such a check's
     retention (§10): the check is purged at the later of its flow's or the
     org's retention and the legal period, and the engine session, the proofed
     name (once approved, `RecordOutcome`) and the days a person is told follow
@@ -1995,8 +1996,8 @@ hosted page.
 
 For onboarding that needs where the person lives. Wallet-side only, like the
 diplomas (§12): the engine knows nothing of it. The address is what the subject
-declares, never read off a document; a Dutch one is checked against the BAG.
-A Yivi app request also asks the registered (BRP) address.
+declares, never read off a document; a Dutch one is checked against the BAG,
+and on a Yivi app request against the registered (BRP) address too.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
   `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
@@ -2040,8 +2041,8 @@ A Yivi app request also asks the registered (BRP) address.
   - Any other address: kept as entered, `unsupported`.
   - An address kept before this has no `verification`; the page shows it as
     declared.
-- **Registered address** (BRP), Yivi app only: the Idem app has no way to the
-  BRP yet.
+- **Compared with the registered address** (BRP), Yivi app only: the Idem app
+  has no way to the BRP yet.
   - A request that asks the address starts its disclosure as
     `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
     houseNumber, zipcode, city) as an optional credential set
@@ -2057,7 +2058,42 @@ A Yivi app request also asks the registered (BRP) address.
   - `yiviDisclosure` seals it in `registered_address_ciphertext` before the
     engine decides, so the page never enters an address before it is there.
     `AddAddress` and `Purge` clear it.
-  - Nothing reads it yet: the entered address keeps its BAG result.
+  - On entry, after the BAG check (whose 422s still apply): the same postal
+    code and house number (`compareRegistered`, case and punctuation aside,
+    the number itself apart so 12-1 is not 121) is `registered`, anything else
+    `registered_mismatch`, the address then carrying the BRP one as
+    `registered`. The Sessions page shows both.
+  - Only `registered` confirms where the person lives. Every other result is
+    self-declared, `verified` included (the address exists, nothing more); an
+    Idem request is always self-declared. `address_added` audits the result
+    as `verification`, never the address.
+- **Address review**: a self-declared address waits for a reviewer
+  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`).
+  - Only the address is reviewed: the session keeps its outcome, and the
+    engine's session review is untouched (`address_review.go`).
+  - `POST .../requests/{id}/address/review` `{decision: confirm|reject}`,
+    reviewer route. `ownReview` applies, except to a platform admin. A
+    decided or erased one is 409 `address_not_under_review`.
+  - A reviewer reaches a pending address through `ReviewScope.reachesAddress`
+    (the request and this decision), never `reaches`: that one opens the
+    result, data-matches and export, so the check's identity and photos.
+  - A purged request never lists under `?addressReview=pending`.
+  - Audited `address_reviewed`, webhook `session.address_reviewed`
+    (`addressReview` in its data).
+  - Decided on the Reviews page, never on the Sessions page:
+    - The waiting list reads `?addressReview=pending` beside
+      `?status=needs_review` (`useWaitingReviewsQuery`); a reviewer lists it
+      org-wide (`listsEveryRequest`). It counts under "Identity checks".
+    - `isAddressReview` sends its page to `routes/address-review.tsx`: the
+      address, the approved check, Confirm / Reject.
+    - The Sessions page only shows the status, with a link to the review.
+  - A match the BAG did not check (`unchecked`) is kept as the BRP address,
+    so a made-up street with the right postal code and number is not.
+  - A mismatch rejects the approved request with `ADDRESS_MISMATCH`
+    (`rejectAddressMismatch`, in `AddAddress`'s transaction): audited
+    `rejected`, sent as `session.failed` after `session.address_added`.
+  - Not disclosed, a card without a house number (it is optional), or an Idem
+    request: the BAG result stands.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
   at boot. A lookup the register cannot answer is 503
   `address_lookup_unavailable`; the page asks for street and city by hand.
