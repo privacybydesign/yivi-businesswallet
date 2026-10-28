@@ -45,7 +45,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	COALESCE(r.address_review, ''), ` + purgeAtColumn
+	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
