@@ -403,36 +403,42 @@ func TestEmploymentDuringEngineReview(t *testing.T) {
 		{"statement", StatusApproved, ""},
 		{"no job", StatusNeedsReview, ReviewNoCurrentEmployment},
 	} {
-		t.Run(tc.statement, func(t *testing.T) {
-			e := newEmploymentFixture(EmploymentRequired)
-			req := sendApprovedAddress(t, e.fixture, time.Minute)
-			e.requests.stored.Status = StatusNeedsReview
-			req.Status = StatusNeedsReview
+		t.Run(tc.statement, func(t *testing.T) { checkEmploymentDuringEngineReview(t, tc.statement, tc.want, tc.reason) })
+	}
+}
 
-			verdict, err := e.upload(req, tc.statement)
-			if err != nil || verdict.Employment == nil {
-				t.Fatalf("a statement in the engine's review = %+v, %v; want it kept", verdict, err)
-			}
-			if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != "" {
-				t.Fatalf("request = %s (%q), want still the engine's review", got.Status, got.ReviewReason)
-			}
+// checkEmploymentDuringEngineReview keeps statement while the engine reviews
+// the identity, then has the engine approve: the request ends want, for
+// reason, and the sweep finds nothing missing.
+func checkEmploymentDuringEngineReview(t *testing.T, statement string, want Status, reason string) {
+	t.Helper()
+	e := newEmploymentFixture(EmploymentRequired)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	e.requests.stored.Status = StatusNeedsReview
+	req.Status = StatusNeedsReview
 
-			e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
-			got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
-			if err != nil || got.Status != tc.want || got.ReviewReason != tc.reason {
-				t.Fatalf("after the engine's approval = %s (%q), %v; want %s (%q)", got.Status, got.ReviewReason, err, tc.want, tc.reason)
-			}
+	verdict, err := e.upload(req, statement)
+	if err != nil || verdict.Employment == nil {
+		t.Fatalf("a statement in the engine's review = %+v, %v; want it kept", verdict, err)
+	}
+	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != "" {
+		t.Fatalf("request = %s (%q), want still the engine's review", got.Status, got.ReviewReason)
+	}
 
-			// The window long past, nothing is missing.
-			past := time.Now().Add(-missingEmploymentDue - time.Minute)
-			e.requests.stored.CheckedAt = &past
-			if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if e.requests.stored.Status != tc.want {
-				t.Errorf("after the sweep = %s, want %s", e.requests.stored.Status, tc.want)
-			}
-		})
+	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
+	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
+	if err != nil || got.Status != want || got.ReviewReason != reason {
+		t.Fatalf("after the engine's approval = %s (%q), %v; want %s (%q)", got.Status, got.ReviewReason, err, want, reason)
+	}
+
+	// The window long past, nothing is missing.
+	past := time.Now().Add(-missingEmploymentDue - time.Minute)
+	e.requests.stored.CheckedAt = &past
+	if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.requests.stored.Status != want {
+		t.Errorf("after the sweep = %s, want %s", e.requests.stored.Status, want)
 	}
 }
 

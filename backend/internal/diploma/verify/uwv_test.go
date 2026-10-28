@@ -121,33 +121,40 @@ func TestPDFUWV(t *testing.T) {
 		}
 	})
 
-	t.Run("revoked seal, offline asked", func(t *testing.T) {
-		// Nothing is embedded, so revocation is asked online even when
-		// Options.OCSP is off, and a revoked seal fails.
-		p.responder.mu.Lock()
-		p.responder.revoked[seal.SerialNumber.String()] = true
-		p.responder.mu.Unlock()
-		res := verifyPDF(t, pdf, Options{Issuer: &testUWV, Trust: p.trust})
-		if checkOK(t, res, CheckRevocation) || res.Valid {
-			t.Errorf("a revoked UWV seal verified: %+v", res.Checks)
-		}
-		if res.RevocationUnreachable {
-			t.Error("a revoked seal read as an unreachable responder")
-		}
-	})
+	t.Run("revoked seal, offline asked", func(t *testing.T) { testUWVRevoked(t, p, pdf, seal) })
+	t.Run("unreachable responder", func(t *testing.T) { testUWVUnreachable(t, p) })
+}
 
-	t.Run("unreachable responder", func(t *testing.T) {
-		closed := httptest.NewServer(http.NotFoundHandler())
-		closed.Close()
-		doc, _ := uwvPDF(t, p, closed.URL)
-		res := verifyPDF(t, doc, Options{Issuer: &testUWV, Trust: p.trust})
-		if checkOK(t, res, CheckRevocation) || res.Valid {
-			t.Errorf("a seal whose responder cannot answer verified: %+v", res.Checks)
-		}
-		if !res.RevocationUnreachable {
-			t.Error("an unreachable responder read as the seal's fault")
-		}
-	})
+// testUWVRevoked checks a revoked seal fails: nothing is embedded, so
+// revocation is asked online even when Options.OCSP is off.
+func testUWVRevoked(t *testing.T, p *pki, pdf []byte, seal *x509.Certificate) {
+	t.Helper()
+	p.responder.mu.Lock()
+	p.responder.revoked[seal.SerialNumber.String()] = true
+	p.responder.mu.Unlock()
+	res := verifyPDF(t, pdf, Options{Issuer: &testUWV, Trust: p.trust})
+	if checkOK(t, res, CheckRevocation) || res.Valid {
+		t.Errorf("a revoked UWV seal verified: %+v", res.Checks)
+	}
+	if res.RevocationUnreachable {
+		t.Error("a revoked seal read as an unreachable responder")
+	}
+}
+
+// testUWVUnreachable checks a seal whose responder cannot answer fails as
+// the responder's fault, not the seal's.
+func testUWVUnreachable(t *testing.T, p *pki) {
+	t.Helper()
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	doc, _ := uwvPDF(t, p, closed.URL)
+	res := verifyPDF(t, doc, Options{Issuer: &testUWV, Trust: p.trust})
+	if checkOK(t, res, CheckRevocation) || res.Valid {
+		t.Errorf("a seal whose responder cannot answer verified: %+v", res.Checks)
+	}
+	if !res.RevocationUnreachable {
+		t.Error("an unreachable responder read as the seal's fault")
+	}
 }
 
 func testUWVVerifies(t *testing.T, p *pki, pdf []byte, seal *x509.Certificate) {
