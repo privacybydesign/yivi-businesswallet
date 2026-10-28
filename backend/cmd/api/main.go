@@ -1024,7 +1024,8 @@ func run() error {
 	// The same pool parses a Verzekeringsbericht; ProviderOff wires no checker.
 	if sealValidators.employment != nil {
 		employmentChecker := employment.NewChecker(sealValidators.employment, employment.NewTextParser(diplomaParser))
-		if err := employmentChecker.Ping(ctx); err != nil {
+		// EU lists down at boot: run on the pinned roots and answer 503 on upload until a reload, as diplomas do.
+		if err := employmentChecker.Ping(ctx); err != nil && !errors.Is(err, diploma.ErrTrustUnavailable) {
 			return fmt.Errorf("employment validator ping: %w", err)
 		}
 		proofingService.SetEmploymentChecker(employmentChecker)

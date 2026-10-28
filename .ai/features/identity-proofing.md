@@ -2187,7 +2187,8 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
       EU lists failed at boot, the UWV validator cannot check: `Validate` and
       `Ping` are `ErrTrustUnavailable` (503 `seal_check_unavailable`), never
       `signature_invalid` for a genuine statement, until a reload brings the EU
-      lists back. DUO's keeps checking on them.
+      lists back. That `Ping` does not fail the boot. DUO's keeps checking on
+      them.
   - Only then the text (`TextParser` on `diploma.PDFiumParser.Text`, the
     diploma PDFium pool and limits). Every page must name the same holder;
     otherwise `not_a_statement`.
