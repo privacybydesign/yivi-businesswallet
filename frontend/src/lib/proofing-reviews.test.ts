@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -22,6 +24,8 @@ import {
   reviewTabFrom,
   waitingOfTab,
   waitingOldestFirst,
+  WALLET_REVIEW_REASONS,
+  walletReviewReason,
 } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
@@ -42,6 +46,7 @@ function request(over: Partial<ProofingRequest> = {}): ProofingRequest {
     diplomaMode: "off",
     diplomas: [],
     addressMode: "off",
+    employmentMode: "off",
     expectedSubject: false,
     flowKind: "identity",
     ...over,
@@ -388,5 +393,35 @@ describe("address reviews", () => {
     expect(
       isAddressReview(request({ flowKind: "data_access", status: "approved" })),
     ).toBe(false);
+  });
+});
+
+// The wallet's own review reasons are the ones backend/internal/proofing
+// opens a review with, both ways.
+describe("wallet review reasons mirror the backend", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/employment.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/\bReview[A-Z]\w*\s*= "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend reason and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...WALLET_REVIEW_REASONS].sort()).toEqual(backend.sort());
+  });
+
+  it("reads only a known reason", () => {
+    expect(walletReviewReason({ reviewReason: "current_benefit" })).toBe(
+      "current_benefit",
+    );
+    expect(walletReviewReason({ reviewReason: "other" })).toBeUndefined();
+    expect(walletReviewReason({})).toBeUndefined();
   });
 });

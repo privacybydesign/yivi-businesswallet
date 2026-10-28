@@ -64,6 +64,8 @@ type fakeRequests struct {
 	methods  []proofingprovider.Method
 	// handovers counts the new codes recorded.
 	handovers int
+	// employmentRejections are the reasons of the statements refused.
+	employmentRejections []string
 	// actors is the audit actor label of each start and outcome recorded, ""
 	// for the system.
 	actors []string
@@ -99,7 +101,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		Status: StatusPending, LinkExpiresAt: in.LinkExpiresAt, Method: in.Method,
 		Hosted:                 in.LinkTokenHash != nil,
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
-		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address,
+		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address, Employment: in.Employment,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
 		FlowKind: in.FlowKind,
 	}
@@ -249,6 +251,37 @@ func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uui
 	return true, nil
 }
 
+func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectEmployment != nil ||
+		(f.stored.Status != StatusApproved && f.stored.Status != StatusNeedsReview) {
+		return false, nil
+	}
+	f.stored.SubjectEmployment = &emp
+	if reason := emp.reviewReason(); reason != "" && f.stored.Status == StatusApproved {
+		f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+	}
+	return true, nil
+}
+
+func (f *fakeRequests) RejectMissingEmployment(_ context.Context, now time.Time, _ int) (int, error) {
+	r := f.stored
+	if r == nil || r.Employment != EmploymentRequired || r.Status != StatusApproved || r.SubjectEmployment != nil ||
+		r.CheckedAt == nil || now.Before(r.CheckedAt.Add(missingEmploymentDue)) {
+		return 0, nil
+	}
+	r.Status, r.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
+	return 1, nil
+}
+
+func (f *fakeRequests) NextMissingEmployment(context.Context, time.Time) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {
+	f.employmentRejections = append(f.employmentRejections, reason)
+	return nil
+}
+
 func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr Address) error {
 	if f.stored != nil && f.stored.ID == req.ID && f.stored.SubjectAddress == nil {
 		f.registeredAddress = &addr
@@ -293,12 +326,31 @@ func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, e
 	return m, nil
 }
 
-func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+// RecordOutcome is the engine's outcome: an approval after its review opens
+// the wallet's review of a statement kept meanwhile, as recordOutcome does.
+func (f *fakeRequests) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	reviewed := f.stored.Status == StatusNeedsReview
+	if err := f.recordOutcome(ctx, status, res); err != nil {
+		return err
+	}
+	if emp := f.stored.SubjectEmployment; reviewed && status == StatusApproved && emp != nil {
+		if reason := emp.reviewReason(); reason != "" {
+			f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+		}
+	}
+	return nil
+}
+
+func (f *fakeRequests) recordOutcome(ctx context.Context, status Status, res proofingprovider.Result) error {
 	f.actors = append(f.actors, actorLabel(ctx))
 	f.outcomes = append(f.outcomes, status)
 	f.results = append(f.results, res)
 	f.names = append(f.names, res.Name)
 	f.stored.Status = status
+	if f.stored.CheckedAt == nil && (status == StatusApproved || status == StatusNeedsReview) {
+		checked := time.Now()
+		f.stored.CheckedAt = &checked
+	}
 	f.stored.ProofedName = res.Name
 	f.stored.AssuranceLevel, f.stored.EIDASLevel, f.stored.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 	if status == StatusApproved || status == StatusRejected {
@@ -312,6 +364,10 @@ func (f *fakeRequests) GetExternal(_ context.Context, _, id uuid.UUID) (Request,
 		return Request{}, ErrRequestNotFound
 	}
 	return *f.stored, nil
+}
+
+func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+	return f.recordOutcome(ctx, status, res)
 }
 
 func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {
@@ -819,16 +875,21 @@ func TestCreateRequestValidates(t *testing.T) {
 		"not allowed":    {NewRequest{SubjectUserID: alex.UserID, FlowID: chipFlow.ID}, ErrFlowNotAllowed},
 	}
 	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{UserID: uuid.New()}, tc.in)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("err = %v, want %v", err, tc.want)
-			}
-			if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-				t.Errorf("a refused request created a session or sent mail")
-			}
-		})
+		t.Run(name, func(t *testing.T) { assertRequestRefused(t, Requester{UserID: uuid.New()}, tc.in, tc.want) })
+	}
+}
+
+// assertRequestRefused sends in as by and wants it refused with want, before
+// any session is opened or mail sent.
+func assertRequestRefused(t *testing.T, by Requester, in NewRequest, want error) {
+	t.Helper()
+	f := newFixture()
+	_, err := f.svc.CreateRequest(context.Background(), testOrg, by, in)
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want %v", err, want)
+	}
+	if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
+		t.Errorf("a refused request created a session or sent mail")
 	}
 }
 
@@ -1247,16 +1308,7 @@ func TestExternalRequestValidates(t *testing.T) {
 		"not completable": {sam, NewRequest{SubjectEmail: "a@example.org", FlowID: browserFlow.ID}, ErrFlowNotCompletable},
 	}
 	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture()
-			_, err := f.svc.CreateRequest(context.Background(), testOrg, tc.by, tc.in)
-			if !errors.Is(err, tc.want) {
-				t.Errorf("err = %v, want %v", err, tc.want)
-			}
-			if len(f.ips.sessions) != 0 || len(f.mailer.sent) != 0 {
-				t.Errorf("a refused request created a session or sent mail")
-			}
-		})
+		t.Run(name, func(t *testing.T) { assertRequestRefused(t, tc.by, tc.in, tc.want) })
 	}
 }
 

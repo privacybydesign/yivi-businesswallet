@@ -302,14 +302,22 @@ func signPDF(t *testing.T, p *pki, opts signOptions) []byte {
 	// The claimed signing time is the one the chain is checked at without a
 	// timestamp, so it has to fall inside the test certificates' validity.
 	claimed := "D:" + time.Now().UTC().Format("20060102150405") + "Z"
-	prefix := "%PDF-1.7\n1 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /ETSI.CAdES.detached " +
-		"/M (" + claimed + ") /Reference [<< /TransformMethod /DocMDP /TransformParams << /P 1 >> >>] /Contents "
+	dict := "/Filter /Adobe.PPKLite /SubFilter /ETSI.CAdES.detached " +
+		"/M (" + claimed + ") /Reference [<< /TransformMethod /DocMDP /TransformParams << /P 1 >> >>]"
+	return layoutPDF(t, dict, func(content []byte) []byte { return signCMS(t, p, content, opts) })
+}
+
+// layoutPDF lays out a one-signature PDF whose signature dictionary holds
+// dict, and fills /Contents with sign over the two ByteRange segments.
+func layoutPDF(t *testing.T, dict string, sign func(content []byte) []byte) []byte {
+	t.Helper()
+	prefix := "%PDF-1.7\n1 0 obj\n<< /Type /Sig " + dict + " /Contents "
 	suffixFormat := " /ByteRange [%010d %010d %010d %010d] >>\nendobj\n%%%%EOF\n"
 	suffixLen := len(fmt.Sprintf(suffixFormat, 0, 0, 0, 0))
 	secondStart := len(prefix) + contentsHexWidth + len("<>")
 	suffix := fmt.Sprintf(suffixFormat, 0, len(prefix), secondStart, suffixLen)
 
-	contents := hex.EncodeToString(signCMS(t, p, []byte(prefix+suffix), opts))
+	contents := hex.EncodeToString(sign([]byte(prefix + suffix)))
 	if len(contents) > contentsHexWidth {
 		t.Fatalf("signature of %d hex chars does not fit the reserved %d", len(contents), contentsHexWidth)
 	}

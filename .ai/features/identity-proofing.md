@@ -99,7 +99,9 @@ tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 `internal/diploma` + `routes/flow-editor.tsx` (the flow's diploma
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
 `matchSubject` in `service.go` (one known person, §13), `address*.go` +
-`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16).
+`routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16),
+`employment*.go` + `internal/employment` + `EmploymentStep` (the UWV
+Verzekeringsbericht, §17).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -1689,14 +1691,20 @@ only: the engine knows nothing of it.
   deep link (`diplomas_need_page`, 422): on screen or hosted only. The send
   form switches to on-screen by itself (`sendableByMail`).
 - **Upload** (`POST .../requests/{id}/diplomas`, `POST /proof/{token}/diplomas`,
-  multipart `file` parts): only on an approved request, within
-  `DiplomaUploadWindow` (1 h) of its approval (`diplomasUntil` in the
-  request, hosted progress), at most 10 per request, 5 MiB each; the hosted
+  multipart `file` parts): only once the identity check finished, approved or
+  in review, within `DiplomaUploadWindow` (1 h) of it (`checked_at`,
+  `stepsOpen`; `diplomasUntil` in the request, hosted progress), at most 10 per request, 5 MiB each; the hosted
   route reads a body only as large as the extracts the request still takes
   (`HostedDiplomasOpen`, `maxDiplomaUpload`). The page
   shows the step after an approval and hands back (`onSettled`, the hosted
   redirect) only once the subject is done: at least one extract held, or the
   window closed.
+- **The signature check is per issuer** (`trust.Issuer.Lacks`): DUO's
+  requires everything below; UWV's seal (§17) lacks the certification, the
+  timestamp, the signed attributes and embedded revocation, so those checks are
+  left out for it, not passed. `verify.PDF` also reads a SignerInfo digest
+  written as an RSA signature OID (`sha256WithRSAEncryption`, UWV's) as its
+  hash.
 - **The check** (`internal/diploma`, as in `privacybydesign/go-diploma-issuer`,
   which has the detail): DUO's PAdES signature is verified first, on the raw
   bytes: it must cover the whole file, carry a qualified timestamp (the
@@ -1727,6 +1735,9 @@ only: the engine knows nothing of it.
     fetch), and reloaded in the background once 24 h old; a failed reload keeps
     the anchors already loaded and is retried after 15 minutes. The pinned roots
     are only the boot fallback.
+    - `pinned` holds only the PKIoverheid and certSIGN roots, and UWV's seal
+      chains to QuoVadis: `pinned` with `EMPLOYMENT_VALIDATOR_PROVIDER=uwv` fails
+      the boot. `off` (or `stub` in dev) lets `pinned` boot.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
@@ -2011,8 +2022,9 @@ and on a Yivi app request against the registered (BRP) address too.
   as a bare deep link (`address_needs_page`, 422); `sendableByMail` checks both.
 - **Entry** (`POST .../requests/{id}/address`, `POST /proof/{token}/address`,
   JSON, 204):
-  - Once, on an approved request, within `AddressWindow` (1 h) of the approval
-    (`addressUntil` in the request and the hosted progress, gone once entered;
+  - Once, after the identity check finished (approved or in review), within
+    `AddressWindow` (1 h) of it (`checked_at`, `stepsOpen`; `addressUntil` in
+    the request and the hosted progress, gone once entered;
     the hosted progress says `addressGiven`, never the address).
   - Street, house number, postal code, city and country, each required, trimmed,
     at most 200 characters.
@@ -2089,9 +2101,10 @@ and on a Yivi app request against the registered (BRP) address too.
     - The Sessions page only shows the status, with a link to the review.
   - A match the BAG did not check (`unchecked`) is kept as the BRP address,
     so a made-up street with the right postal code and number is not.
-  - A mismatch rejects the approved request with `ADDRESS_MISMATCH`
-    (`rejectAddressMismatch`, in `AddAddress`'s transaction): audited
-    `rejected`, sent as `session.failed` after `session.address_added`.
+  - A mismatch rejects the request with `ADDRESS_MISMATCH`, approved or in
+    review (`rejectAddressMismatch`, in `AddAddress`'s transaction): audited
+    `rejected`, sent as `session.failed` after `session.address_added`. A
+    review is not waited for: the mismatch fails the check whatever is decided.
   - Not disclosed, a card without a house number (it is optional), or an Idem
     request: the BAG result stands.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged
@@ -2099,8 +2112,9 @@ and on a Yivi app request against the registered (BRP) address too.
   `address_lookup_unavailable`; the page asks for street and city by hand.
 - The address window keeps a hosted link live (`linkLive`), so the lookups
   run on the live link's rate limit, not the stale one's.
-  - The page shows it after the approval and before the diplomas; it hands back
-    (`onSettled`) once the address is kept or the window closed.
+  - The page shows it once the identity check finished and before the
+    diplomas; it hands back (`onSettled`) once the address is kept or the
+    window closed.
 - **Kept** sealed in `address_ciphertext` (the proofing cipher), decrypted on
   every request read. Audited `address_added` without the address; the webhook
   `session.address_added` carries it.
@@ -2108,3 +2122,189 @@ and on a Yivi app request against the registered (BRP) address too.
     access export (strong match only), and the Sessions page.
   - `Purge` clears it and strips `address` from the request's webhook
     deliveries.
+
+## 17. Employment (UWV Verzekeringsbericht)
+
+For onboarding that needs the person's occupational status (AMLR customer due
+diligence). Wallet-side only, like the address (§16): the engine knows nothing
+of it. The subject uploads the Verzekeringsbericht they download from Mijn UWV
+with DigiD; the wallet checks UWV's seal and keeps the employment relations.
+
+- **AMLR basis** (checked 2026-10-22):
+  - AMLR Art. 22(1)(a), the identification data, does not list occupation.
+  - AMLA's final draft RTS under Art. 28(1) (30 September 2026, not adopted)
+    covers it in Art. 16, the purpose and intended nature (AMLR Art. 20(1)(c)
+    and 25). The information "may include" the employment status, gathered and
+    verified as far as the risk warrants.
+  - So verifying it against UWV is the operator's risk-based choice. The
+    strictness below (holder match, freshness) is a product default.
+- **The document** (checked on a real one):
+  - One `adbe.pkcs7.detached` signature over the whole file. No DocMDP, no
+    signed attributes, no timestamp, no embedded revocation information.
+  - The signer is `O=Uitvoeringsinstituut werknemersverzekeringen`,
+    `NTRNL-34360247`: a qualified e-seal certificate (QcCompliance, eseal,
+    QCP-l, no QSCD) from QuoVadis EU Issuing CA G4, granted on the NL Trusted
+    List. That CA is the anchor itself.
+  - Every page ends with the holder ("De heer J. Lin": salutation, initials,
+    surname), "Geboortedatum: dd-mm-yyyy Datum: <dag maand jaar>", the form
+    code `VZB-006` and "Printversie verzekeringsbericht". No BSN.
+  - "Loongegevens" has one block per employer and contract (`Werkgever/
+    Instantie`, `Loonheffingennummer`, `Verzekerde wetten`, `Contractvorm`),
+    then one line per month with hours and Sv-loon. The newest month lags the
+    payroll filing by about a month.
+  - Self-employed people, students and retirees do not appear: an empty list
+    does not tell them apart.
+- **Per flow** (`identity_proofing_flow_settings.employment`,
+  `FlowEmploymentStore`, `PUT .../flows/{id}/employment`, admin): `off` (the
+  default) or `required`, audited `flow_employment_configured`.
+  - `required` needs a flow that reads `dg1` (`flow_no_identity`), and keeps
+    an edit or older version from dropping it (`identityRequired`).
+  - The flow list carries it as `employmentMode`. A data request flow asks for
+    none. A request snapshots it at send (`identity_proofing_requests.employment`).
+- **A page, never a mail**: `employment_needs_page` (422), as §16.
+- **Upload** (`POST .../requests/{id}/employment`, `POST /proof/{token}/employment`,
+  one multipart `file`, 5 MiB, read as one diploma extract):
+  - Within `EmploymentWindow` (1 h) of the identity check finishing, approved
+    or in the engine's review (`checked_at`, `stepsOpen`, `employmentUntil`;
+    the hosted progress says `employmentGiven`), so the subject gives it before
+    a reviewer decides and is never asked to come back. The hosted route
+    checks the link before it reads the body.
+  - **Kept once**: the first accepted statement closes the step
+    (`employment_closed`). A refused one is only audited, so the subject can
+    try another within the window.
+- **The check** (`internal/employment.Checker`), in this order:
+  - UWV's seal (`diploma.NewPadesValidator(store, trust.UWV, …)`) on the raw
+    bytes, on the diploma trust store. `signature_invalid`, or
+    `not_a_statement` unsigned.
+    - Revocation is always online (OCSP), whatever `DIPLOMA_OCSP` says, since
+      nothing is embedded. A revoked seal is `signature_invalid`.
+    - An unreachable responder is no answer about the seal
+      (`verify.ErrRevocationUnreachable`): the check fails as the checker's
+      own, `diploma.ErrRevocationUnavailable`, 503 `seal_check_unavailable`
+      ("try again later"). DUO's online check reads the same.
+    - The pinned roots hold no QuoVadis anchor (`trust.Issuer.Pinned` is false
+      for UWV). On them, `DIPLOMA_TRUST_SOURCE=pinned` or the fallback after the
+      EU lists failed at boot, the UWV validator cannot check: `Validate` and
+      `Ping` are `ErrTrustUnavailable` (503 `seal_check_unavailable`), never
+      `signature_invalid` for a genuine statement, until a reload brings the EU
+      lists back. That `Ping` does not fail the boot. DUO's keeps checking on
+      them.
+  - Only then the text (`TextParser` on `diploma.PDFiumParser.Text`, the
+    diploma PDFium pool and limits). Every page must name the same holder;
+    otherwise `not_a_statement`.
+  - The holder (`diploma.MatchInitials`) against `sessionHolder`:
+    - each printed initial begins the chip's given name in its place, one per
+      given name ("Th." for Theodorus, "IJ." for IJsbrand);
+    - the surname is the chip's, plain or ICAO, or a married name joined to it
+      with a hyphen in either order ("Jansen-de Vries" for "de Vries"). The
+      partner's name alone is refused;
+    - the same date of birth. Else `holder_mismatch`.
+  - The printed date at most `statementMaxAge` (30 days) old, else `stale`.
+- **What a relation is** (`classify`), as HDN's Rekenregels Inkomensbepaling
+  Loondienst 8.1.1 and 9.0.0 (Appendix 5) read the same PDF:
+  - `benefit`: a benefit UWV pays, printed under "Werkgever/Instantie" as one
+    of ten descriptions ("WW-Uitkering van UWV", "UWV; Loondoorbetaling bij
+    faillissement", …, compared without case) together with one of the
+    loonheffingennummers in HDN's "Bijlage Loonheffingennummers voor
+    Uitkering via het UWV" (`810220350L02/L04/L20/L23/L26/L53`). Both must
+    match, as in IBL. HDN updates that list: check it on a new IBL release.
+  - Sick pay through the employer, "Ziektewet- of WAZO-Uitkering van
+    <werkgever>", is kept as that employer's `employment`, worked or not: the
+    holder still has the job.
+  - `employment` otherwise. AOW (SVB), social assistance and pensions are not
+    in IBL's appendix and their printed names are not known.
+  - `other_income` (`Statement.Current`): a current `employment` relation paid
+    in the last two months without hours worked in them. That is how a
+    pension, AOW or social assistance reads, but also a job's final payment.
+    Hours count only as a whole number ahead of the wages' `€`: an amount alone
+    is no hours.
+- **No benefit's name is kept.** A UWV benefit is kept with payer `UWV` and no
+  loonheffingennummer (all of them merged into one relation), sick pay under
+  its employer's name. The name ("WIA", "Wajong", "Ziektewet- of
+  WAZO-Uitkering") tells of sickness, disability or pregnancy: data concerning
+  health (GDPR Art. 9), which every member on the people and review pages, the
+  API and the webhook would see. The occupational status needs none of it.
+- **Kept**: the statement date and only the relations current on it
+  (`Statement.Current`), as IBL §3.1 decides "works as an employee now": a job
+  with hours worked (more than 0) in a month at most two months before the
+  statement's month, as employers file a month's payroll by the end of the
+  next; a benefit, or sick pay through the employer, paid in one. A month paid without hours
+  (a final payment, an allowance, an on-call contract without shifts) is no
+  work. Not "the newest month on the statement": someone who stopped in June
+  would have their June job read as current.
+  - `employed` (`Statement.Employed`): a current relation that is not a
+    benefit.
+- **No current job, a current benefit, or other income goes to review.** A kept statement
+  moves the approved request to `needs_review` in the same transaction
+  (`openWalletReview`), audited `identity_proofing.needs_review` and webhook
+  `session.review_opened`, with `review_reason` (`Employment.reviewReason`):
+  - `no_current_employment`: `employed: false`;
+  - `current_benefit`: a job, and a current `benefit` relation beside it;
+  - `current_other_income`: a job, and a current `other_income` relation
+    beside it (no `benefit`).
+  - A statement kept while the engine still reviews the identity opens no
+    review then: `recordOutcome` opens it once the engine approves, in the
+    same transaction (`reviewKeptEmployment` then rejects it at once in a
+    paused org).
+  - In a paused org a review the statement opens is rejected at once, as the
+    wallet's decision (no actor), not the uploader's.
+  - The engine approved and still reports the approval, so the review is the
+    wallet's alone: `tryReconcile` skips such a request, `RecordOutcome`
+    refuses it (`review_reason IS NOT NULL`), and `DecideReview` decides it
+    in the wallet (`decideWalletReview`, `RecordWalletOutcome`) without the
+    engine. A rejection without a code is `MANUAL_REVIEW_REJECTED`.
+    `lapseReview` rejects an undecided one the same way.
+  - The org's webhook gets `session.verified`, then `session.review_opened`,
+    then the decision. `reviewReason` is in the request responses and the
+    public API result; the review panel names it.
+- **No statement in time is a rejection.** An approved request on a flow that
+  requires the step, with no statement kept within `EmploymentWindow` of the
+  check, is rejected `EMPLOYMENT_NOT_PROVIDED` (`RejectMissingEmployment`, run
+  by `ReconcileDue`, which wakes at `NextMissingEmployment`), audited
+  `identity_proofing.rejected`, webhook `session.failed`.
+  - It is due `employmentSweepGrace` after the window: the longest check (two
+    OCSP lookups, then a PDFium read) of an upload let in at the window's end,
+    so that upload is kept first.
+  - One still in the engine's review is due once the engine approves it.
+  - A refused upload does not count. Reconcile leaves the rejection: the
+    engine still reports the approval.
+  - Per current relation the employer (`UWV` for a benefit), payroll tax
+    number (none for a benefit), contract form, since when (its first month)
+    and its newest month, blocks of one relation across
+    pages merged. None current: "no current employment or benefit in UWV's
+    records".
+  - Never past relations, the PDF, the holder, the hours or the wages: the
+    purpose is the occupational status now.
+  - Sealed in `employment_ciphertext` (the proofing cipher), with
+    `employment_added_at`. Audited `employment_added` with the statement date
+    only, `employment_rejected` with the reason and failed check. The webhook
+    `session.employment_added` carries it.
+  - Shown in the request responses, the public API's `result`, a data
+    access export (strong match only), and the Sessions page.
+  - `Purge` clears it (and the purged check holds it to that) and strips
+    `employment` from the request's webhook deliveries.
+- **Config:** `EMPLOYMENT_VALIDATOR_PROVIDER=uwv` is the default; `stub`
+  (`DEV_MODE` only, the dev stack's default) accepts every seal but still
+  parses and matches for real. `cmd/api` builds both seal validators on one
+  trust store (`newSealValidators`).
+  - `off` wires no checker, and 409 `no_employment_checker` refuses:
+    - `SaveFlowEmployment` to `required`;
+    - an upload;
+    - a request on a flow already set to `required` (`CreateRequest`), before
+      its subject starts: they could not upload, and the sweep would reject
+      them an hour later.
+  - `off` is the way to run `DIPLOMA_TRUST_SOURCE=pinned`; `uwv` with it is
+    refused at startup.
+- **The page** runs the steps once the identity check finished (approved, or
+  in review: the steps then say the check is done and will be reviewed) as
+  address, diplomas, then employment.
+  - An accepted statement stays on screen (date, seal valid, each employer and
+    its months) until the subject continues, as the diploma step does; the
+    upload does not refetch the progress, which would skip past it.
+  - On continuing, the page re-reads the progress and settles and hands back
+    only what that read returns (`employmentOwed`): a kept statement may have
+    opened a review.
+  - Once the window closed without one, the progress keeps polling until the
+    sweep's rejection lands (`progressPollContinues`), and the step holds its
+    Continue until then, so `approved` is never handed back for a session
+    about to be rejected.

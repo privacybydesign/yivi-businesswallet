@@ -76,6 +76,56 @@ func MatchFullName(fullName, dateOfBirth string, disclosed Person) Result {
 	return result
 }
 
+// MatchInitials compares a holder printed as initials and a surname, the way
+// UWV prints the Verzekeringsbericht ("J.A. de Vries"), with the disclosed
+// person. Each printed initial must begin the disclosed given name in its
+// place ("Th." for Theodorus, "IJ." for IJsbrand), as many as there are
+// given names. The surname is the disclosed one, or a married name joined
+// to it with a hyphen in either order ("Jansen-de Vries" or "de
+// Vries-Jansen" for "de Vries"), as the BRP name in use may be; the
+// partner's name alone is someone else's.
+func MatchInitials(initials []string, surname, dateOfBirth string, disclosed Person) Result {
+	result := Result{}
+	result.DateOfBirthMatch = compareDatesOfBirth(dateOfBirth, disclosed.DateOfBirth, &result.Reasons)
+
+	candidates := [][]nameToken{nameTokens(surname)}
+	if parts := strings.Split(surname, "-"); len(parts) == 2 {
+		candidates = append(candidates, nameTokens(parts[0]), nameTokens(parts[1]))
+	}
+	for _, tail := range surnameTails(disclosed) {
+		if slices.ContainsFunc(candidates, func(c []nameToken) bool { return equalTokens(c, tail) }) {
+			result.SurnameMatch = true
+			break
+		}
+	}
+	if !result.SurnameMatch {
+		result.Reasons = append(result.Reasons, "surname differs")
+	}
+
+	result.GivenNamesMatch = initialsMatch(initials, nameTokens(disclosed.GivenNames))
+	if !result.GivenNamesMatch {
+		result.Reasons = append(result.Reasons, "initials differ")
+	}
+
+	result.Matched = result.DateOfBirthMatch && result.SurnameMatch && result.GivenNamesMatch
+	return result
+}
+
+// initialsMatch reports whether every given name begins with the initial in
+// its place, plain or ICAO spelled, with one initial per given name.
+func initialsMatch(initials []string, given []nameToken) bool {
+	if len(initials) == 0 || len(initials) != len(given) {
+		return false
+	}
+	for i, initial := range initials {
+		letters := Normalize(initial)
+		if letters == "" || (!strings.HasPrefix(given[i].plain, letters) && !strings.HasPrefix(given[i].icao, letters)) {
+			return false
+		}
+	}
+	return true
+}
+
 // printedTokens splits a printed name into its words and marks the ones that
 // start a space-separated word, so a surname never begins inside "Jansen-Smit".
 func printedTokens(fullName string) ([]nameToken, map[int]bool) {

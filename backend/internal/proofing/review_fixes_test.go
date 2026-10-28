@@ -31,9 +31,9 @@ func TestRequiredDiplomasNeedIdentity(t *testing.T) {
 	}
 }
 
-// A flow requiring diplomas keeps reading the name and birth date: an edit or
-// an older version that drops dg1 is refused. A flow without that need is
-// edited and rolled back freely.
+// A flow requiring diplomas or the Verzekeringsbericht keeps reading the name
+// and birth date: an edit or an older version that drops dg1 is refused. A
+// flow without that need is edited and rolled back freely.
 func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	ctx := context.Background()
 	reasons := documentReasons()
@@ -63,6 +63,12 @@ func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	}
 	if _, err := d.svc.ActivateFlowVersion(ctx, testOrg, appFlow.ID, 1); err != nil {
 		t.Errorf("identity flow back to version 1 = %v, want activated", err)
+	}
+
+	e := newFixture()
+	e.svc.flowEmploymentSettings = &fakeFlowEmployment{modes: map[string]EmploymentMode{chipFlow.ID: EmploymentRequired}}
+	if _, err := e.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
+		t.Errorf("employment-required flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
 	}
 }
 

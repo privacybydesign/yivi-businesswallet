@@ -166,6 +166,25 @@ export const REJECT_REASONS = [
 export type RejectReasonKey = (typeof REJECT_REASONS)[number]["key"];
 export const DEFAULT_REJECT_REASON: RejectReasonKey = "someoneElse";
 
+// Why the wallet itself held an approved check for review
+// (proofing.ReviewNoCurrentEmployment, ReviewCurrentBenefit,
+// ReviewCurrentOtherIncome): the Verzekeringsbericht lists no current job, or
+// a current UWV benefit or other income beside one.
+export const WALLET_REVIEW_REASONS = [
+  "no_current_employment",
+  "current_benefit",
+  "current_other_income",
+] as const;
+export type WalletReviewReason = (typeof WALLET_REVIEW_REASONS)[number];
+
+export function walletReviewReason(
+  request: Pick<ProofingRequest, "reviewReason">,
+): WalletReviewReason | undefined {
+  return WALLET_REVIEW_REASONS.find(
+    (reason) => reason === request.reviewReason,
+  );
+}
+
 // Why the reader may not decide an identity check: they sent it, or it is
 // about them. Another reviewer decides it (the backend's ownReview, 403
 // own_review). A data request is the person's own ask: whoever sent its link

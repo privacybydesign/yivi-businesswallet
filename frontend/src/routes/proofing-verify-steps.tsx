@@ -19,6 +19,7 @@ import {
   useUploadDiplomasMutation,
   useSubmitAddressMutation,
   useAddressLookupQuery,
+  useUploadEmploymentMutation,
 } from "../api/identity-proofing.queries";
 import type {
   AddressMode,
@@ -27,7 +28,10 @@ import type {
   AttributeReasons,
   DiplomaMode,
   DiplomaVerdict,
+  EmploymentMode,
+  EmploymentVerdict,
   ProofingBranding,
+  ProofingEmployment,
   HostedDiploma,
   HostedLegalRetention,
   ProofingApp,
@@ -36,12 +40,17 @@ import type {
   ProofingYiviStart,
   VerifyTarget,
 } from "../api/identity-proofing";
+import { EMPLOYMENT_KIND } from "../api/identity-proofing";
 import {
   ATTRIBUTE_AGE_OVER,
   ATTRIBUTE_DOCUMENT,
   addressLookup,
   diplomaRejectionReason,
   diplomaStepDone,
+  employmentOwed,
+  employmentRejectionReason,
+  employmentReview,
+  employmentStepDone,
   formatDuration,
   isRequestedAttribute,
   matchingAddress,
@@ -54,7 +63,7 @@ import {
   verifyErrorMessage,
 } from "../lib/identity-proofing";
 import type { RequestedAttribute } from "../lib/identity-proofing";
-import { useDateFormatter } from "../lib/format-when";
+import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { legalReasonIn } from "../lib/legal-retention";
 import { yiviUniversalLink } from "../lib/yivi-universal-link";
@@ -91,6 +100,8 @@ export interface VerifyFlowInfo {
   diplomaMode?: DiplomaMode;
   // Whether the subject is asked for their postal address afterwards.
   addressMode?: AddressMode;
+  // Whether the subject is asked for their UWV Verzekeringsbericht afterwards.
+  employmentMode?: EmploymentMode;
   // The most days the session's data is kept, as the server works it out:
   // the flow's retention when it sets one, else the org's.
   retentionDays: number;
@@ -98,6 +109,15 @@ export interface VerifyFlowInfo {
 
 // Where a subject logs in with DigiD to download the extract of a diploma.
 const MIJN_DUO_URL = "https://mijn.duo.nl";
+// Where a subject logs in with DigiD to download their Verzekeringsbericht.
+const MIJN_UWV_URL = "https://mijn.uwv.nl";
+
+// What the player reads when their kept statement sends the check to review.
+const EMPLOYMENT_REVIEW_KEYS = {
+  noJob: "identityProofing.employment.review",
+  benefit: "identityProofing.employment.reviewBenefit",
+  otherIncome: "identityProofing.employment.reviewOtherIncome",
+} as const;
 // How long typing a postal code or house number pauses before the address is
 // looked up.
 const ADDRESS_LOOKUP_DEBOUNCE_MS = 300;
@@ -192,6 +212,13 @@ export function Overview({
       icon: "flag",
       label: t("identityProofing.diplomas.overview.label"),
       detail: t("identityProofing.diplomas.overview.detail"),
+    });
+  }
+  if (flow.employmentMode !== undefined && flow.employmentMode !== "off") {
+    items.push({
+      icon: "personal",
+      label: t("identityProofing.employment.overview.label"),
+      detail: t("identityProofing.employment.overview.detail"),
     });
   }
   const { supportContact, privacyUrl } = org.branding;
@@ -421,6 +448,8 @@ export function Session({
   dataRequest = false,
   addressMode = "off",
   onAddressStep,
+  employmentMode = "off",
+  onEmploymentStep,
 }: Readonly<{
   target: VerifyTarget;
   initial: ProofingProgress;
@@ -448,12 +477,25 @@ export function Session({
   // diploma step; onAddressStep is told whether it shows.
   addressMode?: AddressMode;
   onAddressStep?: (active: boolean) => void;
+  // Whether an approved session goes on to the employment step, after the
+  // diploma step; onEmploymentStep is told whether it shows.
+  employmentMode?: EmploymentMode;
+  onEmploymentStep?: (active: boolean) => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const progress = useProofingProgressQuery(target);
   const current = progress.data ?? initial;
   const [addressDone, setAddressDone] = useState(false);
   const [diplomasDone, setDiplomasDone] = useState(false);
+  const [employmentDone, setEmploymentDone] = useState(false);
+  // The window of a statement just kept: the progress drops employmentUntil
+  // once one is held, and a poll would otherwise leave the step before the
+  // subject has seen what was accepted.
+  const [keptUntil, setKeptUntil] = useState<string>();
+  const employmentUntil = current.employmentUntil ?? keptUntil;
+  // The backend still waits for the statement: on continuing, the outcome is
+  // the one read after it, kept or rejected for the window.
+  const owed = employmentOwed(current);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const view = sessionView({
     status: current.status,
@@ -463,11 +505,18 @@ export function Session({
     diplomaMode,
     diplomasUntil: current.diplomasUntil,
     diplomasDone,
+    employmentMode,
+    employmentUntil,
+    employmentDone,
+    employmentOwed: owed,
     secondsLeft,
   });
   const askAddress = view === "address";
   const askDiplomas = view === "diplomas";
+  const askEmployment = view === "employment";
   const showsOutcome = view === "outcome";
+  // The steps after the identity check open while it is still reviewed.
+  const inReview = current.status === "needs_review";
   useEffect(() => {
     if (showsOutcome) {
       onSettled?.(current);
@@ -479,6 +528,9 @@ export function Session({
   useEffect(() => {
     onDiplomaStep?.(askDiplomas);
   }, [askDiplomas, onDiplomaStep]);
+  useEffect(() => {
+    onEmploymentStep?.(askEmployment);
+  }, [askEmployment, onEmploymentStep]);
   const over = current.status === "expired" || view === "expired";
   // Before paint, so the page drops its stepper in the same frame.
   useLayoutEffect(() => {
@@ -519,6 +571,7 @@ export function Session({
       <AddressStep
         target={target}
         until={current.addressUntil}
+        inReview={inReview}
         onDone={() => setAddressDone(true)}
       />
     );
@@ -529,7 +582,25 @@ export function Session({
         target={target}
         until={current.diplomasUntil}
         initial={diplomas}
+        inReview={inReview}
         onDone={() => setDiplomasDone(true)}
+      />
+    );
+  }
+  if (askEmployment && employmentUntil !== undefined) {
+    return (
+      <EmploymentStep
+        target={target}
+        until={employmentUntil}
+        inReview={inReview}
+        settling={employmentDone}
+        onKept={() => setKeptUntil(employmentUntil)}
+        onDone={() => {
+          setEmploymentDone(true);
+          // What was read before the statement is not handed back: a kept
+          // one can open a review, and none rejects the session.
+          void progress.refetch();
+        }}
       />
     );
   }
@@ -575,13 +646,14 @@ export function Session({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      {method === "yivi_app" ? (
+      {method === "yivi_app" && (
         <YiviSession
           target={target}
           sessionSecondsLeft={secondsLeft}
           onRestart={onRestart}
         />
-      ) : target.kind === "request" ? (
+      )}
+      {method !== "yivi_app" && target.kind === "request" && (
         <IdemOnScreen
           target={target}
           deepLink={deepLink}
@@ -589,9 +661,8 @@ export function Session({
           sessionSecondsLeft={secondsLeft}
           fallback={manualIdem}
         />
-      ) : (
-        manualIdem
       )}
+      {method !== "yivi_app" && target.kind !== "request" && manualIdem}
       {current.status === "in_progress" &&
         method === "idem_app" &&
         target.kind === "hosted" && (
@@ -603,7 +674,80 @@ export function Session({
   );
 }
 
-// After an approved identity: the subject uploads the extracts of their
+// What a step after the identity check says of it: verified, or done and
+// waiting for a reviewer while the subject goes on.
+function IdentityCheckBanner({
+  inReview,
+  done,
+}: Readonly<{ inReview: boolean; done: string }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return inReview ? (
+    <p className="bg-tile text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+      <Icon name="time" className="text-tile-fg shrink-0" />
+      {t("identityProofing.onScreen.identityInReview")}
+    </p>
+  ) : (
+    <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+      <Icon name="valid" className="text-success shrink-0" />
+      {done}
+    </p>
+  );
+}
+
+// The opening of an upload step: the identity done, what to upload and the
+// three steps to get it, the first linking to where it is downloaded.
+function UploadStepIntro({
+  section,
+  link,
+  inReview,
+}: Readonly<{
+  section: "diplomas" | "employment";
+  link: { href: string; label: string };
+  inReview: boolean;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <IdentityCheckBanner
+        inReview={inReview}
+        done={t(`identityProofing.${section}.identityDone`)}
+      />
+
+      <div className="flex flex-col gap-1">
+        <StepHeading>{t(`identityProofing.${section}.heading`)}</StepHeading>
+        <p className={HINT}>{t(`identityProofing.${section}.intro`)}</p>
+      </div>
+
+      <ol className="flex flex-col gap-2.5">
+        {(["login", "download", "upload"] as const).map((step, i) => (
+          <li key={step} className="flex items-start gap-3 text-[13.5px]">
+            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
+              {i + 1}
+            </span>
+            <span className="text-ink pt-0.5">
+              {t(`identityProofing.${section}.how.${step}`)}
+              {step === "login" && (
+                <>
+                  {" "}
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link font-semibold hover:underline"
+                  >
+                    {link.label}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+// After the identity check: the subject uploads the extracts of their
 // diplomas they downloaded from DUO, each checked at once against DUO's
 // signature and their proven name and date of birth. The step ends once one
 // is held, or the time to add one is up.
@@ -611,11 +755,13 @@ function DiplomaStep({
   target,
   until,
   initial,
+  inReview,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
   initial: HostedDiploma[];
+  inReview: boolean;
   onDone: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -651,47 +797,25 @@ function DiplomaStep({
     });
   }
 
+  let diplomaUploadLabel: string = t("identityProofing.diplomas.chooseAnother");
+  if (upload.isPending) {
+    diplomaUploadLabel = t("identityProofing.diplomas.checking");
+  } else if (held.length === 0) {
+    diplomaUploadLabel = t("identityProofing.diplomas.choose");
+  }
+
   return (
     <div className="flex w-full flex-col gap-5">
       {/* Mounted throughout, so each upload's verdicts are announced. */}
-      <p role="status" className="sr-only">
-        {announced}
-      </p>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.diplomas.identityDone")}
-      </p>
-
-      <div className="flex flex-col gap-1">
-        <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
-        <p className={HINT}>{t("identityProofing.diplomas.intro")}</p>
-      </div>
-
-      <ol className="flex flex-col gap-2.5">
-        {(["login", "download", "upload"] as const).map((step, i) => (
-          <li key={step} className="flex items-start gap-3 text-[13.5px]">
-            <span className="bg-tile text-tile-fg flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold">
-              {i + 1}
-            </span>
-            <span className="text-ink pt-0.5">
-              {t(`identityProofing.diplomas.how.${step}`)}
-              {step === "login" && (
-                <>
-                  {" "}
-                  <a
-                    href={MIJN_DUO_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-link font-semibold hover:underline"
-                  >
-                    {t("identityProofing.diplomas.how.openDuo")}
-                  </a>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <output className="sr-only">{announced}</output>
+      <UploadStepIntro
+        section="diplomas"
+        inReview={inReview}
+        link={{
+          href: MIJN_DUO_URL,
+          label: t("identityProofing.diplomas.how.openDuo"),
+        }}
+      />
 
       {held.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -757,11 +881,7 @@ function DiplomaStep({
             loading={upload.isPending}
             onClick={() => fileInput.current?.click()}
           >
-            {upload.isPending
-              ? t("identityProofing.diplomas.checking")
-              : held.length === 0
-                ? t("identityProofing.diplomas.choose")
-                : t("identityProofing.diplomas.chooseAnother")}
+            {diplomaUploadLabel}
           </Button>
           {upload.isError && (
             <p role="alert" className={ERROR}>
@@ -793,6 +913,204 @@ function DiplomaStep({
   );
 }
 
+// After the identity check: the subject uploads the Verzekeringsbericht
+// they downloaded from UWV, checked at once against UWV's seal and their
+// proven name and date of birth. Once one is kept the step shows what was
+// accepted and ends when the subject continues, or when the time is up.
+// settling is the subject having continued while the page waits for what the
+// backend holds after it.
+function EmploymentStep({
+  target,
+  until,
+  inReview,
+  settling,
+  onKept,
+  onDone,
+}: Readonly<{
+  target: VerifyTarget;
+  until: string;
+  inReview: boolean;
+  settling: boolean;
+  onKept: () => void;
+  onDone: () => void;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const formatMonth = useMonthFormatter();
+  const upload = useUploadEmploymentMutation(target);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [refused, setRefused] = useState<EmploymentVerdict>();
+  const [kept, setKept] = useState<ProofingEmployment>();
+  // What the upload decided, for a screen reader: the statement below
+  // appears without moving focus.
+  const [announced, setAnnounced] = useState("");
+  const keptReview = kept === undefined ? undefined : employmentReview(kept);
+  const secondsLeft = useSecondsLeft(until);
+  const done = employmentStepDone(kept, secondsLeft);
+
+  function check(file: File | undefined): void {
+    if (file === undefined) return;
+    upload.mutate(file, {
+      onSuccess: (verdict) => {
+        if (verdict.accepted && verdict.employment !== undefined) {
+          setKept(verdict.employment);
+          setRefused(undefined);
+          setAnnounced(
+            t("identityProofing.employment.kept", {
+              date: formatDate(verdict.employment.statementDate),
+            }),
+          );
+          onKept();
+          return;
+        }
+        setRefused(verdict);
+      },
+    });
+  }
+
+  let employmentUploadLabel: string = t(
+    "identityProofing.employment.chooseAgain",
+  );
+  if (upload.isPending) {
+    employmentUploadLabel = t("identityProofing.employment.checking");
+  } else if (refused === undefined) {
+    employmentUploadLabel = t("identityProofing.employment.choose");
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-5">
+      <UploadStepIntro
+        section="employment"
+        inReview={inReview}
+        link={{
+          href: MIJN_UWV_URL,
+          label: t("identityProofing.employment.how.openUwv"),
+        }}
+      />
+
+      {/* Mounted throughout, so the accepted statement is announced. */}
+      <output className="sr-only">{announced}</output>
+      {kept !== undefined && (
+        <div className="bg-success-bg rounded-yivi flex items-start gap-3 px-4 py-3">
+          <Icon name="valid" className="text-success mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="text-ink text-[14px] font-semibold">
+              {t("identityProofing.employment.kept", {
+                date: formatDate(kept.statementDate),
+              })}
+            </span>
+            <span className="text-ink-soft text-[12.5px]">
+              {t("identityProofing.employment.keptChecks")}
+            </span>
+            {keptReview !== undefined && (
+              <span className="text-ink text-[12.5px] font-semibold">
+                {t(EMPLOYMENT_REVIEW_KEYS[keptReview])}
+              </span>
+            )}
+            {kept.relations.length === 0 ? (
+              <span className="text-ink-soft text-[12.5px]">
+                {t("identityProofing.employment.noRelations")}
+              </span>
+            ) : (
+              <ul className="flex flex-col gap-0.5">
+                {kept.relations.map((r, i) => (
+                  <li
+                    key={`${r.payrollTaxNumber}-${i}`}
+                    className="text-ink text-[12.5px]"
+                  >
+                    <span className="font-semibold">{r.employer}</span>{" "}
+                    {r.kind === EMPLOYMENT_KIND.benefit && (
+                      <span className="text-ink-soft">
+                        {t("identityProofing.employment.benefit")}{" "}
+                      </span>
+                    )}
+                    {r.kind === EMPLOYMENT_KIND.otherIncome && (
+                      <span className="text-ink-soft">
+                        {t("identityProofing.employment.otherIncome")}{" "}
+                      </span>
+                    )}
+                    <span className="text-ink-soft">
+                      {t("identityProofing.employment.period", {
+                        from: formatMonth(r.from),
+                        to: formatMonth(r.to),
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </span>
+        </div>
+      )}
+
+      {refused !== undefined && (
+        <p
+          role="alert"
+          className="bg-error-bg rounded-yivi flex items-start gap-3 px-4 py-3"
+        >
+          <Icon name="invalid" className="text-error mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-ink truncate text-[13.5px] font-semibold">
+              {refused.fileName}
+            </span>
+            <span className="text-ink-soft text-[12.5px]">
+              {employmentRejectionReason(refused.reason ?? "", t)}
+            </span>
+          </span>
+        </p>
+      )}
+
+      {done ? (
+        kept === undefined && (
+          <p className={HINT}>{t("identityProofing.employment.closed")}</p>
+        )
+      ) : (
+        <div className="flex flex-col gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Reset so picking the same file again fires onChange.
+              event.target.value = "";
+              check(file);
+            }}
+          />
+          <Button
+            icon="add"
+            className="w-full"
+            loading={upload.isPending}
+            onClick={() => fileInput.current?.click()}
+          >
+            {employmentUploadLabel}
+          </Button>
+          {upload.isError && (
+            <p role="alert" className={ERROR}>
+              {verifyErrorMessage(target, upload.error, t)}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="border-line flex items-center justify-between gap-3 border-t pt-4">
+        {done ? <span /> : <Countdown seconds={secondsLeft} />}
+        {done && (
+          <Button
+            variant={kept === undefined ? "secondary" : "primary"}
+            icon="arrow_front"
+            loading={settling}
+            onClick={onDone}
+          >
+            {t("identityProofing.employment.continue")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Postal code and house number first: in the Netherlands they fill in the
 // street and city.
 const ADDRESS_FIELDS = [
@@ -819,16 +1137,18 @@ const EMPTY_ADDRESS: ProofingAddressInput = {
   country: "",
 };
 
-// After an approved identity: the subject enters their postal address. It is
+// After the identity check: the subject enters their postal address. It is
 // what they declare, kept beside the proven identity. The step ends once it
 // is kept, or the time to enter it is up.
 function AddressStep({
   target,
   until,
+  inReview,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
+  inReview: boolean;
   onDone: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -860,7 +1180,7 @@ function AddressStep({
   const open = secondsLeft > 0;
   const missing = ADDRESS_FIELDS.filter((f) => address[f].trim() === "");
 
-  function save(event: React.FormEvent): void {
+  function save(event: React.SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     setTouched(true);
     if (missing.length > 0) return;
@@ -879,10 +1199,10 @@ function AddressStep({
 
   return (
     <form className="flex w-full flex-col gap-5" onSubmit={save} noValidate>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.address.identityDone")}
-      </p>
+      <IdentityCheckBanner
+        inReview={inReview}
+        done={t("identityProofing.address.identityDone")}
+      />
 
       <div className="flex flex-col gap-1">
         <StepHeading>{t("identityProofing.address.heading")}</StepHeading>
@@ -1416,7 +1736,11 @@ function Expired({
 }: Readonly<{ onRestart?: () => void }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
-    <div role="status" className="flex flex-col items-center gap-4">
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="flex flex-col items-center gap-4"
+    >
       <QrPlaceholder
         label={t("identityProofing.onScreen.scan.expired")}
         expired

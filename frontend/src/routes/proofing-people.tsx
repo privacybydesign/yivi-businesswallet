@@ -17,7 +17,7 @@ import type {
   ProofingResult,
   ProofingSettings,
 } from "../api/identity-proofing";
-import { isDataRequest } from "../api/identity-proofing";
+import { EMPLOYMENT_KIND, isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import {
@@ -25,7 +25,11 @@ import {
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
-import { useWhenFormatter } from "../lib/format-when";
+import {
+  useDateFormatter,
+  useMonthFormatter,
+  useWhenFormatter,
+} from "../lib/format-when";
 import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
@@ -365,6 +369,7 @@ function SessionRow({
           <ResultText request={request} compact />
           <AddressNote request={request} />
           <DiplomaNote request={request} />
+          <EmploymentNote request={request} />
           <DataRequestNote request={request} />
         </Table.Cell>
         <Table.Cell className="text-ink-soft whitespace-nowrap">
@@ -516,6 +521,9 @@ function SessionRow({
                 )}
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
+                )}
+                {request.employmentMode !== "off" && (
+                  <SessionEmployment request={request} />
                 )}
               </div>
               <SessionTimeline slug={slug} request={request} />
@@ -724,6 +732,117 @@ function SessionDiplomas({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// For an approved session that requires the Verzekeringsbericht, that none
+// was kept.
+function EmploymentNote({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    request.employmentMode === "required" &&
+    request.status === "approved" &&
+    request.employment === undefined &&
+    request.purgedAt === undefined
+  ) {
+    return (
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.employment.missing")}
+        </StatusText>
+      </div>
+    );
+  }
+  return null;
+}
+
+// The employment relations UWV's Verzekeringsbericht lists, as of the date
+// UWV made it.
+export function SessionEmployment({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const formatMonth = useMonthFormatter();
+  const e = request.employment;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("identityProofing.sessions.employment.title")}
+      </h3>
+      {e === undefined ? (
+        <p className={HINT}>{t("identityProofing.sessions.employment.none")}</p>
+      ) : (
+        <>
+          <p className="text-ink text-[13px]">
+            {t("identityProofing.sessions.employment.statementDate", {
+              date: formatDate(e.statementDate),
+            })}
+          </p>
+          <p className="text-ink text-[13px] font-semibold">
+            {e.employed
+              ? t("identityProofing.sessions.employment.employed")
+              : t("identityProofing.sessions.employment.notEmployed")}
+          </p>
+          {e.relations.length === 0 ? (
+            <p className={HINT}>
+              {t("identityProofing.sessions.employment.noRelations")}
+            </p>
+          ) : (
+            <ul className="border-line divide-y rounded-lg border">
+              {e.relations.map((r) => (
+                <li
+                  key={`${r.employer}-${r.payrollTaxNumber}-${r.contractForm}-${r.from}`}
+                  className="flex flex-col gap-0.5 px-3 py-2"
+                >
+                  <span className="text-ink flex items-center gap-2 text-[13px] font-semibold">
+                    {r.employer}
+                    {r.kind === EMPLOYMENT_KIND.benefit && (
+                      <StatusText tone="amber">
+                        {t("identityProofing.sessions.employment.benefit")}
+                      </StatusText>
+                    )}
+                    {r.kind === EMPLOYMENT_KIND.otherIncome && (
+                      <StatusText tone="amber">
+                        {t("identityProofing.sessions.employment.otherIncome")}
+                      </StatusText>
+                    )}
+                  </span>
+                  <span className={HINT}>
+                    {[
+                      t("identityProofing.sessions.employment.period", {
+                        from: formatMonth(r.from),
+                        to: formatMonth(r.to),
+                      }),
+                      r.contractForm,
+                    ]
+                      .filter((part) => part.trim() !== "")
+                      .join(" · ")}
+                  </span>
+                  <span className="text-muted font-mono text-[11.5px]">
+                    {t(
+                      "identityProofing.sessions.employment.payrollTaxNumber",
+                      {
+                        number: r.payrollTaxNumber,
+                      },
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className={HINT}>
+            {t("identityProofing.sessions.employment.source")}
+          </p>
+        </>
       )}
     </div>
   );

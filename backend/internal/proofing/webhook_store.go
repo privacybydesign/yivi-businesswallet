@@ -417,8 +417,8 @@ func (s *WebhookStore) nextDue(ctx context.Context) (time.Time, error) {
 
 // recordAttempt stores one attempt's outcome: delivered on a 2xx, else another
 // attempt after the back-off, or failed once the attempts run out. A delivered
-// or failed one is never sent again, so its diploma and address go in the
-// same write. Only while d's lease holds: a worker whose lease lapsed (and
+// or failed one is never sent again, so its diploma, address and employment
+// go in the same write. Only while d's lease holds: a worker whose lease lapsed (and
 // whose delivery another worker then claimed) records nothing, so its late
 // outcome never overwrites the newer one.
 func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusCode *int, sendErr string) error {
@@ -446,7 +446,7 @@ func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusC
 			payload = CASE WHEN $2 = $8 THEN payload ELSE payload - $11::text[] END
 		WHERE id = $1 AND status = $8 AND attempts = $9 AND next_attempt_at = $10`,
 		d.ID, status, attempts, delay.Seconds(), statusCode, sendErr, DeliveryDelivered, DeliveryPending, d.Attempts, d.LeasedUntil,
-		[]string{webhookDiplomaKey, webhookAddressKey})
+		webhookPersonalKeys)
 	if err != nil {
 		return fmt.Errorf("proofing: record delivery %s: %w", d.ID, err)
 	}

@@ -32,6 +32,7 @@ import {
   waitingOfTab,
   waitingOldestFirst,
   waitingSince,
+  walletReviewReason,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
 import { Card, StatusText, Table, TopBar } from "../ui";
@@ -305,7 +306,9 @@ function WaitingRow({
       <Table.Cell>
         {isAddressReview(request)
           ? t("identityProofing.reviews.why.address")
-          : t(`identityProofing.reviews.why.${request.flowKind}`)}
+          : t(
+              `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
+            )}
       </Table.Cell>
       <Table.Cell className="whitespace-nowrap">
         {formatWhen(waitingSince(request))}

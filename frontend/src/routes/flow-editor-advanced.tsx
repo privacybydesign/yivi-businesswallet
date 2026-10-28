@@ -4,6 +4,7 @@ import * as React from "react";
 import type {
   AddressMode,
   DiplomaMode,
+  EmploymentMode,
   ProofingSettings,
 } from "../api/identity-proofing";
 import {
@@ -64,7 +65,11 @@ interface AdvancedSettingsProps {
   addressMode: AddressMode;
   onAddress: (mode: AddressMode) => void;
   addressError: string | null;
-  // Whether the flow must read the name and date of birth: required diplomas.
+  employmentMode: EmploymentMode;
+  onEmployment: (mode: EmploymentMode) => void;
+  employmentError: string | null;
+  // Whether the flow must read the name and date of birth: required diplomas
+  // or employment.
   requiresIdentity: boolean;
   // The languages the flow's hosted page offers: each ticked item is
   // explained in every one, and may be in the others.
@@ -131,6 +136,9 @@ function StepsSection({
   addressMode,
   onAddress,
   addressError,
+  employmentMode,
+  onEmployment,
+  employmentError,
   error,
 }: Readonly<
   Omit<AdvancedSettingsProps, "requiresIdentity" | "locales">
@@ -199,6 +207,20 @@ function StepsSection({
       {diplomaError && (
         <p role="alert" className={ERROR}>
           {diplomaError}
+        </p>
+      )}
+      <OptionRow
+        id="flow-step-employment"
+        checked={employmentMode !== "off"}
+        label={t("identityProofingFlows.steps.employment_upload")}
+        hint={t("identityProofingFlows.editor.steps.employmentHint")}
+        onChange={() =>
+          onEmployment(employmentMode === "off" ? "required" : "off")
+        }
+      />
+      {employmentError && (
+        <p role="alert" className={ERROR}>
+          {employmentError}
         </p>
       )}
       <div className="flex max-w-md flex-col gap-1.5">

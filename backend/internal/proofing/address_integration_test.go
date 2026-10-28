@@ -38,17 +38,9 @@ func TestFlowAddressSavesAndAudits(t *testing.T) {
 }
 
 func TestAddressSealedUntilPurge(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newSealedFixture(t, EventSessionAddressAdded)
+	pool, requests, webhooks, orgID, in := f.pool, f.requests, f.webhooks, f.orgID, f.in
 	ctx := context.Background()
-	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionAddressAdded}); err != nil {
-		t.Fatalf("Save webhook: %v", err)
-	}
-	in := newStoredRequest(orgID, sam, externalSubject("anna@example.org"))
 	in.Address = AddressRequired
 	req := createStarted(t, requests, in, "s1")
 	if req.Address != AddressRequired {

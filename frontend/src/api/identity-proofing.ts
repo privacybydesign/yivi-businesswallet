@@ -83,6 +83,48 @@ const registerAddressSchema = z.object({
 
 export type RegisterAddress = z.infer<typeof registerAddressSchema>;
 
+// Whether a flow has the employment step: once their identity is approved,
+// its subject uploads their UWV Verzekeringsbericht (the sealed PDF from
+// mijn.uwv.nl), checked by the wallet.
+const EMPLOYMENT_MODES = ["off", "required"] as const;
+// An unknown mode reads as required, as diplomaModeSchema.
+const employmentModeSchema = z.enum(EMPLOYMENT_MODES).catch("required");
+export type EmploymentMode = z.infer<typeof employmentModeSchema>;
+
+// The relation kinds a Verzekeringsbericht holds, as the backend names them
+// (employment.Kind*). Sick pay through the employer is kept as that job.
+export const EMPLOYMENT_KIND = {
+  employment: "employment",
+  benefit: "benefit",
+  otherIncome: "other_income",
+} as const;
+
+// The employment relations a UWV Verzekeringsbericht lists, as of the date
+// UWV made it; relations is empty when it lists none.
+const proofingEmploymentSchema = z.object({
+  statementDate: z.string(),
+  // A current relation that is not a benefit; without one the session goes
+  // to review.
+  employed: z.boolean(),
+  relations: z.array(
+    z.object({
+      // employment, benefit (paid by UWV) or other_income (paid without
+      // hours worked).
+      kind: z.string(),
+      // The employer, or "UWV" for a benefit, never the benefit's name.
+      employer: z.string(),
+      // "" for a UWV benefit.
+      payrollTaxNumber: z.string(),
+      // "" when the statement gives none.
+      contractForm: z.string(),
+      from: z.string(),
+      to: z.string(),
+    }),
+  ),
+});
+
+export type ProofingEmployment = z.infer<typeof proofingEmploymentSchema>;
+
 // What a flow's sessions are for: an identity check, or an external person
 // asking for the data held of them ("see my data") or for its erasure
 // ("delete my data"). A data request goes to review once the person is
@@ -192,6 +234,8 @@ const proofingFlowSchema = z.object({
   // Absent on a single version, as diplomaMode.
   addressMode: addressModeSchema.optional(),
   // Absent on a single version, as diplomaMode.
+  employmentMode: employmentModeSchema.optional(),
+  // Absent on a single version, as diplomaMode.
   kind: flowKindSchema.optional(),
   // The flow's "Allow sending this flow as a link" switch: off, the send
   // form offers only Show on this screen. Absent on a single version, as
@@ -248,6 +292,16 @@ const proofingRequestSchema = z.object({
   // A self-declared address waits for a reviewer: pending until confirmed or
   // rejected. The session keeps its outcome.
   addressReview: z.enum(["pending", "confirmed", "rejected"]).optional(),
+  // Whether the session asks for the UWV Verzekeringsbericht, the employment
+  // kept from it, and until when the subject can upload it (absent until
+  // approved, and once kept).
+  employmentMode: employmentModeSchema,
+  employment: proofingEmploymentSchema.optional(),
+  employmentUntil: z.string().optional(),
+  // Why the wallet put the session in review after the identity was
+  // approved (no_current_employment, current_benefit,
+  // current_other_income); absent otherwise.
+  reviewReason: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -702,6 +756,24 @@ export function saveProofingFlowAddress(
     body: { addressMode },
     signal,
   }).then((r) => r.addressMode);
+}
+
+const proofingFlowEmploymentSchema = z.object({
+  employmentMode: employmentModeSchema,
+});
+
+export function saveProofingFlowEmployment(
+  slug: string,
+  flowId: string,
+  employmentMode: EmploymentMode,
+  signal?: AbortSignal,
+): Promise<EmploymentMode> {
+  return request(`${flowBase(slug, flowId)}/employment`, {
+    schema: proofingFlowEmploymentSchema,
+    method: "PUT",
+    body: { employmentMode },
+    signal,
+  }).then((r) => r.employmentMode);
 }
 
 export function getProofingFlowVersions(
@@ -1216,6 +1288,9 @@ export interface ProofingProgress {
   // was created with.
   started?: boolean;
   sessionTtlSeconds?: number;
+  // Until when the subject can upload their Verzekeringsbericht, once
+  // approved and while none is kept.
+  employmentUntil?: string;
 }
 
 export function startProofingYivi(
@@ -1317,6 +1392,10 @@ const hostedProgressSchema = z.object({
   // and once they did (addressGiven).
   addressUntil: z.string().optional(),
   addressGiven: z.boolean(),
+  // Until when the subject can upload their Verzekeringsbericht; absent while
+  // they cannot, and once one is kept (employmentGiven).
+  employmentUntil: z.string().optional(),
+  employmentGiven: z.boolean(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1372,6 +1451,7 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,
+    employmentMode: employmentModeSchema,
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
@@ -1464,6 +1544,36 @@ export function uploadProofingDiplomas(
   }
   return request(`${verifyPath(target)}/diplomas`, {
     schema: z.array(diplomaVerdictSchema),
+    method: "POST",
+    body: form,
+    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+    signal,
+  });
+}
+
+// What became of an uploaded Verzekeringsbericht: kept, or refused with a
+// reason (not_a_statement, signature_invalid, holder_mismatch, stale).
+const employmentVerdictSchema = z.object({
+  fileName: z.string(),
+  accepted: z.boolean(),
+  employment: proofingEmploymentSchema.optional(),
+  reason: z.string().optional(),
+  failedCheck: z.string().optional(),
+});
+
+export type EmploymentVerdict = z.infer<typeof employmentVerdictSchema>;
+
+// Uploads a UWV Verzekeringsbericht on a verify page, after an approved
+// identity. Its seal is checked as a diploma's signature is.
+export function uploadProofingEmployment(
+  target: VerifyTarget,
+  file: File,
+  signal?: AbortSignal,
+): Promise<EmploymentVerdict> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`${verifyPath(target)}/employment`, {
+    schema: employmentVerdictSchema,
     method: "POST",
     body: form,
     timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,

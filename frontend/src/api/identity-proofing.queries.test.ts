@@ -89,6 +89,7 @@ function listedRequest(id: string): ProofingRequest {
     diplomaMode: "off",
     diplomas: [],
     addressMode: "off",
+    employmentMode: "off",
     expectedSubject: false,
     flowKind: "data_access",
   };

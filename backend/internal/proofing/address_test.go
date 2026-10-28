@@ -52,7 +52,7 @@ func sendApprovedAddress(t *testing.T, f fixture, completedAgo time.Duration) Re
 		t.Fatalf("CreateRequest: %v", err)
 	}
 	completed := time.Now().Add(-completedAgo)
-	f.requests.stored.Status, f.requests.stored.CompletedAt = StatusApproved, &completed
+	f.requests.stored.Status, f.requests.stored.CompletedAt, f.requests.stored.CheckedAt = StatusApproved, &completed, &completed
 	return *f.requests.stored
 }
 
@@ -89,6 +89,20 @@ func TestAddAddressTrimsAndKeeps(t *testing.T) {
 	want.Verification = AddressUnchecked
 	if *got.SubjectAddress != want || *f.requests.stored.SubjectAddress != want {
 		t.Errorf("address = %+v, stored %+v; want %+v", *got.SubjectAddress, *f.requests.stored.SubjectAddress, want)
+	}
+}
+
+// The address is taken while the engine still reviews the identity, so the
+// subject gives it before a reviewer decides.
+func TestAddAddressDuringReview(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	req := sendApprovedAddress(t, f, time.Minute)
+	f.requests.stored.Status = StatusNeedsReview
+	if _, err := f.svc.AddAddress(context.Background(), testOrg.ID, req.ID, nil, testAddress); err != nil {
+		t.Fatalf("AddAddress in review: %v", err)
+	}
+	if f.requests.stored.SubjectAddress == nil {
+		t.Error("the address entered in review was not kept")
 	}
 }
 
@@ -236,8 +250,8 @@ func TestLookUpAddress(t *testing.T) {
 		t.Errorf("register down = %v, want ErrAddressLookupUnavailable", err)
 	}
 
-	completed := time.Now().Add(-AddressWindow - time.Minute)
-	f.requests.stored.CompletedAt = &completed
+	checked := time.Now().Add(-AddressWindow - time.Minute)
+	f.requests.stored.CheckedAt = &checked
 	lookup.queries = nil
 	if _, err := f.svc.LookUpAddress(context.Background(), testOrg.ID, req.ID, nil, "6511 AB", "12"); !errors.Is(err, ErrAddressClosed) || len(lookup.queries) != 0 {
 		t.Errorf("window passed = %v, asked %q; want ErrAddressClosed and nothing asked", err, lookup.queries)
@@ -270,7 +284,7 @@ func discloseYiviAddress(t *testing.T, mode AddressMode, registered map[string]s
 		t.Fatalf("YiviDisclosure: %v", err)
 	}
 	completed := time.Now()
-	f.requests.stored.Status, f.requests.stored.CompletedAt = StatusApproved, &completed
+	f.requests.stored.Status, f.requests.stored.CompletedAt, f.requests.stored.CheckedAt = StatusApproved, &completed, &completed
 	return f
 }
 

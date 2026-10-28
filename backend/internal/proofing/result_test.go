@@ -40,6 +40,28 @@ func TestAdminRequestResult(t *testing.T) {
 	}
 }
 
+// A review the wallet opened on an approval shows its reviewer the identity, and
+// the API none of it.
+func TestWalletReviewResult(t *testing.T) {
+	f := newFixture()
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
+		NewRequest{SubjectEmail: "a@example.org", FlowID: chipFlow.ID})
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	f.requests.stored.Status = StatusNeedsReview
+	f.requests.stored.ReviewReason = ReviewNoCurrentEmployment
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
+	req, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
+	if err != nil || identity.Status != proofingprovider.StatusNeedsReview || identity.FamilyName != "Jansen" {
+		t.Fatalf("AdminRequestResult = %+v, %v; want IPS's identity in review", identity, err)
+	}
+	if out := newAPIResultResponse(req, identity, time.Now()); out.Identity != nil || out.Status != StatusNeedsReview {
+		t.Errorf("API result = %s, %+v; want needs_review without identity", out.Status, out.Identity)
+	}
+}
+
 // An age_over flow's approval carries the age answer in the identity, and a
 // rejection carries no identity at all.
 func TestAPIResultAgeOver(t *testing.T) {

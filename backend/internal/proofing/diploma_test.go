@@ -107,7 +107,7 @@ func (d diplomaFixture) sendApproved(t *testing.T, completedAgo time.Duration) R
 		t.Fatalf("CreateRequest: %v", err)
 	}
 	completed := time.Now().Add(-completedAgo)
-	d.requests.stored.Status, d.requests.stored.CompletedAt = StatusApproved, &completed
+	d.requests.stored.Status, d.requests.stored.CompletedAt, d.requests.stored.CheckedAt = StatusApproved, &completed, &completed
 	return *d.requests.stored
 }
 
@@ -160,6 +160,18 @@ func TestAddDiplomasHoldersOnly(t *testing.T) {
 	}
 	if h := d.checker.holders[0]; h.GivenNames != "Anna" || h.Surname != "Jansen" || h.DateOfBirth != testBirthDate {
 		t.Errorf("checked against %+v, want the identity IPS approved", h)
+	}
+}
+
+// Extracts are taken while the engine still reviews the identity, so the
+// subject adds them before a reviewer decides.
+func TestAddDiplomasDuringReview(t *testing.T) {
+	d := newDiplomaFixture(DiplomasRequired)
+	req := d.sendApproved(t, time.Minute)
+	d.requests.stored.Status = StatusNeedsReview
+	verdicts, err := d.upload(req, "Anna Maria Jansen")
+	if err != nil || len(verdicts) != 1 || verdicts[0].Diploma == nil {
+		t.Fatalf("AddDiplomas in review = %+v, %v; want the extract kept", verdicts, err)
 	}
 }
 

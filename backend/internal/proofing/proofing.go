@@ -395,16 +395,20 @@ type Request struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	CompletedAt            *time.Time
+	// CheckedAt is when the identity check finished: the engine approved it
+	// or opened a review. The steps after it take input from then
+	// (stepsOpen); a review's decision moves CompletedAt, not this.
+	CheckedAt *time.Time
 	// RedirectURL is where a hosted request's page sends its subject once it
 	// settles; empty for none. Language is the page's language; empty leaves
 	// the subject's browser to decide.
 	RedirectURL string
 	Language    email.Locale
 	// Diplomas is whether the request asks for DUO diploma extracts once the
-	// identity is approved: its flow's DiplomaMode when it was sent.
+	// identity check finished: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
 	// Address is whether the request asks for the subject's postal address
-	// once the identity is approved: its flow's AddressMode when it was sent.
+	// once the identity check finished: its flow's AddressMode when it was sent.
 	// SubjectAddress is the address they entered, decrypted, at
 	// AddressAddedAt; nil before, and once the request is purged.
 	Address        AddressMode
@@ -412,6 +416,17 @@ type Request struct {
 	AddressAddedAt *time.Time
 	// AddressReview is a self-declared address's review; empty for none.
 	AddressReview AddressReview
+	// Employment is whether the request asks for the subject's UWV
+	// Verzekeringsbericht once the identity check finished: its flow's
+	// EmploymentMode when it was sent. SubjectEmployment is what was kept of
+	// it, decrypted, at EmploymentAddedAt; nil before, and once purged.
+	Employment        EmploymentMode
+	SubjectEmployment *Employment
+	EmploymentAddedAt *time.Time
+	// ReviewReason is why the wallet itself put the request in review after
+	// the engine approved it (Employment.reviewReason); "" for a review the
+	// engine opened, and for none. Such a review is decided in the wallet.
+	ReviewReason string
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -467,6 +482,27 @@ func (r Request) EffectiveStatus(now time.Time) Status {
 	return r.Status
 }
 
+// stepsUntil is when the steps after the identity check (address, diplomas,
+// Verzekeringsbericht) close, window after it finished; nil while it has not,
+// and once it was decided otherwise than approved. They open once the check
+// finished, approved or in review, so the subject gives everything in one go
+// and a reviewer decides after.
+func (r Request) stepsUntil(window time.Duration) *time.Time {
+	if r.CheckedAt == nil || (r.Status != StatusApproved && r.Status != StatusNeedsReview) {
+		return nil
+	}
+	until := r.CheckedAt.Add(window)
+	return &until
+}
+
+// stepsOpen reports whether the steps after the identity check take input at
+// now: stepsUntil has not passed, and the request is not over.
+func (r Request) stepsOpen(now time.Time, window time.Duration) bool {
+	until := r.stepsUntil(window)
+	status := r.EffectiveStatus(now)
+	return until != nil && !now.After(*until) && (status == StatusApproved || status == StatusNeedsReview)
+}
+
 // SessionExpiresAt is when the request's running the engine session ends, or nil when
 // it is over.
 func (r Request) SessionExpiresAt(now time.Time) *time.Time {
@@ -479,8 +515,9 @@ func (r Request) SessionExpiresAt(now time.Time) *time.Time {
 }
 
 // linkLive reports whether a hosted link still has its subject at work:
-// waiting to start, its session running or in review, or an address, diploma
-// or data export window open. A link past all of that only shows its outcome.
+// waiting to start, its session running or in review, or an address,
+// diploma, employment or data export window open. A link past all of that
+// only shows its outcome.
 func (r Request) linkLive(now time.Time) bool {
 	if r.PurgedAt != nil || r.CancelledAt != nil {
 		return false
@@ -489,6 +526,9 @@ func (r Request) linkLive(now time.Time) bool {
 		return true
 	}
 	if until := addressUntil(r); until != nil && now.Before(*until) {
+		return true
+	}
+	if until := employmentUntil(r); until != nil && now.Before(*until) {
 		return true
 	}
 	if until := diplomasUntil(r); until != nil && now.Before(*until) {
@@ -552,6 +592,8 @@ type OrgFlow struct {
 	Diplomas DiplomaMode
 	// Address is whether the flow asks for the subject's postal address.
 	Address AddressMode
+	// Employment is whether the flow asks for the UWV Verzekeringsbericht.
+	Employment EmploymentMode
 	// Kind is what the flow's sessions are for.
 	Kind FlowKind
 	// HostedEnabled is the flow's "Allow sending this flow as a link" switch

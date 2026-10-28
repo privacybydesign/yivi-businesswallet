@@ -187,8 +187,8 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 
 // TestComposePassesProofing holds the identity-proofing vars to
 // the passthrough rule: without them a value set in .env (the encryption key,
-// the phone-reachable URL, Regula, the stub outcome, the diploma validator
-// and its trust cache) never reaches the container.
+// the phone-reachable URL, Regula, the stub outcome, the diploma and
+// employment validators and the trust cache) never reaches the container.
 func TestComposePassesProofing(t *testing.T) {
 	backendEnvironment := backendComposeEnvironment(t)
 
@@ -198,6 +198,7 @@ func TestComposePassesProofing(t *testing.T) {
 		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
 		envIdentityProofingEDLCSCAPaths,
 		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaTrustCacheDir, envDiplomaOCSP,
+		envEmploymentValidatorProvider,
 	} {
 		value, ok := backendEnvironment[key]
 		if !ok {

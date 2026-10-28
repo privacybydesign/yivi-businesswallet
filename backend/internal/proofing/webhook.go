@@ -40,14 +40,17 @@ const (
 	EventSessionCancelled    = "session.cancelled"
 	EventSessionPurged       = "session.purged"
 	// EventSessionDiplomaAdded is sent for each DUO diploma extract the
-	// subject added after their identity was approved.
+	// subject added after their identity check.
 	EventSessionDiplomaAdded = "session.diploma_added"
 	// EventSessionAddressAdded is sent when the subject entered their postal
-	// address after their identity was approved.
+	// address after their identity check.
 	EventSessionAddressAdded = "session.address_added"
 	// EventSessionAddressReviewed is sent when a reviewer confirmed or
 	// rejected a self-declared address.
 	EventSessionAddressReviewed = "session.address_reviewed"
+	// EventSessionEmploymentAdded is sent when the subject's UWV
+	// Verzekeringsbericht was kept after their identity check.
+	EventSessionEmploymentAdded = "session.employment_added"
 	EventTest                   = "test"
 )
 
@@ -57,7 +60,13 @@ var WebhookEvents = []string{
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
 	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
 	EventSessionAddressReviewed,
+	EventSessionEmploymentAdded,
 }
+
+// webhookPersonalKeys are the payload keys that carry what the subject added
+// after their identity check: a delivery drops them once final, and
+// Purge from the request's deliveries still pending.
+var webhookPersonalKeys = []string{webhookDiplomaKey, webhookAddressKey, webhookEmploymentKey}
 
 // outcomeEvents is the webhook event each recorded outcome sends.
 var outcomeEvents = map[Status]string{
@@ -153,7 +162,7 @@ func sessionEventData(req Request, status Status) map[string]any {
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,
-		"method": string(req.Method),
+		"method": string(req.Method), "reviewReason": req.ReviewReason,
 	} {
 		if value != "" {
 			data[key] = value
