@@ -250,13 +250,48 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	}
 }
 
-func TestFlowReturnPage(t *testing.T) {
+const testReturnOrigin, testReturnPage = "https://portal.acme.example", "https://portal.acme.example/verified"
+
+// returnPageFixture is an org whose redirect origins hold testReturnOrigin and
+// https://other.example.
+func returnPageFixture(t *testing.T) fixture {
+	t.Helper()
 	f := newFixture()
 	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
 	f.svc.SetHostedBaseURL(testHostedBase)
+	if _, err := saveOrigins(f.svc, []string{testReturnOrigin, "https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestFlowReturnPageSave(t *testing.T) {
+	f := returnPageFixture(t)
 	ctx := context.Background()
-	const origin, returnPage = "https://portal.acme.example", "https://portal.acme.example/verified"
-	if _, err := saveOrigins(f.svc, []string{origin, "https://other.example"}); err != nil {
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
+	}); !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("a return page off the origins: %v, want ErrRedirectNotAllowed", err)
+	}
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionDone, ReturnURL: testReturnPage,
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a return page on a thank-you-page flow: %v, want ErrInvalidInput", err)
+	}
+	saved, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: " " + testReturnPage + " ",
+	})
+	if err != nil || saved.ReturnURL != testReturnPage {
+		t.Fatalf("SaveFlowHosted = %+v, %v; want the return page trimmed", saved, err)
+	}
+}
+
+func TestFlowReturnPage(t *testing.T) {
+	f := returnPageFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: testReturnPage,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
@@ -268,28 +303,11 @@ func TestFlowReturnPage(t *testing.T) {
 		return sent.Request, err
 	}
 
-	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
-	}); !errors.Is(err, ErrRedirectNotAllowed) {
-		t.Errorf("a return page off the origins: %v, want ErrRedirectNotAllowed", err)
-	}
-	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Completion: CompletionDone, ReturnURL: returnPage,
-	}); !errors.Is(err, ErrInvalidInput) {
-		t.Errorf("a return page on a thank-you-page flow: %v, want ErrInvalidInput", err)
-	}
-	saved, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Completion: CompletionRedirect, ReturnURL: " " + returnPage + " ",
-	})
-	if err != nil || saved.ReturnURL != returnPage {
-		t.Fatalf("SaveFlowHosted = %+v, %v; want the return page trimmed", saved, err)
-	}
-
 	for name, tc := range map[string]struct {
 		in   NewRequest
 		want string
 	}{
-		"no redirect of its own": {NewRequest{}, returnPage},
+		"no redirect of its own": {NewRequest{}, testReturnPage},
 		"its own redirect":       {NewRequest{RedirectURL: "https://other.example/next"}, "https://other.example/next"},
 		"no redirect wanted":     {NewRequest{NoRedirect: true}, ""},
 	} {
@@ -298,7 +316,7 @@ func TestFlowReturnPage(t *testing.T) {
 			t.Errorf("%s: redirect %q, %v; want %q", name, req.RedirectURL, err, tc.want)
 		}
 	}
-	if _, err := create(NewRequest{NoRedirect: true, RedirectURL: returnPage}); !errors.Is(err, ErrInvalidInput) {
+	if _, err := create(NewRequest{NoRedirect: true, RedirectURL: testReturnPage}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("no redirect wanted with a redirect: %v, want ErrInvalidInput", err)
 	}
 	if _, err := create(NewRequest{Channel: ChannelOnScreen, NoRedirect: true}); !errors.Is(err, ErrInvalidInput) {
@@ -309,14 +327,14 @@ func TestFlowReturnPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i := slices.IndexFunc(flows, func(of OrgFlow) bool { return of.ID == appFlow.ID }); i < 0 || flows[i].HostedReturnURL != returnPage {
+	if i := slices.IndexFunc(flows, func(of OrgFlow) bool { return of.ID == appFlow.ID }); i < 0 || flows[i].HostedReturnURL != testReturnPage {
 		t.Errorf("flow list = %+v, want the flow's return page", flows)
 	}
 
 	if _, err := saveOrigins(f.svc, []string{"https://other.example"}); !errors.Is(err, ErrRedirectOriginInUse) {
 		t.Errorf("removing the return page's origin: %v, want ErrRedirectOriginInUse", err)
 	}
-	if _, err := saveOrigins(f.svc, []string{origin}); err != nil {
+	if _, err := saveOrigins(f.svc, []string{testReturnOrigin}); err != nil {
 		t.Errorf("removing an origin no return page is on: %v", err)
 	}
 }
