@@ -567,19 +567,19 @@ export const en = {
       diplomasNeedPage:
         "This flow asks for diplomas, which are uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       diplomasClosed:
-        "Diplomas can only be added for a while after the identity check succeeded.",
+        "Diplomas can only be added for a while after the identity check.",
       diplomasNotAsked: "This check does not ask for diplomas.",
       addressNeedsPage:
         "This flow asks for the address, which is entered on the page that runs the check. Show it on this screen or send a hosted link.",
       addressClosed:
-        "The address can only be entered once, for a while after the identity check succeeded.",
+        "The address can only be entered once, for a while after the identity check.",
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
         "This address is not in the Dutch address register. Check the postal code, house number and street.",
       employmentNeedsPage:
         "This flow asks for the UWV Verzekeringsbericht, which is uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       employmentClosed:
-        "The Verzekeringsbericht can only be uploaded once, for a while after the identity check succeeded.",
+        "The Verzekeringsbericht can only be uploaded once, for a while after the identity check.",
       employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
       noEmploymentChecker:
         "This server checks no Verzekeringsbericht. Ask your administrator to set EMPLOYMENT_VALIDATOR_PROVIDER.",
@@ -595,6 +595,8 @@ export const en = {
       legalRetention:
         "A session the law makes you keep cannot be erased yet. Untick it.",
       tooLarge: "The file is too large.",
+      sealCheckUnavailable:
+        "The seal on the file cannot be checked right now. Try again in a few minutes.",
       generic: "Something went wrong. Please try again.",
     },
     address: {
@@ -676,7 +678,7 @@ export const en = {
         download:
           "Under “Persoonlijke gegevens”, open “Arbeidsverleden” and download it as a PDF.",
         upload:
-          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF or rename it, because that removes UWV's seal.",
+          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF, because that removes UWV's seal.",
       },
       choose: "Choose PDF",
       chooseAgain: "Choose another PDF",
@@ -791,6 +793,8 @@ export const en = {
       title: "Verify a person",
       missingFlow:
         "This flow no longer exists or cannot be sent from here. Go back and pick another one.",
+      identityInReview:
+        "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
         method: "Choose an app",
@@ -1039,7 +1043,6 @@ export const en = {
         notEmployed: "Currently employed: no",
         benefit: "Benefit",
         otherIncome: "Other income",
-        sickViaEmployer: "Sick, paid via employer",
         payrollTaxNumber: "Payroll tax number {{number}}",
         period: "since {{from}}, last reported {{to}}",
         source:

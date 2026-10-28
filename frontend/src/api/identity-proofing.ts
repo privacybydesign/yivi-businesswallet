@@ -91,17 +91,16 @@ const EMPLOYMENT_MODES = ["off", "required"] as const;
 const employmentModeSchema = z.enum(EMPLOYMENT_MODES).catch("required");
 export type EmploymentMode = z.infer<typeof employmentModeSchema>;
 
-// The employment relations a UWV Verzekeringsbericht lists, as of the date
-// UWV made it; relations is empty when it lists none.
 // The relation kinds a Verzekeringsbericht holds, as the backend names them
-// (employment.Kind*).
+// (employment.Kind*). Sick pay through the employer is kept as that job.
 export const EMPLOYMENT_KIND = {
   employment: "employment",
   benefit: "benefit",
-  sickViaEmployer: "sick_via_employer",
   otherIncome: "other_income",
 } as const;
 
+// The employment relations a UWV Verzekeringsbericht lists, as of the date
+// UWV made it; relations is empty when it lists none.
 const proofingEmploymentSchema = z.object({
   statementDate: z.string(),
   // A current relation that is not a benefit; without one the session goes
@@ -109,10 +108,12 @@ const proofingEmploymentSchema = z.object({
   employed: z.boolean(),
   relations: z.array(
     z.object({
-      // employment, benefit (paid by UWV), sick_via_employer or
-      // other_income (paid without hours worked).
+      // employment, benefit (paid by UWV) or other_income (paid without
+      // hours worked).
       kind: z.string(),
+      // The employer, or "UWV" for a benefit, never the benefit's name.
       employer: z.string(),
+      // "" for a UWV benefit.
       payrollTaxNumber: z.string(),
       // "" when the statement gives none.
       contractForm: z.string(),

@@ -101,6 +101,15 @@ func TestPDFUWV(t *testing.T) {
 		}
 	})
 
+	t.Run("sealed by another organisation", func(t *testing.T) {
+		// Nothing else in a bare seal names UWV: the signer identity is what
+		// stops another organisation's qualified seal.
+		res := verifyPDF(t, pdf, Options{Issuer: &trust.UWV, Trust: p.trust})
+		if res.Valid || res.FirstFailure() == nil || res.FirstFailure().ID != CheckSignerIdentity {
+			t.Errorf("FirstFailure = %+v, want %s", res.FirstFailure(), CheckSignerIdentity)
+		}
+	})
+
 	t.Run("changed after signing", func(t *testing.T) {
 		// Without signed attributes only the RSA signature over the content
 		// guards it, so one changed byte must fail that check.
@@ -122,6 +131,9 @@ func TestPDFUWV(t *testing.T) {
 		if checkOK(t, res, CheckRevocation) || res.Valid {
 			t.Errorf("a revoked UWV seal verified: %+v", res.Checks)
 		}
+		if res.RevocationUnreachable {
+			t.Error("a revoked seal read as an unreachable responder")
+		}
 	})
 
 	t.Run("unreachable responder", func(t *testing.T) {
@@ -131,6 +143,9 @@ func TestPDFUWV(t *testing.T) {
 		res := verifyPDF(t, doc, Options{Issuer: &testUWV, Trust: p.trust})
 		if checkOK(t, res, CheckRevocation) || res.Valid {
 			t.Errorf("a seal whose responder cannot answer verified: %+v", res.Checks)
+		}
+		if !res.RevocationUnreachable {
+			t.Error("an unreachable responder read as the seal's fault")
 		}
 	})
 }

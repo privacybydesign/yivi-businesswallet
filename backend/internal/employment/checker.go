@@ -61,7 +61,8 @@ func (c *Checker) Ping(ctx context.Context) error {
 }
 
 // Check decides on pdf for holder. An error is the checker's own failure (no
-// trust anchors, PDFium unavailable), never the document's.
+// trust anchors, a revocation responder that cannot be reached, PDFium
+// unavailable), never the document's.
 //
 // The seal is checked first, on the raw bytes, so only a file UWV sealed
 // reaches PDFium, as diploma.Checker does.

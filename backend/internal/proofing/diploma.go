@@ -41,7 +41,7 @@ const (
 	// MaxDiplomaFileBytes bounds one uploaded extract: DUO's are well under
 	// half a megabyte, also with a grade list.
 	MaxDiplomaFileBytes = 5 << 20
-	// DiplomaUploadWindow is how long after the identity was approved the
+	// DiplomaUploadWindow is how long after the identity check finished the
 	// subject can still add extracts, on the page that ran the session.
 	DiplomaUploadWindow = time.Hour
 )
@@ -52,9 +52,9 @@ const DiplomaReasonDuplicate = "duplicate"
 var (
 	// ErrDiplomasNotAsked is an upload on a request whose flow asks for none.
 	ErrDiplomasNotAsked = errors.New("proofing: the request asks for no diplomas")
-	// ErrDiplomasClosed is an upload before the identity was approved, or
+	// ErrDiplomasClosed is an upload before the identity check finished, or
 	// once DiplomaUploadWindow passed.
-	ErrDiplomasClosed = errors.New("proofing: diplomas can only be added within DiplomaUploadWindow of an approved identity")
+	ErrDiplomasClosed = errors.New("proofing: diplomas can only be added within DiplomaUploadWindow of the identity check")
 	// ErrDiplomasNeedPage is a diploma flow sent where its subject gets no
 	// page to upload on: by mail, or as a bare deep link.
 	ErrDiplomasNeedPage = errors.New("proofing: a flow that asks for diplomas runs on a page: show it on screen or send a hosted link")
@@ -321,7 +321,7 @@ func (s *DiplomaStore) RecordRejected(ctx context.Context, req Request, reason, 
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingDiplomaRejected,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			req.auditFields(fields))
+			audit.Created(req.auditFields(fields)))
 	})
 }
 
@@ -427,7 +427,8 @@ func (s *Service) HostedAddDiplomas(ctx context.Context, token string, files []D
 }
 
 // diplomasOpen reports whether req takes extracts now: it asks for them, is
-// approved, not erased or cancelled, and within DiplomaUploadWindow.
+// not erased or cancelled, and its steps are open for DiplomaUploadWindow
+// (stepsOpen).
 func (s *Service) diplomasOpen(req Request) error {
 	if s.diplomaChecker == nil || s.diplomas == nil {
 		return ErrNoDiplomaChecker
@@ -439,7 +440,7 @@ func (s *Service) diplomasOpen(req Request) error {
 		return ErrSessionOver
 	}
 	now := s.now()
-	if req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil || now.Sub(*req.CompletedAt) > DiplomaUploadWindow {
+	if !req.stepsOpen(now, DiplomaUploadWindow) {
 		return ErrDiplomasClosed
 	}
 	return nil

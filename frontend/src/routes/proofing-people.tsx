@@ -815,13 +815,6 @@ export function SessionEmployment({
                         {t("identityProofing.sessions.employment.otherIncome")}
                       </StatusText>
                     )}
-                    {r.kind === EMPLOYMENT_KIND.sickViaEmployer && (
-                      <StatusText>
-                        {t(
-                          "identityProofing.sessions.employment.sickViaEmployer",
-                        )}
-                      </StatusText>
-                    )}
                   </span>
                   <span className={HINT}>
                     {[

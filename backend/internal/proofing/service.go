@@ -785,6 +785,11 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if employment.asked() && in.Channel != ChannelHosted && in.Channel != ChannelOnScreen {
 		return Sent{}, ErrEmploymentNeedsPage
 	}
+	// A flow set to required before the checker was switched off: its subject
+	// could not upload, and the sweep would reject them after the window.
+	if employment.asked() && s.employmentChecker == nil {
+		return Sent{}, ErrNoEmploymentChecker
+	}
 	if in.Channel == ChannelHosted {
 		return s.createHosted(ctx, org, by, in, subject, *settings, flow, diplomas, address, employment, kind, photo)
 	}
@@ -1348,6 +1353,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 		return req, err
 	}
+	reviewed := req.Status == StatusNeedsReview
 	req.Status, req.AssuranceLevel, req.EIDASLevel, req.ErrorCode = next, res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 	req.ProofedName = res.Name
 	req.Method = methodOr(res.Method, req.Method)
@@ -1356,6 +1362,12 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		completedAt = *res.CompletedAt
 	}
 	req.CompletedAt = &completedAt
+	if req.CheckedAt == nil && (next == StatusApproved || next == StatusNeedsReview) {
+		req.CheckedAt = &completedAt
+	}
+	if reviewed && next == StatusApproved && req.Employment.asked() {
+		return s.reviewKeptEmployment(ctx, req)
+	}
 	if next != StatusNeedsReview {
 		return req, nil
 	}
@@ -1388,6 +1400,28 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 		return declined, nil
 	}
 	return handled, nil
+}
+
+// reviewKeptEmployment reads req again once the engine approved it after its
+// review: a statement kept during that review opened the wallet's own then
+// (recordOutcome), which a paused org cannot decide either.
+func (s *Service) reviewKeptEmployment(ctx context.Context, req Request) (Request, error) {
+	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: read the approved request again failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return req, err
+	}
+	if fresh.Status != StatusNeedsReview {
+		return fresh, nil
+	}
+	decided, err := s.rejectIfPaused(audit.WithoutActor(ctx), fresh)
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+		return fresh, err
+	}
+	return decided, nil
 }
 
 // enforceAssurance holds an approval the engine reported to the level the

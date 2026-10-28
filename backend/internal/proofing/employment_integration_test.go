@@ -205,7 +205,8 @@ func approvedSince(t *testing.T, f sealedFixture, session string, approvedAgo ti
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 
-	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET completed_at = now() - make_interval(secs => $2)
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests
+		SET completed_at = now() - make_interval(secs => $2), checked_at = now() - make_interval(secs => $2)
 		WHERE id = $1`, req.ID, approvedAgo.Seconds()); err != nil {
 		t.Fatal(err)
 	}
@@ -222,22 +223,26 @@ func approvedSince(t *testing.T, f sealedFixture, session string, approvedAgo ti
 func TestRejectMissingEmployment(t *testing.T) {
 	f := newSealedFixture(t, EventSessionFailed)
 	ctx := context.Background()
-	missed := approvedSince(t, f, "s1", EmploymentWindow+time.Minute)
+	missed := approvedSince(t, f, "s1", missingEmploymentDue+time.Minute)
 	inWindow := approvedSince(t, f, "s2", time.Minute)
-	held := approvedSince(t, f, "s3", EmploymentWindow+time.Minute)
+	// An upload let in at the window's end may still be checked.
+	inGrace := approvedSince(t, f, "s4", EmploymentWindow+time.Minute)
+	held := approvedSince(t, f, "s3", missingEmploymentDue+time.Minute)
 	if added, err := f.requests.AddEmployment(ctx, held, Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{}}); err != nil || !added {
 		t.Fatalf("AddEmployment = %v, %v", added, err)
 	}
 
 	next, err := f.requests.NextMissingEmployment(ctx, time.Now())
-	if err != nil || next.IsZero() || next.After(time.Now().Add(EmploymentWindow)) {
-		t.Errorf("NextMissingEmployment = %s, %v; want the open window's end", next, err)
+	if err != nil || next.IsZero() || next.After(time.Now().Add(employmentSweepGrace)) {
+		t.Errorf("NextMissingEmployment = %s, %v; want the grace's end after the window that just closed", next, err)
 	}
 	n, err := f.requests.RejectMissingEmployment(ctx, time.Now(), 10)
 	if err != nil || n != 1 {
 		t.Fatalf("RejectMissingEmployment = %d, %v; want 1", n, err)
 	}
-	checkStatuses(t, f.requests, map[*Request]Status{&missed: StatusRejected, &inWindow: StatusApproved, &held: StatusApproved})
+	checkStatuses(t, f.requests, map[*Request]Status{
+		&missed: StatusRejected, &inWindow: StatusApproved, &inGrace: StatusApproved, &held: StatusApproved,
+	})
 	if auditCount(t, f.pool, audit.IdentityProofingRejected) != 1 {
 		t.Error("want one rejected event")
 	}
@@ -251,6 +256,101 @@ func TestRejectMissingEmployment(t *testing.T) {
 	// An upload that lands after the rejection keeps nothing.
 	if added, err := f.requests.AddEmployment(ctx, missed, Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{}}); err != nil || added {
 		t.Errorf("AddEmployment on the rejected request = %v, %v; want refused", added, err)
+	}
+}
+
+// A statement kept while the engine reviews the identity opens the wallet's
+// review once the engine approves, without the subject asked again.
+func TestEmploymentKeptDuringEngineReview(t *testing.T) {
+	f := newSealedFixture(t, EventSessionReviewOpened)
+	ctx := context.Background()
+	f.in.Employment = EmploymentRequired
+	created, err := f.requests.Create(ctx, f.in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ok, err := f.requests.AttachSession(ctx, created, attachedSession("s1")); err != nil || !ok {
+		t.Fatalf("AttachSession = %v, %v", ok, err)
+	}
+	req, err := f.requests.Get(ctx, f.orgID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}); err != nil {
+		t.Fatalf("RecordOutcome review: %v", err)
+	}
+	inReview, err := f.requests.Get(ctx, f.orgID, req.ID)
+	if err != nil || inReview.CheckedAt == nil {
+		t.Fatalf("in review: checked at %v, %v; want set", inReview.CheckedAt, err)
+	}
+
+	noJob := Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{{
+		Kind: string(employment.KindBenefit), Employer: "UWV", From: "2026-06-01", To: "2026-09-30",
+	}}}
+	if added, err := f.requests.AddEmployment(ctx, inReview, noJob); err != nil || !added {
+		t.Fatalf("AddEmployment in review = %v, %v; want added", added, err)
+	}
+	if got, err := f.requests.Get(ctx, f.orgID, req.ID); err != nil || got.Status != StatusNeedsReview || got.ReviewReason != "" {
+		t.Fatalf("after the statement = %s (%q), %v; want still the engine's review", got.Status, got.ReviewReason, err)
+	}
+
+	if err := f.requests.RecordOutcome(ctx, inReview, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome approve: %v", err)
+	}
+	got, err := f.requests.Get(ctx, f.orgID, req.ID)
+	if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
+		t.Fatalf("after the engine's approval = %s (%q), %v; want the wallet's review", got.Status, got.ReviewReason, err)
+	}
+	if !got.CheckedAt.Equal(*inReview.CheckedAt) {
+		t.Errorf("checked at = %v, want it kept from the review's start %v", got.CheckedAt, inReview.CheckedAt)
+	}
+	if n, err := f.requests.RejectMissingEmployment(ctx, time.Now().Add(missingEmploymentDue+time.Minute), 10); err != nil || n != 0 {
+		t.Errorf("RejectMissingEmployment = %d, %v; want nothing missing", n, err)
+	}
+	// One session.review_opened for the engine's review, one for the wallet's.
+	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
+	if err != nil || len(deliveries) != 2 {
+		t.Errorf("deliveries = %+v, %v; want two session.review_opened", deliveries, err)
+	}
+}
+
+// A wallet review nobody decided before its purge ends rejected
+// REVIEW_LAPSED, audited and sent, before the purge erases it.
+func TestWalletReviewLapses(t *testing.T) {
+	f := newSealedFixture(t, EventSessionFailed)
+	ctx := context.Background()
+	f.in.Employment = EmploymentRequired
+	approved := approvedRequest(t, f.requests, f.in, "s1")
+	if added, err := f.requests.AddEmployment(ctx, approved, Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{}}); err != nil || !added {
+		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
+	}
+	// A raw write: the review waited past its purge time.
+	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET purge_at = now() - interval '1 minute'
+		WHERE id = $1`, approved.ID); err != nil {
+		t.Fatal(err)
+	}
+	due, err := f.requests.ListPurgeDue(ctx, 10)
+	if err != nil || len(due) != 1 || due[0].Status != StatusNeedsReview || due[0].ReviewReason == "" {
+		t.Fatalf("purge due = %+v, %v; want the wallet review", due, err)
+	}
+	before := auditCount(t, f.pool, audit.IdentityProofingRejected)
+
+	svc := NewService(Stores{Requests: f.requests}, nil, nil, nil)
+	if err := svc.lapseReview(ctx, due[0]); err != nil {
+		t.Fatalf("lapseReview: %v", err)
+	}
+	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
+	if err != nil || got.Status != StatusRejected || got.ErrorCode != errorReviewLapsed {
+		t.Fatalf("after the lapse = %s %q, %v; want rejected %s", got.Status, got.ErrorCode, err, errorReviewLapsed)
+	}
+	if auditCount(t, f.pool, audit.IdentityProofingRejected) != before+1 {
+		t.Error("want one rejected event")
+	}
+	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionFailed {
+		t.Errorf("deliveries = %+v, %v; want one session.failed", deliveries, err)
 	}
 }
 

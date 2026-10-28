@@ -13,6 +13,7 @@ import type {
 import {
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
+  EMPLOYMENT_KIND,
   ERASURE_HANDLINGS,
   FLOW_KINDS,
   MAX_LISTED_REQUESTS,
@@ -61,6 +62,7 @@ import {
   methodChoices,
   currentStage,
   progressPollContinues,
+  employmentOwed,
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
@@ -1361,6 +1363,7 @@ describe("proofingErrorMessage", () => {
     [409, "employment_closed", "employmentClosed"],
     [409, "employment_not_asked", "employmentNotAsked"],
     [409, "no_employment_checker", "noEmploymentChecker"],
+    [503, "seal_check_unavailable", "sealCheckUnavailable"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -1897,6 +1900,34 @@ describe("diploma modes mirror backend/internal/proofing", () => {
   });
 });
 
+// The "Benefit" and "Other income" tags compare against these: a kind renamed
+// on one side only would drop them without a word.
+describe("employment kinds mirror backend/internal/employment", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/employment/statement.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/\bKind\w+\s+Kind = "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend kind and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    const frontend: string[] = Object.values(EMPLOYMENT_KIND);
+    for (const kind of backend) {
+      expect(frontend).toContain(kind);
+    }
+    for (const kind of frontend) {
+      expect(backend).toContain(kind);
+    }
+  });
+});
+
 // The flow kinds, and of them the data requests the send form offers, are the
 // backend's, both ways.
 describe("flow kinds mirror backend/internal/proofing", () => {
@@ -2062,6 +2093,31 @@ describe("sessionView", () => {
     ).toBe("outcome");
   });
 
+  it("asks for the Verzekeringsbericht in review too", () => {
+    expect(
+      sessionView({
+        ...running,
+        status: "needs_review",
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("employment");
+  });
+
+  // The subject continued, but what the page read still owes the statement:
+  // the outcome waits for a read after it (kept, or the window's rejection).
+  it("holds the Verzekeringsbericht step while the backend still owes it", () => {
+    const done = {
+      ...running,
+      status: "approved",
+      employmentMode: "required" as const,
+      employmentUntil: until,
+      employmentDone: true,
+    };
+    expect(sessionView({ ...done, employmentOwed: true })).toBe("employment");
+    expect(sessionView({ ...done, employmentOwed: false })).toBe("outcome");
+  });
+
   it("does not ask for the Verzekeringsbericht while live or unasked", () => {
     expect(
       sessionView({
@@ -2202,7 +2258,6 @@ describe("employment step", () => {
       employed: false,
     });
     expect(employmentReview(withJob(["employment"]))).toBeUndefined();
-    expect(employmentReview(withJob(["sick_via_employer"]))).toBeUndefined();
     expect(employmentReview(withJob(["employment", "benefit"]))).toBe(
       "benefit",
     );
@@ -2535,6 +2590,36 @@ describe("progress poll", () => {
     expect(progressPollContinues({ status: "approved" }, null)).toBe(false);
   });
 
+  it("polls an approved session owing its Verzekeringsbericht once the window passed", () => {
+    const until = "2026-10-12T12:00:00Z";
+    const owing = { status: "approved", employmentUntil: until };
+    const before = Date.parse(until) - 1000;
+    const after = Date.parse(until) + 1000;
+    expect(progressPollContinues(owing, null, before)).toBe(false);
+    expect(progressPollContinues(owing, null, after)).toBe(true);
+    expect(progressPollContinues({ status: "rejected" }, null, after)).toBe(
+      false,
+    );
+    expect(
+      progressPollContinues(
+        { status: "needs_review", employmentUntil: until },
+        null,
+        after,
+      ),
+    ).toBe(false);
+  });
+
+  it("owes the statement only while approved and asked", () => {
+    const until = "2026-10-12T12:00:00Z";
+    expect(employmentOwed({ status: "approved", employmentUntil: until })).toBe(
+      true,
+    );
+    expect(employmentOwed({ status: "approved" })).toBe(false);
+    expect(
+      employmentOwed({ status: "needs_review", employmentUntil: until }),
+    ).toBe(false);
+  });
+
   it("stops after a 403 or a 404", () => {
     expect(progressPollContinues(undefined, notAllowed)).toBe(false);
     expect(progressPollContinues({ status: "pending" }, gone)).toBe(false);
@@ -2590,6 +2675,10 @@ describe("hostedErrorMessage", () => {
     const started = apiError(409, "link_started", "started");
     expect(hostedErrorMessage(started, t)).toBe(
       proofingErrorMessage(started, t),
+    );
+    const sealCheck = apiError(503, "seal_check_unavailable", "down");
+    expect(hostedErrorMessage(sealCheck, t)).toBe(
+      t("identityProofing.errors.sealCheckUnavailable"),
     );
     expect(hostedErrorMessage(new Error("offline"), t)).toBe(
       t("identityProofing.errors.generic"),

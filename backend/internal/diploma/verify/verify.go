@@ -86,6 +86,11 @@ const (
 	clockSkew = 5 * time.Minute
 )
 
+// ErrRevocationUnreachable is an online revocation check that got no answer:
+// the responder or CRL could not be reached, or answered with an HTTP error.
+// It says nothing of the certificate.
+var ErrRevocationUnreachable = errors.New("revocation source unreachable")
+
 // TrustSource supplies the trust anchors. Anchors need not be self-signed
 // roots: under eIDAS the CA certificate listed on a trusted list is the
 // anchor, and Go's x509.Verify accepts any certificate in the Roots pool.
@@ -132,6 +137,9 @@ type Result struct {
 	TSA              *x509.Certificate
 	// Anchor describes where the trust anchor for the signer chain came from.
 	Anchor string
+	// RevocationUnreachable is a revocation check that failed only because
+	// its source could not be reached (ErrRevocationUnreachable).
+	RevocationUnreachable bool
 }
 
 // Check is one verification step. ID is a stable machine readable key (used
@@ -481,6 +489,7 @@ func checkRevocation(ctx context.Context, res *Result, p7 *pkcs7.PKCS7, opts Opt
 			detail, err = archive.check(cert, issuer, res.SigningTime)
 		}
 		if err != nil {
+			res.RevocationUnreachable = errors.Is(err, ErrRevocationUnreachable)
 			c.Detail = fmt.Sprintf("%q: %v", cert.Subject.CommonName, err)
 			return c
 		}
@@ -671,11 +680,11 @@ func fetchCRL(ctx context.Context, hc *http.Client, url string, issuer *x509.Cer
 func fetch(hc *http.Client, req *http.Request) ([]byte, error) {
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrRevocationUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s %s: %s", req.Method, req.URL.Redacted(), resp.Status)
+		return nil, fmt.Errorf("%w: %s %s: %s", ErrRevocationUnreachable, req.Method, req.URL.Redacted(), resp.Status)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 }

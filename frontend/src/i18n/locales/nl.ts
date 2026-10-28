@@ -587,19 +587,19 @@ export const nl: Translation<typeof en> = {
       diplomasNeedPage:
         "Deze flow vraagt om diploma's, die worden geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       diplomasClosed:
-        "Diploma's kunnen alleen kort na een geslaagde identiteitscontrole worden toegevoegd.",
+        "Diploma's kunnen alleen kort na de identiteitscontrole worden toegevoegd.",
       diplomasNotAsked: "Deze controle vraagt niet om diploma's.",
       addressNeedsPage:
         "Deze flow vraagt om het adres, dat wordt ingevuld op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       addressClosed:
-        "Het adres kan maar één keer worden ingevuld, kort na een geslaagde identiteitscontrole.",
+        "Het adres kan maar één keer worden ingevuld, kort na de identiteitscontrole.",
       addressNotAsked: "Deze controle vraagt niet om een adres.",
       addressNotFound:
         "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
       employmentNeedsPage:
         "Deze flow vraagt om het Verzekeringsbericht van UWV, dat wordt geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       employmentClosed:
-        "Het Verzekeringsbericht kan maar één keer worden geüpload, kort na een geslaagde identiteitscontrole.",
+        "Het Verzekeringsbericht kan maar één keer worden geüpload, kort na de identiteitscontrole.",
       employmentNotAsked:
         "Deze controle vraagt niet om een Verzekeringsbericht.",
       noEmploymentChecker:
@@ -616,6 +616,8 @@ export const nl: Translation<typeof en> = {
       legalRetention:
         "Een sessie die je volgens de wet moet bewaren kan nog niet verwijderd worden. Vink die uit.",
       tooLarge: "Het bestand is te groot.",
+      sealCheckUnavailable:
+        "Het zegel op het bestand kan nu niet worden gecontroleerd. Probeer het over een paar minuten opnieuw.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
     address: {
@@ -697,7 +699,7 @@ export const nl: Translation<typeof en> = {
         download:
           "Open bij ‘Persoonlijke gegevens’ je ‘Arbeidsverleden’ en download het als pdf.",
         upload:
-          "Upload die pdf hier, precies zoals je hem downloadde. Druk hem niet af naar pdf en geef hem geen andere naam, want dan verdwijnt het zegel van UWV.",
+          "Upload die pdf hier, precies zoals je hem downloadde. Druk hem niet af naar pdf, want dan verdwijnt het zegel van UWV.",
       },
       choose: "Pdf kiezen",
       chooseAgain: "Een andere pdf kiezen",
@@ -813,6 +815,8 @@ export const nl: Translation<typeof en> = {
       title: "Een persoon verifiëren",
       missingFlow:
         "Deze flow bestaat niet meer of kan hier niet worden verstuurd. Ga terug en kies een andere.",
+      identityInReview:
+        "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
       steps: {
         overview: "Wat er wordt verzameld",
         method: "Kies een app",
@@ -1067,7 +1071,6 @@ export const nl: Translation<typeof en> = {
         notEmployed: "Heeft nu werk: nee",
         benefit: "Uitkering",
         otherIncome: "Ander inkomen",
-        sickViaEmployer: "Ziek, betaald via werkgever",
         payrollTaxNumber: "Loonheffingennummer {{number}}",
         period: "sinds {{from}}, laatst aangegeven {{to}}",
         source:

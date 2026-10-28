@@ -252,7 +252,8 @@ func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uui
 }
 
 func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
-	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectEmployment != nil {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.SubjectEmployment != nil ||
+		(f.stored.Status != StatusApproved && f.stored.Status != StatusNeedsReview) {
 		return false, nil
 	}
 	f.stored.SubjectEmployment = &emp
@@ -265,7 +266,7 @@ func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employm
 func (f *fakeRequests) RejectMissingEmployment(_ context.Context, now time.Time, _ int) (int, error) {
 	r := f.stored
 	if r == nil || r.Employment != EmploymentRequired || r.Status != StatusApproved || r.SubjectEmployment != nil ||
-		r.CompletedAt == nil || now.Before(r.CompletedAt.Add(EmploymentWindow)) {
+		r.CheckedAt == nil || now.Before(r.CheckedAt.Add(missingEmploymentDue)) {
 		return 0, nil
 	}
 	r.Status, r.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
@@ -325,12 +326,31 @@ func (f *fakeRequests) Member(_ context.Context, _, userID uuid.UUID) (Member, e
 	return m, nil
 }
 
-func (f *fakeRequests) RecordOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+// RecordOutcome is the engine's outcome: an approval after its review opens
+// the wallet's review of a statement kept meanwhile, as recordOutcome does.
+func (f *fakeRequests) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
+	reviewed := f.stored.Status == StatusNeedsReview
+	if err := f.recordOutcome(ctx, status, res); err != nil {
+		return err
+	}
+	if emp := f.stored.SubjectEmployment; reviewed && status == StatusApproved && emp != nil {
+		if reason := emp.reviewReason(); reason != "" {
+			f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+		}
+	}
+	return nil
+}
+
+func (f *fakeRequests) recordOutcome(ctx context.Context, status Status, res proofingprovider.Result) error {
 	f.actors = append(f.actors, actorLabel(ctx))
 	f.outcomes = append(f.outcomes, status)
 	f.results = append(f.results, res)
 	f.names = append(f.names, res.Name)
 	f.stored.Status = status
+	if f.stored.CheckedAt == nil && (status == StatusApproved || status == StatusNeedsReview) {
+		checked := time.Now()
+		f.stored.CheckedAt = &checked
+	}
 	f.stored.ProofedName = res.Name
 	f.stored.AssuranceLevel, f.stored.EIDASLevel, f.stored.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 	if status == StatusApproved || status == StatusRejected {
@@ -346,8 +366,8 @@ func (f *fakeRequests) GetExternal(_ context.Context, _, id uuid.UUID) (Request,
 	return *f.stored, nil
 }
 
-func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return f.RecordOutcome(ctx, req, sessionID, status, res)
+func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
+	return f.recordOutcome(ctx, status, res)
 }
 
 func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {

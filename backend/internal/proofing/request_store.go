@@ -36,7 +36,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	COALESCE(NULLIF(TRIM(COALESCE(u.given_names, '') || ' ' || COALESCE(u.last_name, '')), ''), u.email, ''),
 	r.subject_name, r.subject_email, r.flow_id, r.flow_name, r.status, r.link_expires_at,
 	COALESCE(r.assurance_level, ''), COALESCE(r.eidas_level, ''), COALESCE(r.error_code, ''),
-	r.created_at, r.updated_at, r.completed_at,
+	r.created_at, r.updated_at, r.completed_at, r.checked_at,
 	r.ips_session_id, r.ips_session_token_ciphertext, r.ips_session_expires_at, r.ips_session_ended_at,
 	COALESCE(r.ips_session_ttl_seconds, 0), r.subject_user_id, COALESCE(r.flow_version, 0),
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
@@ -237,7 +237,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
 		&r.SubjectName, &r.SubjectEmail, &r.FlowID, &r.FlowName, &r.Status, &r.LinkExpiresAt,
-		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt,
+		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.CheckedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
@@ -1342,20 +1342,24 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		const update = `UPDATE identity_proofing_requests SET
 				status = $3, assurance_level = NULLIF($4, ''), eidas_level = NULLIF($5, ''),
 				error_code = NULLIF($6, ''), completed_at = COALESCE($7, now()), updated_at = now(),
+				checked_at = COALESCE(checked_at, CASE WHEN $3 IN ('approved', 'needs_review') THEN COALESCE($7, now()) END),
 				proofed_name_ciphertext = $8, proofed_name_purge_after = now() + make_interval(secs => $9),
 				method = COALESCE(NULLIF($10, ''), method),
 				expected_birth_date_ciphertext = CASE WHEN $3 IN ('approved', 'rejected') THEN NULL
 					ELSE expected_birth_date_ciphertext END
 			WHERE id = $1 AND ips_session_id = $2 AND purged_at IS NULL
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
-				AND (review_reason IS NOT NULL) = $11`
-		tag, err := q.Exec(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), origin == outcomeByWallet)
+				AND (review_reason IS NOT NULL) = $11
+			RETURNING employment_ciphertext`
+		var employmentCT []byte
+		err := q.QueryRow(ctx, update, req.ID, sessionID, string(status),
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), origin == outcomeByWallet).
+			Scan(&employmentCT)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("proofing: record outcome request %s: %w", req.ID, err)
-		}
-		if tag.RowsAffected() == 0 {
-			return nil
 		}
 		if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
 			return err
@@ -1372,7 +1376,24 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		}
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
-		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
+		if err := enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status)); err != nil {
+			return err
+		}
+		if status != StatusApproved || origin != outcomeByEngine || employmentCT == nil {
+			return nil
+		}
+		// A statement kept while the engine reviewed the identity opens the
+		// wallet's review now, as it would have on an approved request.
+		emp, err := s.decryptEmployment(req.ID, employmentCT)
+		if err != nil {
+			return err
+		}
+		reason := emp.reviewReason()
+		if reason == "" {
+			return nil
+		}
+		decided.Status = StatusApproved
+		return openWalletReview(audit.WithoutActor(ctx), q, s.audit, decided, reason)
 	})
 }
 

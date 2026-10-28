@@ -395,16 +395,20 @@ type Request struct {
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	CompletedAt            *time.Time
+	// CheckedAt is when the identity check finished: the engine approved it
+	// or opened a review. The steps after it take input from then
+	// (stepsOpen); a review's decision moves CompletedAt, not this.
+	CheckedAt *time.Time
 	// RedirectURL is where a hosted request's page sends its subject once it
 	// settles; empty for none. Language is the page's language; empty leaves
 	// the subject's browser to decide.
 	RedirectURL string
 	Language    email.Locale
 	// Diplomas is whether the request asks for DUO diploma extracts once the
-	// identity is approved: its flow's DiplomaMode when it was sent.
+	// identity check finished: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
 	// Address is whether the request asks for the subject's postal address
-	// once the identity is approved: its flow's AddressMode when it was sent.
+	// once the identity check finished: its flow's AddressMode when it was sent.
 	// SubjectAddress is the address they entered, decrypted, at
 	// AddressAddedAt; nil before, and once the request is purged.
 	Address        AddressMode
@@ -413,7 +417,7 @@ type Request struct {
 	// AddressReview is a self-declared address's review; empty for none.
 	AddressReview AddressReview
 	// Employment is whether the request asks for the subject's UWV
-	// Verzekeringsbericht once the identity is approved: its flow's
+	// Verzekeringsbericht once the identity check finished: its flow's
 	// EmploymentMode when it was sent. SubjectEmployment is what was kept of
 	// it, decrypted, at EmploymentAddedAt; nil before, and once purged.
 	Employment        EmploymentMode
@@ -476,6 +480,27 @@ func (r Request) EffectiveStatus(now time.Time) Status {
 		return StatusExpired
 	}
 	return r.Status
+}
+
+// stepsUntil is when the steps after the identity check (address, diplomas,
+// Verzekeringsbericht) close, window after it finished; nil while it has not,
+// and once it was decided otherwise than approved. They open once the check
+// finished, approved or in review, so the subject gives everything in one go
+// and a reviewer decides after.
+func (r Request) stepsUntil(window time.Duration) *time.Time {
+	if r.CheckedAt == nil || (r.Status != StatusApproved && r.Status != StatusNeedsReview) {
+		return nil
+	}
+	until := r.CheckedAt.Add(window)
+	return &until
+}
+
+// stepsOpen reports whether the steps after the identity check take input at
+// now: stepsUntil has not passed, and the request is not over.
+func (r Request) stepsOpen(now time.Time, window time.Duration) bool {
+	until := r.stepsUntil(window)
+	status := r.EffectiveStatus(now)
+	return until != nil && !now.After(*until) && (status == StatusApproved || status == StatusNeedsReview)
 }
 
 // SessionExpiresAt is when the request's running the engine session ends, or nil when

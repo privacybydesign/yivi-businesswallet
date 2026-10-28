@@ -37,28 +37,30 @@ type Statement struct {
 // current. A month paid without hours (a final payment, an allowance, an
 // on-call contract without shifts) is no work: such a relation paid in one,
 // and worked in none, is current as KindOtherIncome. A pension, AOW or
-// social assistance, which IBL does not name, reads that way.
+// social assistance, which IBL does not name, reads that way. Sick pay
+// through the employer is current as that employer's job, worked or not.
 func (st *Statement) Current() []Relation {
 	cutoff := time.Date(st.Date.Year(), st.Date.Month()-currentMonths, 1, 0, 0, 0, 0, time.UTC)
 	current := []Relation{}
 	for _, r := range st.Relations {
 		switch {
 		case r.To.Before(cutoff):
+			continue
+		case r.Kind == kindSickViaEmployer:
+			r.Kind = KindEmployment
 		case r.Kind == KindEmployment && r.Worked.Before(cutoff):
 			r.Kind = KindOtherIncome
-			current = append(current, r)
-		default:
-			current = append(current, r)
 		}
+		current = append(current, r)
 	}
 	return current
 }
 
-// Employed reports whether the holder has a current job, or a sickness
-// benefit their employer pays.
+// Employed reports whether the holder has a current job, sick pay through
+// their employer included.
 func (st *Statement) Employed() bool {
 	for _, r := range st.Current() {
-		if r.Kind == KindEmployment || r.Kind == KindSickViaEmployer {
+		if r.Kind == KindEmployment {
 			return true
 		}
 	}
@@ -73,23 +75,25 @@ const (
 	KindEmployment Kind = "employment"
 	// KindBenefit is a benefit UWV pays (classify).
 	KindBenefit Kind = "benefit"
-	// KindSickViaEmployer is a sickness or WAZO benefit paid through the
-	// employer: the holder still has the job.
-	KindSickViaEmployer Kind = "sick_via_employer"
 	// KindOtherIncome is a current payment without hours worked from a payer
 	// that is no UWV benefit: a pension, AOW, social assistance, or a job's
 	// final payment (Statement.Current).
 	KindOtherIncome Kind = "other_income"
 )
 
+// kindSickViaEmployer is a sickness or WAZO benefit paid through the
+// employer: the holder still has the job, which Current makes it.
+const kindSickViaEmployer Kind = "sick_via_employer"
+
 // Relation is one income relation: an employer or a paying body (UWV)
 // under one contract, over the months the statement reports it. The wages
 // per month are read past and never kept.
 type Relation struct {
-	// Employer is "Werkgever/Instantie".
+	// Employer is "Werkgever/Instantie": the employer, or "UWV" for a UWV
+	// benefit, never the benefit's name (classify).
 	Employer string
 	// PayrollTaxNumber is "Loonheffingennummer", which tells two employers of
-	// the same name apart.
+	// the same name apart; empty for a UWV benefit.
 	PayrollTaxNumber string
 	// ContractForm is "Contractvorm", empty when the statement prints none.
 	ContractForm string

@@ -42,14 +42,13 @@ func employmentModeOf(req Request) EmploymentMode {
 }
 
 // employmentUntil is when the subject can last upload their statement:
-// EmploymentWindow after the approval of a request that asks for it and holds
-// none yet, nil otherwise.
+// EmploymentWindow after the identity check of a request that asks for it
+// and holds none yet finished (stepsUntil), nil otherwise.
 func employmentUntil(req Request) *time.Time {
-	if !req.Employment.asked() || req.SubjectEmployment != nil || req.Status != StatusApproved || req.CompletedAt == nil {
+	if !req.Employment.asked() || req.SubjectEmployment != nil {
 		return nil
 	}
-	until := req.CompletedAt.Add(EmploymentWindow)
-	return &until
+	return req.stepsUntil(EmploymentWindow)
 }
 
 // employmentVerdictResponse is what became of an uploaded statement.

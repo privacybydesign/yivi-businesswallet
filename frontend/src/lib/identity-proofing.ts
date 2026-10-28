@@ -61,16 +61,37 @@ export function isProofingLive(status: string): boolean {
 // (403), or it is gone (404). Polling on would only repeat the refusal.
 const FINAL_POLL_STATUSES: readonly number[] = [403, 404];
 
-// Whether a verify page keeps polling its progress: until the first read, and
-// while the session is live, unless a read was refused for good.
+// Whether a verify page keeps polling its progress: until the first read,
+// while the session is live, and while an approved session still owes its
+// Verzekeringsbericht past the window, until the backend rejects it for that
+// (EMPLOYMENT_NOT_PROVIDED); unless a read was refused for good.
 export function progressPollContinues(
-  progress: { status: string } | undefined,
+  progress: { status: string; employmentUntil?: string } | undefined,
   error: Error | null,
+  now: number = Date.now(),
 ): boolean {
   if (refusedForGood(error)) {
     return false;
   }
-  return progress === undefined || isProofingLive(progress.status);
+  return (
+    progress === undefined ||
+    isProofingLive(progress.status) ||
+    (employmentOwed(progress) &&
+      Date.parse(progress.employmentUntil ?? "") <= now)
+  );
+}
+
+// Whether the backend still waits for an approved session's
+// Verzekeringsbericht: it settles once one is kept (approved or to review) or
+// the window passed without one (rejected), and only that read may be handed
+// back as the outcome.
+export function employmentOwed(progress: {
+  status: string;
+  employmentUntil?: string;
+}): boolean {
+  return (
+    progress.status === "approved" && progress.employmentUntil !== undefined
+  );
 }
 
 // Whether a verify page keeps re-reading a session in review, slowly: a
@@ -1159,10 +1180,13 @@ export function currentStage({
   return step;
 }
 
-// What a verify page's running session shows: once an approved session asks
-// for them, the address step, the diploma step and then the employment step
-// until the subject is done with each, else the outcome once settled, the
-// expiry once an unstarted session's link ran out, or the session itself.
+// What a verify page's running session shows: once its identity check
+// finished (approved, or in review) and it asks for them, the address step,
+// the diploma step and then the employment step until the subject is done with
+// each, else the outcome once settled, the expiry once an unstarted session's
+// link ran out, or the session itself. The employment step stays while the
+// backend still owes it (employmentOwed): the outcome it hands back is only
+// ever the one read after the statement.
 export type SessionView =
   | "address"
   | "diplomas"
@@ -1182,6 +1206,7 @@ export function sessionView({
   employmentMode,
   employmentUntil,
   employmentDone,
+  employmentOwed = false,
   secondsLeft,
 }: {
   status: string;
@@ -1194,6 +1219,7 @@ export function sessionView({
   employmentMode: EmploymentMode;
   employmentUntil: string | undefined;
   employmentDone: boolean;
+  employmentOwed?: boolean;
   secondsLeft: number;
 }): SessionView {
   if (!isProofingLive(status)) {
@@ -1205,7 +1231,7 @@ export function sessionView({
     }
     return employmentMode !== "off" &&
       employmentUntil !== undefined &&
-      !employmentDone
+      (!employmentDone || employmentOwed)
       ? "employment"
       : "outcome";
   }
@@ -1531,6 +1557,8 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.employmentNotAsked");
     case "no_employment_checker":
       return t("identityProofing.errors.noEmploymentChecker");
+    case "seal_check_unavailable":
+      return t("identityProofing.errors.sealCheckUnavailable");
     case "flow_no_identity":
       return t("identityProofing.errors.flowNoIdentity");
     case "data_flow_for_member":
@@ -1571,6 +1599,7 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "device_active":
     case "diplomas_closed":
     case "employment_closed":
+    case "seal_check_unavailable":
     case "export_unavailable":
     case "too_large":
     case "payload_too_large":

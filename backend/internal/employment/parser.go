@@ -67,8 +67,9 @@ var (
 	reHolderDates = regexp.MustCompile(`^Geboortedatum:\s*(\d{2}-\d{2}-\d{4})\s+Datum:\s*(\d{1,2} \S+ \d{4})$`)
 	rePageNumber  = regexp.MustCompile(`^Pagina \d+ van \d+$`)
 	// rePeriod starts a month line: "01-09-2026 t/m 30-09-2026 173 € 3.163,56",
-	// its hours after the period.
-	rePeriod = regexp.MustCompile(`^(\d{2}-\d{2}-\d{4}) t/m (\d{2}-\d{2}-\d{4})(?:\s+(\d+)\b)?`)
+	// its hours after the period, in whole numbers ahead of the wages' "€":
+	// an amount alone is no hours.
+	rePeriod = regexp.MustCompile(`^(\d{2}-\d{2}-\d{4}) t/m (\d{2}-\d{2}-\d{4})(?:\s+(\d+)\s+€)?`)
 	// reInitials is a word of initials: "J.", "J.Th." or "IJ.".
 	reInitials = regexp.MustCompile(`^(?:(?:IJ|\p{Lu}\p{Ll}*)\.)+$`)
 	reInitial  = regexp.MustCompile(`(IJ|\p{Lu}\p{Ll}*)\.`)
@@ -268,17 +269,22 @@ func addPeriod(r *Relation, l string) error {
 	return nil
 }
 
-// mergeRelations joins the blocks of one relation, drops a block that
-// reports no month, and classifies each.
+// mergeRelations classifies each block, drops one that reports no month, and
+// joins the blocks of one relation: those of every UWV benefit too, which
+// classify names alike.
 func mergeRelations(blocks []Relation) []Relation {
-	type key struct{ employer, number, contract string }
+	type key struct {
+		kind                       Kind
+		employer, number, contract string
+	}
 	merged := []Relation{}
 	at := map[key]int{}
 	for _, b := range blocks {
 		if b.From.IsZero() {
 			continue
 		}
-		k := key{b.Employer, b.PayrollTaxNumber, b.ContractForm}
+		classify(&b)
+		k := key{b.Kind, b.Employer, b.PayrollTaxNumber, b.ContractForm}
 		i, seen := at[k]
 		if !seen {
 			at[k] = len(merged)
@@ -294,10 +300,6 @@ func mergeRelations(blocks []Relation) []Relation {
 		if b.Worked.After(merged[i].Worked) {
 			merged[i].Worked = b.Worked
 		}
-	}
-
-	for i := range merged {
-		merged[i].Kind = classify(merged[i].Employer, merged[i].PayrollTaxNumber)
 	}
 	return merged
 }

@@ -92,6 +92,9 @@ type Issuer struct {
 	// Lacks is what this issuer's signatures leave out; the zero value
 	// requires all of it.
 	Lacks Lacks
+	// Pinned is an issuer whose chain the pinned roots hold; any other one
+	// verifies only on the EU lists.
+	Pinned bool
 }
 
 // Lacks lists the parts of a long-term PAdES signature an issuer does not
@@ -115,6 +118,7 @@ var DUO = Issuer{
 	Name:                   "Dienst Uitvoering Onderwijs (DUO)",
 	OrganizationIdentifier: "NTRNL-50973029",
 	Organization:           "Dienst Uitvoering Onderwijs (DUO)",
+	Pinned:                 true,
 }
 
 // UWV is the Uitvoeringsinstituut werknemersverzekeringen, which seals the

@@ -34,15 +34,27 @@ var (
 	reSickViaEmployer = regexp.MustCompile(`(?i)^Ziektewet- of WAZO-Uitkering van (.+)$`)
 )
 
-// classify tells what a relation is from its printed payer and number.
-func classify(employer, payrollTaxNumber string) Kind {
-	uwvBenefit := slices.ContainsFunc(uwvBenefits, func(b string) bool { return strings.EqualFold(b, employer) })
+// uwvPayer is who a UWV benefit names as its payer once classified.
+const uwvPayer = "UWV"
+
+// classify tells what r is from its printed payer and number, and drops the
+// benefit's name: "WIA", "Wajong" or "Ziektewet- of WAZO-Uitkering" tells of
+// sickness, disability or pregnancy (data concerning health, GDPR Art. 9),
+// which the occupational status does not need. A UWV benefit's payer is
+// UWV, without its number; sick pay through the employer is that employer's.
+func classify(r *Relation) {
+	uwvBenefit := slices.ContainsFunc(uwvBenefits, func(b string) bool { return strings.EqualFold(b, r.Employer) })
+	sickVia := reSickViaEmployer.FindStringSubmatch(r.Employer)
 	switch {
-	case uwvBenefit && slices.Contains(uwvBenefitPayrollTaxNumbers, payrollTaxNumber):
-		return KindBenefit
-	case reSickViaEmployer.MatchString(employer) && !uwvBenefit:
-		return KindSickViaEmployer
+	case uwvBenefit:
+		r.Kind = KindEmployment
+		if slices.Contains(uwvBenefitPayrollTaxNumbers, r.PayrollTaxNumber) {
+			r.Kind = KindBenefit
+		}
+		r.Employer, r.PayrollTaxNumber = uwvPayer, ""
+	case sickVia != nil:
+		r.Kind, r.Employer = kindSickViaEmployer, sickVia[1]
 	default:
-		return KindEmployment
+		r.Kind = KindEmployment
 	}
 }

@@ -410,6 +410,33 @@ func TestHostedDiplomaChecksLink(t *testing.T) {
 	}
 }
 
+// A Verzekeringsbericht upload is refused before its body is read: to an
+// unknown link, and to one whose window closed.
+func TestHostedEmploymentChecksLink(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	_, token := e.sendHosted(t)
+	checked := time.Now().Add(-EmploymentWindow - time.Minute)
+	e.requests.stored.Status, e.requests.stored.CompletedAt, e.requests.stored.CheckedAt = StatusApproved, &checked, &checked
+	h := NewHandler(e.svc, nil, nil)
+
+	for _, tc := range []struct {
+		name, token, code string
+	}{
+		{"unknown link", "unknown", "session_not_found"},
+		{"window closed", token, "employment_closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/proof/"+tc.token+"/employment", unreadBody{t})
+			r.SetPathValue("token", tc.token)
+			r.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+			var apiErr *respond.APIError
+			if err := h.hostedAddEmployment(httptest.NewRecorder(), r); !errors.As(err, &apiErr) || apiErr.Code != tc.code {
+				t.Errorf("upload = %v, want %s", err, tc.code)
+			}
+		})
+	}
+}
+
 func TestHostedViewHidesDocNumber(t *testing.T) {
 	d := newDiplomaFixture(DiplomasOff)
 	sent, token := d.sendHosted(t)

@@ -47,6 +47,7 @@ import {
   addressLookup,
   diplomaRejectionReason,
   diplomaStepDone,
+  employmentOwed,
   employmentRejectionReason,
   employmentReview,
   employmentStepDone,
@@ -492,6 +493,9 @@ export function Session({
   // subject has seen what was accepted.
   const [keptUntil, setKeptUntil] = useState<string>();
   const employmentUntil = current.employmentUntil ?? keptUntil;
+  // The backend still waits for the statement: on continuing, the outcome is
+  // the one read after it, kept or rejected for the window.
+  const owed = employmentOwed(current);
   const secondsLeft = useSecondsLeft(current.linkExpiresAt);
   const view = sessionView({
     status: current.status,
@@ -504,12 +508,15 @@ export function Session({
     employmentMode,
     employmentUntil,
     employmentDone,
+    employmentOwed: owed,
     secondsLeft,
   });
   const askAddress = view === "address";
   const askDiplomas = view === "diplomas";
   const askEmployment = view === "employment";
   const showsOutcome = view === "outcome";
+  // The steps after the identity check open while it is still reviewed.
+  const inReview = current.status === "needs_review";
   useEffect(() => {
     if (showsOutcome) {
       onSettled?.(current);
@@ -564,6 +571,7 @@ export function Session({
       <AddressStep
         target={target}
         until={current.addressUntil}
+        inReview={inReview}
         onDone={() => setAddressDone(true)}
       />
     );
@@ -574,6 +582,7 @@ export function Session({
         target={target}
         until={current.diplomasUntil}
         initial={diplomas}
+        inReview={inReview}
         onDone={() => setDiplomasDone(true)}
       />
     );
@@ -583,8 +592,15 @@ export function Session({
       <EmploymentStep
         target={target}
         until={employmentUntil}
+        inReview={inReview}
+        settling={employmentDone}
         onKept={() => setKeptUntil(employmentUntil)}
-        onDone={() => setEmploymentDone(true)}
+        onDone={() => {
+          setEmploymentDone(true);
+          // What was read before the statement is not handed back: a kept
+          // one can open a review, and none rejects the session.
+          void progress.refetch();
+        }}
       />
     );
   }
@@ -658,7 +674,27 @@ export function Session({
   );
 }
 
-// After an approved identity: the subject uploads the extracts of their
+// What a step after the identity check says of it: verified, or done and
+// waiting for a reviewer while the subject goes on.
+function IdentityCheckBanner({
+  inReview,
+  done,
+}: Readonly<{ inReview: boolean; done: string }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return inReview ? (
+    <p className="bg-tile text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+      <Icon name="time" className="text-tile-fg shrink-0" />
+      {t("identityProofing.onScreen.identityInReview")}
+    </p>
+  ) : (
+    <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
+      <Icon name="valid" className="text-success shrink-0" />
+      {done}
+    </p>
+  );
+}
+
+// After the identity check: the subject uploads the extracts of their
 // diplomas they downloaded from DUO, each checked at once against DUO's
 // signature and their proven name and date of birth. The step ends once one
 // is held, or the time to add one is up.
@@ -666,11 +702,13 @@ function DiplomaStep({
   target,
   until,
   initial,
+  inReview,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
   initial: HostedDiploma[];
+  inReview: boolean;
   onDone: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -712,10 +750,10 @@ function DiplomaStep({
       <p role="status" className="sr-only">
         {announced}
       </p>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.diplomas.identityDone")}
-      </p>
+      <IdentityCheckBanner
+        inReview={inReview}
+        done={t("identityProofing.diplomas.identityDone")}
+      />
 
       <div className="flex flex-col gap-1">
         <StepHeading>{t("identityProofing.diplomas.heading")}</StepHeading>
@@ -848,18 +886,24 @@ function DiplomaStep({
   );
 }
 
-// After an approved identity: the subject uploads the Verzekeringsbericht
+// After the identity check: the subject uploads the Verzekeringsbericht
 // they downloaded from UWV, checked at once against UWV's seal and their
 // proven name and date of birth. Once one is kept the step shows what was
 // accepted and ends when the subject continues, or when the time is up.
+// settling is the subject having continued while the page waits for what the
+// backend holds after it.
 function EmploymentStep({
   target,
   until,
+  inReview,
+  settling,
   onKept,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
+  inReview: boolean;
+  settling: boolean;
   onKept: () => void;
   onDone: () => void;
 }>): React.JSX.Element {
@@ -908,10 +952,10 @@ function EmploymentStep({
 
   return (
     <div className="flex w-full flex-col gap-5">
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.employment.identityDone")}
-      </p>
+      <IdentityCheckBanner
+        inReview={inReview}
+        done={t("identityProofing.employment.identityDone")}
+      />
 
       <div className="flex flex-col gap-1">
         <StepHeading>{t("identityProofing.employment.heading")}</StepHeading>
@@ -1056,6 +1100,7 @@ function EmploymentStep({
           <Button
             variant={kept === undefined ? "secondary" : "primary"}
             icon="arrow_front"
+            loading={settling}
             onClick={onDone}
           >
             {t("identityProofing.employment.continue")}
@@ -1092,16 +1137,18 @@ const EMPTY_ADDRESS: ProofingAddressInput = {
   country: "",
 };
 
-// After an approved identity: the subject enters their postal address. It is
+// After the identity check: the subject enters their postal address. It is
 // what they declare, kept beside the proven identity. The step ends once it
 // is kept, or the time to enter it is up.
 function AddressStep({
   target,
   until,
+  inReview,
   onDone,
 }: Readonly<{
   target: VerifyTarget;
   until: string;
+  inReview: boolean;
   onDone: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -1152,10 +1199,10 @@ function AddressStep({
 
   return (
     <form className="flex w-full flex-col gap-5" onSubmit={save} noValidate>
-      <p className="bg-success-bg text-ink rounded-yivi flex items-center gap-2 px-3 py-2 text-[13px] font-semibold">
-        <Icon name="valid" className="text-success shrink-0" />
-        {t("identityProofing.address.identityDone")}
-      </p>
+      <IdentityCheckBanner
+        inReview={inReview}
+        done={t("identityProofing.address.identityDone")}
+      />
 
       <div className="flex flex-col gap-1">
         <StepHeading>{t("identityProofing.address.heading")}</StepHeading>

@@ -45,6 +45,9 @@ const (
 	// extract parses in well under a second; past this the instance is killed,
 	// so a crafted PDF cannot hold one of the pool's few instances indefinitely.
 	pdfiumParseTimeout = 20 * time.Second
+	// PDFiumMaxDuration is the longest one read on the pool takes: waiting
+	// for an instance, then parsing.
+	PDFiumMaxDuration = pdfiumInstanceTimeout + pdfiumParseTimeout
 	// pdfiumMaxParses is how many of the pool's instances diploma parses may
 	// hold at once.
 	pdfiumMaxParses = 2

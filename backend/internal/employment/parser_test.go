@@ -69,10 +69,7 @@ func TestParseStatement(t *testing.T) {
 			ContractForm: "schriftelijke arbeidsovereenkomst voor bepaalde tijd, geen oproepovereenkomst",
 			From:         date("01-07-2026"), To: date("30-09-2026"), Worked: date("30-09-2026"), Kind: KindEmployment,
 		},
-		{
-			Employer: "WW-Uitkering van UWV", PayrollTaxNumber: "810220350L02",
-			From: date("01-01-2026"), To: date("31-01-2026"), Kind: KindBenefit,
-		},
+		{Employer: "UWV", From: date("01-01-2026"), To: date("31-01-2026"), Kind: KindBenefit},
 	}
 	if len(st.Relations) != len(want) {
 		t.Fatalf("relations = %+v, want %+v", st.Relations, want)
@@ -84,26 +81,30 @@ func TestParseStatement(t *testing.T) {
 	}
 }
 
+// classify keeps no benefit's name, nor its number: either tells of
+// sickness, disability or pregnancy.
 func TestClassify(t *testing.T) {
 	for _, tc := range []struct {
 		employer, number string
-		want             Kind
+		want             Relation
 	}{
-		{"WW-Uitkering van UWV", "810220350L02", KindBenefit},
-		{"WIA (WGA)-Uitkering van UWV", "810220350L26", KindBenefit},
-		{"Toeslag bij Uitkering (TW) van UWV", "810220350L04", KindBenefit},
-		{"UWV; Loondoorbetaling bij faillissement", "810220350L53", KindBenefit},
+		{"WW-Uitkering van UWV", "810220350L02", Relation{Kind: KindBenefit, Employer: "UWV"}},
+		{"WIA (WGA)-Uitkering van UWV", "810220350L26", Relation{Kind: KindBenefit, Employer: "UWV"}},
+		{"Toeslag bij Uitkering (TW) van UWV", "810220350L04", Relation{Kind: KindBenefit, Employer: "UWV"}},
+		{"UWV; Loondoorbetaling bij faillissement", "810220350L53", Relation{Kind: KindBenefit, Employer: "UWV"}},
 		// IBL 9.0.0 writes the descriptions in lower case.
-		{"WW-uitkering van UWV", "810220350L02", KindBenefit},
-		{"Ziektewet- of WAZO-uitkering van UWV", "810220350L20", KindBenefit},
-		// The description alone is not enough, as in IBL: the number must match too.
-		{"WW-Uitkering van UWV", "123456789L01", KindEmployment},
-		{"UWV", "810220350L02", KindEmployment},
-		{"Ziektewet- of WAZO-Uitkering van VOORBEELD B.V.", "123456789L01", KindSickViaEmployer},
-		{"VOORBEELD B.V.", "123456789L01", KindEmployment},
+		{"WW-uitkering van UWV", "810220350L02", Relation{Kind: KindBenefit, Employer: "UWV"}},
+		{"Ziektewet- of WAZO-uitkering van UWV", "810220350L20", Relation{Kind: KindBenefit, Employer: "UWV"}},
+		// The description alone is not enough, as in IBL: the number must
+		// match too. Its name is still not kept.
+		{"WW-Uitkering van UWV", "123456789L01", Relation{Kind: KindEmployment, Employer: "UWV"}},
+		{"UWV", "810220350L02", Relation{Kind: KindEmployment, Employer: "UWV", PayrollTaxNumber: "810220350L02"}},
+		{"Ziektewet- of WAZO-Uitkering van VOORBEELD B.V.", "123456789L01", Relation{Kind: kindSickViaEmployer, Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01"}},
+		{"VOORBEELD B.V.", "123456789L01", Relation{Kind: KindEmployment, Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01"}},
 	} {
-		if got := classify(tc.employer, tc.number); got != tc.want {
-			t.Errorf("classify(%q, %q) = %q, want %q", tc.employer, tc.number, got, tc.want)
+		got := Relation{Employer: tc.employer, PayrollTaxNumber: tc.number}
+		if classify(&got); got != tc.want {
+			t.Errorf("classify(%q, %q) = %+v, want %+v", tc.employer, tc.number, got, tc.want)
 		}
 	}
 }
@@ -122,15 +123,16 @@ func TestCurrent(t *testing.T) {
 		job("ON CALL, NO SHIFTS IN SEPTEMBER", "30-09-2026", "31-08-2026"),
 		job("PAID WITHOUT HOURS", "30-09-2026", ""),
 		job("JULY", "31-07-2026", "31-07-2026"),
-		{Employer: "WW-Uitkering van UWV", To: date("30-09-2026"), Kind: KindBenefit},
+		{Employer: "UWV", To: date("30-09-2026"), Kind: KindBenefit},
 		{Employer: "OLD BENEFIT", To: date("31-05-2026"), Kind: KindBenefit},
+		{Employer: "SICK, NO HOURS", To: date("30-09-2026"), Kind: kindSickViaEmployer},
 	}}
 	var got []string
 	for _, r := range st.Current() {
 		got = append(got, r.Employer+"/"+string(r.Kind))
 	}
 	want := "SEPTEMBER/employment,AUGUST/employment,ON CALL, NO SHIFTS IN SEPTEMBER/employment," +
-		"PAID WITHOUT HOURS/other_income,WW-Uitkering van UWV/benefit"
+		"PAID WITHOUT HOURS/other_income,UWV/benefit,SICK, NO HOURS/employment"
 	if strings.Join(got, ",") != want {
 		t.Errorf("Current = %v, want %s", got, want)
 	}
@@ -154,7 +156,7 @@ func TestEmployed(t *testing.T) {
 		want      bool
 	}{
 		"a job":                    {[]Relation{{Kind: KindEmployment, To: date("30-09-2026"), Worked: date("30-09-2026")}}, true},
-		"sick via the employer":    {[]Relation{{Kind: KindSickViaEmployer, To: date("30-09-2026")}}, true},
+		"sick via the employer":    {[]Relation{{Kind: kindSickViaEmployer, To: date("30-09-2026")}}, true},
 		"only a benefit":           {[]Relation{{Kind: KindBenefit, To: date("30-09-2026")}}, false},
 		"a past job":               {[]Relation{{Kind: KindEmployment, To: date("31-05-2026"), Worked: date("31-05-2026")}}, false},
 		"paid but no hours":        {[]Relation{{Kind: KindEmployment, To: date("30-09-2026")}}, false},
@@ -200,6 +202,42 @@ func TestMonthsWithoutHeading(t *testing.T) {
 	}
 	if len(st.Relations) != 1 || st.Relations[0].ContractForm != "oproepovereenkomst" || !st.Relations[0].To.Equal(date("30-09-2026")) {
 		t.Errorf("relations = %+v, want one oproepovereenkomst reporting September", st.Relations)
+	}
+}
+
+// A month line printing an amount without hours worked is no work.
+func TestMonthWithoutHours(t *testing.T) {
+	page := "Werkgever/Instantie PENSIOENFONDS\nLoonheffingennummer 222222222L01\nContractvorm\n" +
+		"Periode Aantal uur Sv-loon\n01-09-2026 t/m 30-09-2026 3.163,56\nVZB-006\n" + statementFooter(1, 1)
+	st, err := parseStatement([]string{page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Relations) != 1 || !st.Relations[0].Worked.IsZero() || !st.Relations[0].To.Equal(date("30-09-2026")) {
+		t.Errorf("relations = %+v, want one reporting September without hours worked", st.Relations)
+	}
+}
+
+// Every UWV benefit is kept as one, paid by UWV, and sick pay as the
+// employer's job: no benefit's name is left.
+func TestBenefitNamesNotKept(t *testing.T) {
+	page := "Werkgever/Instantie WIA (WGA)-Uitkering van UWV\nLoonheffingennummer 810220350L26\nContractvorm\n" +
+		"Periode Aantal uur Sv-loon\n01-09-2026 t/m 30-09-2026 0 € 900,00\n" +
+		"Werkgever/Instantie WAO-Uitkering van UWV\nLoonheffingennummer 810220350L02\nContractvorm\n" +
+		"Periode Aantal uur Sv-loon\n01-08-2026 t/m 31-08-2026 0 € 900,00\n" +
+		"Werkgever/Instantie Ziektewet- of WAZO-Uitkering van VOORBEELD B.V.\nLoonheffingennummer 123456789L01\n" +
+		"Contractvorm\nPeriode Aantal uur Sv-loon\n01-09-2026 t/m 30-09-2026 0 € 2.000,00\nVZB-006\n" + statementFooter(1, 1)
+	st, err := parseStatement([]string{page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Date = date("15-10-2026")
+	var got []string
+	for _, r := range st.Current() {
+		got = append(got, fmt.Sprintf("%s/%s/%s", r.Kind, r.Employer, r.PayrollTaxNumber))
+	}
+	if want := "benefit/UWV/,employment/VOORBEELD B.V./123456789L01"; strings.Join(got, ",") != want {
+		t.Errorf("Current = %v, want %s", got, want)
 	}
 }
 

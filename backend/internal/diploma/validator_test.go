@@ -217,3 +217,46 @@ func TestPadesValidator(t *testing.T) {
 		t.Errorf("Validate(unsigned) = %+v, want a %s rejection", verification, verify.CheckSignaturePresent)
 	}
 }
+
+// The pinned roots hold no chain of UWV's seal: on the fallback its validator
+// cannot check, rather than refuse every genuine statement, until a reload
+// brings the EU lists back. DUO's keeps checking on them.
+func TestPadesValidatorOnFallback(t *testing.T) {
+	srv := newListServer(t)
+	srv.failing.Store(true)
+	clock := &fakeClock{now: time.Now()}
+	store, err := trustStoreOn(t, srv, clock, true)
+	if err != nil {
+		t.Fatalf("boot with the pinned fallback: %v", err)
+	}
+	ctx := context.Background()
+
+	uwv := NewPadesValidator(store, trust.UWV, RevocationOffline)
+	if err := uwv.Ping(ctx); !errors.Is(err, ErrTrustUnavailable) {
+		t.Errorf("UWV Ping on the fallback = %v, want ErrTrustUnavailable", err)
+	}
+	if _, err := uwv.Validate(ctx, []byte("%PDF-1.7\n")); !errors.Is(err, ErrTrustUnavailable) {
+		t.Errorf("UWV Validate on the fallback = %v, want ErrTrustUnavailable", err)
+	}
+	if err := NewPadesValidator(store, trust.DUO, RevocationOffline).Ping(ctx); err != nil {
+		t.Errorf("DUO Ping on the fallback = %v, want nil", err)
+	}
+
+	srv.failing.Store(false)
+	clock.now = clock.now.Add(trustRetry)
+	store.Current(ctx)
+	store.reloads.Wait()
+	if err := uwv.Ping(ctx); err != nil {
+		t.Errorf("UWV Ping after the EU lists loaded = %v, want nil", err)
+	}
+}
+
+func TestPadesValidatorPinnedSource(t *testing.T) {
+	store, err := NewTrustStore(context.Background(), TrustConfig{Source: TrustSourcePinned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewPadesValidator(store, trust.UWV, RevocationOffline).Ping(context.Background()); !errors.Is(err, ErrTrustUnavailable) {
+		t.Errorf("UWV Ping on the pinned roots = %v, want ErrTrustUnavailable", err)
+	}
+}

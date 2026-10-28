@@ -15,6 +15,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -924,15 +925,15 @@ func mapError(err error) error {
 	case errors.Is(err, ErrDiplomasNotAsked):
 		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}
 	case errors.Is(err, ErrDiplomasClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity is approved: " + DiplomaUploadWindow.String()}
+		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity check: " + DiplomaUploadWindow.String()}
 	case errors.Is(err, ErrAddressNotAsked):
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}
 	case errors.Is(err, ErrAddressClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity is approved: " + AddressWindow.String()}
+		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}
 	case errors.Is(err, ErrEmploymentNotAsked):
 		return &respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}
 	case errors.Is(err, ErrEmploymentClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity is approved: " + EmploymentWindow.String()}
+		return &respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}
 	case errors.Is(err, ErrAddressNotFound):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}
 	case errors.Is(err, ErrAddressLookupUnavailable):
@@ -945,6 +946,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrNoEmploymentChecker):
 		return &respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}
+	case errors.Is(err, diploma.ErrTrustUnavailable), errors.Is(err, diploma.ErrRevocationUnavailable):
+		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "seal_check_unavailable", Message: "the seal cannot be checked right now: the trust lists or the revocation responder cannot be reached; try again later"}
 	case errors.Is(err, ErrEmploymentNeedsPage):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}
 	case errors.Is(err, ErrHostedDisabled):

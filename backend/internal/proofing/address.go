@@ -39,8 +39,8 @@ func (m AddressMode) valid() bool {
 func (m AddressMode) asked() bool { return m == AddressRequired }
 
 const (
-	// AddressWindow is how long after the identity was approved the subject
-	// can still enter their address, on the page that ran the session.
+	// AddressWindow is how long after the identity check finished the
+	// subject can still enter their address, on the page that ran the session.
 	AddressWindow = time.Hour
 	// maxAddressFieldRunes bounds each field of an address.
 	maxAddressFieldRunes = 200
@@ -49,9 +49,9 @@ const (
 var (
 	// ErrAddressNotAsked is an address on a request whose flow asks for none.
 	ErrAddressNotAsked = errors.New("proofing: the request asks for no address")
-	// ErrAddressClosed is an address before the identity was approved, once
-	// AddressWindow passed, or after one was entered already.
-	ErrAddressClosed = errors.New("proofing: the address can be entered once, within AddressWindow of an approved identity")
+	// ErrAddressClosed is an address before the identity check finished,
+	// once AddressWindow passed, or after one was entered already.
+	ErrAddressClosed = errors.New("proofing: the address can be entered once, within AddressWindow of the identity check")
 	// ErrAddressNeedsPage is an address flow sent where its subject gets no
 	// page to enter it on: by mail, or as a bare deep link.
 	ErrAddressNeedsPage = errors.New("proofing: a flow that asks for the address runs on a page: show it on screen or send a hosted link")
@@ -293,12 +293,15 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	return added, nil
 }
 
-// rejectAddressMismatch rejects req, approved, with errorAddressMismatch on q:
-// audited identity_proofing.rejected and sent as session.failed.
+// rejectAddressMismatch rejects req, approved or in review, with
+// errorAddressMismatch on q: audited identity_proofing.rejected and sent as
+// session.failed. A review is not waited for: a mismatched address fails the
+// check whatever the reviewer decides.
 func rejectAddressMismatch(ctx context.Context, q database.Querier, recorder audit.Recorder, req Request) error {
 	tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
 		SET status = $2, error_code = $3, updated_at = now()
-		WHERE id = $1 AND status = $4`, req.ID, string(StatusRejected), errorAddressMismatch, string(StatusApproved))
+		WHERE id = $1 AND status IN ($4, $5)`, req.ID, string(StatusRejected), errorAddressMismatch,
+		string(StatusApproved), string(StatusNeedsReview))
 	if err != nil {
 		return fmt.Errorf("proofing: reject address mismatch request %s: %w", req.ID, err)
 	}
@@ -435,7 +438,8 @@ func (s *Service) HostedAddAddress(ctx context.Context, token string, addr Addre
 }
 
 // addressOpen reports whether req takes an address now: it asks for one, holds
-// none yet, is approved, not erased or cancelled, and within AddressWindow.
+// none yet, is not erased or cancelled, and its steps are open for
+// AddressWindow (stepsOpen).
 func (s *Service) addressOpen(req Request) error {
 	if !req.Address.asked() {
 		return ErrAddressNotAsked
@@ -444,8 +448,7 @@ func (s *Service) addressOpen(req Request) error {
 		return ErrSessionOver
 	}
 	now := s.now()
-	if req.SubjectAddress != nil || req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil ||
-		now.Sub(*req.CompletedAt) > AddressWindow {
+	if req.SubjectAddress != nil || !req.stepsOpen(now, AddressWindow) {
 		return ErrAddressClosed
 	}
 	return nil
