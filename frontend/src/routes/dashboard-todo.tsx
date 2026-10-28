@@ -7,16 +7,16 @@ import {
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
-import {
-  listedCount,
-  proofingErrorMessage,
-  requestListCapped,
-} from "../lib/identity-proofing";
+import { listedCount, proofingErrorMessage } from "../lib/identity-proofing";
 import {
   notIdentifiedCount,
   screeningAttentionCount,
 } from "../lib/member-insights";
-import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
+import {
+  inReviewOldestFirst,
+  reviewPath,
+  waitingOldestFirst,
+} from "../lib/proofing-reviews";
 import {
   HELD_STATUSES,
   UNFINISHED_STATUSES,
@@ -84,14 +84,14 @@ export function DashboardTodo({
 
   // A disabled query keeps its last result, from before the right was
   // withdrawn too.
-  const held = canReview ? (waiting.data ?? []) : [];
-  const reviews = waitingOldestFirst(held).length;
+  const held = canReview ? waiting.data : undefined;
+  const reviews = waitingOldestFirst(held?.requests ?? []).length;
   if (reviews > 0) {
     items.push({
       key: "reviews",
       title: t("dashboard.todo.reviews", {
         count: reviews,
-        number: listedCount(reviews, requestListCapped(held), t),
+        number: listedCount(reviews, held?.capped === true, t),
       }),
       detail: t("dashboard.todo.reviewsDetail"),
       to: reviewPath(slug),
@@ -193,7 +193,7 @@ export function DashboardWaiting({
     });
   }
 
-  const forAdmin = canReview ? 0 : waitingOldestFirst(all).length;
+  const forAdmin = canReview ? 0 : inReviewOldestFirst(all).length;
   if (forAdmin > 0) {
     items.push({
       key: "forAdmin",

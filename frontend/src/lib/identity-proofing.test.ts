@@ -11,6 +11,8 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import {
+  ADDRESS_REVIEWS,
+  ADDRESS_VERIFICATIONS,
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
   EMPLOYMENT_KIND,
@@ -1950,6 +1952,46 @@ describe("flow kinds mirror backend/internal/proofing", () => {
     expect([...DATA_REQUEST_KINDS].sort()).toEqual(
       backend.filter((kind) => kind !== "identity").sort(),
     );
+  });
+});
+
+// How an address was checked, and where its review stands, are the backend's,
+// both ways: the schema reads a value it lacks as none, which would hide a
+// mismatch or a pending review.
+describe("address verifications mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL("../../../backend/internal/proofing/address.go", import.meta.url),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/Address\w+\s+AddressVerification = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend verification and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_VERIFICATIONS].sort()).toEqual([...backend].sort());
+  });
+});
+
+describe("address reviews mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/address_review.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/AddressReview\w+\s+AddressReview = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend review state and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_REVIEWS].sort()).toEqual([...backend].sort());
   });
 });
 

@@ -440,10 +440,34 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	now := time.Now()
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, newRequestResponse(req, now).withDiplomas(diplomas[req.ID]))
+		out = append(out, requestResponseFor(r.Context(), req, diplomas[req.ID], now))
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// requestResponseFor is req's response as the caller sees it: a member who
+// reaches it only for its address waiting for review (onlyAddress) gets it
+// without its diplomas and proofed name, which deciding the address does not
+// need.
+func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
+	out := newRequestResponse(req, now)
+	if onlyAddress(ctx, req) {
+		out.ProofedName = ""
+		return out
+	}
+	return out.withDiplomas(diplomas)
+}
+
+// onlyAddress reports whether the caller reaches req only for its address
+// waiting for review: not an admin, not its sender, and not on the Reviews
+// page for the request itself.
+func onlyAddress(ctx context.Context, req Request) bool {
+	if organization.ActsAsAdmin(ctx) {
+		return false
+	}
+	caller := auth.UserFromContext(ctx).ID
+	return (req.RequestedBy == nil || *req.RequestedBy != caller) && !ReviewScopeReviews.reaches(req)
 }
 
 // requestFilterFrom reads a request list's filter from its query, refusing a
@@ -578,7 +602,7 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()).withDiplomas(diplomas[req.ID]))
+	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, diplomas[req.ID], time.Now()))
 	return nil
 }
 
@@ -619,10 +643,11 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// addressReviewRequest is a reviewer's decision on a self-declared address:
-// decision "confirm" or "reject".
+// addressReviewRequest is a reviewer's decision on an address waiting for
+// review: decision "confirm" or "reject", and the required reason.
 type addressReviewRequest struct {
 	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
 }
 
 func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
@@ -639,11 +664,11 @@ func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) er
 	}
 	caller := auth.UserFromContext(r.Context())
 	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, caller.ID,
-		reviewScope(r.Context()), body.Decision == "confirm", h.platformAdmins.Has(caller.Email))
+		reviewScope(r.Context()), body.Decision == "confirm", body.Reason)
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
 	return nil
 }
 

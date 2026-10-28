@@ -1084,7 +1084,6 @@ const REJECTION_REASON_KEYS = {
   DOC_EXPIRED: "docExpired",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
-  ADDRESS_MISMATCH: "addressMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
   REVIEW_NOT_HOLDER: "reviewNotHolder",
   REVIEW_ALTERED: "reviewAltered",

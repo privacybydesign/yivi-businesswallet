@@ -98,8 +98,8 @@ type requestStore interface {
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
 	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
 	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
-	SetRegisteredAddress(ctx context.Context, req Request, addr Address) error
-	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview) (bool, error)
+	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
+	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (bool, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 
@@ -2136,8 +2136,14 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	}
 	// Kept before the engine decides, so the page never enters an address
 	// before it is there to compare with.
-	if claims, ok := presentation.RegisteredAddress(); ok && req.Address.asked() {
-		if err := s.requests.SetRegisteredAddress(ctx, req, registeredAddress(claims)); err != nil {
+	// One without the card clears what an earlier attempt kept.
+	if req.Address.asked() {
+		var registered *Address
+		if claims, ok := presentation.RegisteredAddress(); ok {
+			addr := registeredAddress(claims)
+			registered = &addr
+		}
+		if err := s.requests.SetRegisteredAddress(ctx, req, registered); err != nil {
 			return proofingprovider.YiviDisclosure{}, err
 		}
 	}

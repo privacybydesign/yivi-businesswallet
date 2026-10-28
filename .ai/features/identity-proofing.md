@@ -971,14 +971,19 @@ post-review outcome stay the system's.
   - Without `IDENTITY_PROOFING_ENCRYPTION_KEY` the deliverer does not run, and
     the API says so once at boot. Events
   `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
-  `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added`
-  (`WebhookEvents`) are written to the
+  `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added` /
+  `.address_added` / `.address_reviewed` (`WebhookEvents`) are written to the
   outbox (`identity_proofing_webhook_deliveries`, keyed by org) in the same transaction as the
   change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
-  `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`); an
+  `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`,
+  `AddAddress`, `DecideAddressReview`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow,
-  method, assurance and error code: never a name or address (the API has those).
+  method, assurance and error code: never a name or photo (the API has the
+  name).
+  - Only `session.address_added` carries personal data: the address the person
+    entered, without the registered (BRP) one (`Address.forIntegrator`).
+  - `session.address_reviewed` carries the decision as `addressReview`.
   A delivery's `sessionId` is the `ps_` id (absent for a `test` delivery). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
@@ -1053,9 +1058,8 @@ post-review outcome stay the system's.
     privacy, `routes/settings-privacy.tsx`): how long the law makes the org keep
     the data of every approved identity check, counted from the end of the
     check, with the reason shown to the person in each language. It holds only
-    an approved external identity check (`legalHeld`), or one rejected only for
-    its address after approval (`ADDRESS_MISMATCH`, the identity was proven):
-    one otherwise rejected, expired, cancelled or never started proved nobody,
+    an approved external identity check (`legalHeld`): one rejected, expired,
+    cancelled or never started proved nobody,
     so it is purged at its own retention and blocks no erasure. It is the floor of such a check's
     retention (§10): the check is purged at the later of its flow's or the
     org's retention and the legal period, and the engine session, the proofed
@@ -1366,25 +1370,30 @@ end it, §3). An admin, or a member with the reviewer right (below), decides it 
 Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and the
 overview count what waits).
 The page lists what waits, oldest first (waiting since = `completed_at`, when it
-went to review), under All, Identity checks and Data requests; Closed lists the
+went to review), under All, Identity checks and Data requests, and beside them
+the addresses waiting for review (§16); Closed lists the
 data requests that ended, whoever ended them. The list carries no mark of a
 reviewer's decision (the audit event is not read), and a data request is also
 rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
 the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
 data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
 that a reviewer decided, and the Outcome column shows the error code in words.
-An identity check has no closed list yet, as none goes to review today. A data
+An identity check has no closed list yet: no identity session goes to review
+today, and a decided address leaves the page (§16). A data
 request shows "Answer by" = `purge_at`, a calendar month after it went to review
 (`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
-The list is `GET .../requests?status=needs_review`: the filter is applied before
-the list's cap of 200, and that list is the longest in review first, so the cap
-leaves out the newest, never the most overdue. A count from a capped list shows
-"200+" (`listedCount`, `requestListCapped`), on the tabs and the sidebar. Closed reads
+The list is two reads, `GET .../requests?status=needs_review` and
+`?addressReview=pending` (`useWaitingReviewsQuery`): each filter is applied
+before its read's cap of 200, and each read is the longest waiting first, so the
+cap leaves out the newest, never the most overdue. A count shows "200+" when
+either read hit its cap (`capped`, returned with the joined list), on the tabs
+and the sidebar. Closed reads
 `?flowKind=data_request&status=approved` and `...&status=rejected`, each narrowed
 before its cap. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
 from the chip (an audited result read) and the decision; for a data request §15.
-The decision is approve or reject with a required reason; a rejection names what
+A session decision is approve or reject with a required reason; an address
+decision (§16) is confirm or reject, with a required reason too. A rejection names what
 is wrong, sent as the error code (`REJECT_REASONS` in `lib/proofing-reviews.ts`):
 `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED` (it looks
 altered), `EVIDENCE_NOT_AS_REQUESTED`, none for "Something else", which is
@@ -1419,20 +1428,26 @@ right is a member's: a PUT on an admin is 409 `admin_reviews`, a role change
 clears it (audited too), so an admin made a member again has to be given it
 anew, and `memberships_can_review_member` holds every row to that.
 `organization.MayReview` is an admin whose mandate is not withdrawn, or a member
-with the right, and `organization.RequireReviewer` gates the four `reviewer(...)`
-routes in `proofing/handler.go`: `review`, `result`, `data-matches` and
-`data-export`. Everything else stays a member's. A reviewer who is not an admin
+with the right, and `organization.RequireReviewer` gates the five `reviewer(...)`
+routes in `proofing/handler.go`: `review`, `address/review`, `result`,
+`data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
 reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
 request waiting for review, and a data request (`data_access`, `data_erasure`)
 in any status. An identity check that is not waiting holds a person's identity
 and photos the right was never given for. So `GET .../requests` lists every
-request in the org only for `?status=needs_review` (Waiting) and for
-`?flowKind=data_request` (Closed reads it with `status=approved` and `rejected`);
-any other list is the requests they sent. So are the stats, All people and the
-member routes. `GET .../requests/{id}` opens one they sent or one in that scope
-(`mayOpen`, judged on the stored request through `Service.RequestIf`, before the
-engine is asked), and `result`, `data-matches`, `data-export` and the decision
-take the same scope (`reviewScope`); any other is a 404, as for a member. The
+request in the org only for `?status=needs_review` and `?addressReview=pending`
+(Waiting) and for `?flowKind=data_request` (Closed reads it with
+`status=approved` and `rejected`); any other list is the requests they sent. So
+are the stats, All people and the member routes.
+- `GET .../requests/{id}` opens one they sent or one in the wider
+  `reachesAddress` scope: that scope plus an approved check whose address waits
+  for review (`mayOpen`, judged on the stored request through
+  `Service.RequestIf`, before the engine is asked).
+  - One reached only for its address (`onlyAddress`) answers without
+    `proofedName` and diplomas, in the list too (`requestResponseFor`).
+- `result`, `data-matches`, `data-export` and the session decision take the
+  narrow scope (`reaches`); the address decision takes `reachesAddress`. Any
+  other is a 404, as for a member. The
 app reads `canReview` from `GET /orgs/{slug}` (the same `MayReview`): it shows
 the sidebar's Reviews item and count, the Reviews and review pages, and the
 Overview's **Waiting for your decision**, which lists what waits in the org as
@@ -1603,7 +1618,9 @@ Everything this feature does not do yet, in one place.
 - **Hosted page:** no full-theme endpoint; no automated accessibility test
   (axe, WCAG 2.2 AA), which needs a rendered DOM the frontend tests do not have.
 - **Manual review:** when an identity session goes to review is a product
-  decision; today only data requests do (§9).
+  decision; today only data requests and addresses (§16) do (§9).
+  - A pending address review never lapses.
+  - The person is not told when their address is rejected.
 - **Diplomas (§12):** no mailed hosted link for a diploma flow (the mail is the
   Idem session); no diplomas on a member's request page; no real DUO extract in
   the test suite (personal data), so the parser is covered by synthetic layouts.
@@ -2072,24 +2089,42 @@ and on a Yivi app request against the registered (BRP) address too.
     `AddAddress` and `Purge` clear it.
   - On entry, after the BAG check (whose 422s still apply): the same postal
     code and house number (`compareRegistered`, case and punctuation aside,
-    the number itself apart so 12-1 is not 121) is `registered`, anything else
-    `registered_mismatch`, the address then carrying the BRP one as
-    `registered`. The Sessions page shows both.
+    the number itself apart so 12-1 is not 121) is `registered`.
+    - Another postal code or number is `registered_mismatch`, the address
+      then carrying the BRP one as `registered`. The Sessions page and the
+      reviewer show both.
+    - Only the letter or addition differs (or how the number is written,
+      `0012`): the BAG result stands, self-declared. How the card writes a
+      lettered number is not confirmed, so this never counts as a mismatch.
+  - `registered` is for the wallet's pages only: the webhook and the API
+    result send the address without it (`forIntegrator`). A data access
+    export keeps it: it is the person's own data.
+  - A disclosure without the card clears what an earlier attempt kept
+    (`SetRegisteredAddress` with nil), so an address is never compared with
+    another wallet's card.
   - Only `registered` confirms where the person lives. Every other result is
     self-declared, `verified` included (the address exists, nothing more); an
     Idem request is always self-declared. `address_added` audits the result
     as `verification`, never the address.
-- **Address review**: a self-declared address waits for a reviewer
-  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`).
+- **Address review**: any address but `registered` waits for a reviewer
+  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`),
+  `registered_mismatch` included: the person may have moved.
   - Only the address is reviewed: the session keeps its outcome, and the
     engine's session review is untouched (`address_review.go`).
-  - `POST .../requests/{id}/address/review` `{decision: confirm|reject}`,
-    reviewer route. `ownReview` applies, except to a platform admin. A
-    decided or erased one is 409 `address_not_under_review`.
+  - `POST .../requests/{id}/address/review` `{decision: confirm|reject,
+    reason}`, reviewer route. The reason is required (at most 500
+    characters) and audited.
+    - `ownReview` applies to everyone, a platform admin too.
+    - A decided or erased one is 409 `address_not_under_review` to an admin;
+      a reviewer who is not one no longer reaches it, so 404.
+    - The page leaves for Reviews after a decision, as the session review
+      does: the refetch would 404 for such a reviewer.
   - A reviewer reaches a pending address through `ReviewScope.reachesAddress`
     (the request and this decision), never `reaches`: that one opens the
     result, data-matches and export, so the check's identity and photos.
-  - A purged request never lists under `?addressReview=pending`.
+  - `Purge` clears a pending review (`NULLIF(address_review, 'pending')`),
+    keeping a decided one, so no reader masks it; migration
+    `20261028150000` clears the ones purged before.
   - Audited `address_reviewed`, webhook `session.address_reviewed`
     (`addressReview` in its data).
   - Decided on the Reviews page, never on the Sessions page:
@@ -2101,10 +2136,8 @@ and on a Yivi app request against the registered (BRP) address too.
     - The Sessions page only shows the status, with a link to the review.
   - A match the BAG did not check (`unchecked`) is kept as the BRP address,
     so a made-up street with the right postal code and number is not.
-  - A mismatch rejects the request with `ADDRESS_MISMATCH`, approved or in
-    review (`rejectAddressMismatch`, in `AddAddress`'s transaction): audited
-    `rejected`, sent as `session.failed` after `session.address_added`. A
-    review is not waited for: the mismatch fails the check whatever is decided.
+  - A mismatch never changes the session: it keeps its status (approved, or
+    in review for the verzekeringsbericht), and no `session.failed` follows.
   - Not disclosed, a card without a house number (it is optional), or an Idem
     request: the BAG result stands.
 - **Config:** `ADDRESS_LOOKUP_URL` (default PDOK's public API, keyless), pinged

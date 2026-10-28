@@ -67,10 +67,10 @@ func (sc ReviewScope) reaches(req Request) bool {
 }
 
 // reachesAddress reports whether the scope reaches req's request and address:
-// what reaches does, and a self-declared address waiting for a reviewer. Never
+// what reaches does, and an address waiting for a reviewer. Never
 // the result of a check it holds.
 func (sc ReviewScope) reachesAddress(req Request) bool {
-	return sc.reaches(req) || (req.AddressReview == AddressReviewPending && req.PurgedAt == nil)
+	return sc.reaches(req) || req.AddressReview == AddressReviewPending
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with

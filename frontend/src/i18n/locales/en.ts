@@ -520,8 +520,6 @@ export const en = {
         "no Verzekeringsbericht was added in time after the identity check",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
-      addressMismatch:
-        "the address entered is not the registered address (BRP) shared from the Yivi app",
       unknown: "the check did not pass ({{code}})",
       evidenceNotAsRequested:
         "a reviewer found that what was sent is not what was asked for",
@@ -1004,26 +1002,27 @@ export const en = {
         title: "Address",
         none: "No address entered.",
         missing: "No address",
-        declared: "As the person entered it; not checked against a document.",
+        declared:
+          "Self-declared: as the person entered it, not checked against a document.",
         verified:
           "Self-declared: the address exists in the Dutch address register (BAG), but is not confirmed as where the person lives.",
         unchecked:
-          "As the person entered it; the Dutch address register could not be reached to check it.",
+          "Self-declared: the Dutch address register could not be reached to check it.",
         unsupported:
-          "As the person entered it; only Dutch addresses are checked against a register.",
+          "Self-declared: only Dutch addresses are checked against a register.",
         registered:
           "Confirmed: the same as the registered address (BRP) the person shared from the Yivi app.",
         registeredMismatch:
-          "Differs from the registered address (BRP) the person shared from the Yivi app. The session was rejected.",
+          "Differs from the registered address (BRP) the person shared from the Yivi app.",
         registeredTitle: "Registered address (BRP)",
-        reviewPending:
-          "Waiting for a reviewer to confirm the address. The identity check is not affected.",
-        reviewConfirmed: "A reviewer confirmed the address.",
-        reviewRejected:
-          "A reviewer rejected the address. The identity check is not affected.",
+        review: {
+          pending:
+            "Waiting for a reviewer to confirm the address. The identity check is not affected.",
+          confirmed: "A reviewer confirmed the address.",
+          rejected:
+            "A reviewer rejected the address. The identity check is not affected.",
+        },
         openReview: "Open the review",
-        confirm: "Confirm address",
-        reject: "Reject address",
       },
       diplomas: {
         title: "Diplomas",
@@ -1234,12 +1233,16 @@ export const en = {
         title: "Review an address",
         whyTitle: "Why this waits for you",
         why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
+        whyMismatch:
+          "This address differs from the registered address (BRP) the person shared from the Yivi app. They may have moved recently, so a reviewer decides.",
         checkTitle: "Identity check",
         checkHint:
           "The identity check itself is approved. Your decision only concerns the address.",
         method: "Checked with",
         level: "Assurance level",
         decisionTitle: "Decision",
+        confirm: "Confirm address",
+        reject: "Reject address",
         confirmed: "The address was confirmed.",
         rejected: "The address was rejected.",
       },
@@ -1253,6 +1256,7 @@ export const en = {
       why: {
         identity: "Part of it is not signed or sourced",
         address: "Self-declared address, no register confirms it",
+        addressMismatch: "Differs from the registered address (BRP)",
         data_access: "A reviewer approves every request to see data",
         data_erasure: "A reviewer approves every request to delete data",
         no_current_employment: "The Verzekeringsbericht lists no current job",

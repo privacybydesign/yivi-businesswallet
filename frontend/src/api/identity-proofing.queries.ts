@@ -61,6 +61,7 @@ import {
   uploadProofingEmployment,
 } from "./identity-proofing";
 import type {
+  AddressReviewInput,
   ProofingSettings,
   ProofingSettingsUpdate,
   ProofingFlow,
@@ -503,6 +504,13 @@ export function useMemberRequestsQuery(
   });
 }
 
+// What waits for a reviewer, and whether either read hit its cap, so a count
+// of it is only a lower bound.
+export interface WaitingReviews {
+  requests: ProofingRequest[];
+  capped: boolean;
+}
+
 // The requests held in review, the longest in review first: what waits for a
 // decision. The backend caps the list after that order, so what it leaves out
 // is the newest. Under the requests key, so a decision refreshes it. A request
@@ -511,7 +519,7 @@ export function useMemberRequestsQuery(
 export function useWaitingReviewsQuery(
   slug: string,
   options: { enabled: boolean },
-): UseQueryResult<ProofingRequest[], Error> {
+): UseQueryResult<WaitingReviews, Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
     // Two reads: the checks and data requests in review, and the addresses
@@ -521,7 +529,10 @@ export function useWaitingReviewsQuery(
         getProofingRequests(slug, { status: "needs_review" }, signal),
         getProofingRequests(slug, { addressReview: "pending" }, signal),
       ]);
-      return [...inReview, ...addresses];
+      return {
+        requests: [...inReview, ...addresses],
+        capped: requestListCapped(inReview) || requestListCapped(addresses),
+      };
     },
     enabled: options.enabled && slug !== "",
     refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
@@ -1117,14 +1128,14 @@ export function refreshAfterReviewDecision(
   });
 }
 
-// Confirms or rejects a self-declared address; the lists follow.
+// Confirms or rejects an address waiting for a reviewer; the lists follow.
 export function useDecideAddressReviewMutation(
   slug: string,
   requestId: string,
-): UseMutationResult<ProofingRequest, Error, "confirm" | "reject"> {
+): UseMutationResult<ProofingRequest, Error, AddressReviewInput> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (decision) => decideAddressReview(slug, requestId, decision),
+    mutationFn: (input) => decideAddressReview(slug, requestId, input),
     meta: { suppressErrorToast: true },
     onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });

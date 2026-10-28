@@ -15,7 +15,6 @@ import {
   listedCount,
   proofingErrorMessage,
   proofingRejectionReason,
-  requestListCapped,
   requestSubject,
   requestedBy,
 } from "../lib/identity-proofing";
@@ -55,11 +54,11 @@ export default function ProofingReviews(): React.JSX.Element {
   const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
-  const waitingNow = waitingOldestFirst(waiting.data ?? []);
+  const waitingNow = waitingOldestFirst(waiting.data?.requests ?? []);
   const counts = reviewCounts(waitingNow);
   // The backend lists at most the 200 longest in review: past that the counts
   // are lower bounds.
-  const capped = requestListCapped(waiting.data ?? []);
+  const capped = waiting.data?.capped === true;
   // What shows instead of the reviews to anyone without the right, and until
   // the org is known.
   const notice = org.isPending
@@ -305,7 +304,11 @@ function WaitingRow({
       <WhatCell request={request} />
       <Table.Cell>
         {isAddressReview(request)
-          ? t("identityProofing.reviews.why.address")
+          ? t(
+              request.address?.verification === "registered_mismatch"
+                ? "identityProofing.reviews.why.addressMismatch"
+                : "identityProofing.reviews.why.address",
+            )
           : t(
               `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
             )}

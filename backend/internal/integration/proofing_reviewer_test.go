@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -352,5 +353,102 @@ func TestReviewRightClearedOnRoleChange(t *testing.T) {
 	env.loginAs("member@acme.test")
 	if env.canReview("acme") {
 		t.Error("a member whose right a promotion cleared canReview = true")
+	}
+}
+
+// addressReviewResp is what a request response says of its address review,
+// and what a reviewer who reaches it only for that must not see.
+type addressReviewResp struct {
+	ID            string            `json:"id"`
+	Status        string            `json:"status"`
+	AddressReview string            `json:"addressReview"`
+	ProofedName   string            `json:"proofedName"`
+	Diplomas      []json.RawMessage `json:"diplomas"`
+}
+
+// A reviewer reaches an approved check only for its address waiting for
+// review: they list it and open it without the person's proofed name or
+// diplomas, never its result, and decide the address with a reason. Once
+// decided it is closed to them. A plain member reaches none of it, and the
+// check's sender, an admin, does not decide their own.
+func TestProofingAddressReviewFlow(t *testing.T) {
+	env := setup(t)
+	env.proofing.Outcome = proofingprovider.StatusApproved
+	orgID := env.createOrg("Acme", "acme")
+	admin := env.login("admin@acme.test")
+	env.addMembership(admin.ID, orgID, organization.RoleAdmin)
+	flow := env.proofingDefaultFlow("acme")
+	resp := env.putJSON("/api/v1/orgs/acme/identity-proofing/flows/"+flow.ID+"/address", map[string]any{"addressMode": "required"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ask the address on the flow = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	base := "/api/v1/orgs/acme/identity-proofing/requests"
+	sent := decodeJSON[proofingRequestResp](t, env.postJSON(base,
+		map[string]any{"email": "anna@example.org", "flowId": flow.ID, "channel": "on_screen"}))
+	one := base + "/" + sent.ID
+	// The read is what records the engine's outcome on the request.
+	if got := decodeJSON[addressReviewResp](t, env.do(http.MethodGet, one, nil)); got.Status != "approved" || got.ProofedName == "" {
+		t.Fatalf("request = %+v, want approved with a proofed name", got)
+	}
+	resp = env.postJSON(one+"/address", map[string]any{
+		"street": "Molenstraat", "houseNumber": "3", "postalCode": "6511 AB", "city": "Nijmegen", "country": "Nederland",
+	})
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("enter the address = %d, want 204", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	review := one + "/address/review"
+	wantProofingError(t, "the sender deciding their own check's address", env.postJSON(review,
+		map[string]any{"decision": "confirm", "reason": "looks right"}), http.StatusForbidden, "own_review")
+
+	member := env.loginAs("member@acme.test")
+	env.addMembership(member, orgID, organization.RoleMember)
+	resp = env.postJSON(review, map[string]any{"decision": "confirm", "reason": "looks right"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a member without the right deciding an address = %d, want 403", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	env.loginAs("admin@acme.test")
+	resp = env.putJSON(reviewRightPath(member), map[string]any{"canReview": true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("giving the right = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+	env.loginAs("member@acme.test")
+	assertReviewerReachesOnlyAddress(t, env, base, one)
+
+	wantProofingError(t, "an address decision without a reason", env.postJSON(review,
+		map[string]any{"decision": "confirm", "reason": " "}), http.StatusBadRequest, "invalid_input")
+	decided := decodeJSON[addressReviewResp](t, env.postJSON(review, map[string]any{"decision": "confirm", "reason": "matches the rental contract"}))
+	if decided.AddressReview != "confirmed" || decided.Status != "approved" || decided.ProofedName != "" {
+		t.Errorf("decided = %+v, want approved, address confirmed, no proofed name", decided)
+	}
+	wantProofingError(t, "a reviewer opening a check whose address was decided", env.do(http.MethodGet, one, nil),
+		http.StatusNotFound, "session_not_found")
+	wantProofingError(t, "a reviewer deciding a decided address again", env.postJSON(review,
+		map[string]any{"decision": "reject", "reason": "again"}), http.StatusNotFound, "session_not_found")
+}
+
+// assertReviewerReachesOnlyAddress checks that the reviewer, the caller, lists
+// and opens the check one for its pending address only: without the proofed
+// name or diplomas, and never its result.
+func assertReviewerReachesOnlyAddress(t *testing.T, env *testEnv, base, one string) {
+	t.Helper()
+	wantProofingError(t, "an unknown address review filter", env.do(http.MethodGet, base+"?addressReview=bogus", nil),
+		http.StatusBadRequest, "invalid_input")
+	list := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?addressReview=pending", nil))
+	if len(list) != 1 || list[0].AddressReview != "pending" || list[0].ProofedName != "" || len(list[0].Diplomas) != 0 {
+		t.Errorf("pending addresses for a reviewer = %+v, want the one, without proofed name or diplomas", list)
+	}
+	got := decodeJSON[addressReviewResp](t, env.do(http.MethodGet, one, nil))
+	if got.AddressReview != "pending" || got.ProofedName != "" || len(got.Diplomas) != 0 {
+		t.Errorf("request opened by a reviewer = %+v, want its pending address, without proofed name or diplomas", got)
+	}
+	for _, route := range []string{"/result", "/data-matches", "/data-export"} {
+		wantProofingError(t, "a reviewer reading "+route+" of a check whose address waits", env.do(http.MethodGet, one+route, nil),
+			http.StatusNotFound, "session_not_found")
 	}
 }

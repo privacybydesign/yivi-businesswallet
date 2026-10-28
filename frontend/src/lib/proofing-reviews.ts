@@ -57,13 +57,17 @@ export function isAddressReview(request: ProofingRequest): boolean {
   );
 }
 
-// Whether the request waits for a decision: in review, or its address is. A
-// purged one has no person left to decide on.
+// Whether the check itself waits for a decision. A purged one has no person
+// left to decide on.
+function isInReview(request: ProofingRequest): boolean {
+  return request.status === "needs_review" && request.purgedAt === undefined;
+}
+
+// Whether the request waits for a decision: in review, or its address is.
 function isWaiting(request: ProofingRequest): boolean {
   return (
-    (request.status === "needs_review" ||
-      request.addressReview === "pending") &&
-    request.purgedAt === undefined
+    isInReview(request) ||
+    (request.addressReview === "pending" && request.purgedAt === undefined)
   );
 }
 
@@ -89,6 +93,16 @@ export function waitingOldestFirst(
 ): ProofingRequest[] {
   return requests
     .filter(isWaiting)
+    .sort((a, b) => sinceMillis(a) - sinceMillis(b));
+}
+
+// The checks in review, the longest first: what waits without its address.
+// An approved check whose address waits is finished for its sender.
+export function inReviewOldestFirst(
+  requests: readonly ProofingRequest[],
+): ProofingRequest[] {
+  return requests
+    .filter(isInReview)
     .sort((a, b) => sinceMillis(a) - sinceMillis(b));
 }
 
@@ -210,7 +224,16 @@ export interface CheckDecisionDraft {
   reason: string;
 }
 
-type CheckDecisionProblem = "choice" | "reason" | "reasonTooLong";
+type ReasonProblem = "reason" | "reasonTooLong";
+type CheckDecisionProblem = "choice" | ReasonProblem;
+
+// What keeps a decision's reason from being sent: none, or too long.
+export function reasonProblem(reason: string): ReasonProblem | undefined {
+  const trimmed = reason.trim();
+  if (trimmed === "") return "reason";
+  if ([...trimmed].length > REVIEW_REASON_MAX_CHARS) return "reasonTooLong";
+  return undefined;
+}
 
 // What keeps a decision from being sent yet, in the order the form shows it.
 export function checkDecisionProblems(
@@ -218,10 +241,8 @@ export function checkDecisionProblems(
 ): CheckDecisionProblem[] {
   const problems: CheckDecisionProblem[] = [];
   if (draft.choice === undefined) problems.push("choice");
-  if (draft.reason.trim() === "") problems.push("reason");
-  else if ([...draft.reason.trim()].length > REVIEW_REASON_MAX_CHARS) {
-    problems.push("reasonTooLong");
-  }
+  const reason = reasonProblem(draft.reason);
+  if (reason !== undefined) problems.push(reason);
   return problems;
 }
 

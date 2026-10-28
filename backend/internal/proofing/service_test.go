@@ -243,7 +243,7 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview) (bool, error) {
+func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (bool, error) {
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
 		return false, nil
 	}
@@ -282,9 +282,9 @@ func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, re
 	return nil
 }
 
-func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr Address) error {
+func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr *Address) error {
 	if f.stored != nil && f.stored.ID == req.ID && f.stored.SubjectAddress == nil {
-		f.registeredAddress = &addr
+		f.registeredAddress = addr
 	}
 	return nil
 }
@@ -2139,13 +2139,10 @@ func TestReviewScopeReaches(t *testing.T) {
 	}
 }
 
-// A pending self-declared address opens the request and its address to a
-// reviewer, never the result of the check it came with.
+// A pending address opens the request and its address to a reviewer, never
+// the result of the check it came with.
 func TestReviewScopeReachesAddress(t *testing.T) {
-	purgedAt := time.Now()
 	pending := Request{FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending}
-	purged := pending
-	purged.PurgedAt = &purgedAt
 	decided := pending
 	decided.AddressReview = AddressReviewConfirmed
 	if ReviewScopeReviews.reaches(pending) {
@@ -2154,7 +2151,7 @@ func TestReviewScopeReachesAddress(t *testing.T) {
 	if !ReviewScopeReviews.reachesAddress(pending) {
 		t.Error("a reviewer does not reach an address that waits")
 	}
-	if ReviewScopeReviews.reachesAddress(purged) || ReviewScopeReviews.reachesAddress(decided) {
+	if ReviewScopeReviews.reachesAddress(decided) {
 		t.Error("a reviewer reaches an address that no longer waits")
 	}
 }

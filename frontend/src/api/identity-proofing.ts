@@ -42,7 +42,7 @@ export type AddressMode = z.infer<typeof addressModeSchema>;
 // register, Dutch but the register could not be asked, outside the
 // Netherlands, or the same as or other than the registered (BRP) address the
 // Yivi app disclosed. An address kept before addresses were checked has none.
-const ADDRESS_VERIFICATIONS = [
+export const ADDRESS_VERIFICATIONS = [
   "verified",
   "unchecked",
   "unsupported",
@@ -50,6 +50,11 @@ const ADDRESS_VERIFICATIONS = [
   "registered_mismatch",
 ] as const;
 export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
+
+// Where an address that waits for a reviewer stands: a self-declared one, or
+// one other than the registered address. An unknown state reads as none.
+export const ADDRESS_REVIEWS = ["pending", "confirmed", "rejected"] as const;
+export type AddressReviewState = (typeof ADDRESS_REVIEWS)[number];
 
 const postalAddressSchema = z.object({
   street: z.string(),
@@ -289,9 +294,10 @@ const proofingRequestSchema = z.object({
   addressMode: addressModeSchema,
   address: proofingAddressSchema.optional(),
   addressUntil: z.string().optional(),
-  // A self-declared address waits for a reviewer: pending until confirmed or
-  // rejected. The session keeps its outcome.
-  addressReview: z.enum(["pending", "confirmed", "rejected"]).optional(),
+  // A self-declared address, or one other than the registered address, waits
+  // for a reviewer: pending until confirmed or rejected. The session keeps its
+  // outcome.
+  addressReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
   // Whether the session asks for the UWV Verzekeringsbericht, the employment
   // kept from it, and until when the subject can upload it (absent until
   // approved, and once kept).
@@ -868,7 +874,7 @@ export function getProofingRequests(
     flowId?: string;
     status?: ListedStatus;
     flowKind?: "data_request";
-    addressReview?: "pending" | "confirmed" | "rejected";
+    addressReview?: AddressReviewState;
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -1624,12 +1630,17 @@ export interface ProofingReviewInput {
   requestIds?: string[];
 }
 
-// A reviewer's decision on a self-declared address; the session keeps its
-// outcome.
+// A reviewer's decision on an address waiting for one; reason is required. The
+// session keeps its outcome.
+export interface AddressReviewInput {
+  decision: "confirm" | "reject";
+  reason: string;
+}
+
 export function decideAddressReview(
   slug: string,
   requestId: string,
-  decision: "confirm" | "reject",
+  input: AddressReviewInput,
   signal?: AbortSignal,
 ): Promise<ProofingRequest> {
   return request(
@@ -1637,7 +1648,7 @@ export function decideAddressReview(
     {
       schema: proofingRequestSchema,
       method: "POST",
-      body: { decision },
+      body: input,
       signal,
     },
   );

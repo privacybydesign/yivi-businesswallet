@@ -616,13 +616,7 @@ function SessionAddress({
   );
 }
 
-const ADDRESS_REVIEW_KEYS = {
-  pending: "reviewPending",
-  confirmed: "reviewConfirmed",
-  rejected: "reviewRejected",
-} as const;
-
-// Where a self-declared address stands with a reviewer. It is decided on the
+// Where an address waiting for a reviewer stands. It is decided on the
 // Reviews page, which an admin opens from here while it waits.
 function AddressReviewNote({
   slug,
@@ -640,7 +634,7 @@ function AddressReviewNote({
   }
   return (
     <p className={HINT}>
-      {t(`identityProofing.sessions.address.${ADDRESS_REVIEW_KEYS[review]}`)}
+      {t(`identityProofing.sessions.address.review.${review}`)}
       {isAdmin && review === "pending" && (
         <>
           {" "}

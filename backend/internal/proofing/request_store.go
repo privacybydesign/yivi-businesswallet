@@ -45,7 +45,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	CASE WHEN r.purged_at IS NOT NULL AND r.address_review = 'pending' THEN '' ELSE COALESCE(r.address_review, '') END,
+	COALESCE(r.address_review, ''),
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''), ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
@@ -88,11 +88,9 @@ const settledAt = `COALESCE(r.cancelled_at, r.ips_session_ended_at,
 			CASE WHEN r.status = 'pending' AND r.ips_session_id IS NULL THEN r.link_expires_at END)`
 
 // legalHeld is an external identity check its org's legal retention holds: an
-// approved one, which proved who the person is, or one rejected only for its
-// address after that (errorAddressMismatch). An unstarted, expired, cancelled
-// or otherwise rejected check proved nobody, so the law keeps nothing of it.
-const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND (r.status = 'approved'
-		OR (r.status = 'rejected' AND r.error_code = '` + errorAddressMismatch + `'))`
+// approved one, which proved who the person is. An unstarted, expired,
+// cancelled or rejected check proved nobody, so the law keeps nothing of it.
+const legalHeld = `r.subject_kind = 'external' AND r.flow_kind = 'identity' AND r.status = 'approved'`
 
 // legalHeldUntil is when an external identity check the legal retention holds
 // (legalHeld) may be erased: that long after it ended. NULL for any other
@@ -878,7 +876,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
-			AND ($11::text IS NULL OR (r.address_review = $11 AND r.purged_at IS NULL))
+			AND ($11::text IS NULL OR r.address_review = $11)
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
 		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), filter.AddressReview)
@@ -1203,7 +1201,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
 				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL, address_ciphertext = NULL,
 				employment_ciphertext = NULL,
-				registered_address_ciphertext = NULL,
+				registered_address_ciphertext = NULL, address_review = NULLIF(address_review, 'pending'),
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {

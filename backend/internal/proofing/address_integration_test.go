@@ -78,7 +78,7 @@ func TestAddressSealedUntilPurge(t *testing.T) {
 	assertAddressPurged(t, pool, requests, got)
 }
 
-func TestAddressMismatchRejects(t *testing.T) {
+func TestAddressMismatchWaitsForReview(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
 	requests := NewRequestStore(pool, audit.NewDBRecorder(), cipher)
@@ -86,11 +86,6 @@ func TestAddressMismatchRejects(t *testing.T) {
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `INSERT INTO identity_proofing_settings
-		(organization_id, legal_retention_months, legal_retention_reason_en, legal_retention_reason_nl)
-		VALUES ($1, 12, 'a', 'b')`, orgID); err != nil {
-		t.Fatalf("set legal retention: %v", err)
-	}
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x",
 		[]string{EventSessionAddressAdded, EventSessionFailed}); err != nil {
 		t.Fatalf("Save webhook: %v", err)
@@ -116,26 +111,24 @@ func TestAddressMismatchRejects(t *testing.T) {
 		t.Fatalf("AddAddress = %v, %v; want added", added, err)
 	}
 	got, err := requests.Get(ctx, orgID, req.ID)
-	if err != nil || got.Status != StatusRejected || got.ErrorCode != errorAddressMismatch {
-		t.Fatalf("Get = %s %q, %v; want rejected %s", got.Status, got.ErrorCode, err, errorAddressMismatch)
+	if err != nil || got.Status != StatusApproved || got.ErrorCode != "" || got.AddressReview != AddressReviewPending {
+		t.Fatalf("Get = %s %q %q, %v; want approved, address pending", got.Status, got.ErrorCode, got.AddressReview, err)
 	}
 	if got.SubjectAddress == nil || got.SubjectAddress.Registered == nil || *got.SubjectAddress.Registered != registered {
-		t.Errorf("address = %+v; want it kept with the registered one", got.SubjectAddress)
-	}
-	// The identity was proven: the legal retention still holds it.
-	if until, err := requests.HeldUntil(ctx, orgID, req.ID); err != nil || until == nil {
-		t.Errorf("HeldUntil = %v, %v; want held", until, err)
+		t.Errorf("address = %+v; want it kept with the registered one for the reviewer", got.SubjectAddress)
 	}
 	assertMismatchReported(t, pool, webhooks, orgID)
+	assertAddressPurged(t, pool, requests, got)
 }
 
-// assertMismatchReported checks that a rejected address mismatch is audited,
-// its verification without the address, and sent as both webhooks.
+// assertMismatchReported checks that an address mismatch is audited, its
+// verification without the address, and sent as session.address_added
+// without the registered address, and that nothing failed the session.
 func assertMismatchReported(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookStore, orgID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	if auditCount(t, pool, audit.IdentityProofingRejected) != 1 {
-		t.Error("want one rejected event")
+	if auditCount(t, pool, audit.IdentityProofingRejected) != 0 {
+		t.Error("a mismatch rejected the session")
 	}
 	var audited bool
 	if err := pool.QueryRow(ctx, `SELECT metadata::text LIKE '%"verification": "registered_mismatch"%'
@@ -144,12 +137,13 @@ func assertMismatchReported(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookS
 		t.Errorf("address_added audits the verification without the address (%v)", err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID)
-	if err != nil || len(deliveries) != 2 {
-		t.Fatalf("deliveries = %+v, %v; want session.address_added and session.failed", deliveries, err)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressAdded {
+		t.Fatalf("deliveries = %+v, %v; want only session.address_added", deliveries, err)
 	}
-	events := map[string]bool{deliveries[0].Event: true, deliveries[1].Event: true}
-	if !events[EventSessionAddressAdded] || !events[EventSessionFailed] {
-		t.Errorf("deliveries = %v; want session.address_added and session.failed", events)
+	var withRegistered bool
+	if err := pool.QueryRow(ctx, `SELECT payload::text LIKE '%Kerkstraat%' FROM identity_proofing_webhook_deliveries
+		WHERE organization_id = $1`, orgID).Scan(&withRegistered); err != nil || withRegistered {
+		t.Errorf("session.address_added carries the registered address (%v)", err)
 	}
 }
 
@@ -161,7 +155,7 @@ func startWithRegistered(t *testing.T, pool *pgxpool.Pool, requests *RequestStor
 	in := newStoredRequest(makeOrg(t, pool, org), sender, externalSubject("anna@example.org"))
 	in.Address = AddressRequired
 	req := createStarted(t, requests, in, sessionID)
-	if err := requests.SetRegisteredAddress(ctx, req, registered); err != nil {
+	if err := requests.SetRegisteredAddress(ctx, req, &registered); err != nil {
 		t.Fatalf("SetRegisteredAddress: %v", err)
 	}
 	got, err := requests.RegisteredAddress(ctx, req.ID)
@@ -213,7 +207,7 @@ func TestRegisteredAddressSealedUntilAddressOrPurge(t *testing.T) {
 	if got, err := requests.RegisteredAddress(ctx, added.ID); err != nil || got != nil {
 		t.Errorf("after AddAddress registered address = %+v, %v; want none", got, err)
 	}
-	if err := requests.SetRegisteredAddress(ctx, added, registered); err != nil {
+	if err := requests.SetRegisteredAddress(ctx, added, &registered); err != nil {
 		t.Fatalf("SetRegisteredAddress after AddAddress: %v", err)
 	}
 	if got, _ := requests.RegisteredAddress(ctx, added.ID); got != nil {
@@ -247,10 +241,10 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
 	}
 
-	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed); err != nil || !ok {
+	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Matches the rental contract"); err != nil || !ok {
 		t.Fatalf("DecideAddressReview = %v, %v; want decided", ok, err)
 	}
-	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected); err != nil || ok {
+	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected, "Another address"); err != nil || ok {
 		t.Errorf("DecideAddressReview again = %v, %v; want refused", ok, err)
 	}
 	got, err := requests.Get(ctx, orgID, pending.ID)
@@ -260,9 +254,19 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	if auditCount(t, pool, audit.IdentityProofingAddressReviewed) != 1 {
 		t.Error("want one address_reviewed event")
 	}
+	var reasoned bool
+	if err := pool.QueryRow(ctx, `SELECT metadata::text LIKE '%Matches the rental contract%' FROM audit_events
+		WHERE action = $1`, audit.IdentityProofingAddressReviewed).Scan(&reasoned); err != nil || !reasoned {
+		t.Errorf("address_reviewed does not audit the reason (%v)", err)
+	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressReviewed {
-		t.Errorf("deliveries = %+v, %v; want one session.address_reviewed", deliveries, err)
+		t.Fatalf("deliveries = %+v, %v; want one session.address_reviewed", deliveries, err)
+	}
+	var decided string
+	if err := pool.QueryRow(ctx, `SELECT payload->>'addressReview' FROM identity_proofing_webhook_deliveries
+		WHERE organization_id = $1`, orgID).Scan(&decided); err != nil || decided != string(AddressReviewConfirmed) {
+		t.Errorf("session.address_reviewed data.addressReview = %q, %v; want confirmed", decided, err)
 	}
 }
 
@@ -281,6 +285,9 @@ func TestPurgedAddressNotListedForReview(t *testing.T) {
 	review := AddressReviewPending
 	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 0 {
 		t.Errorf("List pending addresses = %d, %v; want none", len(listed), err)
+	}
+	if got, err := requests.Get(ctx, orgID, purged.ID); err != nil || got.AddressReview != "" {
+		t.Errorf("Get after Purge = %q, %v; want no address review", got.AddressReview, err)
 	}
 }
 

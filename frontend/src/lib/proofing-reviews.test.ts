@@ -16,6 +16,7 @@ import {
   checkDecisionInput,
   checkDecisionProblems,
   closedRequests,
+  inReviewOldestFirst,
   isAddressReview,
   ownReview,
   personName,
@@ -23,6 +24,7 @@ import {
   reviewCounts,
   reviewTabFrom,
   waitingOfTab,
+  reasonProblem,
   waitingOldestFirst,
   WALLET_REVIEW_REASONS,
   walletReviewReason,
@@ -385,6 +387,20 @@ describe("address reviews", () => {
     expect(
       waitingOldestFirst([address, decided, request()]).map((r) => r.id),
     ).toEqual(["r1", "address"]);
+  });
+
+  it("leaves the address out of what waits in review", () => {
+    expect(inReviewOldestFirst([address, request()]).map((r) => r.id)).toEqual([
+      "r1",
+    ]);
+  });
+
+  it("asks for a reason of at most the bound", () => {
+    expect(reasonProblem("  ")).toBe("reason");
+    expect(reasonProblem("x".repeat(REVIEW_REASON_MAX_CHARS + 1))).toBe(
+      "reasonTooLong",
+    );
+    expect(reasonProblem(" moved last month ")).toBeUndefined();
   });
 
   it("is an address review only once the check is decided", () => {

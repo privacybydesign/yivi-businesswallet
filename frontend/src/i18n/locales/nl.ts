@@ -540,8 +540,6 @@ export const nl: Translation<typeof en> = {
         "er is na de identiteitscontrole niet op tijd een Verzekeringsbericht toegevoegd",
       identityMismatch:
         "een andere persoon: de naam of geboortedatum op het document is niet die waarvoor het verzoek was",
-      addressMismatch:
-        "het ingevulde adres is niet het woonadres uit de BRP dat vanuit de Yivi-app is gedeeld",
       unknown: "de controle is niet geslaagd ({{code}})",
       evidenceNotAsRequested:
         "een beoordelaar vond dat wat is aangeleverd niet is wat gevraagd was",
@@ -1032,26 +1030,26 @@ export const nl: Translation<typeof en> = {
         none: "Geen adres ingevuld.",
         missing: "Geen adres",
         declared:
-          "Zoals de persoon het invulde; niet gecontroleerd tegen een document.",
+          "Zelf opgegeven: zoals de persoon het invulde, niet gecontroleerd tegen een document.",
         verified:
           "Zelf opgegeven: het adres bestaat in de Nederlandse adresregistratie (BAG), maar is niet bevestigd als woonadres van de persoon.",
         unchecked:
-          "Zoals de persoon het invulde; de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
+          "Zelf opgegeven: de Nederlandse adresregistratie was niet bereikbaar om het te controleren.",
         unsupported:
-          "Zoals de persoon het invulde; alleen Nederlandse adressen worden gecontroleerd in een register.",
+          "Zelf opgegeven: alleen Nederlandse adressen worden gecontroleerd in een register.",
         registered:
           "Bevestigd: gelijk aan het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
         registeredMismatch:
-          "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. De sessie is afgewezen.",
+          "Wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app.",
         registeredTitle: "Woonadres (BRP)",
-        reviewPending:
-          "Wacht op een beoordelaar die het adres bevestigt. De identiteitscontrole verandert niet.",
-        reviewConfirmed: "Een beoordelaar heeft het adres bevestigd.",
-        reviewRejected:
-          "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die het adres bevestigt. De identiteitscontrole verandert niet.",
+          confirmed: "Een beoordelaar heeft het adres bevestigd.",
+          rejected:
+            "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+        },
         openReview: "Open de beoordeling",
-        confirm: "Adres bevestigen",
-        reject: "Adres afwijzen",
       },
       diplomas: {
         title: "Diploma's",
@@ -1265,12 +1263,16 @@ export const nl: Translation<typeof en> = {
         title: "Adres beoordelen",
         whyTitle: "Waarom dit op jou wacht",
         why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
+        whyMismatch:
+          "Dit adres wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. Misschien is diegene net verhuisd, dus een beoordelaar beslist.",
         checkTitle: "Identiteitscontrole",
         checkHint:
           "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het adres.",
         method: "Gecontroleerd met",
         level: "Betrouwbaarheidsniveau",
         decisionTitle: "Besluit",
+        confirm: "Adres bevestigen",
+        reject: "Adres afwijzen",
         confirmed: "Het adres is bevestigd.",
         rejected: "Het adres is afgewezen.",
       },
@@ -1284,6 +1286,7 @@ export const nl: Translation<typeof en> = {
       why: {
         identity: "Een deel is niet ondertekend of uit een bron gehaald",
         address: "Zelf opgegeven adres, geen register bevestigt het",
+        addressMismatch: "Wijkt af van het woonadres (BRP)",
         data_access:
           "Een beoordelaar keurt elk verzoek om gegevens in te zien goed",
         data_erasure:
