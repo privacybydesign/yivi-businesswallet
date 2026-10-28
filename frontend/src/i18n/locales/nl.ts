@@ -572,6 +572,10 @@ export const nl: Translation<typeof en> = {
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
       hostedDisabled:
         "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
+      redirectNotAllowed:
+        "Deze pagina staat niet op een van je terugstuur-origins. Voeg eerst de origin toe onder Instellingen › Gegevens en privacy.",
+      redirectOriginInUse:
+        "De terugkeerpagina van een flow staat op een origin die je verwijdert. Wijzig eerst de terugkeerpagina op het tabblad Gehoste pagina van die flow.",
       dataRequestFlow:
         "Mijn gegevens inzien en Mijn gegevens verwijderen zijn vaste flows van de wallet: ze kunnen niet worden gewijzigd.",
       diplomasNeedPage:
@@ -698,6 +702,10 @@ export const nl: Translation<typeof en> = {
           title: "Link kopiëren",
           hint: "Je stuurt de link zelf. Hij kan één keer worden gestart, binnen 72 uur.",
         },
+      },
+      linkReturn: {
+        title: "Terugsturen na de controle",
+        hint: "Naar {{url}}",
       },
       mailLifetime: "Werkt {{minutes}} minuten na het versturen.",
       submitOnScreen: "Pagina openen",
@@ -1464,10 +1472,15 @@ export const nl: Translation<typeof en> = {
         "Vul eerst op het tabblad Controle de redenen in voor {{languages}}: elk onderdeel dat de flow verzamelt heeft er een nodig in elke taal die de pagina aanbiedt.",
       openCheck: "Naar het tabblad Controle",
       completion: "Als de controle klaar is",
+      returnUrl: {
+        label: "Terugkeerpagina",
+        hint: "Optioneel. Links voor deze flow sturen de persoon hierheen, tenzij het verzoek een eigen pagina noemt. Hij moet op een van de terugstuur-origins staan onder Instellingen › Gegevens en privacy.",
+        placeholder: "https://portal.example.com/geverifieerd",
+      },
       completions: {
         redirect: {
           title: "Terug naar je website",
-          hint: "Naar het adres dat bij het verzoek hoort; een bedankpagina als dat er niet is.",
+          hint: "Naar het adres dat bij het verzoek hoort, anders naar de terugkeerpagina hieronder. Zonder een van beide een bedankpagina.",
         },
         done: {
           title: "Altijd een bedankpagina tonen",

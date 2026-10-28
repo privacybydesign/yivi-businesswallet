@@ -18,11 +18,11 @@ import {
   effectiveBranding,
   hostedDraft,
   hostedDraftDirty,
+  hostedToSave,
   localesWithoutReasons,
   proofingErrorMessage,
-  savedLocales,
 } from "../lib/identity-proofing";
-import { Button, Card } from "../ui";
+import { Button, Card, Input } from "../ui";
 import { CAPTION } from "./proofing-branding-fields";
 import { BrandMark } from "./proofing-ui";
 import { Overview } from "./proofing-verify-steps";
@@ -38,7 +38,7 @@ const COMPLETIONS: readonly ProofingFlowHosted["completion"][] = [
 const REASONS_MISSING = "reasons_missing";
 
 // A flow's hosted page: whether links may be made for it, the languages it
-// offers, how it ends, and a preview of its first step in the flow's branding.
+// offers, how it ends and where its links go back to, and a preview of its first step in the flow's branding.
 // onOpenCheck switches to the Check tab, where a missing reason is filled in.
 export function FlowHostedSettings({
   slug,
@@ -115,7 +115,7 @@ function HostedForm({
     if (noLocale || unexplained.length > 0) {
       return;
     }
-    save.mutate({ ...draft, locales: savedLocales(draft.locales) });
+    save.mutate(hostedToSave(draft));
   }
 
   return (
@@ -245,6 +245,33 @@ function HostedForm({
                 </span>
               </label>
             ))}
+            {draft.completion === "redirect" && (
+              <div className="flex flex-col gap-1.5 pl-7.5">
+                <label
+                  htmlFor={`${idBase}-return-url`}
+                  className="text-[14px] font-semibold"
+                >
+                  {t("identityProofingFlows.hosted.returnUrl.label")}
+                </label>
+                <Input
+                  id={`${idBase}-return-url`}
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  placeholder={t(
+                    "identityProofingFlows.hosted.returnUrl.placeholder",
+                  )}
+                  value={draft.returnUrl}
+                  aria-describedby={`${idBase}-return-url-hint`}
+                  onChange={(event) =>
+                    setDraft({ ...draft, returnUrl: event.target.value })
+                  }
+                />
+                <p id={`${idBase}-return-url-hint`} className={HINT}>
+                  {t("identityProofingFlows.hosted.returnUrl.hint")}
+                </p>
+              </div>
+            )}
           </fieldset>
           {save.isError && !reasonsRefused && (
             <p role="alert" className={ERROR}>

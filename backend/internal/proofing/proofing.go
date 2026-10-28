@@ -555,6 +555,9 @@ type OrgFlow struct {
 	// HostedEnabled is the flow's "Allow sending this flow as a link" switch
 	// (FlowHosted.Enabled): off, a member only shows it on their screen.
 	HostedEnabled bool
+	// HostedReturnURL is the page the flow's links send their subject back to
+	// (FlowHosted.ReturnURL); empty for none.
+	HostedReturnURL string
 	// RetentionDays is what an external person on this flow is told about
 	// keeping their data: subjectRetentionDays.
 	RetentionDays int
@@ -619,8 +622,11 @@ type NewRequest struct {
 	Language email.Locale
 	// RedirectURL is where a hosted page sends its subject once the session
 	// settles; its origin must be one of the org's RedirectOrigins. Empty
-	// shows the page's own done screen.
+	// takes the flow's return page, if it has one.
 	RedirectURL string
+	// NoRedirect ends a hosted page on its own done screen even when its flow
+	// has a return page.
+	NoRedirect bool
 }
 
 // Channel is how a request reaches its subject.

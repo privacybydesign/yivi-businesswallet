@@ -184,6 +184,16 @@ func (f *fakeFlowHosted) Disabled(context.Context, uuid.UUID) ([]string, error) 
 	return out, nil
 }
 
+func (f *fakeFlowHosted) ReturnURLs(context.Context, uuid.UUID) (map[string]string, error) {
+	out := map[string]string{}
+	for id, h := range f.byFlow {
+		if h.ReturnURL != "" {
+			out[id] = h.ReturnURL
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s FlowHosted) (FlowHosted, error) {
 	f.byFlow[flowID] = s
 	return s, nil
@@ -237,6 +247,127 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	}
 	if err := create(NewRequest{}); !errors.Is(err, ErrHostedDisabled) {
 		t.Errorf("a link on a flow with its hosted page off: %v, want ErrHostedDisabled", err)
+	}
+}
+
+func TestFlowReturnPage(t *testing.T) {
+	f := newFixture()
+	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
+	f.svc.SetHostedBaseURL(testHostedBase)
+	ctx := context.Background()
+	const origin, returnPage = "https://portal.acme.example", "https://portal.acme.example/verified"
+	if _, err := saveOrigins(f.svc, []string{origin, "https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
+	create := func(in NewRequest) (Request, error) {
+		if in.Channel == "" {
+			in.Channel = ChannelHosted
+		}
+		sent, err := f.svc.CreateRequest(ctx, testOrg, by, in)
+		return sent.Request, err
+	}
+
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
+	}); !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("a return page off the origins: %v, want ErrRedirectNotAllowed", err)
+	}
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionDone, ReturnURL: returnPage,
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a return page on a thank-you-page flow: %v, want ErrInvalidInput", err)
+	}
+	saved, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: " " + returnPage + " ",
+	})
+	if err != nil || saved.ReturnURL != returnPage {
+		t.Fatalf("SaveFlowHosted = %+v, %v; want the return page trimmed", saved, err)
+	}
+
+	for name, tc := range map[string]struct {
+		in   NewRequest
+		want string
+	}{
+		"no redirect of its own": {NewRequest{}, returnPage},
+		"its own redirect":       {NewRequest{RedirectURL: "https://other.example/next"}, "https://other.example/next"},
+		"no redirect wanted":     {NewRequest{NoRedirect: true}, ""},
+	} {
+		req, err := create(tc.in)
+		if err != nil || req.RedirectURL != tc.want {
+			t.Errorf("%s: redirect %q, %v; want %q", name, req.RedirectURL, err, tc.want)
+		}
+	}
+	if _, err := create(NewRequest{NoRedirect: true, RedirectURL: returnPage}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("no redirect wanted with a redirect: %v, want ErrInvalidInput", err)
+	}
+	if _, err := create(NewRequest{Channel: ChannelOnScreen, NoRedirect: true}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("an on-screen request without a redirect: %v, want ErrInvalidInput", err)
+	}
+
+	flows, err := f.svc.Flows(ctx, testOrg, FlowsAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(flows, func(of OrgFlow) bool { return of.ID == appFlow.ID }); i < 0 || flows[i].HostedReturnURL != returnPage {
+		t.Errorf("flow list = %+v, want the flow's return page", flows)
+	}
+
+	if _, err := saveOrigins(f.svc, []string{"https://other.example"}); !errors.Is(err, ErrRedirectOriginInUse) {
+		t.Errorf("removing the return page's origin: %v, want ErrRedirectOriginInUse", err)
+	}
+	if _, err := saveOrigins(f.svc, []string{origin}); err != nil {
+		t.Errorf("removing an origin no return page is on: %v", err)
+	}
+}
+
+// A link keeps its redirect only while its origin is still allowed and its
+// flow still ends on a redirect.
+func TestHostedViewDropsStaleRedirect(t *testing.T) {
+	f := newFixture()
+	hosted := &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
+	f.svc.flowHostedSettings = hosted
+	f.svc.SetHostedBaseURL(testHostedBase)
+	ctx := context.Background()
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example", "https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	const redirect = "https://other.example/next"
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
+		NewRequest{Channel: ChannelHosted, RedirectURL: redirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := strings.CutPrefix(sent.HostedURL, testHostedBase)
+	viewRedirect := func() string {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(f.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		var out hostedViewResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.RedirectURL
+	}
+
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := viewRedirect(); got != "" {
+		t.Errorf("redirect on a removed origin = %q, want none", got)
+	}
+	if _, err := saveOrigins(f.svc, []string{"https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := viewRedirect(); got != redirect {
+		t.Errorf("redirect on an allowed origin = %q, want %q", got, redirect)
+	}
+	hosted.byFlow[appFlow.ID] = FlowHosted{Enabled: true, Completion: CompletionDone}
+	if got := viewRedirect(); got != "" {
+		t.Errorf("redirect once the flow ends on its thank-you page = %q, want none", got)
 	}
 }
 

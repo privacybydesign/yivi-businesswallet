@@ -28,6 +28,9 @@ var (
 	// ErrRedirectNotAllowed is a hosted request's redirect off the org's
 	// allowed origins.
 	ErrRedirectNotAllowed = errors.New("proofing: the redirect is not on an allowed origin")
+	// ErrRedirectOriginInUse is a change of the org's redirect origins that
+	// drops the origin of a flow's return page.
+	ErrRedirectOriginInUse = errors.New("proofing: a flow's return page is on a redirect origin this removes")
 )
 
 func newLinkToken() (string, []byte, error) {
@@ -473,6 +476,36 @@ func normalizeOrigins(origins []string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// liveRedirect is a link's redirect while it still holds: its flow still ends
+// on a redirect, and its origin is still one of the org's. Empty otherwise.
+func liveRedirect(redirect string, settings Settings, flow FlowHosted) string {
+	if redirect == "" || flow.Completion == CompletionDone || checkRedirect(redirect, settings) != nil {
+		return ""
+	}
+	return redirect
+}
+
+// refuseOriginsInUse is ErrRedirectOriginInUse when origins leave out the
+// origin of one of the org's flows' return pages.
+func (s *Service) refuseOriginsInUse(ctx context.Context, orgID uuid.UUID, origins []string) error {
+	returnURLs, err := s.flowReturnURLs(ctx, orgID)
+	if err != nil || len(returnURLs) == 0 {
+		return err
+	}
+	// A flow the engine no longer lists has no Hosted page tab to clear it on.
+	flows, err := s.ips.ListFlows(ctx, orgTenant(orgID))
+	if err != nil {
+		return fmt.Errorf("proofing: list flows org %s: %w", orgID, err)
+	}
+	allowed := Settings{RedirectOrigins: origins}
+	for _, f := range flows {
+		if u, ok := returnURLs[f.ID]; ok && checkRedirect(u, allowed) != nil {
+			return ErrRedirectOriginInUse
+		}
+	}
+	return nil
 }
 
 // checkRedirect accepts a hosted request's redirect: an absolute URL on one of

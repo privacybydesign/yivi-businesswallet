@@ -563,7 +563,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   flow id, shared with the hosted, diploma, address and kind settings below; saving one
   leaves the others alone, and no row reads as every default. `GET .../flows` (and
   the API's `GET /proofing/flows`) never lists a data request flow (§15), and its rows
-  carry `hostedEnabled`, the flow's "Allow sending this flow as a link" switch.
+  carry `hostedEnabled`, the flow's "Allow sending this flow as a link" switch, and
+  `hostedReturnUrl`, its return page (§7) when it has one.
   `PUT /flow-selection {flowIds, defaultFlowId}` replaces the selection whole
   (`flowIds` are the flows members may use), audited `identity_proofing.flows_configured`
   with before/after. `GET .../flows` rows carry `allowed`, `default` and
@@ -1218,7 +1219,9 @@ person not present and a flow the mail cannot carry (diplomas); the dialog
 shows the link to copy (`SecretReveal`) once it has closed, on one line, with
 "Open in new tab" beside Done. Opening it only loads the page (`GET`
 `/proof/{token}` reads); the link is used by `start`, when an app is picked.
-No redirect: the page ends on its own done screen.
+The link takes the flow's return page (below) like an API link without a
+`redirectUrl`. When the flow has one, the dialog shows "Send back after the
+check" under Copy a link, on by default; off sends `redirect: false`.
 
 A link that lapses unstarted is ended by the deadline job (`LapseLinks`,
 audited `session_ended` with `reason: link_lapsed`, webhook `session.expired`).
@@ -1250,7 +1253,18 @@ on a loopback host, at most 10, normalised lowercase. The host must be a DNS
 name or an IP address (`validHost`): the origins are written into the page's
 `frame-ancestors`, where `*`, a quote or a `;` would mean something else. A hosted create may carry
 `redirectUrl` on one of them (else 400 `redirect_not_allowed`; any other channel
-400). The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
+400). The link's redirect, stored on the request when it is made:
+
+- the create's `redirectUrl`, else
+- the flow's return page (`returnUrl` below), else
+- none: `redirect: false` on the create (API and wallet alike) skips the
+  return page, and with a `redirectUrl` is 400.
+
+A link made before a return page changes keeps its own. The view answers it
+only while it still holds (`liveRedirect`): its origin still allowed and the
+flow still on `completion: redirect`. Removing an origin a listed flow's
+return page is on is 409 `redirect_origin_in_use` (`refuseOriginsInUse`).
+The page view answers `sessionId` (the `ps_` id), `redirectUrl`,
 `embedOrigins`, `language` and `organization` (name, branding and data
 retention; the branding is the flow's own over the org's). Once `Session` reports an outcome
 (`onSettled`), `proof.tsx` posts `{type: "proofing.completed", session, status}`
@@ -1291,8 +1305,11 @@ shows the QR, and says so.
 `identity_proofing_flow_settings`, `flow_hosted.go`; flows belong to the
 provider, so keyed on org and flow id with no foreign key): `enabled` (off: a
 hosted create is 409 `hosted_disabled`), `locales` (empty: every one; a create
-with another `language` is 400; the page keeps to them), and `completion`
-(`redirect`, or `done`, where a create with a `redirectUrl` is 400).
+with another `language` is 400; the page keeps to them), `completion`
+(`redirect`, or `done`, where a create with a `redirectUrl` is 400), and
+`returnUrl` (`hosted_return_url`, empty for none): the return page, on an
+allowed origin (else 400 `redirect_not_allowed`) and only under `redirect`
+(400, and a CHECK). The tab shows it under "Go back to your website".
 Admins edit them on the Hosted page tab of a flow's Edit flow view, with a
 preview of the overview step in the flow's branding; Cancel there discards
 that tab's changes only, so Edit flow and the other tabs' drafts stay. The

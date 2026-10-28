@@ -552,6 +552,10 @@ export const en = {
         "The Idem app still has this session open: carry on there, or close it first.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
+      redirectNotAllowed:
+        "This page is not on one of your redirect origins. Add its origin under Settings › Data and privacy first.",
+      redirectOriginInUse:
+        "A flow's return page is on an origin you removed. Change the return page on that flow's Hosted page tab first.",
       dataRequestFlow:
         "See my data and Delete my data are the wallet's own flows: they cannot be changed.",
       diplomasNeedPage:
@@ -678,6 +682,10 @@ export const en = {
           title: "Copy a link",
           hint: "You send the link yourself. It can be started once, within 72 hours.",
         },
+      },
+      linkReturn: {
+        title: "Send back after the check",
+        hint: "To {{url}}",
       },
       mailLifetime: "It works for {{minutes}} minutes after sending.",
       submitOnScreen: "Open page",
@@ -1426,10 +1434,15 @@ export const en = {
         "Fill in the reasons in {{languages}} on the Check tab first: every item the flow collects needs one in each language the page offers.",
       openCheck: "Go to the Check tab",
       completion: "When the check ends",
+      returnUrl: {
+        label: "Return page",
+        hint: "Optional. Links for this flow send the person here, unless the request names its own page. It must be on one of the redirect origins under Settings › Data and privacy.",
+        placeholder: "https://portal.example.com/verified",
+      },
       completions: {
         redirect: {
           title: "Go back to your website",
-          hint: "To the address the request came with; a thank-you page if there is none.",
+          hint: "To the address the request came with, else to the return page below. Without either, a thank-you page.",
         },
         done: {
           title: "Always show a thank-you page",

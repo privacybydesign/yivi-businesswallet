@@ -193,6 +193,7 @@ function SendForm({
   const [picked, setPicked] = useState("");
   const [touched, setTouched] = useState(false);
   const [channel, setChannel] = useState<ProofingChannel>("email");
+  const [returnOn, setReturnOn] = useState(true);
   const navigate = useNavigate();
 
   if (!choosesKind && sendable.length === 0) {
@@ -218,6 +219,9 @@ function SendForm({
     channel,
   });
   const picks = sendable.find((f) => f.id === flowId);
+  // Where the flow's links go back to once the check ends; none for a data
+  // request, whose answer shows on the page.
+  const returnUrl = dataRequest ? undefined : picks?.hostedReturnUrl;
   const mailMinutes = mailLifetimeMinutes(
     picks,
     settings.data?.sessionTtlSeconds,
@@ -267,6 +271,9 @@ function SendForm({
         name: fields.name,
         birthDate: fields.birthDate,
         channel: delivery,
+        ...(delivery === "hosted" && returnUrl && !returnOn
+          ? { redirect: false }
+          : {}),
         ...requestTarget(kind, flowId),
       },
       {
@@ -368,8 +375,11 @@ function SendForm({
               mailMinutes={mailMinutes}
               email={email}
               showEmailError={showEmailError}
+              returnUrl={returnUrl}
+              returnOn={returnOn}
               onChannel={setChannel}
               onEmail={setEmail}
+              onReturnOn={setReturnOn}
             />
             <SubjectFields
               nameShown={fields.nameShown}
@@ -424,7 +434,8 @@ function NoFlowsDialog({
 }
 
 // How the request reaches the person: the channels the flow allows, with the
-// address field under a mail.
+// address field under a mail, and under a link whether it goes back to the
+// flow's return page.
 function DeliveryFieldset({
   channels,
   delivery,
@@ -433,8 +444,11 @@ function DeliveryFieldset({
   mailMinutes,
   email,
   showEmailError,
+  returnUrl,
+  returnOn,
   onChannel,
   onEmail,
+  onReturnOn,
 }: Readonly<{
   channels: typeof SEND_CHANNELS;
   delivery: ProofingChannel;
@@ -443,10 +457,55 @@ function DeliveryFieldset({
   mailMinutes: number | undefined;
   email: string;
   showEmailError: boolean;
+  returnUrl: string | undefined;
+  returnOn: boolean;
   onChannel: (channel: ProofingChannel) => void;
   onEmail: (email: string) => void;
+  onReturnOn: (on: boolean) => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
+
+  function footer(value: ProofingChannel): React.ReactNode {
+    if (value !== delivery) {
+      return undefined;
+    }
+    if (value === "email") {
+      return (
+        <>
+          <label htmlFor="proofing-subject-email" className={LABEL}>
+            {t("identityProofing.send.email")}
+          </label>
+          <Input
+            id="proofing-subject-email"
+            type="email"
+            autoComplete="off"
+            placeholder={t("identityProofing.send.emailPlaceholder")}
+            value={email}
+            aria-invalid={showEmailError}
+            aria-describedby={showEmailError ? EMAIL_ERROR_ID : undefined}
+            onChange={(event) => onEmail(event.target.value)}
+          />
+          {showEmailError && (
+            <p id={EMAIL_ERROR_ID} className={ERROR}>
+              {t("identityProofing.send.emailRequired")}
+            </p>
+          )}
+        </>
+      );
+    }
+    if (value === "hosted" && returnUrl) {
+      return (
+        <SwitchRow
+          checked={returnOn}
+          title={t("identityProofing.send.linkReturn.title")}
+          hint={t("identityProofing.send.linkReturn.hint", { url: returnUrl })}
+          onChange={onReturnOn}
+        />
+      );
+    }
+    return undefined;
+  }
+
   return (
     <fieldset className="flex flex-col gap-2.5">
       <legend className={`${LABEL} mb-1`}>
@@ -471,31 +530,7 @@ function DeliveryFieldset({
           checked={delivery === option.value}
           disabled={option.value === "email" && !mailable}
           onSelect={() => onChannel(option.value)}
-          footer={
-            option.value === "email" &&
-            delivery === "email" && (
-              <>
-                <label htmlFor="proofing-subject-email" className={LABEL}>
-                  {t("identityProofing.send.email")}
-                </label>
-                <Input
-                  id="proofing-subject-email"
-                  type="email"
-                  autoComplete="off"
-                  placeholder={t("identityProofing.send.emailPlaceholder")}
-                  value={email}
-                  aria-invalid={showEmailError}
-                  aria-describedby={showEmailError ? EMAIL_ERROR_ID : undefined}
-                  onChange={(event) => onEmail(event.target.value)}
-                />
-                {showEmailError && (
-                  <p id={EMAIL_ERROR_ID} className={ERROR}>
-                    {t("identityProofing.send.emailRequired")}
-                  </p>
-                )}
-              </>
-            )
-          }
+          footer={footer(option.value)}
         />
       ))}
       {!linkable ? (

@@ -1418,6 +1418,10 @@ export function proofingErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.diplomasNeedPage");
     case "hosted_disabled":
       return t("identityProofing.errors.hostedDisabled");
+    case "redirect_not_allowed":
+      return t("identityProofing.errors.redirectNotAllowed");
+    case "redirect_origin_in_use":
+      return t("identityProofing.errors.redirectOriginInUse");
     case "data_request_flow":
       return t("identityProofing.errors.dataRequestFlow");
     case "diplomas_closed":
@@ -1957,6 +1961,21 @@ export function savedLocales(selected: readonly string[]): string[] {
   return selected.length === SUPPORTED_LANGUAGES.length ? [] : [...selected];
 }
 
+// The return page a Hosted page form saves: trimmed, and none on a flow that
+// always ends on its thank-you page.
+export function savedReturnUrl(draft: ProofingFlowHosted): string {
+  return draft.completion === "redirect" ? draft.returnUrl.trim() : "";
+}
+
+// What a Hosted page form saves.
+export function hostedToSave(draft: ProofingFlowHosted): ProofingFlowHosted {
+  return {
+    ...draft,
+    locales: savedLocales(draft.locales),
+    returnUrl: savedReturnUrl(draft),
+  };
+}
+
 // A flow's Hosted page form as saved: Cancel goes back to it.
 export function hostedDraft(saved: ProofingFlowHosted): ProofingFlowHosted {
   return { ...saved, locales: selectedLocales(saved.locales) };
@@ -1971,6 +1990,7 @@ export function hostedDraftDirty(
   return (
     draft.enabled !== seed.enabled ||
     draft.completion !== seed.completion ||
+    savedReturnUrl(draft) !== seed.returnUrl ||
     draft.locales.join() !== seed.locales.join()
   );
 }

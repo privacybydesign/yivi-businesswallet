@@ -37,6 +37,7 @@ import {
   dropsOwnBranding,
   hostedDraft,
   hostedDraftDirty,
+  hostedToSave,
   savedLocales,
   selectedLocales,
   diplomaRejectionReason,
@@ -2611,6 +2612,7 @@ describe("hosted page form", () => {
     enabled: true,
     locales: [],
     completion: "redirect",
+    returnUrl: "",
   };
 
   it("starts from what is saved, every language ticked for none", () => {
@@ -2632,6 +2634,29 @@ describe("hosted page form", () => {
         saved,
       ),
     ).toBe(true);
+  });
+
+  it("holds a return page as it is saved", () => {
+    const page = "https://portal.example.com/verified";
+    expect(
+      hostedDraftDirty({ ...hostedDraft(saved), returnUrl: page }, saved),
+    ).toBe(true);
+    expect(
+      hostedDraftDirty({ ...hostedDraft(saved), returnUrl: "  " }, saved),
+    ).toBe(false);
+    expect(
+      hostedToSave({ ...hostedDraft(saved), returnUrl: ` ${page} ` }),
+    ).toEqual({ ...saved, returnUrl: page });
+  });
+
+  it("saves no return page on a flow that ends on its thank-you page", () => {
+    const done = { ...saved, completion: "done" as const };
+    const draft = {
+      ...hostedDraft(done),
+      returnUrl: "https://portal.example.com/verified",
+    };
+    expect(hostedToSave(draft)).toEqual(done);
+    expect(hostedDraftDirty(draft, done)).toBe(false);
   });
 });
 

@@ -317,8 +317,12 @@ type apiCreateSessionRequest struct {
 	// subject opens it on their own device and starts there; nothing is mailed.
 	Hosted bool `json:"hosted"`
 	// RedirectURL is where a hosted page sends its subject once the session
-	// settles, on one of the org's allowed redirect origins.
+	// settles, on one of the org's allowed redirect origins; absent takes the
+	// flow's return page.
 	RedirectURL string `json:"redirectUrl"`
+	// Redirect false ends a hosted page on its own done screen, though its
+	// flow has a return page.
+	Redirect *bool `json:"redirect"`
 }
 
 func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error {
@@ -338,7 +342,7 @@ func (h *Handler) apiCreateSession(w http.ResponseWriter, r *http.Request) error
 			Channel: channel, SubjectEmail: body.Email, SubjectName: body.Name,
 			SubjectBirthDate: body.BirthDate, ReferencePhoto: body.ReferencePhoto, FlowID: body.FlowID, FlowKind: body.FlowKind,
 			SkipMail: body.SendMail != nil && !*body.SendMail, Language: body.Language,
-			RedirectURL: body.RedirectURL,
+			RedirectURL: body.RedirectURL, NoRedirect: body.Redirect != nil && !*body.Redirect,
 		})
 	if err != nil {
 		return mapError(err)
