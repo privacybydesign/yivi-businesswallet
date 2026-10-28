@@ -6,7 +6,7 @@ ALTER TABLE identity_proofing_flow_settings
     ADD COLUMN hosted_return_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE identity_proofing_flow_settings
     ADD CONSTRAINT identity_proofing_flow_settings_hosted_return_url_check
-        CHECK (hosted_completion = 'redirect' OR hosted_return_url = '');
+        CHECK (hosted_completion = 'redirect' OR char_length(hosted_return_url) = 0);
 
 -- +goose Down
 ALTER TABLE identity_proofing_flow_settings
