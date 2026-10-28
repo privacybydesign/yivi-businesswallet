@@ -6,24 +6,39 @@ import (
 	"time"
 )
 
-// startPruner runs prune on a ticker until ctx is cancelled, logging failures.
-// It backs the expired-row cleanup for both the session and presentation stores.
+// startPruner runs prune once at start and then every interval until ctx is
+// cancelled, logging failures. It backs the expired-row cleanup of the session
+// and presentation stores and other retention sweeps that report a count. The
+// run at start matters for retention: a replica restarted more often than
+// every would otherwise never prune at all.
 func startPruner(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
-	ticker := time.NewTicker(every)
 	go func() {
+		runPrune(ctx, name, prune)
+		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if _, err := prune(ctx); err != nil {
-					slog.ErrorContext(ctx, "prune failed",
-						slog.String("store", name),
-						slog.String("error", err.Error()),
-					)
-				}
+				runPrune(ctx, name, prune)
 			}
 		}
 	}()
+}
+
+// startPrunerAtBoot is startPruner that also runs prune once at start: for a
+// job whose interval is long next to how often the API is redeployed.
+func startPrunerAtBoot(ctx context.Context, name string, every time.Duration, prune func(context.Context) (int64, error)) {
+	go runPrune(ctx, name, prune)
+	startPruner(ctx, name, every, prune)
+}
+
+func runPrune(ctx context.Context, name string, prune func(context.Context) (int64, error)) {
+	if _, err := prune(ctx); err != nil {
+		slog.ErrorContext(ctx, "periodic job failed",
+			slog.String("store", name),
+			slog.String("error", err.Error()),
+		)
+	}
 }

@@ -71,9 +71,10 @@ func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
 
 // Ping is a boot-time reachability check. validatie.nl exposes no health
 // endpoint - it is a single anonymous POST-only API - so this GETs the same URL
-// and accepts 405 Method Not Allowed as healthy (it proves the route exists and
-// the service answered) alongside a plain 2xx; anything else (unreachable, 404,
-// 5xx) fails the boot the same way every other provider's Ping does.
+// and accepts any answer but a 404 as healthy: it answers anything that is not a
+// real upload with a 405 or a 500 depending on where it is asked from (a 500
+// from the prod cluster, whose real uploads go through fine), so only an
+// unreachable service or a wrong URL fails the boot.
 func (c *HTTPClient) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL, nil)
 	if err != nil {
@@ -84,10 +85,10 @@ func (c *HTTPClient) Ping(ctx context.Context) error {
 		return fmt.Errorf("vog: ping validatie.nl: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 == 2 || resp.StatusCode == http.StatusMethodNotAllowed {
-		return nil
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("vog: ping validatie.nl: %s not found", c.baseURL)
 	}
-	return fmt.Errorf("vog: ping validatie.nl: unexpected status %d", resp.StatusCode)
+	return nil
 }
 
 // Validate submits pdf and returns validatie.nl's response code, retrying a
@@ -96,7 +97,7 @@ func (c *HTTPClient) Ping(ctx context.Context) error {
 // authentic or a final rejection - returns immediately without retrying.
 func (c *HTTPClient) Validate(ctx context.Context, pdf []byte) (ResponseCode, error) {
 	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		if attempt > 0 {
 			select {
 			case <-time.After(retryBackoff[attempt-1]):

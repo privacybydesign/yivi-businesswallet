@@ -141,7 +141,7 @@ export default function Qerds(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">

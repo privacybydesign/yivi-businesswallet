@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 type TagTone = "default" | "green" | "amber" | "red" | "blue";
 
 const TONE_CLASSES: Record<TagTone, string> = {
-  default: "bg-surface-3 text-ink-soft",
+  default: "bg-tag text-tag-fg",
   green: "bg-success-bg text-success",
   amber: "bg-warning-bg text-warning-fg",
   red: "bg-error-bg text-error",
@@ -22,7 +22,7 @@ export function Tag({
   dot = false,
   title,
   children,
-}: TagProps): React.JSX.Element {
+}: Readonly<TagProps>): React.JSX.Element {
   return (
     <span
       title={title}

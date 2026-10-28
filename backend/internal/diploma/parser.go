@@ -1,0 +1,430 @@
+package diploma
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/klippa-app/go-pdfium"
+	"github.com/klippa-app/go-pdfium/requests"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/pdftext"
+)
+
+// ErrNotADiploma is returned when the PDF does not look like a DUO diploma
+// extract at all.
+var ErrNotADiploma = errors.New("document is not a DUO diploma extract")
+
+// ErrUnreadable is a PDF that PDFium cannot open or that has no pages.
+var ErrUnreadable = errors.New("pdf cannot be read")
+
+// Parser extracts the printed data from a diploma extract PDF.
+type Parser interface {
+	Parse(ctx context.Context, pdf []byte) (*Document, error)
+}
+
+// Word is a positioned piece of text on a page. Coordinates are PDF user
+// space points: X grows to the right, Y grows upwards, so Top is larger than
+// Bottom and the first line of the page has the largest Top.
+type Word = pdftext.Word
+
+const (
+	// pdfiumInstanceTimeout bounds how long a parse waits for a free instance.
+	pdfiumInstanceTimeout = 30 * time.Second
+	// pdfiumParseTimeout bounds one parse once it has an instance. A genuine
+	// extract parses in well under a second; past this the instance is killed,
+	// so a crafted PDF cannot hold one of the pool's few instances indefinitely.
+	pdfiumParseTimeout = 20 * time.Second
+	// PDFiumMaxDuration is the longest one read on the pool takes: waiting
+	// for an instance, then parsing.
+	PDFiumMaxDuration = pdfiumInstanceTimeout + pdfiumParseTimeout
+	// pdfiumMaxParses is how many of the pool's instances diploma parses may
+	// hold at once.
+	pdfiumMaxParses = 2
+)
+
+// PDFiumParser parses diploma extracts with PDFium running in a WebAssembly
+// sandbox (pure Go, no cgo), on a pool its caller owns.
+type PDFiumParser struct {
+	pool pdfium.Pool
+	// parses holds a slot per parse in flight, at most pdfiumMaxParses.
+	parses chan struct{}
+}
+
+// NewPDFiumParser parses on pool, which its owner closes.
+func NewPDFiumParser(pool pdfium.Pool) *PDFiumParser {
+	return &PDFiumParser{pool: pool, parses: make(chan struct{}, pdfiumMaxParses)}
+}
+
+// Pages is the text of an extract: the positioned words of the first page and
+// the plain text of the remaining pages.
+type Pages struct {
+	First []Word
+	Rest  []string
+}
+
+// Parse extracts the diploma data from the PDF bytes.
+func (p *PDFiumParser) Parse(ctx context.Context, pdf []byte) (*Document, error) {
+	pages, err := onInstance(ctx, p, pdf, readPages)
+	if err != nil {
+		return nil, err
+	}
+	return extractDocument(pages)
+}
+
+// Text returns the plain text of every page, on the same pool and limits as
+// Parse: for another sealed document whose layout needs no positions.
+func (p *PDFiumParser) Text(ctx context.Context, pdf []byte) ([]string, error) {
+	return onInstance(ctx, p, pdf, readText)
+}
+
+// onInstance runs read on a pooled instance, killing the instance when the
+// parse outlives pdfiumParseTimeout or ctx. Kill interrupts the WebAssembly
+// call in flight only when the pool's runtime closes on context done.
+func onInstance[T any](ctx context.Context, p *PDFiumParser, pdf []byte, read func(pdfium.Pdfium, []byte) (T, error)) (T, error) {
+	var none T
+	wait := time.NewTimer(pdfiumInstanceTimeout)
+	defer wait.Stop()
+	select {
+	case p.parses <- struct{}{}:
+		defer func() { <-p.parses }()
+	case <-wait.C:
+		return none, errors.New("diploma: get pdfium instance: too many parses in flight")
+	case <-ctx.Done():
+		return none, fmt.Errorf("diploma: get pdfium instance: %w", ctx.Err())
+	}
+
+	instance, err := p.pool.GetInstance(pdfiumInstanceTimeout)
+	if err != nil {
+		return none, fmt.Errorf("diploma: get pdfium instance: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, pdfiumParseTimeout)
+	defer cancel()
+
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := read(instance, pdf)
+		done <- result{value, err}
+	}()
+	select {
+	case r := <-done:
+		if err := instance.Close(); err != nil {
+			slog.Warn("diploma: return pdfium instance to pool", slog.String("error", err.Error()))
+		}
+		return r.value, r.err
+	case <-ctx.Done():
+		if err := instance.Kill(); err != nil {
+			slog.Warn("diploma: kill pdfium instance", slog.String("error", err.Error()))
+		}
+		return none, fmt.Errorf("diploma: parse pdf: %w", ctx.Err())
+	}
+}
+
+// readText reads the plain text of every page.
+func readText(instance pdfium.Pdfium, pdf []byte) ([]string, error) {
+	doc, err := instance.OpenDocument(&requests.OpenDocument{File: &pdf})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreadable, err)
+	}
+	defer func() {
+		_, err := instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
+		if err != nil {
+			slog.Warn("diploma: close pdf document", slog.String("error", err.Error()))
+		}
+	}()
+
+	pageCount, err := instance.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
+	if err != nil {
+		return nil, fmt.Errorf("diploma: count pages: %w", err)
+	}
+	if pageCount.PageCount < 1 {
+		return nil, fmt.Errorf("%w: pdf has no pages", ErrUnreadable)
+	}
+	pages := make([]string, 0, pageCount.PageCount)
+	for i := range pageCount.PageCount {
+		pageText, err := instance.GetPageText(&requests.GetPageText{
+			Page: requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("diploma: extract text of page %d: %w", i+1, err)
+		}
+		pages = append(pages, pageText.Text)
+	}
+	return pages, nil
+}
+
+func readPages(instance pdfium.Pdfium, pdf []byte) (*Pages, error) {
+	doc, err := instance.OpenDocument(&requests.OpenDocument{File: &pdf})
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to open pdf: %v", ErrNotADiploma, err)
+	}
+	defer func() {
+		_, err := instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
+		if err != nil {
+			slog.Warn("diploma: close pdf document", slog.String("error", err.Error()))
+		}
+	}()
+
+	pageCount, err := instance.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
+	if err != nil {
+		return nil, fmt.Errorf("diploma: count pages: %w", err)
+	}
+	if pageCount.PageCount < 1 {
+		return nil, fmt.Errorf("%w: pdf has no pages", ErrNotADiploma)
+	}
+
+	text, err := instance.GetPageTextStructured(&requests.GetPageTextStructured{
+		Page: requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: 0}},
+		Mode: requests.GetPageTextStructuredModeRects,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("diploma: extract text: %w", err)
+	}
+	pages := &Pages{First: make([]Word, 0, len(text.Rects))}
+	for _, rect := range text.Rects {
+		t := strings.TrimSpace(rect.Text)
+		if t == "" {
+			continue
+		}
+		pages.First = append(pages.First, Word{
+			Text:   t,
+			Left:   rect.PointPosition.Left,
+			Top:    rect.PointPosition.Top,
+			Right:  rect.PointPosition.Right,
+			Bottom: rect.PointPosition.Bottom,
+		})
+	}
+
+	for i := 1; i < pageCount.PageCount; i++ {
+		pageText, err := instance.GetPageText(&requests.GetPageText{
+			Page: requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("diploma: extract text of page %d: %w", i+1, err)
+		}
+		pages.Rest = append(pages.Rest, pageText.Text)
+	}
+	return pages, nil
+}
+
+// Headings printed on the extract, in the order they appear.
+const (
+	headingRegister  = "Uit het register onderwijsdeelnemers"
+	headingProfile   = "PROFIEL"
+	headingAchieved  = "BEHAALD DOOR"
+	headingIssued    = "UITGEGEVEN DOOR"
+	labelBorn        = "Geboren op"
+	labelDownload    = "Downloaddatum:"
+	headingGradeList = "CIJFERLIJST"
+)
+
+// documentTypes are the headings that introduce the qualification.
+var documentTypes = map[string]string{
+	"DIPLOMA":       "Diploma",
+	"GETUIGSCHRIFT": "Getuigschrift",
+	"CERTIFICAAT":   "Certificaat",
+}
+
+var (
+	rePlaceDate = regexp.MustCompile(`^(.+?),\s*(\d{1,2} [A-Za-z]+ \d{4})$`)
+	reLevel     = regexp.MustCompile(`NLQF\s*(\d+\+?)\s*/\s*EQF\s*(\d+\+?)`)
+	reFooter    = regexp.MustCompile(`(\d+)\s*-\s*pagina\s*(\d+)\s*/\s*(\d+)`)
+)
+
+// extractDocument interprets the text of a diploma extract. It is layout
+// based: the extract is a sequence of headings ("DIPLOMA", "BEHAALD DOOR",
+// "UITGEGEVEN DOOR") each followed by the lines that belong to it.
+func extractDocument(pages *Pages) (*Document, error) {
+	lines := pdftext.GroupLines(pages.First)
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("%w: no text found", ErrNotADiploma)
+	}
+	texts := nonEmptyTexts(lines)
+	if !containsLine(texts, headingRegister) {
+		return nil, fmt.Errorf("%w: register heading not found", ErrNotADiploma)
+	}
+
+	doc := &Document{Pages: 1 + len(pages.Rest), Profiles: []string{}}
+	for _, s := range splitSections(doc, texts) {
+		if err := applySection(doc, s); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkComplete(doc); err != nil {
+		return nil, err
+	}
+	doc.HasGradeList = hasGradeList(pages.Rest)
+	return doc, nil
+}
+
+// sectionType keys the section that holds the qualification, whose heading is
+// one of documentTypes.
+const sectionType = "TYPE"
+
+// section is a heading and the lines printed under it.
+type section struct {
+	heading string
+	lines   []string
+}
+
+func nonEmptyTexts(lines []pdftext.Line) []string {
+	texts := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if t := strings.TrimSpace(l.Text()); t != "" {
+			texts = append(texts, t)
+		}
+	}
+	return texts
+}
+
+// splitSections splits the page into sections keyed by heading, recording the
+// document type on doc as it passes its heading.
+func splitSections(doc *Document, texts []string) []section {
+	var sections []section
+	for _, t := range texts {
+		if title, ok := documentTypes[t]; ok {
+			doc.DocumentType = title
+			sections = append(sections, section{heading: sectionType})
+			continue
+		}
+		switch t {
+		case headingRegister, headingProfile, headingAchieved, headingIssued:
+			sections = append(sections, section{heading: t})
+			continue
+		}
+		if len(sections) == 0 {
+			continue
+		}
+		current := &sections[len(sections)-1]
+		current.lines = append(current.lines, t)
+	}
+	return sections
+}
+
+func applySection(doc *Document, s section) error {
+	switch s.heading {
+	case sectionType:
+		doc.Qualification = strings.Join(s.lines, " ")
+	case headingProfile:
+		applyProfiles(doc, s.lines)
+	case headingAchieved:
+		return applyAchieved(doc, s.lines)
+	case headingIssued:
+		return applyIssued(doc, s.lines)
+	}
+	return nil
+}
+
+func applyProfiles(doc *Document, lines []string) {
+	for _, l := range lines {
+		profile := strings.TrimSpace(strings.TrimLeft(l, "•-* "))
+		profile = strings.TrimSpace(strings.TrimPrefix(profile, "Profiel"))
+		if profile != "" {
+			doc.Profiles = append(doc.Profiles, profile)
+		}
+	}
+}
+
+func applyAchieved(doc *Document, lines []string) error {
+	var name []string
+	for _, l := range lines {
+		after, ok := strings.CutPrefix(l, labelBorn)
+		if !ok {
+			name = append(name, l)
+			continue
+		}
+		born, err := parseDutchDate(strings.TrimSpace(after))
+		if err != nil {
+			return fmt.Errorf("%w: date of birth: %v", ErrNotADiploma, err)
+		}
+		doc.DateOfBirth = born
+	}
+	doc.FullName = strings.Join(name, " ")
+	return nil
+}
+
+func applyIssued(doc *Document, lines []string) error {
+	var institution []string
+	for _, l := range lines {
+		if !doc.DateAwarded.IsZero() {
+			// Everything after the award date is trailing information.
+			if err := applyTrailing(doc, l); err != nil {
+				return err
+			}
+			continue
+		}
+		if m := rePlaceDate.FindStringSubmatch(l); m != nil {
+			if t, err := parseDutchDate(m[2]); err == nil {
+				doc.PlaceOfIssue = strings.TrimSpace(m[1])
+				doc.DateAwarded = t
+				continue
+			}
+		}
+		institution = append(institution, l)
+	}
+	doc.Institution = strings.Join(institution, " ")
+	return nil
+}
+
+func applyTrailing(doc *Document, l string) error {
+	if m := reLevel.FindStringSubmatch(l); m != nil {
+		doc.NLQFLevel, doc.EQFLevel = m[1], m[2]
+		return nil
+	}
+	if after, ok := strings.CutPrefix(l, labelDownload); ok {
+		downloaded, err := parseDutchDate(strings.TrimSpace(after))
+		if err != nil {
+			return fmt.Errorf("%w: download date: %v", ErrNotADiploma, err)
+		}
+		doc.DownloadDate = downloaded
+		return nil
+	}
+	if m := reFooter.FindStringSubmatch(l); m != nil {
+		doc.DocumentNumber = m[1]
+	}
+	return nil
+}
+
+func checkComplete(doc *Document) error {
+	if doc.DocumentType == "" || doc.Qualification == "" {
+		return fmt.Errorf("%w: qualification not found", ErrNotADiploma)
+	}
+	if doc.FullName == "" || doc.DateOfBirth.IsZero() {
+		return fmt.Errorf("%w: holder not found", ErrNotADiploma)
+	}
+	if doc.Institution == "" || doc.DateAwarded.IsZero() {
+		return fmt.Errorf("%w: issuing institution not found", ErrNotADiploma)
+	}
+	if doc.DocumentNumber == "" {
+		return fmt.Errorf("%w: document number not found", ErrNotADiploma)
+	}
+	return nil
+}
+
+func hasGradeList(rest []string) bool {
+	for _, page := range rest {
+		if strings.Contains(page, headingGradeList) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsLine(lines []string, want string) bool {
+	return slices.Contains(lines, want)
+}
+
+// parseDutchDate parses dates as printed on the extract ("3 februari 1980"),
+// which may end in a full stop.
+func parseDutchDate(s string) (time.Time, error) {
+	return pdftext.ParseDutchDate(strings.TrimSuffix(strings.TrimSpace(s), "."))
+}

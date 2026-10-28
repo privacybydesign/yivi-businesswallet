@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -325,9 +326,7 @@ func (s *Store) consume(ctx context.Context, id uuid.UUID, status, action string
 			return fmt.Errorf("openid4vppresenter: consume as %s: %w", status, err)
 		}
 		meta := map[string]any{"verifier": t.VerifierIdentity}
-		for k, v := range extra {
-			meta[k] = v
-		}
+		maps.Copy(meta, extra)
 		return s.audit.Record(ctx, tx, action,
 			audit.Target{Type: audit.TargetPresentationTransaction, ID: t.ID.String(), OrgID: t.OrganizationID},
 			audit.Created(meta))

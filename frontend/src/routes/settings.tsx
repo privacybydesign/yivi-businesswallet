@@ -9,9 +9,9 @@ import {
   resolveSettingsLocation,
   settingsTabParam,
 } from "../lib/settings-tabs";
-import type { SettingsLocation } from "../lib/settings-tabs";
+import type { SettingsLocation, SettingsTab } from "../lib/settings-tabs";
+import type { OrganizationDetail } from "../api/organization";
 import { Card, TopBar } from "../ui";
-import { DepartmentSettings } from "./department-settings";
 import { EmailSettingsPanel } from "./email-settings";
 import { EmailTemplatesPanel } from "./email-templates";
 import { IdentitySettingsPanel } from "./identity-settings";
@@ -24,6 +24,8 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
+import { BrandingPanel } from "./proofing-branding";
+import { PrivacySettingsPanel } from "./settings-privacy";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
@@ -61,7 +63,7 @@ export default function Settings(): React.JSX.Element {
     <>
       <TopBar title={t("settings.title")} subtitle={t("settings.subtitle")} />
 
-      <div className="border-line bg-surface flex gap-1 border-b px-8">
+      <div className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8">
         {SETTINGS_TABS.map((item) => {
           const active = tab === item.key;
           return (
@@ -70,7 +72,7 @@ export default function Settings(): React.JSX.Element {
               type="button"
               onClick={() => goTo({ tab: item.key, section })}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -82,7 +84,7 @@ export default function Settings(): React.JSX.Element {
         })}
       </div>
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -99,19 +101,6 @@ export default function Settings(): React.JSX.Element {
               {t("settings.adminOnly")}
             </p>
           </Card>
-        ) : tab === "org" ? (
-          <div className="flex flex-col gap-6">
-            <OrgProfileSettings org={org.data} />
-            <DepartmentSettings slug={slug} />
-          </div>
-        ) : tab === "mandates" ? (
-          <MandateSettings slug={slug} />
-        ) : tab === "identity" ? (
-          <IdentitySettingsPanel slug={slug} />
-        ) : tab === "screening" ? (
-          <ScreeningSettingsPanel slug={slug} />
-        ) : tab === "branding" ? (
-          <ThemeSettingsPanel slug={slug} />
         ) : tab === COMMUNICATION_TAB ? (
           <div className="flex flex-col gap-6">
             <div
@@ -150,12 +139,6 @@ export default function Settings(): React.JSX.Element {
               <TeamsSettingsPanel slug={slug} />
             ) : null}
           </div>
-        ) : tab === "issuer" ? (
-          <IssuerSettingsPanel slug={slug} />
-        ) : tab === "provisioning" ? (
-          <ProvisioningSettingsPanel slug={slug} />
-        ) : tab === "signing" ? (
-          <CscSettingsPanel slug={slug} />
         ) : tab === "postguard" ? (
           <div className="flex max-w-2xl flex-col gap-6">
             <PostguardEncryptionKeyCard slug={slug} isAdmin={isAdmin} />
@@ -163,9 +146,45 @@ export default function Settings(): React.JSX.Element {
             <PostguardNotificationsCard slug={slug} isAdmin={isAdmin} />
           </div>
         ) : (
-          <WscaWalletPanel slug={slug} />
+          <SettingsPanel tab={tab} slug={slug} org={org.data} />
         )}
       </div>
     </>
   );
+}
+
+// The panel of a settings tab that holds one panel, as an admin sees it.
+function SettingsPanel({
+  tab,
+  slug,
+  org,
+}: Readonly<{
+  tab: SettingsTab;
+  slug: string;
+  org: OrganizationDetail;
+}>): React.JSX.Element {
+  switch (tab) {
+    case "org":
+      return <OrgProfileSettings org={org} />;
+    case "branding":
+      return <BrandingPanel slug={slug} orgName={org.name} />;
+    case "privacy":
+      return <PrivacySettingsPanel slug={slug} />;
+    case "mandates":
+      return <MandateSettings slug={slug} />;
+    case "identity":
+      return <IdentitySettingsPanel slug={slug} />;
+    case "screening":
+      return <ScreeningSettingsPanel slug={slug} />;
+    case "theme":
+      return <ThemeSettingsPanel slug={slug} />;
+    case "issuer":
+      return <IssuerSettingsPanel slug={slug} />;
+    case "provisioning":
+      return <ProvisioningSettingsPanel slug={slug} />;
+    case "signing":
+      return <CscSettingsPanel slug={slug} />;
+    default:
+      return <WscaWalletPanel slug={slug} />;
+  }
 }

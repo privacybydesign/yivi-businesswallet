@@ -1,6 +1,7 @@
 package email
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,15 @@ func sampleVars(kind Kind) map[string]string {
 			varOrgName: "Acme BV",
 			varVogURL:  "https://wallet.example.org/vog/abc",
 			varReason:  "Your VOG has expired.",
+		}
+	case KindIdentityProofingRequested:
+		return map[string]string{
+			varOrgName:        "Acme BV",
+			varRequesterName:  "Sam de Vries",
+			varProofingURL:    "vcmrtd://verify?handover=abc&api=https%3A%2F%2Fproofing.example.org",
+			varValidMinutes:   "10",
+			varSupportContact: "support@initech.example",
+			varPrivacyURL:     "https://initech.example/privacy",
 		}
 	default:
 		return nil
@@ -334,6 +344,11 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 		varReason:         "Your last identity check has expired.",
 		varVogURL:         "https://wallet.example.org/vog/abc",
 		varSignerName:     "Sam Jansen",
+		varRequesterName:  "Sam de Vries",
+		varProofingURL:    "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+		varValidMinutes:   "10",
+		varSupportContact: "support@example.org",
+		varPrivacyURL:     "https://example.org/privacy",
 	}
 	if err := validateSamples(complete); err != nil {
 		t.Fatalf("validateSamples on the complete set = %v, want nil", err)
@@ -348,9 +363,7 @@ func TestValidateSamplesRejectsGapsAndLeftovers(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			broken := map[string]string{}
-			for k, v := range complete {
-				broken[k] = v
-			}
+			maps.Copy(broken, complete)
 			mutate(broken)
 			if err := validateSamples(broken); err == nil {
 				t.Errorf("validateSamples(%v) = nil, want an error", broken)

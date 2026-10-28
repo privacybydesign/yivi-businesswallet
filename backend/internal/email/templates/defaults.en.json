@@ -20,7 +20,12 @@
     "reidentifyUrl": "https://wallet.example.org/reidentify/sample",
     "dueDate": "2026-08-01",
     "reason": "Your last identity check has expired.",
-    "vogUrl": "https://wallet.example.org/vog/sample"
+    "vogUrl": "https://wallet.example.org/vog/sample",
+    "requesterName": "Sam de Vries",
+    "proofingUrl": "vcmrtd://verify?handover=sample&api=https%3A%2F%2Fproofing.example.org",
+    "validMinutes": "10",
+    "supportContact": "support@example.org",
+    "privacyUrl": "https://example.org/privacy"
   },
   "events": {
     "membership.invited": "Invited member",
@@ -30,6 +35,7 @@
     "membership.declined": "Declined invitation",
     "membership.revoked": "Revoked membership",
     "membership.role_changed": "Changed role",
+    "membership.review_changed": "Changed reviewer right",
     "membership.expired": "Invitation expired",
     "membership.identity_requested": "Requested identification",
     "membership.identity_reverified": "Re-confirmed identity",
@@ -213,6 +219,20 @@
         { "type": "heading", "text": "Your VOG has expired" },
         { "type": "paragraph", "text": "Your certificate of conduct for {{orgName}} expired on {{dueDate}}. Please upload a new one." },
         { "type": "button", "label": "Upload my VOG", "url": "{{vogUrl}}" },
+        { "type": "footer" }
+      ]
+    },
+    "identity_proofing_requested": {
+      "subject": "{{orgName}} asks you to verify your identity",
+      "blocks": [
+        { "type": "logo" },
+        { "type": "heading", "text": "{{orgName}} asks you to verify your identity" },
+        { "type": "paragraph", "text": "{{requesterName}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone." },
+        { "type": "qr", "label": "Scan with the Idem app", "url": "{{proofingUrl}}" },
+        { "type": "button", "label": "Open in the Idem app", "url": "{{proofingUrl}}" },
+        { "type": "paragraph", "text": "Reading this on your phone? Tap the button. The QR code and the button start the same session, which is valid for {{validMinutes}} minutes from when this e-mail was sent. After that, ask {{orgName}} for a new one." },
+        { "type": "paragraph", "text": "Questions about this request? Contact {{supportContact}}." },
+        { "type": "paragraph", "text": "How your data is handled: {{privacyUrl}}" },
         { "type": "footer" }
       ]
     }

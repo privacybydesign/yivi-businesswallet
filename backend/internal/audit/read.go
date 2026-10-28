@@ -42,6 +42,52 @@ type Event struct {
 	TargetID   string          `json:"targetId"`
 	Metadata   json.RawMessage `json:"metadata"`
 	Actor      *EventActor     `json:"actor"`
+	// ActorLabel names a non-user actor, e.g. `api_key:<prefix>`.
+	ActorLabel *string `json:"actorLabel"`
+	// DetailHidden marks an event read by an ordinary member: Actor,
+	// ActorLabel, TargetID and Metadata are withheld, so who acted, on whom and
+	// what changed is visible to admins only.
+	DetailHidden bool `json:"detailHidden,omitempty"`
+}
+
+// HideDetail withholds who acted, the target's id and what changed from each
+// event, leaving what happened, to what kind of target and when: the audit log
+// as an ordinary member reads it. A target id can be personal data (an
+// invitee's email, a colleague's user id).
+func HideDetail(events []Event) {
+	for i := range events {
+		events[i].Metadata = json.RawMessage(`{}`)
+		events[i].Actor = nil
+		events[i].ActorLabel = nil
+		events[i].TargetID = ""
+		events[i].DetailHidden = true
+	}
+}
+
+// memberVisibleTargets are the target types an ordinary member reads in the
+// org log: the org's own configuration. Events about people (members,
+// invitees, proofing subjects, customers) and their messages stay admin-only.
+var memberVisibleTargets = []string{
+	TargetOrganization,
+	TargetDepartment,
+	TargetAttestationSchema,
+	TargetAttestationTemplate,
+	TargetAttestationKey,
+	TargetHeldAttestation,
+	TargetEmailSettings,
+	TargetEmailTemplate,
+	TargetIssuerSettings,
+	TargetThemeSettings,
+	TargetOnboardingSettings,
+	TargetNotificationSettings,
+	TargetIdentitySettings,
+	TargetScreeningSettings,
+	TargetSlackSettings,
+	TargetTeamsSettings,
+	TargetProvisioningSettings,
+	TargetCSCSettings,
+	TargetIdentityProofingSettings,
+	TargetIdentityProofingFlow,
 }
 
 type Page struct {
@@ -94,6 +140,12 @@ func (r *Reader) ListForOrganization(ctx context.Context, orgID uuid.UUID, after
 	return r.page(ctx, "a.organization_id = $1", []any{orgID}, after, limit)
 }
 
+// ListMemberVisible is ListForOrganization narrowed to memberVisibleTargets:
+// the page an ordinary member reads, before HideDetail.
+func (r *Reader) ListMemberVisible(ctx context.Context, orgID uuid.UUID, after *Cursor, limit int) (Page, error) {
+	return r.page(ctx, "a.organization_id = $1 AND a.target_type = ANY($2)", []any{orgID, memberVisibleTargets}, after, limit)
+}
+
 // ListForMember matches both target_id keys a member's events use: email (for
 // invitations, before a user row exists) and the user id (everything after).
 func (r *Reader) ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *Cursor, limit int) (Page, error) {
@@ -102,6 +154,13 @@ func (r *Reader) ListForMember(ctx context.Context, orgID, userID uuid.UUID, aft
 		OR (a.target_type = 'membership'
 			AND a.target_id IN ($2, (SELECT email FROM users WHERE id = $3))))`
 	return r.page(ctx, filter, []any{orgID, userID.String(), userID}, after, limit)
+}
+
+// ListForTarget returns the org's events about one target (e.g. one identity
+// proofing request), newest first.
+func (r *Reader) ListForTarget(ctx context.Context, orgID uuid.UUID, targetType, targetID string, after *Cursor, limit int) (Page, error) {
+	filter := `a.organization_id = $1 AND a.target_type = $2 AND a.target_id = $3`
+	return r.page(ctx, filter, []any{orgID, targetType, targetID}, after, limit)
 }
 
 func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, after *Cursor, limit int) (Page, error) {
@@ -126,7 +185,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 	q := fmt.Sprintf(`
 		SELECT a.id, a.occurred_at, a.action, a.target_type, a.target_id, a.metadata,
 		       u.id, u.preferred_name, u.given_names, u.last_name,
-		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at
+		       u.avatar_bytes IS NOT NULL, u.avatar_updated_at, a.actor_label
 		FROM audit_events a
 		LEFT JOIN users u ON u.id = a.actor_user_id
 		WHERE %s
@@ -152,7 +211,7 @@ func (r *Reader) page(ctx context.Context, filter string, filterArgs []any, afte
 			avatarUpdate *time.Time
 		)
 		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Action, &e.TargetType, &e.TargetID, &meta,
-			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate); err != nil {
+			&actorID, &preferred, &given, &last, &hasAvatar, &avatarUpdate, &e.ActorLabel); err != nil {
 			return Page{}, fmt.Errorf("audit: list events scan: %w", err)
 		}
 		e.Metadata = meta

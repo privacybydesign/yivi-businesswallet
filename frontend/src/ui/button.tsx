@@ -12,7 +12,8 @@ type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: "bg-primary text-primary-fg hover:bg-primary-hover",
-  secondary: "bg-surface text-ink border border-line-strong hover:bg-surface-3",
+  secondary:
+    "bg-surface text-ink border-(length:--yb-button-outline-width) border-(--yb-button-outline) hover:bg-surface-3",
   ghost: "bg-transparent text-ink hover:bg-surface-3",
   danger: "bg-transparent text-error border border-error hover:bg-error-bg",
   dangerGhost:
@@ -53,14 +54,14 @@ export function Button({
   type = "button",
   disabled,
   ...rest
-}: ButtonProps): React.JSX.Element {
+}: Readonly<ButtonProps>): React.JSX.Element {
   return (
     <button
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={[
-        "rounded-yivi font-display inline-flex items-center justify-center gap-2 font-semibold whitespace-nowrap",
+        "rounded-button font-button inline-flex items-center justify-center gap-2 font-(--yb-button-weight) whitespace-nowrap",
         "cursor-pointer transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
         VARIANT_CLASSES[variant],
         iconOnly ? ICON_ONLY_SIZE_CLASSES[size] : SIZE_CLASSES[size],

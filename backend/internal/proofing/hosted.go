@@ -1,0 +1,525 @@
+package proofing
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/netip"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+)
+
+const linkTokenBytes = 32
+
+var (
+	ErrLinkStarted = errors.New("proofing: the link was started already")
+	// ErrRedirectNotAllowed is a hosted request's redirect off the org's
+	// allowed origins.
+	ErrRedirectNotAllowed = errors.New("proofing: the redirect is not on an allowed origin")
+	// ErrRedirectOriginInUse is a change of the org's redirect origins that
+	// drops the origin of a flow's return page.
+	ErrRedirectOriginInUse = errors.New("proofing: a flow's return page is on a redirect origin this removes")
+)
+
+func newLinkToken() (string, []byte, error) {
+	b := make([]byte, linkTokenBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", nil, fmt.Errorf("proofing: link token: %w", err)
+	}
+	raw := base64.RawURLEncoding.EncodeToString(b)
+	hash := sha256.Sum256([]byte(raw))
+	return raw, hash[:], nil
+}
+
+func (s *Service) SetHostedBaseURL(u string) { s.hostedBaseURL = u }
+
+type Hosted struct {
+	Request Request
+	// Settings is the org's retention, with the flow's branding over the org's.
+	Settings Settings
+	Flow     proofingprovider.Flow
+	// FlowSettings is the flow's hosted page settings.
+	FlowSettings FlowHosted
+}
+
+// hostedRequest is the request behind a hosted link. A paused org's links
+// still read, settle and decline: only starting one is refused (startHosted).
+func (s *Service) hostedRequest(ctx context.Context, token string) (Request, error) {
+	hash := sha256.Sum256([]byte(token))
+	return s.linkRequest(ctx, hash[:])
+}
+
+// hostedBudget is the bucket a hosted call counts against: its org's while
+// the link is live, the link's own once it is not.
+type hostedBudget struct {
+	key  string
+	live bool
+}
+
+// hostedLimitKey is the budget a hosted link's calls count against. Only a
+// live link (Request.linkLive) spends its org's: anyone who was ever sent a
+// link keeps it, and a stale one polled from a few addresses would otherwise
+// take the budget of every page the org has open. ctx carries
+// the request it read, so the handler's own hostedRequest does not read it
+// again; one ctx already carries for the link is used as is.
+func (s *Service) hostedLimitKey(ctx context.Context, token string) (context.Context, hostedBudget, error) {
+	hash := sha256.Sum256([]byte(token))
+	var req Request
+	if read, ok := ctx.Value(linkReadKey{}).(*linkRead); ok && !read.used && bytes.Equal(read.hash, hash[:]) {
+		req = read.req
+	} else {
+		var err error
+		if req, err = s.requests.GetByLinkToken(ctx, hash[:]); err != nil {
+			return ctx, hostedBudget{}, err
+		}
+		ctx = context.WithValue(ctx, linkReadKey{}, &linkRead{hash: hash[:], req: req})
+	}
+	if !req.linkLive(s.now()) {
+		return ctx, hostedBudget{key: hex.EncodeToString(hash[:])}, nil
+	}
+	return ctx, hostedBudget{key: req.OrganizationID.String(), live: true}, nil
+}
+
+type linkReadKey struct{}
+
+// linkRead is the request hostedLimitKey read for a link, handed to the
+// first hostedRequest of the same link: read once per call, not twice.
+type linkRead struct {
+	hash []byte
+	req  Request
+	used bool
+}
+
+// linkRequest is the request of the link hashing to hash: the one
+// hostedLimitKey read in ctx the first time, the store's after.
+func (s *Service) linkRequest(ctx context.Context, hash []byte) (Request, error) {
+	if read, ok := ctx.Value(linkReadKey{}).(*linkRead); ok && !read.used && bytes.Equal(read.hash, hash) {
+		read.used = true
+		return read.req, nil
+	}
+	return s.requests.GetByLinkToken(ctx, hash)
+}
+
+func (s *Service) HostedRequest(ctx context.Context, token string) (Hosted, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Hosted{}, err
+	}
+	if !req.External() {
+		return Hosted{}, ErrRequestNotFound
+	}
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
+	if err != nil {
+		return Hosted{}, err
+	}
+	flow, err := s.hostedFlow(ctx, req)
+	if err != nil {
+		return Hosted{}, err
+	}
+	flowSettings, err := s.flowHosted(ctx, req.OrganizationID, flow.ID)
+	if err != nil {
+		return Hosted{}, err
+	}
+	own, err := s.flowBranding(ctx, req.OrganizationID, flow.ID)
+	if err != nil {
+		return Hosted{}, err
+	}
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Hosted{}, err
+	}
+	if req, err = s.withLegalNotice(ctx, req); err != nil {
+		return Hosted{}, err
+	}
+	return Hosted{Request: req, Settings: settings.brandedFor(own), Flow: flow, FlowSettings: flowSettings}, nil
+}
+
+func (s *Service) hostedFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
+	tenant := orgTenant(req.OrganizationID)
+	flows, err := s.ips.ListFlows(ctx, tenant)
+	if err != nil {
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", req.OrganizationID, err)
+	}
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == req.FlowID })
+	if i < 0 {
+		return proofingprovider.Flow{}, ErrFlowNotFound
+	}
+	return flows[i], nil
+}
+
+func (s *Service) HostedStatus(ctx context.Context, token string) (Request, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Request{}, err
+	}
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	return s.withLegalNotice(ctx, req)
+}
+
+func (s *Service) StartHosted(ctx context.Context, token string, method proofingprovider.Method) (Sent, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Sent{}, err
+	}
+	return s.startHosted(ctx, req, method)
+}
+
+// Headless is a hosted request started from the caller's own UI: the app
+// link it shows (AppLink for the Idem app, WalletLink for the Yivi app).
+type Headless struct {
+	Request    Request
+	AppLink    string
+	WalletLink string
+	ExpiresAt  time.Time
+}
+
+// StartHeadless starts an external hosted request in method, as the subject
+// picking an app on the hosted page would, for an org building its own UI.
+// A Yivi one's disclosure starts at once and is polled through the hosted
+// link's routes. A request not created hosted is ErrNotHosted.
+func (s *Service) StartHeadless(ctx context.Context, orgID, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
+	if err != nil {
+		return Headless{}, err
+	}
+	if !req.Hosted {
+		return Headless{}, ErrNotHosted
+	}
+	sent, err := s.startHosted(ctx, req, method)
+	if err != nil {
+		return Headless{}, err
+	}
+	out := Headless{Request: sent.Request, AppLink: sent.DeepLink, ExpiresAt: sent.Request.session.ExpiresAt}
+	if method == proofingprovider.MethodYivi {
+		started, err := s.startYivi(ctx, sent.Request, sent.Request.session)
+		if err != nil {
+			return Headless{}, err
+		}
+		out.WalletLink = started.WalletLink
+	}
+	return out, nil
+}
+
+// startHosted creates a hosted request's engine session for method, unless
+// the org's proofing is paused: a pause lets running sessions settle, and
+// starts none.
+func (s *Service) startHosted(ctx context.Context, req Request, method proofingprovider.Method) (Sent, error) {
+	if req.CancelledAt != nil || req.PurgedAt != nil {
+		return Sent{}, ErrSessionOver
+	}
+	if err := s.checkActive(ctx, req.OrganizationID); err != nil {
+		return Sent{}, err
+	}
+	if !req.awaitingStart(s.now()) {
+		if req.session != nil {
+			return Sent{}, ErrLinkStarted
+		}
+		return Sent{}, ErrSessionOver
+	}
+	if method != proofingprovider.MethodIdem && method != proofingprovider.MethodYivi {
+		return Sent{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
+	}
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
+	if err != nil {
+		return Sent{}, err
+	}
+	flow, err := s.hostedFlow(ctx, req)
+	if err != nil {
+		return Sent{}, err
+	}
+	if !externalCompletable(flow) {
+		return Sent{}, ErrFlowNotCompletable
+	}
+	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
+		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+	}
+	// The reference photo was held for this start; a flow that needs one
+	// it lacks (the flow changed since the send) cannot run.
+	var photo *proofingprovider.Image
+	if flowNeedsReferencePhoto(flow) {
+		if photo, err = s.requests.ReferencePhoto(ctx, req); err != nil {
+			return Sent{}, err
+		}
+		if photo == nil {
+			return Sent{}, ErrFlowNotCompletable
+		}
+	}
+	tenant := orgTenant(req.OrganizationID)
+	retention := engineRetention(&settings, req.FlowKind, req.RetentionOverride)
+	ttl := settings.sessionTTL(flow)
+	sess, err := s.ips.CreateSession(ctx, tenant, proofingprovider.SessionInput{
+		FlowID: flow.ID, ClientReference: req.ID.String(), TTL: ttl, Method: method,
+		Language: string(req.Language), Retention: retention, ReferencePhoto: photo,
+	})
+	if err != nil {
+		return Sent{}, fmt.Errorf("proofing: create session request %s: %w", req.ID, err)
+	}
+	sess = withSessionTTL(sess, ttl)
+	if method == proofingprovider.MethodIdem && sess.Claim == nil {
+		return Sent{}, s.discardSession(ctx, tenant, sess,
+			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID))
+	}
+	req.Method = method
+	attached, err := s.requests.AttachSession(ctx, req, sess)
+	if err != nil {
+		return Sent{}, s.discardSession(ctx, tenant, sess, err)
+	}
+	if !attached {
+		// A concurrent start won (or the request ended meanwhile): this
+		// session, holding the reference photo, is erased again.
+		return Sent{}, s.discardSession(ctx, tenant, sess, ErrLinkStarted)
+	}
+	s.markIfRetentionMoved(ctx, req.OrganizationID, req.FlowKind, req.RetentionOverride, retention)
+	if sess.FlowVersion != 0 {
+		req.FlowVersion = sess.FlowVersion
+	}
+	req.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
+	out := Sent{Request: req}
+	if sess.Claim != nil {
+		out.DeepLink = sess.Claim.DeepLink
+	}
+	return out, nil
+}
+
+// hostedYiviSession is the running Yivi session of a hosted request.
+func (s *Service) hostedYiviSession(ctx context.Context, token string) (Request, *ipsSession, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	return s.yiviSessionOf(req)
+}
+
+// HostedClaimLink is ClaimLink for a hosted request.
+func (s *Service) HostedClaimLink(ctx context.Context, token string) (proofingprovider.Claim, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return proofingprovider.Claim{}, err
+	}
+	return s.claimLink(audit.ContextWithActor(ctx, hostedSubjectActor), req)
+}
+
+// HostedStartYivi is StartYivi for a hosted request.
+func (s *Service) HostedStartYivi(ctx context.Context, token string) (YiviStart, error) {
+	req, sess, err := s.hostedYiviSession(ctx, token)
+	if err != nil {
+		return YiviStart{}, err
+	}
+	return s.startYivi(ctx, req, sess)
+}
+
+// HostedYiviDisclosure is YiviDisclosure for a hosted request.
+func (s *Service) HostedYiviDisclosure(ctx context.Context, token string) (proofingprovider.YiviDisclosure, error) {
+	req, sess, err := s.hostedYiviSession(ctx, token)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
+	}
+	return s.yiviDisclosure(ctx, req, sess)
+}
+
+// HostedEmbedOrigins are the origins that may frame a hosted link's page: its
+// org's allowed redirect origins. It reads no the engine state.
+func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]string, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	if !req.External() {
+		return nil, ErrRequestNotFound
+	}
+	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
+	if err != nil {
+		return nil, err
+	}
+	return settings.RedirectOrigins, nil
+}
+
+// HostedLogo is the logo of a hosted request's page: its flow's own, else its
+// org's.
+func (s *Service) HostedLogo(ctx context.Context, token string) (Logo, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Logo{}, err
+	}
+	if !req.External() {
+		return Logo{}, ErrRequestNotFound
+	}
+	own, err := s.flowBranding(ctx, req.OrganizationID, req.FlowID)
+	if err != nil {
+		return Logo{}, err
+	}
+	return s.brandLogo(ctx, req.OrganizationID, req.FlowID, own)
+}
+
+// hostedSubjectActor names who acts through a hosted link in the audit log:
+// its subject, who has no account.
+var hostedSubjectActor = audit.Actor{Label: "hosted_link"}
+
+// DeclineHosted cancels a hosted request whose subject declined on its page,
+// before starting, audited as identity_proofing.session_cancelled by the link.
+// A started or settled link is ErrLinkStarted or ErrSessionOver.
+func (s *Service) DeclineHosted(ctx context.Context, token string) (Request, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.CancelledAt != nil || req.PurgedAt != nil {
+		return Request{}, ErrSessionOver
+	}
+	if !req.awaitingStart(s.now()) {
+		if req.session != nil {
+			return Request{}, ErrLinkStarted
+		}
+		return Request{}, ErrSessionOver
+	}
+	cancelled, err := s.requests.Cancel(audit.ContextWithActor(ctx, hostedSubjectActor), req, nil)
+	if errors.Is(err, errCancelSessionMoved) {
+		return Request{}, ErrLinkStarted
+	}
+	if err != nil {
+		return Request{}, err
+	}
+	if !cancelled {
+		return Request{}, ErrSessionOver
+	}
+	return s.hostedRequest(ctx, token)
+}
+
+// maxRedirectOrigins and maxRedirectLength bound what an org lists and what a
+// hosted request redirects to.
+const (
+	maxRedirectOrigins = 10
+	maxRedirectLength  = 2048
+)
+
+// The longest DNS name, and the longest label in one (RFC 1035 §2.3.4).
+const (
+	maxHostLength  = 253
+	maxLabelLength = 63
+)
+
+// loopbackHosts may use plain http in a redirect origin, for an org
+// developing against its own machine. They are hostnames as url.URL.Hostname
+// gives them: an IPv6 address without its brackets.
+var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
+
+// parseRedirectOrigin reads raw as an origin: https (or http on a loopback
+// host), a host, an optional port, and nothing else. It returns the origin
+// lowercased, as a browser serialises it.
+func parseRedirectOrigin(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
+	}
+	if !validHost(u.Hostname()) {
+		return "", fmt.Errorf("%w: %q is not an origin (scheme://host[:port])", ErrInvalidInput, raw)
+	}
+	origin := strings.ToLower(u.Scheme + "://" + u.Host)
+	if u.Scheme != "https" && (u.Scheme != "http" || !slices.Contains(loopbackHosts, strings.ToLower(u.Hostname()))) {
+		return "", fmt.Errorf("%w: %q must use https", ErrInvalidInput, raw)
+	}
+	return origin, nil
+}
+
+// validHost reports whether host, a URL's hostname, is an IP address or a DNS
+// name: dot-separated labels of letters, digits and inner hyphens. Anything
+// else, a * wildcard, a quote or a ;, would mean something else in the
+// frame-ancestors list the origin is written into. An internationalised name
+// is entered in its xn-- form, as a browser serialises the origin.
+func validHost(host string) bool {
+	if _, err := netip.ParseAddr(host); err == nil {
+		return true
+	}
+	if host == "" || len(host) > maxHostLength {
+		return false
+	}
+	for label := range strings.SplitSeq(host, ".") {
+		if label == "" || len(label) > maxLabelLength || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// normalizeOrigins checks the origins the org's hosted pages may redirect to
+// and be embedded on: each an origin, kept once, in the order given.
+func normalizeOrigins(origins []string) ([]string, error) {
+	if len(origins) > maxRedirectOrigins {
+		return nil, fmt.Errorf("%w: at most %d redirect origins", ErrInvalidInput, maxRedirectOrigins)
+	}
+	out := make([]string, 0, len(origins))
+	for _, raw := range origins {
+		origin, err := parseRedirectOrigin(raw)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(out, origin) {
+			out = append(out, origin)
+		}
+	}
+	return out, nil
+}
+
+// liveRedirect is a link's redirect while it still holds: its flow still ends
+// on a redirect, and its origin is still one of the org's. Empty otherwise.
+func liveRedirect(redirect string, settings Settings, flow FlowHosted) string {
+	if redirect == "" || flow.Completion == CompletionDone || checkRedirect(redirect, settings) != nil {
+		return ""
+	}
+	return redirect
+}
+
+// refuseOriginsInUse is ErrRedirectOriginInUse when origins leave out the
+// origin of one of the org's flows' return pages.
+func (s *Service) refuseOriginsInUse(ctx context.Context, orgID uuid.UUID, origins []string) error {
+	returnURLs, err := s.flowReturnURLs(ctx, orgID)
+	if err != nil || len(returnURLs) == 0 {
+		return err
+	}
+	// A flow the engine no longer lists has no Hosted page tab to clear it on.
+	flows, err := s.ips.ListFlows(ctx, orgTenant(orgID))
+	if err != nil {
+		return fmt.Errorf("proofing: list flows org %s: %w", orgID, err)
+	}
+	allowed := Settings{RedirectOrigins: origins}
+	for _, f := range flows {
+		if u, ok := returnURLs[f.ID]; ok && checkRedirect(u, allowed) != nil {
+			return ErrRedirectOriginInUse
+		}
+	}
+	return nil
+}
+
+// checkRedirect accepts a hosted request's redirect: an absolute URL on one of
+// the org's origins.
+func checkRedirect(raw string, settings Settings) error {
+	if len(raw) > maxRedirectLength {
+		return fmt.Errorf("%w: redirectUrl is too long", ErrInvalidInput)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil {
+		return fmt.Errorf("%w: redirectUrl must be an absolute URL", ErrInvalidInput)
+	}
+	if !slices.Contains(settings.RedirectOrigins, strings.ToLower(u.Scheme+"://"+u.Host)) {
+		return ErrRedirectNotAllowed
+	}
+	return nil
+}

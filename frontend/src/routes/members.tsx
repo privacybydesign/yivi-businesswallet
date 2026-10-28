@@ -26,6 +26,7 @@ import {
   screeningStatusTone,
 } from "../lib/screening-status";
 import { fullName, personInitials } from "../lib/name";
+import { showsReviewTag } from "../lib/review-right";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Avatar, Button, Card, Icon, Input, Table, Tag, TopBar } from "../ui";
 import type { SortDir } from "../ui";
@@ -320,7 +321,7 @@ export default function Members(): React.JSX.Element {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         {org.isError ? (
           <Card className="p-6">
             <p className="text-error text-[14px]">
@@ -341,8 +342,8 @@ export default function Members(): React.JSX.Element {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <div className="border-line flex items-center gap-3 border-b px-4 py-3">
-              <div className="max-w-[320px] flex-1">
+            <div className="border-line flex flex-wrap items-center gap-3 border-b px-4 py-3">
+              <div className="basis-full sm:max-w-[320px] sm:flex-1 sm:basis-0">
                 <Input
                   icon="search"
                   placeholder={t("members.search")}
@@ -588,11 +589,18 @@ export default function Members(): React.JSX.Element {
                           </Table.Cell>
                         )}
                         <Table.Cell>
-                          <Tag
-                            tone={member.role === "admin" ? "blue" : "default"}
-                          >
-                            <span className="capitalize">{member.role}</span>
-                          </Tag>
+                          <div className="flex flex-wrap gap-1">
+                            <Tag
+                              tone={
+                                member.role === "admin" ? "blue" : "default"
+                              }
+                            >
+                              <span className="capitalize">{member.role}</span>
+                            </Tag>
+                            {showsReviewTag(member) && (
+                              <Tag>{t("common.canReview")}</Tag>
+                            )}
+                          </div>
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           {pending && member.invitationId && (
@@ -677,10 +685,10 @@ export default function Members(): React.JSX.Element {
 function IdentityTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag
@@ -698,10 +706,10 @@ function IdentityTag({
 function VogTag({
   member,
   formatDate,
-}: {
+}: Readonly<{
   member: MemberListEntry;
   formatDate: (iso: string) => string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Tag

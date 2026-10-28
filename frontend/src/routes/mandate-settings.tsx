@@ -32,7 +32,7 @@ import {
   mandateWindowError,
   mandateWindowIsEmpty,
 } from "../lib/mandate";
-import { Button, Card, Icon, Modal, Table, Tag } from "../ui";
+import { Button, Card, Icon, Modal, Select, Table, Tag } from "../ui";
 import * as React from "react";
 
 const COLUMN_COUNT = 7;
@@ -106,7 +106,7 @@ function Field({
   hint,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   hint?: string;
@@ -115,7 +115,7 @@ function Field({
     "aria-describedby"?: string;
     "aria-invalid"?: boolean;
   }>;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : "", error ? errorId : ""]
@@ -150,10 +150,10 @@ function Field({
 function GrantMandateDialog({
   slug,
   onClose,
-}: {
+}: Readonly<{
   slug: string;
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const members = useOrganizationMembersQuery(
     slug,
@@ -247,9 +247,9 @@ function GrantMandateDialog({
           hint={t("mandates.form.granteeHint")}
           error={granteeError ? t("mandates.form.granteeRequired") : undefined}
         >
-          <select
+          <Select
             id="mandate-grantee"
-            className={control(granteeError)}
+            state={granteeError ? "error" : "ok"}
             value={granteeUserId}
             onChange={(event) => setGranteeUserId(event.target.value)}
           >
@@ -259,7 +259,7 @@ function GrantMandateDialog({
                 {`${fullName(entry)} (${entry.email})`}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <Field
@@ -267,9 +267,8 @@ function GrantMandateDialog({
           label={t("mandates.form.type")}
           hint={mandateTypeHint(type, t)}
         >
-          <select
+          <Select
             id="mandate-type"
-            className={control(false)}
             value={type}
             onChange={(event) => setType(event.target.value)}
           >
@@ -278,7 +277,7 @@ function GrantMandateDialog({
                 {mandateTypeLabel(option, t)}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <Field
@@ -286,9 +285,8 @@ function GrantMandateDialog({
           label={t("mandates.form.scope")}
           hint={t("mandates.form.scopeHint")}
         >
-          <select
+          <Select
             id="mandate-scope"
-            className={control(false)}
             value={scope}
             onChange={(event) => setScope(event.target.value)}
           >
@@ -298,7 +296,7 @@ function GrantMandateDialog({
             <option value="department">
               {t("mandates.scopes.department")}
             </option>
-          </select>
+          </Select>
         </Field>
 
         {scope === "department" && (
@@ -311,9 +309,9 @@ function GrantMandateDialog({
                 : undefined
             }
           >
-            <select
+            <Select
               id="mandate-department"
-              className={control(departmentError)}
+              state={departmentError ? "error" : "ok"}
               value={departmentId}
               onChange={(event) => setDepartmentId(event.target.value)}
             >
@@ -323,7 +321,7 @@ function GrantMandateDialog({
                   {department.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         )}
 
@@ -378,12 +376,12 @@ function RevokeMandateDialog({
   mandate,
   cascade,
   onClose,
-}: {
+}: Readonly<{
   slug: string;
   mandate: Mandate;
   cascade: Mandate[];
   onClose: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const revoke = useRevokeMandateMutation(slug);
 
@@ -545,7 +543,9 @@ function RevokeMandateDialog({
   );
 }
 
-export function MandateSettings({ slug }: { slug: string }): React.JSX.Element {
+export function MandateSettings({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const mandates = useMandatesQuery(slug);
   const authority = useMandateAuthorityQuery(slug);

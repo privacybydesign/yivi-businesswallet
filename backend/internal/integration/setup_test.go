@@ -24,6 +24,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/devverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
@@ -32,14 +33,21 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/presentation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofing"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/server"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/session"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 )
 
 const sessionTTL = time.Hour
+
+// proofingTestEncryptionKey is a throwaway AES-256 key (hex 32 bytes) sealing the
+// test orgs' proofing request data and webhook secrets.
+const proofingTestEncryptionKey = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 // disclosureToken is the client-facing presentation id used across these tests.
 // setup seeds a presentation_sessions row mapping it to a verifier transaction id
@@ -148,6 +156,9 @@ type testEnv struct {
 	// verifier is the relying-party identity the router's inbound OpenID4VP
 	// validator trusts; the fake inbound verifier signs its request objects with it.
 	verifier devverifier.Identity
+	// proofing stands in for the proofing engine: a test sets its Outcome,
+	// before creating a session, to have the subject finish it.
+	proofing *proofingprovider.Stub
 }
 
 // presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
@@ -242,7 +253,30 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	}
 	presenterHandler := openid4vppresenter.NewHandler(presenterService, presenterMetadata, requireUser, orgHandler.Authorize)
 
-	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler))
+	// Identity proofing against the in-process provider stub; nil mailer, like the org
+	// handler's (request e-mail delivery is best-effort and not exercised here).
+	proofingCipher, err := crypto.NewCipher(proofingTestEncryptionKey)
+	if err != nil {
+		t.Fatalf("proofing cipher: %v", err)
+	}
+	proofingStub := proofingprovider.NewStub()
+	proofingRecorder := audit.NewDBRecorder()
+	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
+	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
+		proofingRequests,
+		proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher),
+	), proofingStub, fake, nil)
+	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
+	proofingHandler.SetPlatformAdmins(admins)
+	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))
+	// The hosted page takes its theme and logo from the Idem app's branding, as
+	// cmd/api wires it.
+	proofingHandler.SetAppBranding(proofing.NewAppBrandingResolver(proofingRequests,
+		proofing.NewOrgSettingsStore(pool, proofingRecorder), proofing.NewFlowBrandingStore(pool, proofingRecorder),
+		themesettings.NewStore(pool, proofingRecorder)))
+
+	srv := httptest.NewServer(server.New(pool, "", authHandler, orgHandler, attestationHandler, presenterHandler, proofingHandler))
 	t.Cleanup(srv.Close)
 
 	jar, err := cookiejar.New(nil)
@@ -257,6 +291,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		pool:     pool,
 		fake:     fake,
 		verifier: verifierIdentity,
+		proofing: proofingStub,
 	}
 }
 

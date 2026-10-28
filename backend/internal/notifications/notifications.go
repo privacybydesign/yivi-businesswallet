@@ -25,6 +25,7 @@ package notifications
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -57,12 +58,7 @@ func Channels() []ChannelID {
 
 // KnownChannel reports whether id is one of the known channels.
 func KnownChannel(id ChannelID) bool {
-	for _, c := range channelIDs {
-		if c == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(channelIDs, id)
 }
 
 // Group is the family a subscribable event belongs to. It carries no behaviour —
@@ -114,6 +110,8 @@ var catalog = []CatalogEntry{
 	{audit.MembershipDeclined, GroupMembership},
 	{audit.MembershipRevoked, GroupMembership},
 	{audit.MembershipRoleChanged, GroupMembership},
+	// Its metadata is the right before and after, as role_changed's is the role.
+	{audit.MembershipReviewChanged, GroupMembership},
 	{audit.MembershipExpired, GroupMembership},
 	{audit.MembershipIdentityRequested, GroupMembership},
 	{audit.MembershipIdentityReverified, GroupMembership},

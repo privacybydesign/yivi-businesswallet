@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -23,11 +25,12 @@ func disclosure(t *testing.T, name string, value any) string {
 // sdjwt builds a compact SD-JWT VC: issuer JWT ~ disclosures... ~ (KB trailer).
 func sdjwt(t *testing.T, disclosures ...string) string {
 	t.Helper()
-	s := "issuer.jwt.sig"
+	var s strings.Builder
+	s.WriteString("issuer.jwt.sig")
 	for _, d := range disclosures {
-		s += "~" + d
+		s.WriteString("~" + d)
 	}
-	return s + "~" // trailing '~' = empty key-binding slot
+	return s.String() + "~" // trailing '~' = empty key-binding slot
 }
 
 func TestParseDisclosuresFlattensAcrossCredentials(t *testing.T) {
@@ -75,39 +78,82 @@ func TestStringifyNonStringClaim(t *testing.T) {
 	}
 }
 
+var stagingVCTs = vctsFor(defaultCredentialScheme)
+
+func TestVCTsFollowTheScheme(t *testing.T) {
+	if got := vctsFor("pbdf"); got.passport != "pbdf.pbdf.passport" || got.email != "pbdf.sidn-pbdf.email" {
+		t.Errorf("vctsFor(pbdf) = %+v", got)
+	}
+	if vctsFor("") != stagingVCTs {
+		t.Error("an empty scheme should fall back to the default (staging)")
+	}
+}
+
+// The scheme set at New reaches both the start request and the credential
+// Result names.
+func TestClientUsesTheConfiguredScheme(t *testing.T) {
+	var started startRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"vp_token":{"idcard":["jwt~~"]}}`))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&started)
+		_, _ = w.Write([]byte(`{"transaction_id":"tx","client_id":"cid","request_uri":"https://verifier.example/req"}`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "", "1", "", "pbdf", srv.Client())
+	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
+		t.Fatalf("StartPresentation: %v", err)
+	}
+	if got := started.DCQLQuery.Credentials[0].Meta.VctValues; !slices.Equal(got, []string{"pbdf.sidn-pbdf.email"}) {
+		t.Errorf("login vct_values = %v, want the pbdf email credential", got)
+	}
+
+	p, err := client.Result(context.Background(), "tx")
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if doc, ok := p.Document(); !ok || doc.Credential != "pbdf.pbdf.idcard" {
+		t.Errorf("Document() = %+v, %v, want the pbdf id-card", doc, ok)
+	}
+}
+
 func TestLoginQueryIsEmailOnly(t *testing.T) {
-	q := loginQuery()
+	q := stagingVCTs.loginQuery()
 	if len(q.Credentials) != 1 || q.Credentials[0].ID != "email" {
 		t.Fatalf("login query should request only email, got %+v", q.Credentials)
 	}
 }
 
-func TestIdentityQueryOffersPassportOrIDCard(t *testing.T) {
-	q := identityQuery()
-	if len(q.Credentials) != 4 {
-		t.Fatalf("credentials = %d, want 4 (passport, idcard, email, phone)", len(q.Credentials))
+func TestIdentityQueryDocuments(t *testing.T) {
+	q := stagingVCTs.identityQuery()
+	if len(q.Credentials) != 5 {
+		t.Fatalf("credentials = %d, want 5 (passport, idcard, residencepermit, email, phone)", len(q.Credentials))
 	}
-	// The first credential_set must be the passport-OR-idcard choice.
-	if len(q.CredentialSets) == 0 || len(q.CredentialSets[0].Options) != 2 {
-		t.Fatalf("first credential set is not a 2-way choice: %+v", q.CredentialSets)
+	// The first credential_set must be the passport-OR-idcard-OR-residencepermit choice.
+	if len(q.CredentialSets) == 0 || len(q.CredentialSets[0].Options) != 3 {
+		t.Fatalf("first credential set is not a 3-way choice: %+v", q.CredentialSets)
 	}
 }
 
 func TestQueryForScope(t *testing.T) {
-	if got := len(queryFor(ScopeLogin, nil).Credentials); got != 1 {
+	if got := len(stagingVCTs.queryFor(ScopeLogin, nil).Credentials); got != 1 {
 		t.Errorf("ScopeLogin credentials = %d, want 1", got)
 	}
-	if got := len(queryFor(ScopeIdentity, nil).Credentials); got != 4 {
-		t.Errorf("ScopeIdentity credentials = %d, want 4", got)
+	if got := len(stagingVCTs.queryFor(ScopeIdentity, nil).Credentials); got != 5 {
+		t.Errorf("ScopeIdentity credentials = %d, want 5", got)
 	}
-	if got := len(queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
+	if got := len(stagingVCTs.queryFor(ScopeVog, []string{"aspect11", "aspect43"}).Credentials[0].Claims); got != 7 {
 		t.Errorf("ScopeVog claims = %d, want 7 (5 core fields + 2 requested aspects)", got)
 	}
-	combined := queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
-	if got := len(combined.Credentials); got != 5 {
-		t.Errorf("ScopeIdentityVog credentials = %d, want 5 (identity's 4 + vog)", got)
+	combined := stagingVCTs.queryFor(ScopeIdentityVog, []string{"aspect11", "aspect43"})
+	if got := len(combined.Credentials); got != 6 {
+		t.Errorf("ScopeIdentityVog credentials = %d, want 6 (identity's 5 + vog)", got)
 	}
-	// Four independent sets: passport-or-idcard, email, phone, vog - the VOG is
+	// Four independent sets: identity document, email, phone, vog - the VOG is
 	// required, not optional, in the combined presentation.
 	if got := len(combined.CredentialSets); got != 4 {
 		t.Errorf("ScopeIdentityVog credential sets = %d, want 4", got)
@@ -115,6 +161,106 @@ func TestQueryForScope(t *testing.T) {
 	last := combined.Credentials[len(combined.Credentials)-1]
 	if last.ID != credIDVog || len(last.Claims) != 7 {
 		t.Errorf("ScopeIdentityVog's last credential = %+v, want vog with 7 claims", last)
+	}
+}
+
+// Proofing asks for the passport, id-card or residence permit, with no email
+// or phone, and its photo only when the caller asks it.
+func TestProofingQueryAsksPhotoOnlyWhenAsked(t *testing.T) {
+	q := stagingVCTs.queryFor(ScopeProofing, nil)
+	if len(q.Credentials) != 3 || len(q.CredentialSets) != 1 || len(q.CredentialSets[0].Options) != 3 {
+		t.Fatalf("proofing query = %+v, want passport OR idcard OR residencepermit only", q)
+	}
+	asksPhoto := func(c dcqlCredential) bool {
+		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == ClaimPhoto })
+	}
+	for _, c := range q.Credentials {
+		if asksPhoto(c) {
+			t.Errorf("%s asks for the photo unasked: %+v", c.ID, c.Claims)
+		}
+	}
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, []string{ClaimPhoto}).Credentials {
+		if !asksPhoto(c) {
+			t.Errorf("%s does not ask for the photo: %+v", c.ID, c.Claims)
+		}
+	}
+}
+
+// An age check asks for the age claim and never the date of birth.
+func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
+	claim, ok := AgeClaim(18)
+	if !ok || claim != "over18" {
+		t.Fatalf("AgeClaim(18) = %q, %v; want over18", claim, ok)
+	}
+	if _, ok := AgeClaim(17); ok {
+		t.Error("AgeClaim(17) answered: the credentials carry no over17")
+	}
+
+	has := func(c dcqlCredential, name string) bool {
+		return slices.ContainsFunc(c.Claims, func(cl dcqlClaim) bool { return cl.Path[0] == name })
+	}
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, []string{claim}).Credentials {
+		if !has(c, claim) || has(c, ClaimDateOfBirth) {
+			t.Errorf("%s claims = %+v, want over18 without dateOfBirth", c.ID, c.Claims)
+		}
+	}
+
+	for _, c := range stagingVCTs.queryFor(ScopeProofing, nil).Credentials {
+		if !has(c, ClaimDateOfBirth) {
+			t.Errorf("%s without an age check does not ask the date of birth", c.ID)
+		}
+	}
+}
+
+// A flow asking the address adds the registered address as a set the wallet
+// may leave out, in the production scheme whatever the configured one.
+func TestProofingAddressQueryAsksRegisteredAddressOptionally(t *testing.T) {
+	q := stagingVCTs.queryFor(ScopeProofingAddress, nil)
+	if len(q.Credentials) != 4 || len(q.CredentialSets) != 2 {
+		t.Fatalf("proofing address query = %+v, want the identity and the address", q)
+	}
+	identity, address := q.CredentialSets[0], q.CredentialSets[1]
+	if identity.Required != nil {
+		t.Errorf("identity set required = %v, want it required", *identity.Required)
+	}
+	if address.Required == nil || *address.Required || !slices.Equal(address.Options[0], []string{credIDAddress}) {
+		t.Errorf("address set = %+v, want the address, not required", address)
+	}
+	c := q.Credentials[3]
+	if c.ID != credIDAddress || !slices.Equal(c.Meta.VctValues, []string{"pbdf.gemeente.address"}) || len(c.Claims) != 4 {
+		t.Errorf("address credential = %+v, want pbdf.gemeente.address with four claims", c)
+	}
+}
+
+func TestRegisteredAddress(t *testing.T) {
+	if _, ok := (Presentation{}).RegisteredAddress(); ok {
+		t.Error("RegisteredAddress answered for a presentation without it")
+	}
+	p := Presentation{ByCredential: map[string]map[string]string{credIDAddress: {ClaimAddressStreet: "Kerkstraat"}}}
+	if got, ok := p.RegisteredAddress(); !ok || got[ClaimAddressStreet] != "Kerkstraat" {
+		t.Errorf("RegisteredAddress = %v, %v", got, ok)
+	}
+}
+
+func TestDocumentPrefersPassport(t *testing.T) {
+	p := Presentation{ByCredential: map[string]map[string]string{
+		credIDIDCard:   {ClaimGivenNames: "Card"},
+		credIDPassport: {ClaimGivenNames: "Passport"},
+	}}
+	doc, ok := p.Document()
+	if !ok || doc.Credential != stagingVCTs.passport || doc.Claims[ClaimGivenNames] != "Passport" {
+		t.Fatalf("Document() = %+v, %v", doc, ok)
+	}
+	idcard, ok := Presentation{ByCredential: map[string]map[string]string{credIDIDCard: {}}}.Document()
+	if !ok || idcard.Credential != stagingVCTs.idCard {
+		t.Fatalf("id-card Document() = %+v, %v", idcard, ok)
+	}
+	permit, ok := Presentation{ByCredential: map[string]map[string]string{credIDResidencePermit: {}}}.Document()
+	if !ok || permit.Credential != stagingVCTs.residencePermit {
+		t.Fatalf("residence permit Document() = %+v, %v", permit, ok)
+	}
+	if _, ok := (Presentation{ByCredential: map[string]map[string]string{credIDEmail: {}}}).Document(); ok {
+		t.Fatal("an email-only presentation has no document")
 	}
 }
 
@@ -166,7 +312,7 @@ func startBody(t *testing.T, intendedUseID, registrationCertificate string) map[
 	}))
 	defer srv.Close()
 
-	client := New(srv.URL, "", intendedUseID, registrationCertificate, srv.Client())
+	client := New(srv.URL, "", intendedUseID, registrationCertificate, "", srv.Client())
 	if _, err := client.StartPresentation(context.Background(), ScopeLogin); err != nil {
 		t.Fatalf("StartPresentation: %v", err)
 	}
@@ -225,7 +371,7 @@ func TestStartPresentationAsksForAGetRequestURI(t *testing.T) {
 // issuerJWT builds an SD-JWT VC issuer-signed JWT whose payload carries iat.
 func issuerJWT(t *testing.T, issuedAt int64) string {
 	t.Helper()
-	payload, err := json.Marshal(map[string]any{"vct": vctPassport, "iat": issuedAt})
+	payload, err := json.Marshal(map[string]any{"vct": stagingVCTs.passport, "iat": issuedAt})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
@@ -245,10 +391,13 @@ func TestIdentityIssuedAtReadsTheIssuerJWT(t *testing.T) {
 		t.Errorf("identityIssuedAt(passport) = %v, want unix %d", got, obtained)
 	}
 
-	// An id-card presentation is the other half of the identity credential set.
-	idcard := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimFamilyName, "Owner") + "~"
-	if got := identityIssuedAt(map[string][]string{"idcard": {idcard}}); got.Unix() != obtained {
-		t.Errorf("identityIssuedAt(idcard) = %v, want unix %d", got, obtained)
+	// The id-card and residence permit are the other options of the identity
+	// credential set.
+	for _, id := range []string{credIDIDCard, credIDResidencePermit} {
+		tok := issuerJWT(t, obtained) + "~" + disclosure(t, ClaimFamilyName, "Owner") + "~"
+		if got := identityIssuedAt(map[string][]string{id: {tok}}); got.Unix() != obtained {
+			t.Errorf("identityIssuedAt(%s) = %v, want unix %d", id, got, obtained)
+		}
 	}
 }
 

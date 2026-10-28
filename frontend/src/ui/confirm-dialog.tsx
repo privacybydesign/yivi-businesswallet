@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   message: string;
   // Label for the confirm action button (translated by the caller).
   confirmLabel: string;
+  // Label for the cancel button (translated by the caller); "Cancel" when absent.
+  cancelLabel?: string;
   // Confirm button style; defaults to the destructive variant since most
   // confirmations gate a delete.
   confirmVariant?: "primary" | "danger";
@@ -15,6 +17,9 @@ interface ConfirmDialogProps {
   onClose: () => void;
   // Disables the confirm button while the action is in flight.
   busy?: boolean;
+  // Why the action failed (translated by the caller); the dialog stays open so
+  // the user sees it and can retry.
+  error?: string;
 }
 
 // ConfirmDialog is the in-app replacement for window.confirm: an accessible,
@@ -24,11 +29,13 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
+  cancelLabel,
   confirmVariant = "danger",
   onConfirm,
   onClose,
   busy = false,
-}: ConfirmDialogProps): React.JSX.Element {
+  error,
+}: Readonly<ConfirmDialogProps>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <Modal
@@ -38,7 +45,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose}>
-            {t("common.cancel")}
+            {cancelLabel ?? t("common.cancel")}
           </Button>
           <Button
             variant={confirmVariant}
@@ -52,6 +59,11 @@ export function ConfirmDialog({
       }
     >
       <p className="text-ink-soft text-sm">{message}</p>
+      {error !== undefined && (
+        <p role="alert" className="text-error mt-2 text-[12.5px]">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }

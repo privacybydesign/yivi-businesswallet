@@ -47,6 +47,7 @@ type repository interface {
 	RevokeMandate(ctx context.Context, orgID, mandateID, revokedBy uuid.UUID, effectiveAt *time.Time, reason string) ([]Mandate, error)
 
 	UpdateMemberType(ctx context.Context, orgID, userID uuid.UUID, memberType string, externalOrganisation *string) (Member, error)
+	SetReviewRight(ctx context.Context, orgID, userID uuid.UUID, right ReviewRight) (Member, error)
 	RequestIdentification(ctx context.Context, orgID uuid.UUID, userIDs []uuid.UUID, requestedBy uuid.UUID, reason string) ([]RequestedMember, error)
 	GetIdentitySettings(ctx context.Context, orgID uuid.UUID) (IdentitySettings, error)
 	SaveIdentitySettings(ctx context.Context, orgID uuid.UUID, in IdentitySettingsInput) (IdentitySettings, error)
@@ -93,6 +94,7 @@ type inviter interface {
 
 type auditReader interface {
 	ListForOrganization(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
+	ListMemberVisible(ctx context.Context, orgID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 	ListForMember(ctx context.Context, orgID, userID uuid.UUID, after *audit.Cursor, limit int) (audit.Page, error)
 }
 
@@ -199,6 +201,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /orgs/{slug}/members/{userId}", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.offboardMember))))
 	mux.Handle("GET /orgs/{slug}/members/{userId}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.memberAuditEvents))))
 	mux.Handle("PATCH /orgs/{slug}/members/{userId}/type", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateMemberType))))
+	mux.Handle("PUT /orgs/{slug}/members/{userId}/review-right", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.updateReviewRight))))
 	mux.Handle("POST /orgs/{slug}/members/{userId}/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentification))))
 	mux.Handle("POST /orgs/{slug}/members/request-identification", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.requestIdentificationBulk))))
 	// Any member may mint their own re-identification link (the in-app banner);
@@ -235,7 +238,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/mandates", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.grantMandate))))
 	mux.Handle("POST /orgs/{slug}/mandates/{id}/revoke", orgScoped(RequireMandateAuthority(respond.HandlerFunc(h.revokeMandate))))
 
-	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(RequireOrgAdmin(respond.HandlerFunc(h.auditEvents))))
+	// Any member reads the org's configuration events; only an admin sees the
+	// rest, and who acted, on whom and what changed.
+	mux.Handle("GET /orgs/{slug}/audit-events", orgScoped(respond.HandlerFunc(h.auditEvents)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) error {
@@ -294,6 +299,9 @@ func (h *Handler) listForUser(w http.ResponseWriter, r *http.Request) error {
 type orgDetailResponse struct {
 	Organization
 	Role string `json:"role"`
+	// CanReview is whether the caller decides identity checks and data requests
+	// (MayReview): what shows them Identity proofing > Reviews.
+	CanReview bool `json:"canReview"`
 	// Identity is the caller's own re-identification state in this organisation
 	// (#240), so any member — not just an admin, who alone may read the member
 	// list — can be shown the banner when their identification is due, overdue
@@ -350,6 +358,7 @@ func (h *Handler) details(w http.ResponseWriter, r *http.Request) error {
 	respond.JSON(w, r, http.StatusOK, orgDetailResponse{
 		Organization: org,
 		Role:         roleFromContext(ctx),
+		CanReview:    MayReview(ctx),
 		Identity:     h.ownIdentity(ctx, org.ID, auth.UserFromContext(ctx).ID),
 		Vog:          h.ownVog(ctx, org.ID, auth.UserFromContext(ctx).ID),
 	})

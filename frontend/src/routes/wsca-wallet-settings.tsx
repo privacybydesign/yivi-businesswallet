@@ -11,14 +11,16 @@ import { useWhenFormatter } from "../lib/format-when";
 import { Button, Card } from "../ui";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const CONTROL =
   "rounded-yivi border-line-strong bg-surface text-ink h-9 w-full border px-3 text-[13.5px] outline-none transition-colors focus:border-ink focus:ring-ink/10 focus:ring-3";
 
 // Mirrors the backend WSCA PIN policy (secdsa.MinPINLength): at least 5 digits.
 const SECRET_PATTERN = /^\d{5,}$/;
 
-export function WscaWalletPanel({ slug }: { slug: string }): React.JSX.Element {
+export function WscaWalletPanel({
+  slug,
+}: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const status = useWscaStatusQuery(slug);
 
@@ -63,7 +65,9 @@ export function WscaWalletPanel({ slug }: { slug: string }): React.JSX.Element {
   );
 }
 
-function AccountCard({ account }: { account: WscaAccount }): React.JSX.Element {
+function AccountCard({
+  account,
+}: Readonly<{ account: WscaAccount }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   return (
@@ -101,7 +105,7 @@ function AccountCard({ account }: { account: WscaAccount }): React.JSX.Element {
   );
 }
 
-function ActivateForm({ slug }: { slug: string }): React.JSX.Element {
+function ActivateForm({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const activate = useActivateWscaMutation(slug);
   const [secret, setSecret] = useState("");
@@ -179,7 +183,7 @@ function ActivateForm({ slug }: { slug: string }): React.JSX.Element {
   );
 }
 
-function RotateForm({ slug }: { slug: string }): React.JSX.Element {
+function RotateForm({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const rotate = useRotateWscaMutation(slug);
   const [currentSecret, setCurrentSecret] = useState("");

@@ -10,7 +10,7 @@ import {
 import { useOrganizationQuery } from "../api/organization.queries";
 import { ApiError } from "../api/http";
 import { formatBytes } from "../lib/qerds";
-import { Button, Card, Icon, TopBar } from "../ui";
+import { Button, Card, Icon, Select, TopBar } from "../ui";
 import * as React from "react";
 
 const FORM_ID = "qerds-compose-form";
@@ -88,13 +88,13 @@ function Field({
   required,
   error,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className={FIELD_LABEL}>
@@ -252,14 +252,13 @@ export default function QerdsCompose(): React.JSX.Element {
         id={FORM_ID}
         onSubmit={handleSubmit}
         noValidate
-        className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]"
+        className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]"
       >
         <Card className="flex flex-col gap-5 p-5">
           <Field id="qerds-from" label={t("qerds.compose.from")}>
             {addressOptions.length > 0 ? (
-              <select
+              <Select
                 id="qerds-from"
-                className={`${control(false)} h-9`}
                 value={selectedFrom}
                 onChange={(event) => setSender(event.target.value)}
               >
@@ -272,7 +271,7 @@ export default function QerdsCompose(): React.JSX.Element {
                       : address.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : (
               <input
                 id="qerds-from"
@@ -295,8 +294,8 @@ export default function QerdsCompose(): React.JSX.Element {
               // Explicit picker for the interim address book (until the European
               // Digital Directory); the free-text input below still accepts any
               // address.
-              <select
-                className={`${control(false)} mb-2 h-9`}
+              <Select
+                className="mb-2 w-full"
                 value=""
                 onChange={(event) => {
                   if (event.target.value !== "") {
@@ -311,7 +310,7 @@ export default function QerdsCompose(): React.JSX.Element {
                     {contact.name} — {contact.address}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
             <input
               id="qerds-recipient"

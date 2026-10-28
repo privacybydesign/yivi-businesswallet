@@ -10,13 +10,14 @@ import {
   AA_CONTRAST,
   COLOR_FIELD_DEFAULTS,
   DEFAULT_PRIMARY,
+  FONT_OPTIONS,
   primaryContrastFloor,
   readableForeground,
 } from "../lib/theme";
-import { Button, Card } from "../ui";
+import { Button, Card, Select } from "../ui";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const GROUP_LABEL =
   "text-ink col-span-2 mt-2 text-[12px] font-semibold first:mt-0";
 const CONTROL =
@@ -71,27 +72,6 @@ const COLOR_GROUPS = [
   fields: ReadonlyArray<{ field: ThemeColorField; labelKey: string }>;
 }>;
 
-// Curated body-font options. Values are full font-family stacks; each is either
-// a bundled font (Open Sans, Alexandria) shipped with its open licence, or a
-// system/web-safe stack rendered from the client's own fonts — so nothing is
-// distributed by us and there is no commercial-licence exposure. The default
-// (Open Sans) stores "" so an unset theme keeps the app default. Names are
-// proper nouns and stay untranslated.
-const FONT_OPTIONS = [
-  { name: "Open Sans", value: "" },
-  { name: "Alexandria", value: '"Alexandria", system-ui, sans-serif' },
-  {
-    name: "System UI",
-    value: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-  },
-  { name: "Helvetica / Arial", value: '"Helvetica Neue", Arial, sans-serif' },
-  { name: "Georgia", value: 'Georgia, "Times New Roman", serif' },
-  {
-    name: "Monospace",
-    value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-  },
-] as const;
-
 const ALL_COLOR_FIELDS = COLOR_GROUPS.flatMap((g) =>
   g.fields.map((f) => f.field),
 );
@@ -107,9 +87,9 @@ function colorsFromSettings(settings: OrgTheme): Colors {
 
 export function ThemeSettingsPanel({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const theme = useOrgThemeQuery(slug);
 
@@ -139,21 +119,24 @@ export function ThemeSettingsPanel({
   );
 }
 
-function ColorField({
+// One theme colour: a picker, its hex and a reset; empty shows `fallback`.
+// Laid out as two cells of a label/control grid. The customer branding tab
+// uses it too.
+export function ColorField({
   label,
   value,
   fallback,
   onChange,
   onClear,
   clearLabel,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   fallback: string;
   onChange: (next: string) => void;
   onClear: () => void;
   clearLabel: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const active = HEX_PATTERN.test(value);
   // Hex is case-insensitive; normalise to lower case so the native colour
   // picker (which only accepts lower-case #rrggbb) round-trips a saved value.
@@ -189,10 +172,10 @@ function ColorField({
 function ThemeForm({
   slug,
   settings,
-}: {
+}: Readonly<{
   slug: string;
   settings: OrgTheme;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useUpdateOrgThemeMutation(slug);
 
@@ -311,8 +294,8 @@ function ThemeForm({
           {t("themeSettings.typographyGroup")}
         </span>
         <span className={EYEBROW}>{t("themeSettings.font")}</span>
-        <select
-          className={`${CONTROL} max-w-[220px]`}
+        <Select
+          className="w-full max-w-[220px]"
           value={fontFamily}
           onChange={(event) => setFontFamily(event.target.value)}
           aria-label={t("themeSettings.font")}
@@ -327,7 +310,7 @@ function ThemeForm({
               {option.name}
             </option>
           ))}
-        </select>
+        </Select>
 
         <span className={GROUP_LABEL}>{t("themeSettings.logoGroup")}</span>
         <span className={EYEBROW}>{t("themeSettings.logo")}</span>
@@ -383,7 +366,7 @@ function ThemeForm({
         <span className={EYEBROW}>{t("themeSettings.preview")}</span>
         <div className="mt-2.5 flex items-center gap-3">
           <span
-            className="rounded-yivi font-display inline-flex h-9 items-center px-3.5 text-[13.5px] font-semibold"
+            className="rounded-button font-button inline-flex h-9 items-center px-3.5 text-[13.5px] font-(--yb-button-weight)"
             style={{
               backgroundColor: previewPrimary,
               color: readableForeground(previewPrimary),

@@ -37,11 +37,13 @@ import {
 } from "../lib/audit-event";
 import { fullName, personInitials } from "../lib/name";
 import { useWhenFormatter } from "../lib/format-when";
+import { showsReviewTag } from "../lib/review-right";
+import { MemberProofing } from "./member-proofing";
 import { Avatar, Button, Card, Icon, Modal, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 
 const CONFLICT_STATUS = 409;
 
@@ -49,11 +51,11 @@ function DetailRow({
   label,
   value,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -75,15 +77,15 @@ function TimelineItem({
   formatWhen,
   t,
   isLast,
-}: {
+}: Readonly<{
   event: AuditEvent;
   dateFormatter: Intl.DateTimeFormat;
   formatWhen: (iso: string) => string;
   t: TFunction;
   isLast: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const visual = auditVisual(event.action);
-  const subject = auditSubject(event, dateFormatter);
+  const subject = auditSubject(event, dateFormatter, t);
   return (
     <li className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -156,7 +158,7 @@ export default function MemberDetail(): React.JSX.Element {
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("memberDetail.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const message = (text: string, isError = false): React.JSX.Element => (
@@ -213,7 +215,7 @@ export default function MemberDetail(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
           <Card className="p-6">
             <h2 className="text-[16px] font-semibold">
@@ -364,6 +366,7 @@ export default function MemberDetail(): React.JSX.Element {
                   {screeningStatusLabel(member.vogStatus, t)}
                 </Tag>
               )}
+              {showsReviewTag(member) && <Tag>{t("common.canReview")}</Tag>}
             </div>
           </div>
           <div className="flex flex-col gap-2.5 p-5">
@@ -417,6 +420,7 @@ export default function MemberDetail(): React.JSX.Element {
             )}
           </div>
           <div className="border-line flex flex-col gap-2 border-t p-4">
+            <MemberProofing slug={slug} userId={id} />
             {requestableIdentity({
               status: "active",
               identityStatus: member.identityStatus,

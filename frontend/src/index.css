@@ -1,13 +1,14 @@
 /* ==========================================================================
    Yivi Business Wallet — global stylesheet.
 
-   Design tokens are lifted verbatim from the Yivi Design System
-   (`colors_and_type.css` + `ui_kits/business/tokens.css`). They live as plain
+   Design tokens were lifted verbatim from the Yivi Design System
+   (`colors_and_type.css` + `ui_kits/business/tokens.css`, no longer kept in
+   this repository). They live as plain
    CSS custom properties on :root so they remain a single source of truth, and
    `@theme inline` maps them onto Tailwind utilities (bg-*, text-*, font-*, …).
 
-   Dark mode follows the OS `prefers-color-scheme` preference: a single
-   `@media (prefers-color-scheme: dark)` block (further down) overrides the
+   Dark mode follows the top bar's switch (Auto follows the OS): a single
+   `[data-color-scheme="dark"]` block (further down) overrides the
    neutral, surface, status and elevation --yb-* variables with the design
    system's dark values, and every utility resolves through those variables so
    the whole shell flips at once. A tenant's brand seed colours are applied
@@ -62,11 +63,50 @@
   font-display: swap;
 }
 
+/* --------- Montserrat + Nunito (the white-label design), self-hosted ---------
+   The heading and body pair of the white-label design (see the
+   [data-design="white-label"] block), the same pair the Idem app draws with. */
+@font-face {
+  font-family: "Montserrat";
+  src: url("./assets/fonts/Montserrat-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Montserrat";
+  src: url("./assets/fonts/Montserrat-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Nunito";
+  src: url("./assets/fonts/Nunito-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Nunito";
+  src: url("./assets/fonts/Nunito-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Nunito";
+  src: url("./assets/fonts/Nunito-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* --------- Raw design tokens (single source of truth) --------- */
 :root {
   /* Let the browser render native UI (form controls, scrollbars, the colour
      picker) to match the active light/dark palette. */
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* Brand & ink */
   --yb-brand: #ba3354; /* rose — accent only */
@@ -87,6 +127,7 @@
   /* Communicating */
   --yb-success: #00973a;
   --yb-success-bg: #e3f4e9;
+  --yb-success-fg: #1e6b3a;
   --yb-warning: #eba73b;
   --yb-warning-fg: #8a5d17;
   --yb-warning-bg: #fbefd8;
@@ -115,16 +156,47 @@
   --yb-topbar-fg-soft: var(--yb-ink-soft);
   --yb-topbar-line: var(--yb-line);
 
-  /* Body font family — overridable per org (mode-safe; set inline by the theme
-     engine). Headings keep --font-display (Alexandria). */
+  /* Font families — overridable per org (mode-safe; set inline by the theme
+     engine, which sets an org's font for headings and body alike). */
   --yb-font-sans:
     "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --yb-font-display:
+    "Alexandria", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Buttons: their font, weight and outline, which the white-label design
+     changes. */
+  --yb-font-button: var(--yb-font-display);
+  --yb-button-weight: 600;
+  --yb-button-outline: var(--yb-line-strong);
+  --yb-button-outline-width: 1px;
 
   /* Radii & elevation */
   --yb-radius: 8px;
   --yb-radius-sm: 6px;
+  --yb-radius-card: var(--yb-radius);
+  --yb-radius-button: var(--yb-radius);
   --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
   --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+
+  /* The current step's label (ui/stepper.tsx). */
+  --yb-step-label: var(--yb-ink);
+
+  /* Small caps labels (table heads, stat and field labels), an icon's tile,
+     a stat's icon and a plain tag, which the white-label design draws in its
+     own type and brand tints. */
+  --yb-font-label: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --yb-tile: var(--yb-surface-3);
+  --yb-tile-fg: var(--yb-ink);
+  --yb-stat-icon: var(--yb-muted);
+  --yb-tag: var(--yb-surface-3);
+  --yb-tag-fg: var(--yb-ink-soft);
+
+  /* An org's own logo in the sidebar (ui/logo.tsx). */
+  --yb-logo-height: 22px;
+
+  /* The login background's two blob colours (see .mesh-wave). */
+  --yb-mesh-a: #ba3354;
+  --yb-mesh-b: #1d4e89;
 }
 
 /* --------- Dark palette ---------
@@ -136,39 +208,119 @@
    win over these defaults and carry into dark mode unchanged. The status
    foregrounds come from the design system's dark tag palette so each stays
    ≥4.5:1 (WCAG 2.2 AA) on its dark chip background — pinned by
-   index-css-dark.test.ts. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --yb-ink: #f2efec;
-    --yb-ink-soft: #b8b3b0;
-    --yb-muted: #7e7876;
+   index-css-dark.test.ts. It applies under data-color-scheme="dark", which
+   lib/color-scheme.ts sets from the top bar's switch or the OS appearance;
+   `:where` keeps the selector at :root's specificity, so an org theme's
+   `:root:root` block still wins. */
+:root:where([data-color-scheme="dark"]) {
+  color-scheme: dark;
 
-    --yb-line: #2b2928;
-    --yb-line-strong: #3a3736;
-    --yb-surface: #1d1b1a;
-    --yb-surface-2: #141312;
-    --yb-surface-3: #252322;
-    --yb-highlight: #1c3648;
-    --yb-highlight-border: #2b5774;
+  --yb-ink: #f2efec;
+  --yb-ink-soft: #b8b3b0;
+  --yb-muted: #7e7876;
 
-    --yb-success: #6ad28c;
-    --yb-success-bg: #10321e;
-    --yb-warning: #eba73b;
-    --yb-warning-fg: #eba73b;
-    --yb-warning-bg: #3a2e14;
-    --yb-error: #ed7070;
-    --yb-error-bg: #3b1b1b;
-    --yb-link: #7db4e8;
+  --yb-line: #2b2928;
+  --yb-line-strong: #3a3736;
+  --yb-surface: #1d1b1a;
+  --yb-surface-2: #141312;
+  --yb-surface-3: #252322;
+  --yb-highlight: #1c3648;
+  --yb-highlight-border: #2b5774;
 
-    /* Default (unthemed) primary flips to light ink; an org's primary seed
-       overrides this inline. */
-    --yb-primary: #f2efec;
-    --yb-primary-hover: #e0dad4;
-    --yb-primary-fg: #141312;
+  --yb-success: #6ad28c;
+  --yb-success-bg: #10321e;
+  --yb-success-fg: #6ad28c;
+  --yb-warning: #eba73b;
+  --yb-warning-fg: #eba73b;
+  --yb-warning-bg: #3a2e14;
+  --yb-error: #ed7070;
+  --yb-error-bg: #3b1b1b;
+  --yb-link: #7db4e8;
 
-    --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
-    --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
-  }
+  /* Default (unthemed) primary flips to light ink; an org's primary seed
+     overrides this inline. */
+  --yb-primary: #f2efec;
+  --yb-primary-hover: #e0dad4;
+  --yb-primary-fg: #141312;
+
+  --yb-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  --yb-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* --------- White-label design ---------
+   An org with a theme of its own, and every hosted customer page, is shown in
+   the white-label design instead of Yivi's: the design the Idem app has as its
+   own (derived from the CM.com design), so a tenant's portal, its customers'
+   pages and the app look like one product. lib/theme.ts sets
+   data-design="white-label" for it. These are the design's own values; the
+   org's colours and font win over them (inline and in the `:root:root` block),
+   and whatever the org leaves out keeps them. `:where` keeps every selector at
+   :root's specificity, so source order decides against the Yivi defaults
+   above. */
+:root:where([data-design="white-label"]) {
+  /* Montserrat headings, Nunito body; buttons in the body font, bold. */
+  --yb-font-display:
+    "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --yb-font-sans:
+    "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --yb-font-button: var(--yb-font-sans);
+  --yb-button-weight: 700;
+
+  /* Pill buttons; secondary ones outlined in the text colour. Rounder cards. */
+  --yb-radius-button: 9999px;
+  --yb-radius-card: 16px;
+  --yb-button-outline: var(--yb-ink);
+  --yb-button-outline-width: 2px;
+
+  --yb-mesh-a: var(--yb-brand);
+  --yb-mesh-b: var(--yb-primary);
+
+  /* Step labels in the accent, as the Idem app's. */
+  --yb-step-label: var(--yb-brand);
+
+  /* Labels in the body font, as the Idem app has no monospace. */
+  --yb-font-label: var(--yb-font-sans);
+
+  /* A logo is the brand's mark, not a wordmark beside "Business". */
+  --yb-logo-height: 32px;
+
+  /* The open nav item: a tint of the brand colour. */
+  --yb-sidebar-active: color-mix(
+    in srgb,
+    var(--yb-primary) 10%,
+    var(--yb-sidebar)
+  );
+}
+
+/* The design's cool neutrals and status colours, light. */
+:root:where([data-design="white-label"]:not([data-color-scheme="dark"])) {
+  --yb-ink: #101e1e;
+  --yb-ink-soft: #344055;
+  --yb-muted: #6f7786;
+
+  --yb-line: #eaebee;
+  --yb-line-strong: #d6d9dd;
+  --yb-surface: #ffffff;
+  --yb-surface-2: #fbfbfc;
+  --yb-surface-3: #f5f5f6;
+  --yb-highlight: color-mix(in srgb, var(--yb-primary) 8%, #ffffff);
+  --yb-highlight-border: color-mix(in srgb, var(--yb-primary) 20%, #ffffff);
+
+  --yb-success: #1f6b4c;
+  --yb-success-bg: #e9f9f1;
+  --yb-success-fg: #1f6b4c;
+  --yb-error: #b42335;
+  --yb-error-bg: #fbeaec;
+
+  --yb-primary-hover: #000000;
+
+  /* Icon tiles in a tint of the primary, tags in a tint of the accent, as
+     the Idem app's. */
+  --yb-tile: color-mix(in srgb, var(--yb-primary) 10%, #ffffff);
+  --yb-tile-fg: var(--yb-primary);
+  --yb-stat-icon: var(--yb-primary);
+  --yb-tag: color-mix(in srgb, var(--yb-brand) 10%, #ffffff);
+  --yb-tag-fg: var(--yb-brand);
 }
 
 /* --------- Map tokens onto Tailwind utilities --------- */
@@ -189,12 +341,18 @@
 
   --color-success: var(--yb-success);
   --color-success-bg: var(--yb-success-bg);
+  --color-success-fg: var(--yb-success-fg);
   --color-warning: var(--yb-warning);
   --color-warning-fg: var(--yb-warning-fg);
   --color-warning-bg: var(--yb-warning-bg);
   --color-error: var(--yb-error);
   --color-error-bg: var(--yb-error-bg);
   --color-link: var(--yb-link);
+  --color-tile: var(--yb-tile);
+  --color-tile-fg: var(--yb-tile-fg);
+  --color-stat-icon: var(--yb-stat-icon);
+  --color-tag: var(--yb-tag);
+  --color-tag-fg: var(--yb-tag-fg);
 
   --color-primary: var(--yb-primary);
   --color-primary-hover: var(--yb-primary-hover);
@@ -210,13 +368,16 @@
   --color-topbar-fg-soft: var(--yb-topbar-fg-soft);
   --color-topbar-line: var(--yb-topbar-line);
 
-  --font-display:
-    "Alexandria", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--yb-font-display);
   --font-sans: var(--yb-font-sans);
+  --font-button: var(--yb-font-button);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-label: var(--yb-font-label);
 
   --radius-yivi: var(--yb-radius);
   --radius-yivi-sm: var(--yb-radius-sm);
+  --radius-card: var(--yb-radius-card);
+  --radius-button: var(--yb-radius-button);
 
   --shadow-card: var(--yb-shadow);
   --shadow-card-lg: var(--yb-shadow-lg);
@@ -263,7 +424,8 @@
 
 /* --------- Animated mesh background (login / landing hero) ---------
    Two blurred blob layers drift in opposite directions over the warm
-   surface, using the brand rose and highlight blue at low alpha so the
+   surface, using the brand rose and highlight blue (in the white-label
+   design the org's accent and primary) at low alpha so the
    foreground text and sign-in card stay readable. Motion is transform-only
    (GPU-friendly) and disabled under `prefers-reduced-motion`. */
 @layer components {
@@ -289,12 +451,12 @@
     background-image:
       radial-gradient(
         30% 40% at 25% 30%,
-        rgba(186, 51, 84, 0.18),
+        color-mix(in srgb, var(--yb-mesh-a) 18%, transparent),
         transparent 62%
       ),
       radial-gradient(
         32% 42% at 78% 72%,
-        rgba(186, 51, 84, 0.12),
+        color-mix(in srgb, var(--yb-mesh-a) 12%, transparent),
         transparent 62%
       );
     animation: mesh-drift-a 22s ease-in-out infinite alternate;
@@ -304,12 +466,12 @@
     background-image:
       radial-gradient(
         34% 44% at 80% 22%,
-        rgba(29, 78, 137, 0.16),
+        color-mix(in srgb, var(--yb-mesh-b) 16%, transparent),
         transparent 62%
       ),
       radial-gradient(
         30% 40% at 20% 82%,
-        rgba(29, 78, 137, 0.12),
+        color-mix(in srgb, var(--yb-mesh-b) 12%, transparent),
         transparent 62%
       );
     animation: mesh-drift-b 26s ease-in-out infinite alternate;
@@ -344,5 +506,63 @@
     .mesh-wave::after {
       animation: none;
     }
+  }
+}
+
+/* --------- Face match slider ---------
+   The flow editor's threshold (routes/flow-editor-threshold.tsx) draws its own
+   track and fill; the native range input on top is transparent apart from its
+   thumb, so keyboard, touch and screen reader behaviour stay the browser's.
+   The thumb's 20px is THUMB_SIZE there, which places the track and the scale. */
+@layer components {
+  .threshold-range {
+    --thumb: var(--yb-ink);
+    appearance: none;
+    height: 28px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .threshold-range[data-warn] {
+    --thumb: var(--yb-warning-fg);
+  }
+
+  .threshold-range:focus-visible {
+    outline: 2px solid var(--yb-ink);
+    outline-offset: 2px;
+    border-radius: var(--yb-radius-sm);
+  }
+
+  .threshold-range::-webkit-slider-runnable-track {
+    height: 28px;
+    background: transparent;
+  }
+
+  .threshold-range::-moz-range-track {
+    height: 28px;
+    background: transparent;
+  }
+
+  .threshold-range::-webkit-slider-thumb {
+    appearance: none;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    margin-top: 4px;
+    border: 2px solid var(--thumb);
+    border-radius: 50%;
+    background: var(--yb-surface);
+    box-shadow: var(--yb-shadow);
+  }
+
+  .threshold-range::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--thumb);
+    border-radius: 50%;
+    background: var(--yb-surface);
+    box-shadow: var(--yb-shadow);
   }
 }

@@ -21,6 +21,7 @@ import {
   Card,
   Icon,
   IdentityDisclosure,
+  ColorSchemeSwitcher,
   LanguageSwitcher,
   Logo,
   Outcome,
@@ -145,7 +146,8 @@ export default function Login(): React.JSX.Element {
 
   return (
     <div className="mesh-wave relative flex min-h-screen flex-col justify-center">
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+      <div className="absolute top-4 right-4 flex gap-2 sm:top-6 sm:right-6">
+        <ColorSchemeSwitcher />
         <LanguageSwitcher />
       </div>
       <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-2 lg:gap-16">
@@ -176,7 +178,7 @@ export default function Login(): React.JSX.Element {
         </section>
 
         <div className="order-1 flex justify-center lg:order-2 lg:justify-end">
-          <Card className="w-full max-w-md p-8">
+          <Card className="w-full max-w-md p-6 sm:p-8">
             <div className="flex justify-center">
               <Logo />
             </div>

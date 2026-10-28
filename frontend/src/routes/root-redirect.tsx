@@ -35,7 +35,7 @@ export default function RootRedirect(): React.JSX.Element | null {
   if (orgs.length === 0) {
     return (
       <div className="bg-surface-2 flex min-h-screen items-center justify-center p-6">
-        <Card className="w-full max-w-md p-8 text-center">
+        <Card className="w-full max-w-md p-6 text-center sm:p-8">
           <div className="flex justify-center">
             <Logo />
           </div>

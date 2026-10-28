@@ -2,11 +2,20 @@ import { createBrowserRouter } from "react-router";
 import type { CrumbContext, RouteHandle } from "./ui";
 import type { Member, OrganizationDetail } from "./api/organization";
 import type { QerdsMessageWithEvidence } from "./api/qerds";
+import type { HeldAttestationClaims } from "./api/attestations";
+import type { ProofingFlow, ProofingRequest } from "./api/identity-proofing";
+import { credentialDisplayName } from "./lib/credential-display";
 import {
   organizationMemberQueryKey,
   organizationQueryKey,
 } from "./api/organization.queries";
 import { qerdsMessageQueryKey } from "./api/qerds.queries";
+import { heldClaimsBaseQueryKey } from "./api/attestations.queries";
+import {
+  proofingFlowsQueryKey,
+  proofingRequestQueryKey,
+} from "./api/identity-proofing.queries";
+import { personName } from "./lib/proofing-reviews";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -23,6 +32,14 @@ import IdentityReviews from "./routes/identity-reviews";
 import Dashboard from "./routes/dashboard";
 import Members from "./routes/members";
 import VogSubmit from "./routes/vog-submit";
+import IdentityProofingFlow from "./routes/identity-proofing-flow";
+import IdentityProofingFlows from "./routes/identity-proofing-flows";
+import IdentityProofingOverview from "./routes/identity-proofing-overview";
+import ProofingVerify from "./routes/proofing-verify";
+import ProofingPeople from "./routes/proofing-people";
+import ProofingReviews from "./routes/proofing-reviews";
+import ProofingReview from "./routes/proofing-review";
+import Developers from "./routes/developers";
 import MemberInvite from "./routes/member-invite";
 import MemberDetail from "./routes/member-detail";
 import MemberEdit from "./routes/member-edit";
@@ -43,6 +60,7 @@ import Settings from "./routes/settings";
 import Signing from "./routes/signing";
 import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
+import Proof from "./routes/proof";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -60,6 +78,45 @@ const orgCrumb: RouteHandle = {
   },
 };
 const membersCrumb: RouteHandle = { crumb: ({ t }) => t("members.title") };
+const identityProofingCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.title"),
+};
+const identityProofingFlowsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofingFlows.title"),
+};
+const identityProofingFlowCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const flows = queryClient.getQueryData<ProofingFlow[]>(
+      proofingFlowsQueryKey(params.orgSlug ?? ""),
+    );
+    return (
+      flows?.find((flow) => flow.id === params.flowId)?.name ??
+      t("identityProofingFlows.title")
+    );
+  },
+};
+const proofingPeopleCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.people.title"),
+};
+const proofingReviewsCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.reviews.title"),
+};
+const proofingReviewCrumb: RouteHandle = {
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const request = queryClient.getQueryData<ProofingRequest>(
+      proofingRequestQueryKey(params.orgSlug ?? "", params.requestId ?? ""),
+    );
+    return request
+      ? personName(request, t)
+      : t("identityProofing.reviews.title");
+  },
+};
+const developersCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.developers.title"),
+};
+const proofingVerifyCrumb: RouteHandle = {
+  crumb: ({ t }) => t("identityProofing.onScreen.title"),
+};
 const inviteCrumb: RouteHandle = { crumb: ({ t }) => t("memberInvite.title") };
 const memberCrumb: RouteHandle = {
   crumb: ({ params, queryClient, t }: CrumbContext) => {
@@ -94,10 +151,23 @@ const qerdsMessageCrumb: RouteHandle = {
 const attestationsCrumb: RouteHandle = {
   crumb: ({ t }) => t("attestations.title"),
 };
-// The credential's own name is only known once its claims load, and the page's
-// title already carries it, so the crumb stays a static label.
+// The credential's name once its detail is cached (in whichever language it was
+// read), else a generic label.
 const heldCredentialCrumb: RouteHandle = {
-  crumb: ({ t }) => t("attestations.held.detail.title"),
+  crumb: ({ params, queryClient, t }: CrumbContext) => {
+    const cached = queryClient
+      .getQueriesData<HeldAttestationClaims>({
+        queryKey: heldClaimsBaseQueryKey(
+          params.orgSlug ?? "",
+          params.heldId ?? "",
+        ),
+      })
+      .map(([, data]) => data)
+      .find((data) => data?.vct !== undefined);
+    return cached
+      ? cached.displayName || credentialDisplayName(cached.vct)
+      : t("attestations.held.detail.title");
+  },
 };
 const postguardCrumb: RouteHandle = { crumb: ({ t }) => t("postguard.title") };
 const postguardSendCrumb: RouteHandle = {
@@ -141,6 +211,9 @@ export const router = createBrowserRouter([
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },
+      // An external person verifying from a hosted link: public, keyed by
+      // the link's token, on the subject's own device.
+      { path: "/p/:token", Component: Proof },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,
@@ -169,6 +242,52 @@ export const router = createBrowserRouter([
                 handle: orgCrumb,
                 children: [
                   { index: true, Component: Dashboard },
+                  {
+                    path: "identity-proofing",
+                    handle: identityProofingCrumb,
+                    children: [
+                      { index: true, Component: IdentityProofingOverview },
+                      {
+                        path: "flows",
+                        handle: identityProofingFlowsCrumb,
+                        children: [
+                          { index: true, Component: IdentityProofingFlows },
+                          {
+                            path: ":flowId",
+                            Component: IdentityProofingFlow,
+                            handle: identityProofingFlowCrumb,
+                          },
+                        ],
+                      },
+                      {
+                        path: "people",
+                        Component: ProofingPeople,
+                        handle: proofingPeopleCrumb,
+                      },
+                      {
+                        path: "reviews",
+                        handle: proofingReviewsCrumb,
+                        children: [
+                          { index: true, Component: ProofingReviews },
+                          {
+                            path: ":requestId",
+                            Component: ProofingReview,
+                            handle: proofingReviewCrumb,
+                          },
+                        ],
+                      },
+                      {
+                        path: "developers",
+                        Component: Developers,
+                        handle: developersCrumb,
+                      },
+                      {
+                        path: "verify",
+                        Component: ProofingVerify,
+                        handle: proofingVerifyCrumb,
+                      },
+                    ],
+                  },
                   {
                     path: "members",
                     handle: membersCrumb,

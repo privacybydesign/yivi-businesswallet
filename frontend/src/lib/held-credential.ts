@@ -9,6 +9,7 @@ import type { TFunction } from "i18next";
 import { HELD_SOURCES } from "../api/attestations";
 import type { HeldAttestation, HeldSource } from "../api/attestations";
 import { credentialDisplayName } from "./credential-display";
+import { fullName } from "./name";
 
 // How long before a credential expires it moves to "Needs attention", so the org
 // has time to have it re-issued before it stops working.
@@ -194,9 +195,9 @@ export interface HeldCredentialWithStatus {
 }
 
 // heldSections applies the search and filters, then splits what is left into the
-// two sections the view stacks: what needs attention (revoked, expired, expiring
-// soon) and what is simply valid. Both keep the backend's order (most recently
-// received first).
+// two sections the view stacks: what needs attention (revoked, then expired, then
+// expiring soon) and what is simply valid. Within one state both keep the
+// backend's order (most recently received first).
 export function heldSections(
   credentials: HeldAttestation[],
   filters: HeldFilters,
@@ -221,5 +222,150 @@ export function heldSections(
       status,
     });
   }
+  // The worst first: what can no longer be used, then what is about to stop.
+  // The sort is stable, so the backend's order holds within one state.
+  attention.sort((a, b) => ATTENTION_RANK[a.status] - ATTENTION_RANK[b.status]);
   return { attention, valid };
+}
+
+const ATTENTION_RANK: Record<HeldStatus, number> = {
+  revoked: 0,
+  expired: 1,
+  expiringSoon: 2,
+  valid: 3,
+};
+
+// The status chips of the Wallet view: "" is every credential.
+export const HELD_CHIP_FILTERS = [
+  "",
+  "valid",
+  "expiringSoon",
+  "expired",
+  "revoked",
+] as const satisfies readonly HeldStatusFilter[];
+
+// How many credentials each chip would show.
+export function heldStatusCounts(
+  credentials: readonly HeldValidity[],
+  now: Date,
+): Record<(typeof HELD_CHIP_FILTERS)[number], number> {
+  const counts = { "": 0, valid: 0, expiringSoon: 0, expired: 0, revoked: 0 };
+  for (const credential of credentials) {
+    counts[""]++;
+    counts[heldStatus(credential, now)]++;
+  }
+  return counts;
+}
+
+// Whole days until the credential expires, negative once it has (days since);
+// null when it does not expire. A part of a day counts towards the nearer end,
+// so "expires in 1 day" never reads for something that has hours left.
+export function heldDaysToExpiry(
+  credential: HeldValidity,
+  now: Date,
+): number | null {
+  const expiresAt = heldExpiryAt(credential);
+  if (expiresAt === null) {
+    return null;
+  }
+  const days = (expiresAt - now.getTime()) / MS_PER_DAY;
+  return days >= 0 ? Math.floor(days) : Math.ceil(days);
+}
+
+// One line of a held credential's history.
+export interface HeldHistoryEntry {
+  at: string;
+  kind: "received" | "statusChanged" | "statusChecked" | "other";
+  action: string;
+  actor?: string;
+  sender?: string;
+  revoked?: boolean;
+}
+
+interface HistoryEvent {
+  occurredAt: string;
+  action: string;
+  metadata: Record<string, unknown>;
+  actor: {
+    preferredName?: string | null;
+    givenNames: string;
+    lastName: string;
+  } | null;
+  detailHidden?: boolean;
+}
+
+function afterField(event: HistoryEvent, key: string): unknown {
+  const after = event.metadata.after;
+  return typeof after === "object" && after !== null
+    ? (after as Record<string, unknown>)[key]
+    : undefined;
+}
+
+// heldHistory merges a credential's audit trail with what the credential itself
+// records: its receipt (for one received before the trail recorded that) and
+// its last status check, oldest first. The check comes last: it is stamped a
+// moment before the events it causes, so its own time would sort it above them.
+export function heldHistory(
+  events: readonly HistoryEvent[],
+  credential: { receivedAt: string; statusCheckedAt?: string },
+): HeldHistoryEntry[] {
+  const entries: HeldHistoryEntry[] = events.map((event) => {
+    // Named as the audit log names its actors.
+    const actor = event.actor
+      ? fullName({
+          ...event.actor,
+          preferredName: event.actor.preferredName ?? null,
+        })
+      : undefined;
+    switch (event.action) {
+      case "attestation.held_received": {
+        const sender = afterField(event, "sender");
+        return {
+          at: event.occurredAt,
+          kind: "received",
+          action: event.action,
+          actor,
+          sender:
+            typeof sender === "string" && sender !== "" ? sender : undefined,
+        };
+      }
+      case "attestation.held_status_changed":
+        return {
+          at: event.occurredAt,
+          kind: "statusChanged",
+          action: event.action,
+          revoked: afterField(event, "revoked") === true,
+        };
+      default:
+        return {
+          at: event.occurredAt,
+          kind: "other",
+          action: event.action,
+          actor,
+        };
+    }
+  });
+  if (!entries.some((e) => e.kind === "received")) {
+    entries.push({ at: credential.receivedAt, kind: "received", action: "" });
+  }
+  entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  if (credential.statusCheckedAt) {
+    entries.push({
+      at: credential.statusCheckedAt,
+      kind: "statusChecked",
+      action: "",
+    });
+  }
+  return entries;
+}
+
+// The formats irmago stores an SD-JWT VC under.
+const SD_JWT_FORMATS = new Set(["dc+sd-jwt", "vc+sd-jwt"]);
+
+// A credential format as people know it; an unknown one shows as is.
+export function heldFormatLabel(format: string): string {
+  if (SD_JWT_FORMATS.has(format)) {
+    return "SD-JWT VC";
+  }
+  return format || "—";
 }

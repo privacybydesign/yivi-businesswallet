@@ -1,3 +1,9 @@
+# Delivery: builds, scans and pushes the three images
+# ghcr.io/privacybydesign/yivi-businesswallet/{business-wallet,postguard-sidecar,devverifier}.
+# Push to main -> :edge, release vX.Y.Z -> :X.Y.Z and :latest, manual run ->
+# :<branch>. The ops repo pulls them from ghcr.io (edge on dev, the release
+# version on prod). PR builds are scanned in Status checks; published images
+# are re-scanned weekly by image-rescan.yml.
 name: Delivery
 
 on:
@@ -6,164 +12,44 @@ on:
   release:
     # Note: a current limitation is that when a release is edited after publication, then the Docker tags are not automatically updated.
     types: [published]
-  schedule:
-    # Run every monday on 9:00 in the morning (UTC).
-    - cron: '0 9 * * 0'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  packages: write
+permissions: {}
 
 jobs:
-  publish-docker-image:
-    runs-on: ubuntu-latest
-    # One image per custom (non-stock) Dockerfile in the repo. Stock images
-    # (postgres, mailpit, domibus, ...) are pulled from their registries and are
-    # not built here; the development Dockerfiles are live-reload dev tooling and
-    # are not published. Each component sets its own build context: the
-    # business-wallet image uses the repo root (to bundle the built frontend with
-    # the Go API), postguard-sidecar uses its own directory, devverifier — the
-    # staging-only OpenID4VP relying party that drives the wallet's inbound
-    # presentation flow — builds one Go command from backend/.
+  docker:
     strategy:
-      # Scan each image independently: a vulnerability in one must not hide the
-      # build/scan status of the other.
+      # A failed scan of one image must not stop the others from publishing.
       fail-fast: false
       matrix:
         include:
+          # Root context: the image bundles the built frontend with the Go API.
           - component: business-wallet
-            # Root context so the image can bundle the built frontend alongside
-            # the Go API (the backend serves the SPA on "/").
             context: .
             dockerfile: backend/docker/production/Dockerfile
           - component: postguard-sidecar
             context: postguard-sidecar
             dockerfile: postguard-sidecar/Dockerfile
+          # Staging-only OpenID4VP relying party, one Go command from backend/.
           - component: devverifier
             context: backend
             dockerfile: backend/docker/devverifier/Dockerfile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Check whether this event is the HEAD of main
-        continue-on-error: true
-        id: is-head-main
-        run: git rev-parse HEAD | grep -x ${{ github.sha }}
-        shell: bash
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
-        with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.component }}
-          tags: |
-            type=semver,pattern={{major}}.{{minor}}.{{patch}}
-            type=edge,enable=${{ steps.is-head-main.outcome == 'success' }}
-            type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build container and export to local Docker
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        env:
-          WALLET_PROVIDER_DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          load: true
-          tags: local/${{ matrix.component }}:scan
-          # Per-component cache scope so the matrix builds don't overwrite each
-          # other's GitHub Actions cache.
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
-          # The business-wallet image builds the API with -tags wsca, which needs
-          # a clone of the private wallet-provider repo. Passed by env-var NAME
-          # (not value) so the multi-line SSH key is not newline-split into bogus
-          # secret entries. Consumed only by that Dockerfile; harmlessly ignored
-          # by the postguard-sidecar and devverifier builds.
-          secret-envs: |
-            wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
-
-      # The scan gates delivery directly: fail-build fails the job when a fixable
-      # critical vulnerability is present. Results are not uploaded to GitHub code
-      # scanning, which would require GitHub Advanced Security (Code Security) —
-      # a paid feature on this private repo, and intentionally left disabled.
-      - name: Scan Image
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
-        id: scan
-        with:
-          image: local/${{ matrix.component }}:scan
-          only-fixed: true
-          fail-build: true
-          severity-cutoff: critical
-
-      - name: Push image to GitHub Container Registry
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        if: ${{ github.event_name == 'release' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-        env:
-          WALLET_PROVIDER_DEPLOY_KEY: ${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.component }}
-          secret-envs: |
-            wallet_provider_key=WALLET_PROVIDER_DEPLOY_KEY
-
-  mirror-image:
-    runs-on: ubuntu-latest
-    name: Mirror ${{ matrix.component }} to Scaleway registry
-    needs: publish-docker-image
-    # SCW_SECRET_KEY lives in the `dev` environment; without this the secret is
-    # empty and `docker login --password-stdin` falls back to an interactive
-    # prompt, failing with "Cannot perform an interactive login from a non TTY device".
-    environment: dev
-    # Only mirror when the edge image was actually pushed (HEAD of main / manual run).
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - component: business-wallet
-            target: business-wallet
-          - component: postguard-sidecar
-            target: postguard-sidecar
-          - component: devverifier
-            target: devverifier
-    env:
-      SOURCE_IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.component }}:edge
-      TARGET_IMAGE: rg.nl-ams.scw.cloud/yivi-containter-registry/${{ matrix.target }}:edge
-    steps:
-      # The edge image is private on ghcr, and this is a separate job from the
-      # publish job, so it needs its own ghcr login to pull the source image.
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Scaleway container registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: rg.nl-ams.scw.cloud
-          username: nologin
-          password: ${{ secrets.SCW_SECRET_KEY }}
-
-      - name: Mirror image
-        run: |
-          docker pull "$SOURCE_IMAGE"
-          docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
-          docker push "$TARGET_IMAGE"
+    uses: privacybydesign/github-workflows/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+      attestations: write
+    with:
+      image-name: ghcr.io/${{ github.repository }}/${{ matrix.component }}
+      context: ${{ matrix.context }}
+      dockerfile: ${{ matrix.dockerfile }}
+      # The old Delivery tagged :latest on every stable release; keep doing so.
+      tag-latest: true
+    secrets:
+      # The business-wallet image builds the API with -tags wsca, which clones
+      # the private wallet-provider repo (RUN --mount=type=secret). Quoted so
+      # the multi-line SSH key stays one secret; ignored by the other images.
+      DOCKER_BUILD_SECRETS: |
+        "wallet_provider_key=${{ secrets.WALLET_PROVIDER_DEPLOY_KEY }}"

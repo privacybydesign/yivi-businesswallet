@@ -14,7 +14,7 @@ import {
 } from "../api/attestations.queries";
 import type { MemberType } from "../api/organization";
 import { ApiError } from "../api/http";
-import { Button, Card, Icon, Tag, TopBar } from "../ui";
+import { Button, Card, Icon, Select, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const INVITE_MODES = [
@@ -44,7 +44,7 @@ const CONFLICT_STATUS = 409;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
 const SUBHEAD = "text-ink text-[12px] font-semibold";
 const CONTROL =
@@ -123,14 +123,14 @@ function Field({
   error,
   className,
   children,
-}: {
+}: Readonly<{
   id: string;
   label: string;
   required?: boolean;
   error?: string;
   className?: string;
   children: React.ReactNode;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className={["flex flex-col gap-1", className ?? ""].join(" ")}>
       <label htmlFor={id} className={FIELD_LABEL}>
@@ -161,9 +161,9 @@ function Field({
 // this invitation. Only natural-person templates can be auto-issued to a member.
 function OnboardingAttestationsCard({
   slug,
-}: {
+}: Readonly<{
   slug: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const onboarding = useOnboardingAttestationsQuery(slug);
   const templates = useAttestationTemplatesQuery(slug);
@@ -230,9 +230,9 @@ function OnboardingAttestationsCard({
           {t("memberInvite.attestationsNoTemplates")}
         </p>
       ) : (
-        <select
+        <Select
           aria-label={t("memberInvite.addMore")}
-          className={[control(false), "mt-3"].join(" ")}
+          className="mt-3 w-full"
           value=""
           disabled={save.isPending || available.length === 0}
           onChange={(e) => add(e.target.value)}
@@ -243,7 +243,7 @@ function OnboardingAttestationsCard({
               {tmpl.displayName || tmpl.name}
             </option>
           ))}
-        </select>
+        </Select>
       )}
     </Card>
   );
@@ -344,12 +344,12 @@ export default function MemberInvite(): React.JSX.Element | null {
         id={FORM_ID}
         onSubmit={handleSubmit}
         noValidate
-        className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_340px]"
+        className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_340px]"
       >
         <div className="flex flex-col gap-4">
           <Card className="p-5">
             <div className={EYEBROW}>{t("memberInvite.howTo")}</div>
-            <div className="mt-2.5 flex gap-2.5">
+            <div className="mt-2.5 flex flex-wrap gap-2.5">
               {INVITE_MODES.map((m) => {
                 const active = mode === m.key;
                 return (
@@ -361,7 +361,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                     title={m.enabled ? undefined : t("common.comingSoon")}
                     onClick={() => m.enabled && setMode(m.key)}
                     className={[
-                      "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold transition-colors",
+                      "rounded-yivi flex flex-1 items-center gap-2.5 border px-3 py-3.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors",
                       !m.enabled
                         ? "bg-surface border-line-strong text-muted cursor-not-allowed opacity-60"
                         : active
@@ -452,11 +452,10 @@ export default function MemberInvite(): React.JSX.Element | null {
 
               <div className="flex flex-col gap-2">
                 <div className={SUBHEAD}>{t("memberInvite.groupRoleDept")}</div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field id="invite-role" label={t("common.role")}>
-                    <select
+                    <Select
                       id="invite-role"
-                      className={control(false)}
                       value={role}
                       onChange={(e) => setRole(e.target.value)}
                     >
@@ -466,12 +465,11 @@ export default function MemberInvite(): React.JSX.Element | null {
                       <option value="admin">
                         {t("memberInvite.roleAdmin")}
                       </option>
-                    </select>
+                    </Select>
                   </Field>
                   <Field id="invite-department" label={t("common.department")}>
-                    <select
+                    <Select
                       id="invite-department"
-                      className={control(false)}
                       value={departmentId}
                       onChange={(e) => setDepartmentId(e.target.value)}
                     >
@@ -483,7 +481,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                           {d.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </Field>
                   <Field id="invite-job-title" label={t("common.jobTitle")}>
                     <input
@@ -494,14 +492,13 @@ export default function MemberInvite(): React.JSX.Element | null {
                     />
                   </Field>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field
                     id="invite-member-type"
                     label={t("memberInvite.memberType")}
                   >
-                    <select
+                    <Select
                       id="invite-member-type"
-                      className={control(false)}
                       value={memberType}
                       onChange={(e) =>
                         setMemberType(e.target.value as MemberType)
@@ -513,7 +510,7 @@ export default function MemberInvite(): React.JSX.Element | null {
                       <option value="external">
                         {t("memberInvite.memberTypeExternal")}
                       </option>
-                    </select>
+                    </Select>
                   </Field>
                   {memberType === "external" && (
                     <Field

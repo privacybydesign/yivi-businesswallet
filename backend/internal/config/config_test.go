@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -235,6 +236,28 @@ func TestLoadKeepsConfiguredRegistrationCertificate(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsTheCredentialSchemes(t *testing.T) {
+	for _, scheme := range eudiCredentialSchemes {
+		cfg, err := loadWith(t, map[string]string{envEudiCredentialScheme: scheme})
+		if err != nil {
+			t.Fatalf("Load(%s): %v", scheme, err)
+		}
+		if cfg.EudiCredentialScheme != scheme {
+			t.Errorf("credential scheme = %q, want %q", cfg.EudiCredentialScheme, scheme)
+		}
+	}
+}
+
+func TestLoadRejectsAnUnknownCredentialScheme(t *testing.T) {
+	_, err := loadWith(t, map[string]string{envEudiCredentialScheme: "pbdf-stagign"})
+	if err == nil {
+		t.Fatal("Load accepted a misspelt credential scheme")
+	}
+	if !strings.Contains(err.Error(), envEudiCredentialScheme) {
+		t.Errorf("error %q does not name %s", err, envEudiCredentialScheme)
+	}
+}
+
 func TestLoadRejectsBothEudiCredentials(t *testing.T) {
 	_, err := loadWith(t, map[string]string{
 		envEudiIntendedUseID:           "1",
@@ -295,6 +318,36 @@ func TestLoadOrgRequestDefaults(t *testing.T) {
 	}
 }
 
+// TRUSTED_PROXIES takes CIDRs and single addresses; empty trusts none, and a
+// value that is neither stops the boot instead of trusting nothing silently.
+func TestLoadTrustedProxies(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("unset TrustedProxies = %v, want none", cfg.TrustedProxies)
+	}
+
+	cfg, err = loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8, 192.168.1.7 ,fd00::/8"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"10.0.0.0/8", "192.168.1.7/32", "fd00::/8"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+	for i, p := range cfg.TrustedProxies {
+		if p.String() != want[i] {
+			t.Errorf("TrustedProxies[%d] = %s, want %s", i, p, want[i])
+		}
+	}
+
+	if _, err := loadWith(t, map[string]string{envTrustedProxies: "10.0.0.0/8,ingress-nginx"}); err == nil {
+		t.Error("TRUSTED_PROXIES with a name loaded, want an error")
+	}
+}
+
 // A CA certificate without its key (or the reverse) is a half-done setup, not
 // a request for the ephemeral CA.
 func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
@@ -305,6 +358,184 @@ func TestLoadRejectsHalfConfiguredRequesterCA(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {
 				t.Errorf("Load(%v) succeeded, want an error", env)
+			}
+		})
+	}
+}
+
+// The real DUO signature check is the default, as in go-diploma-issuer: a
+// deployment that forgets the setting never accepts any PDF as a diploma.
+func TestLoadDiplomaDefaultsToDUO(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiplomaValidatorProvider != ProviderDUO {
+		t.Errorf("diploma validator = %q, want %q", cfg.DiplomaValidatorProvider, ProviderDUO)
+	}
+	stub, err := loadWith(t, map[string]string{envDiplomaValidatorProvider: ProviderStub, envDevMode: "true", envAppBaseURL: localStack})
+	if err != nil || stub.DiplomaValidatorProvider != ProviderStub {
+		t.Errorf("explicit stub = %q, %v; want %q", stub.DiplomaValidatorProvider, err, ProviderStub)
+	}
+}
+
+// The real UWV seal check is the default, as the DUO one is.
+func TestLoadEmploymentDefaultUWV(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EmploymentValidatorProvider != ProviderUWV {
+		t.Errorf("employment validator = %q, want %q", cfg.EmploymentValidatorProvider, ProviderUWV)
+	}
+	if _, err := loadWith(t, map[string]string{envEmploymentValidatorProvider: "duo"}); err == nil {
+		t.Error("an unknown employment validator loaded, want an error")
+	}
+}
+
+// The pinned roots hold no root UWV's seal chains to, so pinning them under
+// the real UWV check would reject every statement: it fails the boot instead.
+func TestLoadRefusesPinnedForUWV(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envDiplomaTrustSource: DiplomaTrustPinned}); err == nil {
+		t.Error("pinned trust with the UWV check loaded, want an error")
+	}
+	stub, err := loadWith(t, map[string]string{
+		envDiplomaTrustSource: DiplomaTrustPinned, envEmploymentValidatorProvider: ProviderStub,
+		envDevMode: "true", envAppBaseURL: localStack,
+	})
+	if err != nil || stub.DiplomaTrustSource != DiplomaTrustPinned {
+		t.Errorf("pinned trust with the stub = %q, %v; want %q", stub.DiplomaTrustSource, err, DiplomaTrustPinned)
+	}
+	// Off checks no statement, so a production deploy can pin its roots.
+	off, err := loadWith(t, map[string]string{envDiplomaTrustSource: DiplomaTrustPinned, envEmploymentValidatorProvider: ProviderOff})
+	if err != nil || off.EmploymentValidatorProvider != ProviderOff {
+		t.Errorf("pinned trust with the check off = %q, %v; want %q", off.EmploymentValidatorProvider, err, ProviderOff)
+	}
+}
+
+// The online revocation check is on unless switched off: off, only the
+// revocation information embedded in an extract counts.
+func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil || !cfg.DiplomaOCSP {
+		t.Errorf("default DiplomaOCSP = %v, %v; want on", cfg.DiplomaOCSP, err)
+	}
+	cfg, err = loadWith(t, map[string]string{envDiplomaOCSP: "false"})
+	if err != nil || cfg.DiplomaOCSP {
+		t.Errorf("DIPLOMA_OCSP=false: DiplomaOCSP = %v, %v; want off", cfg.DiplomaOCSP, err)
+	}
+}
+
+// DEV_MODE needs APP_BASE_URL set: its default is localhost, so a deployment
+// that left it out would otherwise pass the localhost check.
+func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{envDevMode: "true"}); err == nil {
+		t.Error("DEV_MODE without APP_BASE_URL loaded, want an error")
+	}
+}
+
+// The URLs the Idem app sends chip data and selfies to are https, or plain
+// http to this machine, outside a local stack; a local stack may use a LAN
+// address for the phone.
+func TestLoadPhoneURLsNeedHTTPS(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://proofing.example.org": true,
+		"http://localhost:8080":        true,
+		"http://proofing.example.org":  false,
+		"http://192.168.1.20:8080":     false,
+	} {
+		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL} {
+			t.Run(key+"="+raw, func(t *testing.T) {
+				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
+					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
+				}
+			})
+		}
+	}
+	t.Run("a LAN address on a local stack", func(t *testing.T) {
+		if _, err := loadWith(t, map[string]string{
+			envDevMode: "true", envAppBaseURL: localStack, envIdentityProofingPublicURL: "http://192.168.1.20:8080",
+		}); err != nil {
+			t.Errorf("%v, want it loaded", err)
+		}
+	})
+}
+
+// The Idem App Link is https with a host and nothing appended, even on a local
+// stack: the engine adds the claim's own query, and an App Link is https only.
+func TestLoadAppLinkURL(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"":                                 true,
+		"https://idem.yivi.app/verify":     true,
+		"http://idem.yivi.app/verify":      false,
+		"https://idem.yivi.app/verify?x=1": false,
+		"https://idem.yivi.app/verify#x":   false,
+		"vcmrtd://verify":                  false,
+		"https:///verify":                  false,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			cfg, err := loadWith(t, map[string]string{envIdentityProofingAppLinkURL: raw})
+			if (err == nil) != ok {
+				t.Fatalf("%s=%q: %v, want ok %v", envIdentityProofingAppLinkURL, raw, err, ok)
+			}
+			if ok && cfg.IdentityProofingAppLinkURL != raw {
+				t.Errorf("IdentityProofingAppLinkURL = %q, want %q", cfg.IdentityProofingAppLinkURL, raw)
+			}
+		})
+	}
+}
+
+// A stub outcome with the engine provider is a half-switched .env: refused,
+// not silently ignored.
+func TestLoadStubOutcomeNeedsStubProvider(t *testing.T) {
+	if _, err := loadWith(t, map[string]string{
+		envIdentityProofingProvider:    ProviderEngine,
+		envIdentityProofingStubOutcome: "approved",
+		envDevMode:                     "true",
+		envAppBaseURL:                  localStack,
+	}); err == nil {
+		t.Errorf("%s with %s=%s loaded, want an error", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderEngine)
+	}
+}
+
+// localStack is the APP_BASE_URL of a local developer stack.
+const localStack = "http://localhost:5173"
+
+// A stub that passes a real check runs only on a local stack (DEV_MODE), and
+// DEV_MODE only with APP_BASE_URL set to a localhost URL.
+func TestLoadStubsNeedDevMode(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		envIdentityProofingProvider: {envIdentityProofingProvider: ProviderStub},
+		envIdentityProofingStubOutcome: {
+			envIdentityProofingProvider:    ProviderStub,
+			envIdentityProofingStubOutcome: "approved",
+		},
+		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
+		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
+	} {
+		t.Run(name+" without", func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("%v without %s loaded, want an error", env, envDevMode)
+			}
+		})
+		t.Run(name+" with", func(t *testing.T) {
+			withDevMode := map[string]string{envDevMode: "true", envAppBaseURL: localStack}
+			maps.Copy(withDevMode, env)
+			if _, err := loadWith(t, withDevMode); err != nil {
+				t.Errorf("%v with %s: %v", env, envDevMode, err)
+			}
+		})
+	}
+	for base, ok := range map[string]bool{
+		"http://localhost:5173":                    true,
+		"http://127.0.0.1:8080":                    true,
+		"https://business-wallet.staging.yivi.app": false,
+		"http://192.168.1.20:5173":                 false,
+	} {
+		t.Run(base, func(t *testing.T) {
+			_, err := loadWith(t, map[string]string{envDevMode: "true", envAppBaseURL: base})
+			if (err == nil) != ok {
+				t.Errorf("DEV_MODE with APP_BASE_URL %s: %v, want ok %v", base, err, ok)
 			}
 		})
 	}

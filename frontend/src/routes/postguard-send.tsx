@@ -10,7 +10,7 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { postguardReadiness } from "../lib/postguard-availability";
 import { formatBytes } from "../lib/format-bytes";
 import { ApiError } from "../api/http";
-import { Button, Card, Icon, TopBar } from "../ui";
+import { Button, Card, Icon, Select, TopBar } from "../ui";
 import { PostguardNotReady } from "./postguard-not-ready";
 import * as React from "react";
 
@@ -174,7 +174,7 @@ export default function PostguardSend(): React.JSX.Element {
       />
 
       {blockedReason ? (
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <PostguardNotReady reason={blockedReason} isAdmin={isAdmin} />
         </div>
       ) : (
@@ -182,7 +182,7 @@ export default function PostguardSend(): React.JSX.Element {
           id={FORM_ID}
           onSubmit={handleSubmit}
           noValidate
-          className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]"
+          className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]"
         >
           <Card className="flex flex-col gap-5 p-5">
             {/* File */}
@@ -287,9 +287,8 @@ export default function PostguardSend(): React.JSX.Element {
               <label htmlFor="postguard-expiry" className={FIELD_LABEL}>
                 {t("postguard.send.expiryLabel")}
               </label>
-              <select
+              <Select
                 id="postguard-expiry"
-                className={`${control(false)} h-9`}
                 value={expiry}
                 onChange={(event) => setExpiry(event.target.value as Expiry)}
               >
@@ -298,7 +297,7 @@ export default function PostguardSend(): React.JSX.Element {
                     {t(`postguard.send.expiry.${option}`)}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             {/* Message */}

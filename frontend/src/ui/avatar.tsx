@@ -70,7 +70,7 @@ export function Avatar({
   src,
   alt,
   fit = "contain",
-}: AvatarProps): React.JSX.Element {
+}: Readonly<AvatarProps>): React.JSX.Element {
   // A src the browser cannot load falls back to the initials rather than leaving
   // a broken image: an avatar URL carries the photo's version, so one held in a
   // rendered list can outlive the photo it points at.

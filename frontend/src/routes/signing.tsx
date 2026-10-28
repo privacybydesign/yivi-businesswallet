@@ -195,7 +195,7 @@ export default function Signing(): React.JSX.Element {
       <div
         role="tablist"
         aria-label={t("signing.title")}
-        className="border-line bg-surface flex gap-1 border-b px-8"
+        className="border-line bg-surface flex gap-1 overflow-x-auto border-b px-4 sm:px-8"
         onKeyDown={(e) => {
           if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
           e.preventDefault();
@@ -219,7 +219,7 @@ export default function Signing(): React.JSX.Element {
               tabIndex={active ? 0 : -1}
               onClick={() => setTab(tab.key)}
               className={[
-                "h-11 border-b-2 px-3.5 text-[13.5px] transition-colors",
+                "h-11 shrink-0 border-b-2 px-3.5 text-[13.5px] whitespace-nowrap transition-colors",
                 active
                   ? "border-primary text-ink font-semibold"
                   : "text-ink-soft hover:text-ink border-transparent font-medium",
@@ -235,7 +235,7 @@ export default function Signing(): React.JSX.Element {
         id="signing-tabpanel"
         role="tabpanel"
         aria-labelledby={`signing-tab-${activeTab}`}
-        className="p-8"
+        className="p-4 sm:p-8"
       >
         {activeTab === "history" ? (
           <SigningHistoryPanel slug={slug} enabled={isAdmin} />
@@ -278,10 +278,10 @@ export default function Signing(): React.JSX.Element {
 function ActiveRequestCard({
   slug,
   requestId,
-}: {
+}: Readonly<{
   slug: string;
   requestId: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const me = useMeQuery();
   const request = useSigningRequestQuery(slug, requestId, me.data?.id);
@@ -343,9 +343,9 @@ function ActiveRequestCard({
 // terminal counterpart to requestCompleted/requestFailed above.
 function DeclinedNotice({
   request,
-}: {
+}: Readonly<{
   request: SigningRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const decliner = (request.signers ?? []).find(
     (s) => s.status === SIGNER_STATUS.declined,
@@ -371,9 +371,9 @@ function DeclinedNotice({
 // who signed from outside the organisation is part of reading a co-signed document.
 function SignerList({
   request,
-}: {
+}: Readonly<{
   request: SigningRequest;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const signers = request.signers ?? [];
   return (
@@ -408,11 +408,11 @@ function ToSignTab({
   slug,
   isLinked,
   onGoLink,
-}: {
+}: Readonly<{
   slug: string;
   isLinked: boolean;
   onGoLink: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const pending = usePendingSigningRequestsQuery(slug);
   const start = useStartSignRequestMutation(slug);
@@ -560,12 +560,12 @@ function Segmented<T extends string>({
   value,
   onChange,
   ariaLabel,
-}: {
+}: Readonly<{
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
   ariaLabel: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const refs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const currentIndex = Math.max(
     options.findIndex((o) => o.value === value),
@@ -623,12 +623,12 @@ function WizardStepRail({
   current,
   reachable,
   onStep,
-}: {
+}: Readonly<{
   steps: string[];
   current: number;
   reachable: boolean[];
   onStep: (index: number) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <ol className="flex items-center overflow-x-auto">
       {steps.map((label, index) => {
@@ -699,7 +699,7 @@ function ChannelCard({
   tabIndex,
   onKeyDown,
   innerRef,
-}: {
+}: Readonly<{
   selected: boolean;
   title: string;
   description: string;
@@ -707,7 +707,7 @@ function ChannelCard({
   tabIndex: number;
   onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
   innerRef: (el: HTMLButtonElement | null) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <button
       ref={innerRef}
@@ -752,10 +752,10 @@ const WIZARD_STEP_COUNT = 4;
 function NewRequestTab({
   slug,
   onCreated,
-}: {
+}: Readonly<{
   slug: string;
   onCreated: () => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const members = useOrganizationMembersQuery(
     slug,
@@ -1360,7 +1360,7 @@ function NewRequestTab({
               <div className="w-full shrink-0 lg:w-[360px]">
                 <Card className="overflow-hidden p-0">
                   <div className="border-line border-b px-4 py-3.5">
-                    <div className="text-muted font-mono text-[11px] tracking-wide uppercase">
+                    <div className="text-muted font-label text-[11px] tracking-wide uppercase">
                       {t("signing.summaryTitle")}
                     </div>
                     <div className="mt-2 flex items-center gap-2.5">
@@ -1485,11 +1485,11 @@ function CredentialTab({
   slug,
   credential,
   isLinked,
-}: {
+}: Readonly<{
   slug: string;
   credential: ReturnType<typeof useSigningCredentialQuery>;
   isLinked: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const link = useLinkSigningCredentialMutation(slug);
 

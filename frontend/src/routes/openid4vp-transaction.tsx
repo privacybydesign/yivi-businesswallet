@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   Icon,
+  ColorSchemeSwitcher,
   LanguageSwitcher,
   Logo,
   Outcome,
@@ -51,11 +52,12 @@ export default function OpenID4VPTransaction(): React.JSX.Element | null {
 
   return (
     <div className="mesh-wave relative flex min-h-screen flex-col justify-center">
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+      <div className="absolute top-4 right-4 flex gap-2 sm:top-6 sm:right-6">
+        <ColorSchemeSwitcher />
         <LanguageSwitcher />
       </div>
       <div className="mx-auto w-full max-w-md px-6 py-12">
-        <Card className="w-full p-8">
+        <Card className="w-full p-6 sm:p-8">
           <div className="flex justify-center">
             <Logo />
           </div>
@@ -89,12 +91,12 @@ function OrgPicker({
   orgs,
   busy,
   onSelect,
-}: {
+}: Readonly<{
   verifier: string;
   orgs: ReturnType<typeof useOpenID4VPOrgsQuery>;
   busy: boolean;
   onSelect: (slug: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (orgs.isError) {
     return <TransactionError error={orgs.error} />;
@@ -142,10 +144,10 @@ function OrgPicker({
 function OrgButton({
   org,
   onSelect,
-}: {
+}: Readonly<{
   org: OpenID4VPOrg;
   onSelect: (slug: string) => void;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <button
       type="button"
@@ -166,10 +168,10 @@ function OrgButton({
 function SelectOutcome({
   result,
   verifier,
-}: {
+}: Readonly<{
   result: OpenID4VPSelectResult;
   verifier: string;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   if (result.status === "completed") {
     return (
@@ -196,9 +198,9 @@ function SelectOutcome({
 
 function StatusOutcome({
   status,
-}: {
+}: Readonly<{
   status: OpenID4VPStatus;
-}): React.JSX.Element | null {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
   switch (status) {
     case "pending_auth":
@@ -243,7 +245,9 @@ function StatusOutcome({
   }
 }
 
-function TransactionError({ error }: { error: unknown }): React.JSX.Element {
+function TransactionError({
+  error,
+}: Readonly<{ error: unknown }>): React.JSX.Element {
   const { t } = useTranslation();
   const kind = transactionErrorKind(error);
   return (

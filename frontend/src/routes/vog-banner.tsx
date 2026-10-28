@@ -12,11 +12,11 @@ export function VogBanner({
   slug,
   orgName,
   vog,
-}: {
+}: Readonly<{
   slug: string;
   orgName: string;
   vog: OwnVogState;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const { t } = useTranslation();
   const mint = useMintOwnVogLinkMutation(slug);
   const formatDate = useDateFormatter();

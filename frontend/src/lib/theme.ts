@@ -1,37 +1,39 @@
 import type { OrgTheme } from "../api/theme";
+import {
+  DEFAULT_DESIGN,
+  DESIGN_ATTRIBUTE,
+  WHITE_LABEL_DESIGN,
+  setWhiteLabelScheme,
+  type Design,
+} from "./color-scheme";
 
 // Runtime theming. The app's colours resolve through the --yb-* custom
 // properties on :root (see index.css); overriding those re-colours every
 // Tailwind utility that maps to them. Clearing an override falls back to the
 // :root default, so an unset field keeps the default look.
 //
-// Two mechanisms, chosen by whether a token is mode-safe:
-//   * Brand fills (primary, accent) are self-contained coloured fills with their
-//     own readable foreground, so a single value is correct in both light and
-//     dark mode. They are applied INLINE on the documentElement (resolveThemeTokens
-//     → applyOrgTheme), where they win over both the light and dark :root defaults.
-//   * Neutral/semantic roles (surface, border, text, link, status) are
-//     mode-specific — a tenant's light surface must not be forced into dark mode —
-//     so each derives a light value AND a dark value, shipped as a single
-//     <style id="ybw-org-theme"> block whose dark half lives under a
-//     `prefers-color-scheme: dark` media query (an inline custom property can't
-//     carry a media query). The block uses a doubled `:root:root` selector so it
-//     wins over index.css by SPECIFICITY, not source order — which lets the inline
-//     pre-paint script (index.html) inject it before Vite's CSS without a
-//     source-order race, so a full reload never flashes the default palette (the
-//     FOUC this all guards against).
+// A themed org is always shown light: its colours are the brand's own, picked
+// for light pages, so the white-label design keeps the light scheme (see
+// setWhiteLabelScheme) and every token has one value. Two mechanisms:
+//   * Brand fills (primary, accent), the navigation chrome and the font are
+//     applied INLINE on the documentElement (resolveThemeTokens → applyOrgTheme).
+//   * Neutral/semantic roles (surface, border, text, link, status) are derived
+//     to WCAG AA and shipped as one <style id="ybw-org-theme"> block. Its doubled
+//     `:root:root` selector wins over index.css by SPECIFICITY, not source order
+//     — which lets the inline pre-paint script (index.html) inject it before
+//     Vite's CSS without a source-order race, so a full reload never flashes the
+//     default palette (the FOUC this all guards against).
 
-// --- Mode-safe brand fills (applied inline on the documentElement) ---
+// --- Brand fills (applied inline on the documentElement) ---
 const PRIMARY = "--yb-primary";
 const PRIMARY_HOVER = "--yb-primary-hover";
 const PRIMARY_FG = "--yb-primary-fg";
 const ACCENT = "--yb-brand";
 const ACCENT_600 = "--yb-brand-600";
 
-// Navigation chrome (sidebar + top bar) and the body font are also mode-safe: a
-// chrome colour is a self-contained fill with its own readable foreground that
-// works in both modes, and a font family is mode-agnostic — so all are applied
-// inline alongside the brand fills.
+// Navigation chrome (sidebar + top bar) and the body font: a chrome colour is a
+// self-contained fill with its own readable foreground, so it is applied inline
+// alongside the brand fills, as is the font.
 const SIDEBAR = "--yb-sidebar";
 const SIDEBAR_FG = "--yb-sidebar-fg";
 const SIDEBAR_FG_SOFT = "--yb-sidebar-fg-soft";
@@ -42,6 +44,7 @@ const TOPBAR_FG = "--yb-topbar-fg";
 const TOPBAR_FG_SOFT = "--yb-topbar-fg-soft";
 const TOPBAR_LINE = "--yb-topbar-line";
 const FONT_SANS = "--yb-font-sans";
+const FONT_DISPLAY = "--yb-font-display";
 
 const THEMED_PROPERTIES = [
   PRIMARY,
@@ -59,12 +62,13 @@ const THEMED_PROPERTIES = [
   TOPBAR_FG_SOFT,
   TOPBAR_LINE,
   FONT_SANS,
+  FONT_DISPLAY,
 ] as const;
 
 // How a chrome seed derives its companions: the soft foreground fades the
 // readable foreground toward the background; the active/hover fill and the
 // border nudge the background toward the foreground so they stay visible on the
-// chrome in both light and dark.
+// chrome.
 const CHROME_FG_SOFT_MIX = 0.32;
 const CHROME_ACTIVE_MIX = 0.12;
 const CHROME_LINE_MIX = 0.18;
@@ -78,9 +82,11 @@ function isSafeFontFamily(value: string): boolean {
   return FONT_FAMILY_PATTERN.test(value);
 }
 
-// --- Mode-aware roles (shipped via the <style> block) ---
+// --- Derived roles (shipped via the <style> block) ---
 const LINK = "--yb-link";
 const INK = "--yb-ink";
+const INK_SOFT = "--yb-ink-soft";
+const MUTED = "--yb-muted";
 const SURFACE = "--yb-surface";
 const SURFACE_2 = "--yb-surface-2";
 const SURFACE_3 = "--yb-surface-3";
@@ -88,13 +94,14 @@ const LINE = "--yb-line";
 const LINE_STRONG = "--yb-line-strong";
 const SUCCESS = "--yb-success";
 const SUCCESS_BG = "--yb-success-bg";
+const SUCCESS_FG = "--yb-success-fg";
 const WARNING = "--yb-warning";
 const WARNING_FG = "--yb-warning-fg";
 const WARNING_BG = "--yb-warning-bg";
 const ERROR = "--yb-error";
 const ERROR_BG = "--yb-error-bg";
 
-// The <style> element carrying the mode-aware overrides.
+// The <style> element carrying the derived overrides.
 const ORG_THEME_STYLE_ID = "ybw-org-theme";
 
 // Foreground candidates for text sitting on a themed colour: near-white or the
@@ -114,53 +121,82 @@ export const AA_CONTRAST = 4.5;
 const ADJUST_STEP = 0.06;
 const ADJUST_MAX_STEPS = 24;
 
-// The default token values (from index.css :root), shown as the placeholder /
-// picker fallback when a field is unset. Keyed by the theme colour field so the
-// settings UI can look each up.
-export const DEFAULT_PRIMARY = "#484747";
+// What each colour is when the theme leaves it unset: the white-label design's
+// own values (from index.css), as a themed org is shown in that design. Shown
+// as the placeholder / picker fallback in the settings UI, keyed by the theme
+// colour field so it can look each up.
+export const DEFAULT_PRIMARY = "#101e1e";
 export const DEFAULT_ACCENT = "#ba3354";
 export const COLOR_FIELD_DEFAULTS = {
   primaryColor: DEFAULT_PRIMARY,
   accentColor: DEFAULT_ACCENT,
-  textColor: "#484747",
-  surfaceColor: "#faf8f6",
-  borderColor: "#eae5e2",
+  textColor: "#101e1e",
+  surfaceColor: "#fbfbfc",
+  borderColor: "#eaebee",
   linkColor: "#1d4e89",
-  successColor: "#00973a",
+  successColor: "#1f6b4c",
   warningColor: "#eba73b",
-  errorColor: "#bd1919",
-  sidebarColor: "#faf8f6",
-  topbarColor: "#faf8f6",
+  errorColor: "#b42335",
+  sidebarColor: "#ffffff",
+  topbarColor: "#ffffff",
 } as const;
 
-// --- Default neutral anchors, mirrored from index.css ---
-// The mode-aware derivations gate contrast against, and tint from, these
-// baseline values so the derived palette stays coherent with the design system.
+// Curated font options a theme may pick (org and customer alike), for headings
+// and body alike. Values are full
+// font-family stacks; each is either a bundled font (Montserrat, Nunito, Open
+// Sans, Alexandria) shipped with its open licence, or a system/web-safe stack
+// rendered from the client's own fonts — so nothing is distributed by us and
+// there is no commercial-licence exposure. The default stores "" so the theme
+// keeps the white-label design's own pair (Montserrat headings, Nunito body).
+// Names are proper nouns and stay untranslated.
+export const FONT_OPTIONS = [
+  { name: "Montserrat / Nunito", value: "" },
+  { name: "Montserrat", value: '"Montserrat", system-ui, sans-serif' },
+  { name: "Nunito", value: '"Nunito", system-ui, sans-serif' },
+  { name: "Open Sans", value: '"Open Sans", system-ui, sans-serif' },
+  { name: "Alexandria", value: '"Alexandria", system-ui, sans-serif' },
+  {
+    name: "System UI",
+    value: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  },
+  { name: "Helvetica / Arial", value: '"Helvetica Neue", Arial, sans-serif' },
+  { name: "Georgia", value: 'Georgia, "Times New Roman", serif' },
+  {
+    name: "Monospace",
+    value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  },
+] as const;
+
+// --- Neutral anchors: the white-label design's, mirrored from index.css ---
+// The derivations gate contrast against, and tint from, these baseline values
+// so the derived palette stays coherent with the design. A theme is always
+// shown in the white-label design (usesWhiteLabelDesign), so its anchors are
+// that design's neutrals, not Yivi's.
 const LIGHT = {
+  ink: "#101e1e",
   surface: "#ffffff",
-  surface2: "#faf8f6",
-  surface3: "#f5f2ef",
-  line: "#eae5e2",
-  lineStrong: "#d7d2cd",
+  surface2: "#fbfbfc",
+  surface3: "#f5f5f6",
+  line: "#eaebee",
+  lineStrong: "#d6d9dd",
   highlight: "#eaf3f9",
 } as const;
-const DARK = {
-  surface: "#1d1b1a",
-  surface2: "#141312",
-  surface3: "#252322",
-  line: "#2b2928",
-  lineStrong: "#3a3736",
-  highlight: "#1c3648",
-} as const;
-
-// How strongly a seed tints each neutral. Surfaces are backgrounds behind body
-// text, so their tint is kept subtle to preserve the text contrast the default
-// neutrals were designed for; borders are decorative (no text), so they take a
-// stronger tint. Status backgrounds are pale/dark chips.
+// How strongly a surface seed tints the cards, which are backgrounds behind
+// body text, so the tint is kept subtle.
 const SURFACE_TINT = 0.08;
-const BORDER_TINT = 0.28;
-const STATUS_BG_TINT_LIGHT = 0.14;
-const STATUS_BG_TINT_DARK = 0.16;
+
+// A surface seed is the page background and a border seed the line colour as
+// given; the hover row and the strong line are those darkened,
+// as Yivi's defaults are (#faf8f6 → #f5f2ef, #eae5e2 → #d7d2cd).
+const SURFACE_3_DARKEN = 0.02;
+const LINE_STRONG_DARKEN = 0.08;
+
+// How far the secondary and muted text fade from the text seed towards white,
+// as Yivi's defaults do from its ink (#484747 → #757375, #9f9a9a).
+const INK_SOFT_FADE = 0.25;
+const MUTED_FADE = 0.45;
+// How strongly a status seed tints its pale chip background.
+const STATUS_BG_TINT = 0.14;
 
 interface Rgb {
   r: number;
@@ -289,13 +325,13 @@ export function primaryContrastFloor(background: string): number | null {
 }
 
 // resolveThemeTokens turns a saved theme into the map of INLINE design-token
-// overrides (the mode-safe brand fills) to apply on the documentElement: the
+// overrides (the brand fills) to apply on the documentElement: the
 // primary/accent seeds plus the hover/shade and readable-foreground variants
 // derived from them. A missing or malformed seed is simply left out (so it falls
 // back to the :root default), so the returned map only ever holds valid
 // overrides. This is the single source of truth for both the runtime apply and
 // the pre-paint cache (see index.html), so the cached palette and the applied
-// palette can never drift apart. The mode-aware roles are handled separately by
+// palette can never drift apart. The derived roles are handled separately by
 // resolveThemeCss.
 export function resolveThemeTokens(
   theme: OrgTheme | null | undefined,
@@ -317,7 +353,7 @@ export function resolveThemeTokens(
 
   // Navigation chrome: each seed is a brand fill with a readable foreground, a
   // faded soft foreground, and a nudged active/border shade so nav elements
-  // stay legible on the coloured chrome (in both modes).
+  // stay legible on the coloured chrome.
   const sidebar = theme?.sidebarColor ?? "";
   if (parseHex(sidebar)) {
     const fg = readableForegroundAA(sidebar);
@@ -337,9 +373,11 @@ export function resolveThemeTokens(
     tokens[TOPBAR_LINE] = mix(topbar, fg, CHROME_LINE_MIX);
   }
 
+  // An org's font is its headings' as well as its body text's.
   const font = theme?.fontFamily ?? "";
   if (isSafeFontFamily(font)) {
     tokens[FONT_SANS] = font;
+    tokens[FONT_DISPLAY] = font;
   }
 
   return tokens;
@@ -392,36 +430,21 @@ function adjustToContrast(
   return current;
 }
 
-// The light and dark link colours derived from a theme's link/accent seed.
-export interface LinkTheme {
-  light: string;
-  dark: string;
+// The backgrounds a `text-link` element renders on: the seed-tinted surfaces
+// plus the fixed highlight/info chip. The derived link must clear AA against
+// every one, so we gate on the darkest (clearing AA there clears it on all the
+// others).
+function linkBackgrounds(theme: OrgTheme | null | undefined): string[] {
+  return [...Object.values(surfaceTiers(theme)), LIGHT.highlight];
 }
 
-// The surface tiers a `text-link` element renders on, per mode: the seed-tinted
-// surfaces plus the fixed highlight/info chip. The derived link must clear AA
-// against every one, so we gate on the worst case (the darkest light bg / the
-// lightest dark bg — clearing AA there clears it on all the others in that mode).
-function linkBackgrounds(theme: OrgTheme | null | undefined): {
-  light: string[];
-  dark: string[];
-} {
-  const surfaces = surfaceTiers(theme);
-  return {
-    light: [...Object.values(surfaces.light), LIGHT.highlight],
-    dark: [...Object.values(surfaces.dark), DARK.highlight],
-  };
-}
-
-// resolveLinkTheme derives the mode-aware link colour from the link seed
-// (falling back to the accent seed, so a brand accent still tints links even
-// when no explicit link colour is set): darkened until it clears AA on the
-// darkest light-mode background, and lightened until it clears AA on the
-// lightest dark-mode background. Returns null when there is no valid seed (the
-// default Yivi link then stands).
-export function resolveLinkTheme(
+// resolveLinkColor derives the link colour from the link seed (falling back to
+// the accent seed, so a brand accent still tints links even when no explicit
+// link colour is set), darkened until it clears AA on the darkest background.
+// Returns null when there is no valid seed (the default link then stands).
+export function resolveLinkColor(
   theme: OrgTheme | null | undefined,
-): LinkTheme | null {
+): string | null {
   const seed =
     theme?.linkColor && parseHex(theme.linkColor)
       ? theme.linkColor
@@ -429,175 +452,135 @@ export function resolveLinkTheme(
   if (!parseHex(seed)) {
     return null;
   }
-  const backgrounds = linkBackgrounds(theme);
-  return {
-    light: adjustToContrast(
-      seed,
-      extremeBackground(backgrounds.light, "darkest"),
-      "darken",
-    ),
-    dark: adjustToContrast(
-      seed,
-      extremeBackground(backgrounds.dark, "lightest"),
-      "lighten",
-    ),
-  };
+  return adjustToContrast(
+    seed,
+    extremeBackground(linkBackgrounds(theme), "darkest"),
+    "darken",
+  );
 }
 
-// surfaceTiers derives the light and dark surface tiers from the surface seed
-// (each default neutral tinted subtly toward it), or the default neutrals when
-// no seed is set. The subtle tint keeps the surfaces close to the AA-verified
-// defaults so body text stays readable on them.
+// usableAsSurface reports whether a seed is light enough to be the page
+// background as given: the default ink must read on it.
+function usableAsSurface(seed: string): boolean {
+  return (contrastRatio(seed, LIGHT.ink) ?? 0) >= AA_CONTRAST;
+}
+
+// surfaceTiers derives the surface tiers from the surface seed, or the default
+// neutrals when no seed is set. A seed light enough for text is the page
+// background itself, with the cards subtly tinted towards it; a darker one
+// only tints the default neutrals, which keeps the surfaces close to the
+// AA-verified defaults.
 function surfaceTiers(theme: OrgTheme | null | undefined): {
-  light: { surface: string; surface2: string; surface3: string };
-  dark: { surface: string; surface2: string; surface3: string };
+  surface: string;
+  surface2: string;
+  surface3: string;
 } {
   const seed = theme?.surfaceColor ?? "";
   if (!parseHex(seed)) {
     return {
-      light: {
-        surface: LIGHT.surface,
-        surface2: LIGHT.surface2,
-        surface3: LIGHT.surface3,
-      },
-      dark: {
-        surface: DARK.surface,
-        surface2: DARK.surface2,
-        surface3: DARK.surface3,
-      },
+      surface: LIGHT.surface,
+      surface2: LIGHT.surface2,
+      surface3: LIGHT.surface3,
     };
   }
-  return {
-    light: {
-      surface: mix(LIGHT.surface, seed, SURFACE_TINT),
-      surface2: mix(LIGHT.surface2, seed, SURFACE_TINT),
-      surface3: mix(LIGHT.surface3, seed, SURFACE_TINT),
-    },
-    dark: {
-      surface: mix(DARK.surface, seed, SURFACE_TINT),
-      surface2: mix(DARK.surface2, seed, SURFACE_TINT),
-      surface3: mix(DARK.surface3, seed, SURFACE_TINT),
-    },
-  };
+  return usableAsSurface(seed)
+    ? {
+        surface: mix(LIGHT.surface, seed, SURFACE_TINT),
+        surface2: seed,
+        surface3: darken(seed, SURFACE_3_DARKEN),
+      }
+    : {
+        surface: mix(LIGHT.surface, seed, SURFACE_TINT),
+        surface2: mix(LIGHT.surface2, seed, SURFACE_TINT),
+        surface3: mix(LIGHT.surface3, seed, SURFACE_TINT),
+      };
 }
 
-// A single mode-aware token: its value in light mode and in dark mode.
-interface ModeValue {
-  light: string;
-  dark: string;
-}
-
-// statusPair derives a status role from its seed: a chip background (the seed
-// mixed toward the mode's base, pale in light / dark in dark mode) and a solid
-// foreground/icon colour. The solid is nudged past the WCAG-AA floor against the
-// WORST-CASE background it actually lands on in that mode — not just its own
-// chip. `text-error` / `text-success` / `text-warning` render the solid bare on
-// the surface tiers (--yb-surface etc.) all over the app, and a surface seed
-// tints those tiers; in dark mode a tinted surface is lighter than the chip, so
-// light-on-light there would fall below AA if we only gated on the chip. So the
-// candidates are the chip PLUS every (possibly tinted) surface tier, and we gate
-// on the darkest of them in light mode / the lightest in dark mode. Both modes
-// stay AA-safe by construction on every background the solid can sit on.
+// statusPair derives a status role from its seed: a pale chip background (the
+// seed mixed toward the surface) and a solid foreground/icon colour. The solid
+// is nudged past the WCAG-AA floor against the WORST-CASE background it
+// actually lands on — not just its own chip. `text-error` / `text-success` /
+// `text-warning` render the solid bare on the surface tiers (--yb-surface etc.)
+// all over the app, and a surface seed tints those tiers, so the candidates are
+// the chip PLUS every (possibly tinted) surface tier, and we gate on the
+// darkest of them.
 function statusPair(
   seed: string,
   surfaces: ReturnType<typeof surfaceTiers>,
-): { solid: ModeValue; bg: ModeValue } {
-  const lightBg = mix(LIGHT.surface, seed, STATUS_BG_TINT_LIGHT);
-  const darkBg = mix(DARK.surface2, seed, STATUS_BG_TINT_DARK);
-  const lightWorst = extremeBackground(
-    [...Object.values(surfaces.light), lightBg],
-    "darkest",
-  );
-  const darkWorst = extremeBackground(
-    [...Object.values(surfaces.dark), darkBg],
-    "lightest",
-  );
-  return {
-    solid: {
-      light: adjustToContrast(seed, lightWorst, "darken"),
-      dark: adjustToContrast(seed, darkWorst, "lighten"),
-    },
-    bg: { light: lightBg, dark: darkBg },
-  };
+): { solid: string; bg: string } {
+  const bg = mix(LIGHT.surface, seed, STATUS_BG_TINT);
+  const worst = extremeBackground([...Object.values(surfaces), bg], "darkest");
+  return { solid: adjustToContrast(seed, worst, "darken"), bg };
 }
 
-// resolveThemeCss derives the map of mode-aware token overrides (surface,
-// border, text, link, status) from a saved theme, as { token: {light, dark} }.
-// Only roles whose seed is set (or, for the link, whose seed or accent is set)
-// appear. This is the single source of truth for both the runtime <style> block
-// (applyOrgTheme) and the pre-paint cache (index.html), so they cannot drift.
+// resolveThemeCss derives the map of token overrides (surface, border, text,
+// link, status) from a saved theme. Only roles whose seed is set (or, for the
+// link, whose seed or accent is set) appear. This is the single source of
+// truth for both the runtime <style> block (applyOrgTheme) and the pre-paint
+// cache (index.html), so they cannot drift.
 export function resolveThemeCss(
   theme: OrgTheme | null | undefined,
-): Record<string, ModeValue> {
-  const out: Record<string, ModeValue> = {};
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const surfaces = surfaceTiers(theme);
 
   // Surfaces (subtle brand tint of the neutral tiers).
   if (parseHex(theme?.surfaceColor ?? "")) {
-    const s = surfaceTiers(theme);
-    out[SURFACE] = { light: s.light.surface, dark: s.dark.surface };
-    out[SURFACE_2] = { light: s.light.surface2, dark: s.dark.surface2 };
-    out[SURFACE_3] = { light: s.light.surface3, dark: s.dark.surface3 };
+    out[SURFACE] = surfaces.surface;
+    out[SURFACE_2] = surfaces.surface2;
+    out[SURFACE_3] = surfaces.surface3;
   }
 
-  // Borders (decorative — no text — so a stronger tint is fine).
+  // Borders (decorative, no text): the seed itself, and darkened for the
+  // strong line.
   const border = theme?.borderColor ?? "";
   if (parseHex(border)) {
-    out[LINE] = {
-      light: mix(LIGHT.line, border, BORDER_TINT),
-      dark: mix(DARK.line, border, BORDER_TINT),
-    };
-    out[LINE_STRONG] = {
-      light: mix(LIGHT.lineStrong, border, BORDER_TINT),
-      dark: mix(DARK.lineStrong, border, BORDER_TINT),
-    };
+    out[LINE] = border;
+    out[LINE_STRONG] = darken(border, LINE_STRONG_DARKEN);
   }
 
-  // Body text/ink: gated to AA against the (possibly tinted) worst-case surface
-  // in each mode — the darkest light surface for dark ink, the lightest dark
-  // surface for light ink.
+  // Body text/ink: gated to AA against the (possibly tinted) darkest surface.
+  // The secondary text fades from the ink and is gated the same way; the muted
+  // text (placeholders, disabled) is not gated, as its default is not.
   const text = theme?.textColor ?? "";
   if (parseHex(text)) {
-    const surfaces = surfaceTiers(theme);
-    out[INK] = {
-      light: adjustToContrast(
-        text,
-        extremeBackground(Object.values(surfaces.light), "darkest"),
-        "darken",
-      ),
-      dark: adjustToContrast(
-        text,
-        extremeBackground(Object.values(surfaces.dark), "lightest"),
-        "lighten",
-      ),
-    };
+    const darkest = extremeBackground(Object.values(surfaces), "darkest");
+    const ink = adjustToContrast(text, darkest, "darken");
+    out[INK] = ink;
+    out[INK_SOFT] = adjustToContrast(
+      lighten(ink, INK_SOFT_FADE),
+      darkest,
+      "darken",
+    );
+    out[MUTED] = lighten(ink, MUTED_FADE);
   }
 
   // Link (seed = link colour, else accent).
-  const link = resolveLinkTheme(theme);
+  const link = resolveLinkColor(theme);
   if (link) {
-    out[LINK] = { light: link.light, dark: link.dark };
+    out[LINK] = link;
   }
 
   // Semantic status roles. The solid is gated against the surface tiers it
   // renders on (see statusPair), so it needs the theme's (possibly tinted)
   // surfaces.
-  const statusSurfaces = surfaceTiers(theme);
   const success = theme?.successColor ?? "";
   if (parseHex(success)) {
-    const p = statusPair(success, statusSurfaces);
+    const p = statusPair(success, surfaces);
     out[SUCCESS] = p.solid;
     out[SUCCESS_BG] = p.bg;
+    out[SUCCESS_FG] = p.solid;
   }
   const warning = theme?.warningColor ?? "";
   if (parseHex(warning)) {
-    const p = statusPair(warning, statusSurfaces);
+    const p = statusPair(warning, surfaces);
     out[WARNING] = p.solid;
     out[WARNING_FG] = p.solid;
     out[WARNING_BG] = p.bg;
   }
   const error = theme?.errorColor ?? "";
   if (parseHex(error)) {
-    const p = statusPair(error, statusSurfaces);
+    const p = statusPair(error, surfaces);
     out[ERROR] = p.solid;
     out[ERROR_BG] = p.bg;
   }
@@ -605,25 +588,20 @@ export function resolveThemeCss(
   return out;
 }
 
-// buildThemeCss serialises the mode-aware token map into a stylesheet. The
-// doubled `:root:root` selector wins over index.css by specificity (not source
-// order), so the pre-paint injection in index.html has no ordering race against
-// Vite's CSS. Returns "" when there is nothing to override.
+// buildThemeCss serialises the token map into a stylesheet. The doubled
+// `:root:root` selector wins over index.css by specificity (not source order),
+// so the pre-paint injection in index.html has no ordering race against Vite's
+// CSS. Returns "" when there is nothing to override.
 export function buildThemeCss(theme: OrgTheme | null | undefined): string {
   const tokens = resolveThemeCss(theme);
   const names = Object.keys(tokens);
   if (names.length === 0) {
     return "";
   }
-  const light = names.map((n) => `${n}:${tokens[n].light}`).join(";");
-  const dark = names.map((n) => `${n}:${tokens[n].dark}`).join(";");
-  return (
-    `:root:root{${light}}` +
-    `@media (prefers-color-scheme: dark){:root:root{${dark}}}`
-  );
+  return `:root:root{${names.map((n) => `${n}:${tokens[n]}`).join(";")}}`;
 }
 
-// setThemeStyle installs (or clears) the mode-aware <style> block.
+// setThemeStyle installs (or clears) the derived <style> block.
 function setThemeStyle(css: string): void {
   const existing = document.getElementById(ORG_THEME_STYLE_ID);
   if (!css) {
@@ -641,6 +619,30 @@ function setThemeStyle(css: string): void {
   }
 }
 
+// usesWhiteLabelDesign reports whether a theme is shown in the white-label
+// design: any theme the org has set up. An org without one keeps Yivi's.
+export function usesWhiteLabelDesign(
+  theme: OrgTheme | null | undefined,
+): boolean {
+  return theme?.configured === true;
+}
+
+// setWhiteLabelDesign switches the white-label design on or off, and with it
+// the light scheme it is always shown in.
+function setWhiteLabelDesign(design: Design): void {
+  if (design === WHITE_LABEL_DESIGN) {
+    document.documentElement.setAttribute(DESIGN_ATTRIBUTE, WHITE_LABEL_DESIGN);
+  } else {
+    document.documentElement.removeAttribute(DESIGN_ATTRIBUTE);
+  }
+  setWhiteLabelScheme(design);
+}
+
+// themeDesign is the design a theme is shown in.
+function themeDesign(theme: OrgTheme | null | undefined): Design {
+  return usesWhiteLabelDesign(theme) ? WHITE_LABEL_DESIGN : DEFAULT_DESIGN;
+}
+
 // shouldApplyOrgTheme reports whether the runtime theme effect should push
 // tokens onto the document for the current query state. While the theme query is
 // in flight its data is `undefined`; applying then runs applyOrgTheme(undefined),
@@ -654,10 +656,10 @@ export function shouldApplyOrgTheme(
   return theme !== undefined;
 }
 
-// applyOrgTheme maps a saved theme onto the design tokens: the mode-safe brand
-// fills inline on the documentElement, the mode-aware roles as the <style>
-// block. Missing/invalid fields are cleared so they fall back to the default
-// look.
+// applyOrgTheme maps a saved theme onto the design tokens: the white-label
+// design for a configured theme, the brand fills inline on the
+// documentElement, the derived roles as the <style> block. Missing/invalid
+// fields are cleared so they fall back to the design's own.
 export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
   const root = document.documentElement.style;
   const tokens = resolveThemeTokens(theme);
@@ -670,6 +672,7 @@ export function applyOrgTheme(theme: OrgTheme | null | undefined): void {
     }
   }
   setThemeStyle(buildThemeCss(theme));
+  setWhiteLabelDesign(themeDesign(theme));
 }
 
 // clearOrgTheme restores every token to its default (used when leaving an org).
@@ -679,6 +682,7 @@ export function clearOrgTheme(): void {
     root.removeProperty(property);
   }
   setThemeStyle("");
+  setWhiteLabelDesign(DEFAULT_DESIGN);
 }
 
 // Cached theme, keyed by org slug, so a full page reload can paint the tenant's
@@ -691,11 +695,13 @@ function themeCacheKey(slug: string): string {
   return THEME_CACHE_PREFIX + slug;
 }
 
-// The cached shape: the inline brand-fill overrides and the mode-aware CSS
-// string. Kept in step with the reader in index.html.
+// The cached shape: the inline brand-fill overrides, the derived CSS string
+// and whether it uses the white-label design. Kept
+// in step with the reader in index.html.
 interface CachedTheme {
   inline: Record<string, string>;
   css: string;
+  whiteLabel: boolean;
 }
 
 // cacheOrgTheme stores the resolved overrides for an org so the next full load
@@ -712,6 +718,7 @@ export function cacheOrgTheme(
     const payload: CachedTheme = {
       inline: resolveThemeTokens(theme),
       css: buildThemeCss(theme),
+      whiteLabel: usesWhiteLabelDesign(theme),
     };
     window.localStorage.setItem(themeCacheKey(slug), JSON.stringify(payload));
   } catch {
@@ -741,6 +748,9 @@ export function applyCachedOrgTheme(slug: string): boolean {
       root.setProperty(property, value);
     }
     setThemeStyle(payload.css ?? "");
+    setWhiteLabelDesign(
+      payload.whiteLabel === true ? WHITE_LABEL_DESIGN : DEFAULT_DESIGN,
+    );
     return true;
   } catch {
     return false;

@@ -3,6 +3,7 @@ package attestation
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"github.com/google/uuid"
@@ -79,9 +80,7 @@ func (i *OnboardingIssuer) IssueOnboarding(ctx context.Context, m organization.O
 // the wizard's precedence without inventing values.
 func resolveOnboardingAttributes(template Template, sources map[string]string) map[string]string {
 	attrs := make(map[string]string, len(template.DefaultAttributes)+len(template.AttributeSources))
-	for key, value := range template.DefaultAttributes {
-		attrs[key] = value
-	}
+	maps.Copy(attrs, template.DefaultAttributes)
 	for key, token := range template.AttributeSources {
 		if value := sources[token]; value != "" {
 			attrs[key] = value

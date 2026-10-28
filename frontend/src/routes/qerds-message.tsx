@@ -22,7 +22,7 @@ import { Button, Card, Icon, Tag, TopBar } from "../ui";
 import * as React from "react";
 
 const EYEBROW =
-  "text-muted font-mono text-[11px] font-medium tracking-[0.06em] uppercase";
+  "text-muted font-label text-[11px] font-medium tracking-[0.06em] uppercase";
 
 // Matches the Button component's secondary/md classes so the deep-link to the
 // Attestations page reads as a regular action while staying a real navigation
@@ -57,13 +57,13 @@ function OfferCard({
   senderAddress,
   rawBody,
   t,
-}: {
+}: Readonly<{
   slug: string;
   offer: QerdsCredentialOffer;
   senderAddress: string;
   rawBody: string;
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const credentialName =
     offer.credentialName || t("attestations.offers.unnamedCredential");
   const sender = offer.senderOrgName || senderAddress;
@@ -131,12 +131,12 @@ function DetailRow({
   value,
   mono,
   capitalize,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   mono?: boolean;
   capitalize?: boolean;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className={EYEBROW}>{label}</span>
@@ -157,11 +157,11 @@ function EvidenceItem({
   evidence,
   dateFormatter,
   t,
-}: {
+}: Readonly<{
   evidence: QerdsEvidence;
   dateFormatter: Intl.DateTimeFormat;
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   return (
     <li className="flex gap-3">
       <span className="text-valid inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--color-valid)_14%,transparent)]">
@@ -197,12 +197,12 @@ function AttachmentsCard({
   messageId,
   attachments,
   t,
-}: {
+}: Readonly<{
   slug: string;
   messageId: string;
   attachments: QerdsAttachment[];
   t: TFunction;
-}): React.JSX.Element {
+}>): React.JSX.Element {
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
   async function download(attachment: QerdsAttachment): Promise<void> {
@@ -277,7 +277,7 @@ export default function QerdsMessage(): React.JSX.Element {
   const shell = (body: React.ReactNode): React.JSX.Element => (
     <>
       <TopBar title={t("qerds.message.title")} />
-      <div className="p-8">{body}</div>
+      <div className="p-4 sm:p-8">{body}</div>
     </>
   );
   const notice = (text: string, isError = false): React.JSX.Element => (
@@ -317,7 +317,7 @@ export default function QerdsMessage(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 p-8 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-8 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
           {message.offer ? (
             <OfferCard

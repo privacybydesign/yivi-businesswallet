@@ -2,13 +2,13 @@ name: yivi-business-wallet
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-yivi_business_wallet}
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata17:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-yivi_business_wallet}"]
       interval: 5s
@@ -68,9 +68,13 @@ services:
       EUDI_ISSUER_CHAIN: ${EUDI_ISSUER_CHAIN:-}
       EUDI_INTENDED_USE_ID: ${EUDI_INTENDED_USE_ID:-}
       EUDI_REGISTRATION_CERTIFICATE: ${EUDI_REGISTRATION_CERTIFICATE:-}
+      EUDI_CREDENTIAL_SCHEME: ${EUDI_CREDENTIAL_SCHEME:-}
       # Public base URL of the frontend, used to build claim links in outbound
       # e-mail / QERDS credential-offer messages.
       APP_BASE_URL: ${APP_BASE_URL:-}
+      # Reverse proxies (CIDRs or addresses) whose X-Forwarded-For names the
+      # client that per-source rate limits key on; empty trusts none.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       # Encrypts per-org SMTP passwords at rest (hex 32 bytes). Optional: without
       # it, orgs can only configure passwordless (e.g. relay) SMTP.
       EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
@@ -101,6 +105,35 @@ services:
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}
       ATTESTATION_ISSUER_PING_CREDENTIAL: ${ATTESTATION_ISSUER_PING_CREDENTIAL:-}
+      # Identity proofing runs in the backend's own engine (`engine`, the
+      # default) or the in-memory `stub`. The encryption key (hex 32 bytes)
+      # seals the sessions' evidence and the webhook secrets at rest.
+      IDENTITY_PROOFING_PROVIDER: ${IDENTITY_PROOFING_PROVIDER:-}
+      IDENTITY_PROOFING_ENCRYPTION_KEY: ${IDENTITY_PROOFING_ENCRYPTION_KEY:-}
+      # Makes every `stub` session decide (approved, rejected or needs_review).
+      IDENTITY_PROOFING_STUB_OUTCOME: ${IDENTITY_PROOFING_STUB_OUTCOME:-}
+      # Where the Idem app reaches /api/v1/app; empty is APP_BASE_URL. A phone
+      # needs an address it can reach, e.g. http://<LAN-IP>:8080.
+      IDENTITY_PROOFING_PUBLIC_URL: ${IDENTITY_PROOFING_PUBLIC_URL:-}
+      # The https App Link a claim opens the Idem app with; empty is vcmrtd://verify.
+      IDENTITY_PROOFING_APP_LINK_URL: ${IDENTITY_PROOFING_APP_LINK_URL:-}
+      # The Regula Face API for face verification; empty disables it.
+      REGULA_FACE_API_URL: ${REGULA_FACE_API_URL:-}
+      REGULA_FACE_API_PUBLIC_URL: ${REGULA_FACE_API_PUBLIC_URL:-}
+      REGULA_FACE_MATCH_THRESHOLD: ${REGULA_FACE_MATCH_THRESHOLD:-}
+      # Comma-separated eDL CSCA files (from the ops repo); empty trusts no licence.
+      IDENTITY_PROOFING_EDL_CSCA_PATHS: ${IDENTITY_PROOFING_EDL_CSCA_PATHS:-}
+      # Diploma verification: the validator (`stub` or the real PDF check) and
+      # the source of the trusted signing roots; empty keeps the config defaults.
+      DIPLOMA_VALIDATOR_PROVIDER: ${DIPLOMA_VALIDATOR_PROVIDER:-}
+      DIPLOMA_TRUST_SOURCE: ${DIPLOMA_TRUST_SOURCE:-}
+      # Where the EU Trusted Lists are cached between restarts; empty keeps none.
+      DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-}
+      # "false" stops the online revocation check of DUO's signing chain; on by default.
+      DIPLOMA_OCSP: ${DIPLOMA_OCSP:-}
+      # Verzekeringsbericht verification: the validator (`stub` or the real UWV
+      # seal check, on the diploma trust anchors); empty keeps the config default.
+      EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-}
     depends_on:
       db:
         condition: service_healthy
@@ -116,4 +149,4 @@ services:
       start_period: 5s
 
 volumes:
-  pgdata:
+  pgdata17:

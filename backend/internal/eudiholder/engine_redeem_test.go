@@ -16,8 +16,13 @@ import (
 type fakeCredentialStore struct {
 	db.CredentialStore
 
-	err    error
-	stored int
+	err       error
+	stored    int
+	instances []db.CredentialStatusInstance
+}
+
+func (f *fakeCredentialStore) ListInstancesWithStatusReference() ([]db.CredentialStatusInstance, error) {
+	return f.instances, f.err
 }
 
 func (f *fakeCredentialStore) StoreBatch(batch *models.CredentialBatch) error {
@@ -122,5 +127,30 @@ func TestStoreRecorderIgnoresInstancelessBatch(t *testing.T) {
 	}
 	if got := rec.refFor("nl.kvk.registration"); got != "" {
 		t.Fatalf("refFor for an instanceless batch = %q, want empty", got)
+	}
+}
+
+// A single credential's refresh hands irmago's sweep only its own batch.
+func TestBatchStatusStoreListsOneBatch(t *testing.T) {
+	target, other := datatypes.NewUUIDv4(), datatypes.NewUUIDv4()
+	store := batchStatusStore{
+		CredentialStore: &fakeCredentialStore{instances: []db.CredentialStatusInstance{
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: other, StatusListURI: "https://issuer.test/other"},
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: "https://issuer.test/target"},
+			{InstanceID: datatypes.NewUUIDv4(), BatchID: target, StatusListURI: "https://issuer.test/target"},
+		}},
+		batchID: target,
+	}
+	got, err := store.ListInstancesWithStatusReference()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("listed %d instances, want the target batch's 2", len(got))
+	}
+	for _, inst := range got {
+		if inst.BatchID != target {
+			t.Errorf("listed an instance of batch %s, want only %s", inst.BatchID, target)
+		}
 	}
 }

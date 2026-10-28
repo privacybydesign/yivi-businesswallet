@@ -16,15 +16,15 @@ export function Stat({
   value,
   hint,
   icon,
-}: StatProps): React.JSX.Element {
+}: Readonly<StatProps>): React.JSX.Element {
   return (
     <Card className="px-4 py-3.5">
       <div className="flex items-center justify-between">
-        <span className="text-muted font-mono text-[11px] font-medium tracking-[0.08em] uppercase">
+        <span className="text-muted font-label text-[11px] font-medium tracking-[0.08em] uppercase">
           {label}
         </span>
         {icon && (
-          <span className="text-muted">
+          <span className="text-stat-icon">
             <Icon name={icon} size={ICON_SIZE} />
           </span>
         )}

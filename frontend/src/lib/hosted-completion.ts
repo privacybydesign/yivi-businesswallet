@@ -1,0 +1,208 @@
+// How a hosted proofing page picks its language and hands its subject back
+// once the session settles. Pure, so the rules are unit-tested.
+
+import type { MutationStatus } from "@tanstack/react-query";
+import type { HostedTheme, ProofingProgress } from "../api/identity-proofing";
+import type { OrgTheme } from "../api/theme";
+import { ttlMinutes } from "./identity-proofing";
+import {
+  DEFAULT_LANGUAGE,
+  isSupportedLanguage,
+  resolveInitialLanguage,
+  type Language,
+} from "../i18n/language";
+
+// The page's language, among those the flow offers (none listed: every
+// supported one): the session's, then the browser's first offered preference,
+// then the default, else the first offered. A choice stored for the wallet
+// itself does not count: the subject is not a wallet user.
+export function hostedLanguage(
+  session: string | undefined,
+  preferred: readonly string[],
+  offered: readonly string[] = [],
+): Language {
+  const offers = (value: Language): boolean =>
+    offered.length === 0 || offered.includes(value);
+  if (isSupportedLanguage(session) && offers(session)) {
+    return session;
+  }
+  for (const preference of preferred) {
+    const base = resolveInitialLanguage(null, [preference]);
+    if (preference.toLowerCase().split("-")[0] === base && offers(base)) {
+      return base;
+    }
+  }
+  if (offers(DEFAULT_LANGUAGE)) {
+    return DEFAULT_LANGUAGE;
+  }
+  return offered.find(isSupportedLanguage) ?? DEFAULT_LANGUAGE;
+}
+
+// The message an embedding page receives once the session settles.
+export interface HostedCompletedMessage {
+  type: "proofing.completed";
+  session: string;
+  status: string;
+}
+
+export function completedMessage(
+  session: string,
+  status: string,
+): HostedCompletedMessage {
+  return { type: "proofing.completed", session, status };
+}
+
+// The redirect with the session and its status added, keeping the redirect's
+// own query. The backend accepted the redirect's origin when the session was
+// created; an unparsable one is undefined, so the page shows its own done screen.
+export function completionRedirect(
+  redirectUrl: string,
+  message: HostedCompletedMessage,
+): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(redirectUrl);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return undefined;
+  }
+  url.searchParams.set("session", message.session);
+  url.searchParams.set("status", message.status);
+  return url.toString();
+}
+
+// How a settled hosted page hands its subject back: the message, whether it is
+// posted to the embedding page, and where the page redirects, if anywhere.
+export interface HostedHandBack {
+  message: HostedCompletedMessage;
+  post: boolean;
+  redirectTo: string | undefined;
+}
+
+// The status of a check that ran out unfinished: the session's time, or the
+// link's before it was started.
+const STATUS_EXPIRED = "expired";
+
+// The hand-back for a settled status, or undefined when there is none: the
+// page hands back once, and a data request in review is not answered yet. A
+// data request's answer shows on the page, so it never redirects away; nor
+// does a check that ran out, whose page says what to do next (VF5) instead of
+// sending the person back as if it were done.
+export function hostedHandBack({
+  sessionId,
+  status,
+  handedBack,
+  dataRequest,
+  framed,
+  redirectUrl,
+}: {
+  sessionId: string;
+  status: string;
+  handedBack: boolean;
+  dataRequest: boolean;
+  framed: boolean;
+  redirectUrl: string | undefined;
+}): HostedHandBack | undefined {
+  if (handedBack || (dataRequest && status === "needs_review")) {
+    return undefined;
+  }
+  const message = completedMessage(sessionId, status);
+  return {
+    message,
+    post: framed,
+    redirectTo:
+      redirectUrl && !dataRequest && status !== STATUS_EXPIRED
+        ? completionRedirect(redirectUrl, message)
+        : undefined,
+  };
+}
+
+// What a page posts to: its parent window when it is framed.
+export interface MessageTarget {
+  postMessage(message: unknown, targetOrigin: string): void;
+}
+
+// Posts the completion to each of the org's origins, never "*": the
+// browser delivers it only when the embedding page is on that origin, so no
+// other page learns the outcome.
+export function postCompletion(
+  parent: MessageTarget,
+  origins: readonly string[],
+  message: HostedCompletedMessage,
+): void {
+  for (const origin of origins) {
+    parent.postMessage(message, origin);
+  }
+}
+
+// The origins an admin typed, one per line: trimmed, blank lines dropped. The
+// backend checks each one and normalises it.
+export function originLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+// The hosted page's theme: the white-label design in the look the Idem app
+// shows the session in (the proofing look, the flow's own over the org's,
+// else the org's theme), its header as the page's header. The branding's
+// own colour (the flow's, else the org's) is the brand colour when it has a
+// valid one, so a flow's colour shows over a theme's. Applied through
+// applyOrgTheme, which keeps text on it readable and drops what is not a
+// valid colour.
+export function hostedTheme(
+  theme: HostedTheme | undefined,
+  primaryColor: string,
+): OrgTheme {
+  return {
+    configured: true,
+    primaryColor: HEX_COLOR.test(primaryColor)
+      ? primaryColor
+      : (theme?.primaryColor ?? ""),
+    accentColor: theme?.secondaryColor ?? "",
+    textColor: theme?.textColor ?? "",
+    surfaceColor: theme?.surfaceColor ?? "",
+    borderColor: theme?.borderColor ?? "",
+    linkColor: theme?.linkColor ?? "",
+    successColor: theme?.successColor ?? "",
+    warningColor: theme?.warningColor ?? "",
+    errorColor: theme?.errorColor ?? "",
+    sidebarColor: "",
+    topbarColor: theme?.headerColor ?? "",
+    fontFamily: theme?.fontFamily ?? "",
+    logoUri: "",
+  };
+}
+
+// Whether the decline dialog may close: not while the decline is in flight.
+export function canCloseDecline(status: MutationStatus): boolean {
+  return status !== "pending";
+}
+
+// Why a hosted check ended unfinished, as "This check has ended" says it: a
+// link that was never started ran out before a start; a started one ran out
+// within the lifetime its session was created with, named when the page has
+// it (a session started before the wallet kept it says "in time").
+export type CheckEndReason =
+  | { kind: "notStarted" }
+  | { kind: "timedOut"; minutes: number | undefined };
+
+export function checkEndReason(
+  progress: Pick<ProofingProgress, "started" | "sessionTtlSeconds">,
+): CheckEndReason {
+  if (progress.started !== true) {
+    return { kind: "notStarted" };
+  }
+  return {
+    kind: "timedOut",
+    minutes:
+      progress.sessionTtlSeconds === undefined
+        ? undefined
+        : ttlMinutes(progress.sessionTtlSeconds),
+  };
+}

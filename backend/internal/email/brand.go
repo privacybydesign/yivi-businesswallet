@@ -17,7 +17,7 @@ import (
 // like the app.
 //
 // Only the LIGHT half of that derivation is mirrored. The app ships a
-// `prefers-color-scheme: dark` block; mail cannot (see shell.go), so the mail
+// dark-mode block; mail cannot (see shell.go), so the mail
 // palette is one light-mode palette chosen to stay readable when a client
 // force-inverts it. Every colour is nudged toward black rather than white for the
 // same reason: a darker foreground survives inversion better than a lighter one.
@@ -242,7 +242,7 @@ func readableForegroundAA(background string) string {
 // also has a lighten direction, for its dark-mode half; mail has no dark half.
 func adjustToContrast(color, background string) string {
 	current := color
-	for i := 0; i < adjustMaxSteps; i++ {
+	for range adjustMaxSteps {
 		if contrastRatio(current, background) >= aaContrast {
 			break
 		}

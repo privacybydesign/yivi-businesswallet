@@ -1,0 +1,130 @@
+package proofing
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/addresslookup"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
+)
+
+// maxFormBodyBytes caps a small JSON form a page posts, such as an address:
+// far above what its fields allow, read before they are checked.
+const maxFormBodyBytes = 16 << 10
+
+// The query parameters of the address lookup routes.
+const (
+	queryPostalCode  = "postalCode"
+	queryHouseNumber = "houseNumber"
+)
+
+type flowAddressBody struct {
+	AddressMode AddressMode `json:"addressMode"`
+}
+
+func (h *Handler) getFlowAddress(w http.ResponseWriter, r *http.Request) error {
+	mode, err := h.service.FlowAddress(r.Context(), orgFromRequest(r), r.PathValue("flowID"))
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, flowAddressBody{AddressMode: mode})
+	return nil
+}
+
+func (h *Handler) saveFlowAddress(w http.ResponseWriter, r *http.Request) error {
+	var body flowAddressBody
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	mode, err := h.service.SaveFlowAddress(r.Context(), orgFromRequest(r), r.PathValue("flowID"), body.AddressMode)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, flowAddressBody{AddressMode: mode})
+	return nil
+}
+
+// addressModeOf is the request's mode, off for a row from before the address.
+func addressModeOf(req Request) AddressMode {
+	if req.Address == "" {
+		return AddressOff
+	}
+	return req.Address
+}
+
+// addressUntil is when the subject can last enter their address: AddressWindow
+// after the identity check of a request that asks for it and holds none yet
+// finished (stepsUntil), nil otherwise.
+func addressUntil(req Request) *time.Time {
+	if !req.Address.asked() || req.SubjectAddress != nil {
+		return nil
+	}
+	return req.stepsUntil(AddressWindow)
+}
+
+// addAddress keeps the address entered on a request's on-screen page; the
+// page reads it back with the request.
+func (h *Handler) addAddress(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+	var body Address
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if _, err := h.service.AddAddress(r.Context(), orgFromRequest(r).ID, id, requestedBy, body); err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// hostedAddAddress keeps the address a hosted link's subject entered. The
+// answer carries no address: the link's token alone opens the page.
+func (h *Handler) hostedAddAddress(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+	var body Address
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if _, err := h.service.HostedAddAddress(r.Context(), r.PathValue("token"), body); err != nil {
+		return mapError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// addressLookupBody is the register's addresses at a postal code and number.
+type addressLookupBody struct {
+	Addresses []addresslookup.Address `json:"addresses"`
+}
+
+// lookUpAddress finds the addresses at ?postalCode= and ?houseNumber= on a
+// request's on-screen page.
+func (h *Handler) lookUpAddress(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	found, err := h.service.LookUpAddress(r.Context(), orgFromRequest(r).ID, id, requestedBy, q.Get(queryPostalCode), q.Get(queryHouseNumber))
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, addressLookupBody{Addresses: found})
+	return nil
+}
+
+// hostedLookUpAddress finds the addresses at ?postalCode= and ?houseNumber=
+// on a hosted link's page.
+func (h *Handler) hostedLookUpAddress(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	found, err := h.service.HostedLookUpAddress(r.Context(), r.PathValue("token"), q.Get(queryPostalCode), q.Get(queryHouseNumber))
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, addressLookupBody{Addresses: found})
+	return nil
+}

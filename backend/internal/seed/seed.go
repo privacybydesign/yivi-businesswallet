@@ -24,15 +24,28 @@ import (
 const fakerSeed = 1
 
 const (
-	demoOrgSlug      = "yivi"
-	fakerMemberCount = 15
-	inviteCount      = 35
-	revokeCount      = 22
-	roleChangeCount  = 8
+	demoOrgSlug = "yivi"
+	inviteCount = 22
+)
+
+// The Yivi org's two test members, each with something left to do: one is
+// asked to identify, the other, an external, to hand in a VOG.
+const (
+	identityTestEmail = "sanne.visser@example.test"
+	vogTestEmail      = "daan.smit@example.test"
+)
+
+// The orgs that run identity proofing for external people (proofing.go).
+const (
+	radboudSlug = "radboud-universiteit"
+	asrSlug     = "asr"
+	unibetSlug  = "unibet"
+	cmSlug      = "cm"
+	odixusSlug  = "odixus"
 )
 
 // demoOrganization is a seeded business wallet: an org with KVK identity, a QERDS
-// digital address and one representative. Its KVK identity and primary
+// digital address and, unless repKind is empty, one representative. Its KVK identity and primary
 // representative mirror registryprovider.DemoRegistrations (the register flow's
 // fake API), so a seeded user resolves to a real representative entry and the
 // seeded data never drifts from the register — enforced by TestDemoOrgsMatchRegister.
@@ -88,6 +101,7 @@ var yiviTeam = []demoUser{
 	{email: "m.kamphuis@yivi.app", givenNames: "Martijn", lastName: "Kamphuis"},
 	{email: "r.hensen@yivi.app", givenNames: "Ruben", lastName: "Hensen"},
 	{email: "d.mulder@yivi.app", givenNames: "Dibran", lastName: "Mulder"},
+	{email: "j.lin@yivi.app", givenNames: "Jameson", lastName: "Lin"},
 }
 
 // partnerOrganization pairs a staging pilot organisation with the team
@@ -169,13 +183,21 @@ var kvkRegisterOrg = demoOrganization{
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
 	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
-	{name: "Radboud Universiteit", slug: "radboud-universiteit", kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Radboud Universiteit (Demo)", slug: radboudSlug, kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
 	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
+	// Identity proofing use cases (demoProofingOrgs): real names marked "(Demo)",
+	// with no representative and placeholder KVK numbers outside the register.
+	{name: "a.s.r. verzekeringen (Demo)", slug: asrSlug, kvkNumber: "90000110", euid: "NL.KVK.90000110", addressLocal: "asr"},
+	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NL.KVK.90000120", addressLocal: "unibet"},
+	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NL.KVK.90000130", addressLocal: "cm"},
+	{name: "odixus (Demo)", slug: odixusSlug, kvkNumber: "90000140", euid: "NL.KVK.90000140", addressLocal: "odixus"},
 }
 
 var demoUsers = []demoUser{
 	{email: "admin@yivi.app", givenNames: "Johannes Hendrik", preferredName: "Jan", lastName: "Janssen"},
 	{email: "user@yivi.app", givenNames: "Thijs Adriaan", lastName: "de Vries"},
+	{email: identityTestEmail, givenNames: "Sanne", lastName: "Visser"},
+	{email: vogTestEmail, givenNames: "Daan", lastName: "Smit"},
 }
 
 var demoDepartments = []demoDepartment{
@@ -188,6 +210,8 @@ var demoMemberships = []demoMembership{
 	{email: "user@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Technology Officer", department: "Engineering"},
 	{email: "admin@yivi.app", slug: "yivi", role: "admin", jobTitle: "Chief Executive Officer", department: "Operations"},
 	{email: "user@yivi.app", slug: "firsty", role: "member", jobTitle: "Account Manager", department: "Sales"},
+	{email: identityTestEmail, slug: "yivi", role: "member", jobTitle: "Support Engineer", department: "Operations"},
+	{email: vogTestEmail, slug: "yivi", role: "member", jobTitle: "Freelance Developer", department: "Engineering"},
 }
 
 // communityOrganization is a dev-demo organisation whose point is its internal
@@ -390,6 +414,10 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedHeldAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
+	// The identity proofing use cases the proofing orgs run for external people.
+	if err := seedProofing(ctx, pool, orgsBySlug); err != nil {
+		return err
+	}
 
 	// Gemeente Nijmegen is the first tenant whose attestation catalogue is a
 	// public-sector permit rather than an HR/supplier credential (issue #245): the
@@ -408,11 +436,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		deptsByOrgName[demoOrgSlug+"/Operations"].ID,
 	}
 
-	members, admins, err := seedFakerMembers(ctx, faker, users, orgs, demoOrg.ID, demoDeptIDs)
-	if err != nil {
-		return err
-	}
-	admins = append(admins, usersByEmail["user@yivi.app"].ID, usersByEmail["admin@yivi.app"].ID)
+	admins := []uuid.UUID{usersByEmail["user@yivi.app"].ID, usersByEmail["admin@yivi.app"].ID}
 
 	// The activity is the audited history; guard on it so re-runs (which can't
 	// recreate already-revoked invitations) don't pile up duplicate events.
@@ -424,7 +448,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		slog.Info("activity already seeded")
 		return nil
 	}
-	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, members, demoDeptIDs); err != nil {
+	if err := seedActivity(ctx, faker, orgs, demoOrg.ID, admins, testMembers{identity: usersByEmail[identityTestEmail].ID, vog: usersByEmail[vogTestEmail].ID}, demoDeptIDs); err != nil {
 		return err
 	}
 	return spreadAuditTimestamps(ctx, pool, demoOrg.ID)
@@ -716,45 +740,17 @@ func ensureMembership(ctx context.Context, orgs *organization.Store, orgID, user
 	return nil
 }
 
-// seedFakerMembers provisions active members for the demo org and returns the
-// member and admin user ids, so the activity below can attribute actions to a
-// realistic spread of actors.
-func seedFakerMembers(ctx context.Context, faker *gofakeit.Faker, users *user.Store, orgs *organization.Store, orgID uuid.UUID, deptIDs []uuid.UUID) (members, admins []uuid.UUID, err error) {
-	for i := 0; i < fakerMemberCount; i++ {
-		first, last := faker.FirstName(), faker.LastName()
-		email := fmt.Sprintf("%s.%s%d@example.test", slugify(first), slugify(last), i)
-
-		u, err := ensureUser(ctx, users, email, first, last, "")
-		if err != nil {
-			return nil, nil, err
-		}
-
-		role := organization.RoleMember
-		if i%6 == 0 {
-			role = organization.RoleAdmin
-		}
-		// Round-robin the departments, leaving every (len+1)th unassigned.
-		var deptID *uuid.UUID
-		if slot := i % (len(deptIDs) + 1); slot < len(deptIDs) {
-			deptID = &deptIDs[slot]
-		}
-		if err := ensureMembership(ctx, orgs, orgID, u.ID, role, faker.JobTitle(), deptID); err != nil {
-			return nil, nil, err
-		}
-		if role == organization.RoleAdmin {
-			admins = append(admins, u.ID)
-		} else {
-			members = append(members, u.ID)
-		}
-	}
-	slog.Info("seeded faker members", slog.Int("count", fakerMemberCount))
-	return members, admins, nil
+// testMembers are the members seedActivity asks an identification and a VOG
+// of.
+type testMembers struct {
+	identity, vog uuid.UUID
 }
 
 // seedActivity performs real, audited operations — invitations, revocations and
-// role changes — each attributed to a random admin, so the audit log reflects
-// genuine history (every entry corresponds to real data) with varied actors.
-func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins, members, deptIDs []uuid.UUID) error {
+// the test members' identification and VOG requests, each attributed to a
+// random admin, so the audit log reflects genuine history (every entry
+// corresponds to real data) with varied actors.
+func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization.Store, orgID uuid.UUID, admins []uuid.UUID, members testMembers, deptIDs []uuid.UUID) error {
 	actorCtx := func(actor uuid.UUID) context.Context {
 		return audit.ContextWithActor(ctx, audit.Actor{UserID: actor})
 	}
@@ -767,7 +763,7 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 	}
 
 	invitationIDs := make([]uuid.UUID, 0, inviteCount)
-	for i := 0; i < inviteCount; i++ {
+	for i := range inviteCount {
 		first, last := faker.FirstName(), faker.LastName()
 		inviter := pickAdmin()
 		inv, err := orgs.CreateInvitation(actorCtx(inviter), organization.Invitation{
@@ -786,9 +782,9 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		invitationIDs = append(invitationIDs, inv.ID)
 	}
 
-	// Revoke a subset — these become 'gone' history, correctly absent from the list.
-	for i := 0; i < revokeCount && i < len(invitationIDs); i++ {
-		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, invitationIDs[i]); err != nil {
+	// Revoke them all: 'gone' history, correctly absent from the list.
+	for _, id := range invitationIDs {
+		if err := orgs.RevokeInvitation(actorCtx(pickAdmin()), orgID, id); err != nil {
 			return fmt.Errorf("seed: revoke: %w", err)
 		}
 	}
@@ -808,21 +804,40 @@ func seedActivity(ctx context.Context, faker *gofakeit.Faker, orgs *organization
 		return fmt.Errorf("seed: anchor invite: %w", err)
 	}
 
-	// Role changes on existing members (promote some, retitle others) — always
-	// member->admin so the last-admin guard can never trip.
-	for i := 0; i < roleChangeCount && i < len(members); i++ {
-		role := organization.RoleMember
-		if i%2 == 0 {
-			role = organization.RoleAdmin
-		}
-		dept := deptIDs[faker.Number(0, len(deptIDs)-1)]
-		if _, err := orgs.UpdateMembership(actorCtx(pickAdmin()), orgID, members[i], &role, optional(faker.JobTitle()), &dept); err != nil {
-			return fmt.Errorf("seed: role change: %w", err)
-		}
+	identityRequester := pickAdmin()
+	if _, err := orgs.RequestIdentification(actorCtx(identityRequester), orgID, []uuid.UUID{members.identity}, identityRequester, ""); err != nil {
+		return fmt.Errorf("seed: request identification: %w", err)
 	}
 
-	slog.Info("seeded activity",
-		slog.Int("invited", inviteCount+1), slog.Int("revoked", revokeCount), slog.Int("roleChanged", roleChangeCount))
+	// The VOG test member is an external, and the policy asks a VOG of
+	// externals only, so the admins' own rows stay "not required".
+	if _, err := orgs.UpdateMemberType(actorCtx(pickAdmin()), orgID, members.vog, organization.MemberTypeExternal, nil); err != nil {
+		return fmt.Errorf("seed: vog member type: %w", err)
+	}
+
+	policy, err := orgs.GetScreeningSettings(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: screening settings: %w", err)
+	}
+
+	if _, err := orgs.SaveScreeningSettings(actorCtx(pickAdmin()), orgID, organization.ScreeningSettingsInput{
+		RequiredFor:                 organization.ScreeningRequiredForExternals,
+		RequiredCodes:               policy.RequiredCodes,
+		RecheckAnchor:               policy.RecheckAnchor,
+		ReminderDaysBefore:          policy.ReminderDaysBefore,
+		OverdueReminderIntervalDays: policy.OverdueReminderIntervalDays,
+		OverdueReminderMaxCount:     policy.OverdueReminderMaxCount,
+		OverdueConsequence:          policy.OverdueConsequence,
+	}); err != nil {
+		return fmt.Errorf("seed: screening policy: %w", err)
+	}
+
+	vogRequester := pickAdmin()
+	if _, err := orgs.RequestVog(actorCtx(vogRequester), orgID, []uuid.UUID{members.vog}, vogRequester, ""); err != nil {
+		return fmt.Errorf("seed: request vog: %w", err)
+	}
+
+	slog.Info("seeded activity", slog.Int("invited", inviteCount+1), slog.Int("revoked", inviteCount))
 	return nil
 }
 

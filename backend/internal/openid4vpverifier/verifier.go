@@ -31,6 +31,14 @@ const (
 	ClaimDateOfBirth = "dateOfBirth"
 	ClaimNationality = "nationality"
 	ClaimPhone       = "mobilenumber"
+	// ClaimPhoto is the passport, id-card and residence-permit portrait, base64 (ScopeProofing).
+	ClaimPhoto = "photo"
+
+	// pbdf.gemeente.address claim keys (ScopeProofingAddress).
+	ClaimAddressStreet      = "street"
+	ClaimAddressHouseNumber = "houseNumber"
+	ClaimAddressPostalCode  = "zipcode"
+	ClaimAddressCity        = "city"
 
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because
@@ -70,31 +78,65 @@ type Session struct {
 type Presentation struct {
 	Claims map[string]string
 	// ByCredential holds each requested credential's own disclosed claims,
-	// keyed by the DCQL credential id (passport, idcard, email, phone, vog).
+	// keyed by the DCQL credential id (passport, idcard, residencepermit, email,
+	// phone, vog, address).
 	// Needed because two credentials in one presentation may disclose the same
 	// claim name - both the identity credential and pbdf.vog carry a
 	// dateOfBirth - and Claims keeps only one of them, in map-iteration order.
 	ByCredential map[string]map[string]string
-	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport or
-	// id-card) issuer-signed JWT — the moment the wallet obtained that credential
+	// IdentityIssuedAt is the `iat` claim of the identity credential's (passport,
+	// id-card or residence permit) issuer-signed JWT, the moment the wallet obtained that credential
 	// from its issuer, not the physical document's issue date. Used by a
 	// freshness check on re-identification (see .ai/features/auth-openid4vp.md and
 	// the member-reidentification feature); zero when the presentation carried no
 	// identity credential or its `iat` could not be read.
 	IdentityIssuedAt time.Time
+	// vcts names Document's credential; zero (a hand-built value) means
+	// defaultCredentialScheme's.
+	vcts vcts
 }
 
 // identityCredentialIDs are the credentials an identity disclosure draws on.
-var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDEmail, credIDPhone}
+var identityCredentialIDs = []string{credIDPassport, credIDIDCard, credIDResidencePermit, credIDEmail, credIDPhone}
 
 // IdentityClaims returns the claims the identity credentials disclosed
-// (passport or id-card, email, phone) and VogClaims those of the pbdf.vog
+// (passport, id-card or residence permit, email, phone) and VogClaims those of the pbdf.vog
 // credential, kept apart so a combined presentation (ScopeIdentityVog) cannot
 // let one credential's dateOfBirth overwrite the other's. A Presentation
 // carrying no per-credential detail (ByCredential empty - a fake, or a
 // hand-built value) falls back to the flattened Claims.
 func (p Presentation) IdentityClaims() map[string]string {
 	return p.claimsOf(identityCredentialIDs...)
+}
+
+// IdentityDocument is the passport, id-card or residence permit a presentation
+// disclosed.
+type IdentityDocument struct {
+	// Credential is the credential's vct (e.g. pbdf-staging.pbdf.passport).
+	Credential string
+	Claims     map[string]string
+}
+
+// Document returns the passport, id-card or residence permit the presentation
+// disclosed, in that order of preference; false when it carried none.
+func (p Presentation) Document() (IdentityDocument, bool) {
+	v := p.vcts
+	if v == (vcts{}) {
+		v = vctsFor(defaultCredentialScheme)
+	}
+	for _, c := range [...]struct{ id, vct string }{{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}} {
+		if claims, ok := p.ByCredential[c.id]; ok {
+			return IdentityDocument{Credential: c.vct, Claims: claims}, true
+		}
+	}
+	return IdentityDocument{}, false
+}
+
+// RegisteredAddress returns the claims of the registered address
+// (ScopeProofingAddress); false when the wallet left it out.
+func (p Presentation) RegisteredAddress() (map[string]string, bool) {
+	claims, ok := p.ByCredential[credIDAddress]
+	return claims, ok
 }
 
 // VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.
@@ -175,11 +217,11 @@ func disclosuresOf(sdjwt string) map[string]string {
 	return out
 }
 
-// identityIssuedAt returns the `iat` of the identity credential (passport or
-// id-card, whichever is present) in vp, zero when neither is present or its
+// identityIssuedAt returns the `iat` of the identity credential (passport,
+// id-card or residence permit, whichever is present) in vp, zero when none is present or its
 // `iat` could not be read.
 func identityIssuedAt(vp map[string][]string) time.Time {
-	for _, id := range [...]string{credIDPassport, credIDIDCard} {
+	for _, id := range [...]string{credIDPassport, credIDIDCard, credIDResidencePermit} {
 		tokens := vp[id]
 		if len(tokens) == 0 {
 			continue
@@ -199,8 +241,8 @@ func identityIssuedAt(vp map[string][]string) time.Time {
 // already did that; see the package doc); it only reads an already-trusted claim.
 func issuerIssuedAt(sdjwt string) (time.Time, bool) {
 	jwt := sdjwt
-	if i := strings.IndexByte(sdjwt, '~'); i >= 0 {
-		jwt = sdjwt[:i]
+	if before, _, ok := strings.Cut(sdjwt, "~"); ok {
+		jwt = before
 	}
 	segments := strings.Split(jwt, ".")
 	if len(segments) < 2 {
