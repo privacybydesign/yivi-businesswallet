@@ -61,10 +61,28 @@ export function followReviewEvents(
   };
 }
 
+// The browser retries a dropped connection, never one answered with an error
+// status (a proxy's 502 while the API restarts): that closes the stream for
+// good, so it is opened again after this pause.
+const REOPEN_AFTER_ERROR_MS = 5_000;
+
 // Opens the stream and calls changed on each change and each (re)connect.
 function lead(open: () => ReviewStream, changed: () => void): () => void {
-  const stream = open();
-  stream.addEventListener("open", changed);
-  stream.addEventListener(REVIEWS_CHANGED_EVENT, changed);
-  return () => stream.close();
+  let stream: ReviewStream | undefined;
+  let reopen: ReturnType<typeof setTimeout> | undefined;
+  const connect = (): void => {
+    const current = open();
+    stream = current;
+    current.addEventListener("open", changed);
+    current.addEventListener(REVIEWS_CHANGED_EVENT, changed);
+    current.addEventListener("error", () => {
+      current.close();
+      reopen = setTimeout(connect, REOPEN_AFTER_ERROR_MS);
+    });
+  };
+  connect();
+  return () => {
+    clearTimeout(reopen);
+    stream?.close();
+  };
 }
