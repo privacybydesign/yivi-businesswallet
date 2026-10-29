@@ -74,8 +74,7 @@ const (
 
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
-	// point at instead, so a deployment that wants the real check opts in
-	// explicitly via VogValidatorProvider rather than by an environment default.
+	// point at instead.
 	envVogValidatorProvider = "VOG_VALIDATOR_PROVIDER"
 	envVogValidatorURL      = "VOG_VALIDATOR_URL"
 	// VogReferenceHashKey keys the HMAC that turns a VOG's kenmerk into a
@@ -315,11 +314,11 @@ const (
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
 
-	// ProviderValidatieNL selects the real validatie.nl HTTP client for VOG
-	// screening; ProviderStub (shared with every other provider) is the
-	// dev/CI default.
+	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
+	// default; ProviderStub accepts every VOG and runs only when set explicitly
+	// (the dev stack sets it, as for diplomas).
 	ProviderValidatieNL         = "validatie_nl"
-	defaultVogValidatorProvider = ProviderStub
+	defaultVogValidatorProvider = ProviderValidatieNL
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
 
 	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
@@ -902,14 +901,16 @@ func loadDevMode(c *Config) error {
 }
 
 // requireProductionSettings refuses, outside a local stack, plain http to
-// another machine for what the phone sends, and a stub in place of a real check.
+// another machine for what the phone or a VOG check sends, and a stub in place
+// of a real check.
 func requireProductionSettings(c *Config) error {
-	// The Idem app sends chip data, selfies and liveness frames to these:
-	// over the network only with https. Plain http to this machine never
-	// leaves it.
+	// The Idem app sends chip data, selfies and liveness frames to the first
+	// two, and the backend a member's VOG PDF to the last: over the network
+	// only with https. Plain http to this machine never leaves it.
 	for key, raw := range map[string]string{
 		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
 		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:           c.VogValidatorURL,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
@@ -920,6 +921,7 @@ func requireProductionSettings(c *Config) error {
 		envIdentityProofingStubOutcome: c.IdentityProofingStubOutcome != "",
 		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
 		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
+		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
 	} {
 		if stubbed {
 			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)

@@ -48,6 +48,8 @@ Diploma uploads accept any PDF in the dev stack (`DIPLOMA_VALIDATOR_PROVIDER=stu
 `compose.override.yaml`); set it to `duo` in `.env` to check real DUO extracts.
 Verzekeringsbericht uploads likewise (`EMPLOYMENT_VALIDATOR_PROVIDER=stub`); set it to `uwv`
 to check UWV's seal for real, or `off` to check none.
+VOG uploads likewise (`VOG_VALIDATOR_PROVIDER=stub`); set it to `validatie_nl` to check
+them for real.
 
 The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
 
