@@ -448,12 +448,12 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 
 // requestResponseFor is req's response as the caller sees it: a member who
 // reaches it only for its address waiting for review (onlyAddress) gets it
-// without its diplomas and proofed name, which deciding the address does not
-// need.
+// without its diplomas, proofed name and employment, which deciding the
+// address does not need.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
 	if onlyAddress(ctx, req) {
-		out.ProofedName = ""
+		out.ProofedName, out.Employment = "", nil
 		return out
 	}
 	return out.withDiplomas(diplomas)

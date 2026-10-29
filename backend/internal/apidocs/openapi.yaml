@@ -6990,7 +6990,7 @@ paths:
         (at most 500 characters; 400 `invalid_input` otherwise). Only the address is decided: the
         session keeps its outcome. Audited `identity_proofing.address_reviewed` with the reason,
         sent as webhook `session.address_reviewed`. The answer is the request; to a reviewer who
-        is not an administrator, without `proofedName` and diplomas. To an administrator, an
+        is not an administrator, without `proofedName`, `employment` and diplomas. To an administrator, an
         address that waits for no review, decided already or erased, is 409
         `address_not_under_review`; a reviewer who is not an administrator no longer reaches
         that request, so it is 404 `session_not_found`. One on a request the caller sent, or

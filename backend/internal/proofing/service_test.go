@@ -16,9 +16,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 type fakeSettings struct {
@@ -2153,6 +2156,37 @@ func TestReviewScopeReachesAddress(t *testing.T) {
 	}
 	if ReviewScopeReviews.reachesAddress(decided) {
 		t.Error("a reviewer reaches an address that no longer waits")
+	}
+}
+
+// A reviewer who reaches a check only for its pending address reads it
+// without the person's proofed name, employment or diplomas. An admin and the
+// sender read all of it.
+func TestAddressOnlyResponseLeavesOutThePerson(t *testing.T) {
+	sender, reviewer := uuid.New(), uuid.New()
+	req := Request{
+		FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending, RequestedBy: &sender,
+		ProofedName: "Anna Jansen", SubjectEmployment: &Employment{},
+	}
+	diplomas := []Diploma{{}}
+	as := func(id uuid.UUID, role string) context.Context {
+		return auth.ContextWithUser(organization.ContextWithRole(context.Background(), role), user.User{ID: id})
+	}
+
+	got := requestResponseFor(as(reviewer, organization.RoleMember), req, diplomas, time.Now())
+	if got.ProofedName != "" || got.Employment != nil || len(got.Diplomas) != 0 {
+		t.Errorf("address-only reviewer reads proofed name %q, employment %v, %d diplomas; want none",
+			got.ProofedName, got.Employment, len(got.Diplomas))
+	}
+	for name, ctx := range map[string]context.Context{
+		"admin":  as(reviewer, organization.RoleAdmin),
+		"sender": as(sender, organization.RoleMember),
+	} {
+		got := requestResponseFor(ctx, req, diplomas, time.Now())
+		if got.ProofedName == "" || got.Employment == nil || len(got.Diplomas) != 1 {
+			t.Errorf("%s reads proofed name %q, employment %v, %d diplomas; want all of it",
+				name, got.ProofedName, got.Employment, len(got.Diplomas))
+		}
 	}
 }
 

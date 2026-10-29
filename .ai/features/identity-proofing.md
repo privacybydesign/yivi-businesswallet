@@ -1444,7 +1444,7 @@ are the stats, All people and the member routes.
   for review (`mayOpen`, judged on the stored request through
   `Service.RequestIf`, before the engine is asked).
   - One reached only for its address (`onlyAddress`) answers without
-    `proofedName` and diplomas, in the list too (`requestResponseFor`).
+    `proofedName`, `employment` and diplomas, in the list too (`requestResponseFor`).
 - `result`, `data-matches`, `data-export` and the session decision take the
   narrow scope (`reaches`); the address decision takes `reachesAddress`. Any
   other is a 404, as for a member. The
