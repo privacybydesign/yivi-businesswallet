@@ -15,7 +15,8 @@ import (
 )
 
 // Under BlurBSN a document image whose BSN cannot be covered (here: bytes
-// Go cannot decode) is withheld from the result, never released readable.
+// Go cannot decode) is withheld from the result, never released readable, and
+// one that came without a region is withheld and dropped as well.
 func TestReleasedImageFailsClosed(t *testing.T) {
 	undecodable := &documentImageInfo{
 		ImageBase64: base64.StdEncoding.EncodeToString([]byte("not an image")), MimeType: "image/heic",
@@ -29,6 +30,18 @@ func TestReleasedImageFailsClosed(t *testing.T) {
 	}
 	if got := releasedDocumentImage(session.Session{}, nil, privacy.RedactionPolicy{BlurBSN: true}); got != nil {
 		t.Error("released an image that was never sent")
+	}
+
+	unlocated := &documentImageInfo{ImageBase64: undecodable.ImageBase64, MimeType: undecodable.MimeType}
+	if got := releasedDocumentImage(session.Session{}, unlocated, privacy.RedactionPolicy{BlurBSN: true}); got != nil {
+		t.Errorf("released %q without a region under BlurBSN, want it withheld", got.MimeType)
+	}
+	sess := session.Session{Steps: session.StepEvidence{DocumentPhoto: &session.DocumentPhotoStepEvidence{
+		Front: session.DocumentPhotoSide{Image: unlocated.ImageBase64, MimeType: unlocated.MimeType},
+	}}}
+	redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{BlurBSN: true})
+	if stored := sess.Steps.DocumentPhoto.Front.Image; stored != "" {
+		t.Error("stored an undecodable document photo without a region under BlurBSN, want it dropped")
 	}
 }
 

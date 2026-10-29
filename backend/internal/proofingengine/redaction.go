@@ -1,9 +1,13 @@
 package proofingengine
 
 import (
+	"encoding/base64"
+	"fmt"
+	"image"
 	"log/slog"
 	"maps"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/redact"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -204,10 +208,23 @@ func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session
 
 // coverBSN fills the printed BSN's region in a document photo. A photo whose
 // BSN the app did not locate is returned as taken: the server never guesses
-// where the BSN is, and the flow asked for the photo.
+// where the BSN is, and the flow asked for the photo. Either way a photo that
+// is not a readable image fails, so it is withheld and dropped.
 func coverBSN(imageBase64, mimeType string, region *imageRegion) (string, string, error) {
 	if region == nil {
+		if err := decodable(imageBase64); err != nil {
+			return "", "", err
+		}
 		return imageBase64, mimeType, nil
 	}
 	return redact.Region(imageBase64, mimeType, redact.Rect{X: region.X, Y: region.Y, W: region.W, H: region.H})
+}
+
+// decodable is why a document photo is not a readable image, or nil.
+func decodable(imageBase64 string) error {
+	raw, err := base64.StdEncoding.DecodeString(imageBase64)
+	if err != nil {
+		return fmt.Errorf("decode base64 document photo: %w", err)
+	}
+	return images.Decode(raw, func(image.Image, string) error { return nil })
 }
