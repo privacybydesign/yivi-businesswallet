@@ -1496,11 +1496,13 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 identity check in review keeps no name.
 
 Under a flow's BlurBSN policy (or a mask or omit BSN policy) a document photo
-is released and stored with the BSN region the app located filled solid; a
-photo that came without one is released and stored as taken (`coverBSN`),
-since the server never guesses where the BSN is and the flow asked for the
-photo. Idem locates no BSN yet, so its photos come through as taken. A photo
-that cannot be decoded is still withheld and dropped. Only a
+is released and stored with the BSN region the app located filled solid. A
+photo that came without one is withheld from the result and dropped from
+storage under BlurBSN (Black out the BSN), since the server never guesses
+where the BSN is; under a mask or omit policy it is released and stored as
+taken, since the flow asked for the photo (`coverBSN`). Idem locates no BSN
+yet, so its photos come through as taken unless the flow blacks out the BSN.
+A photo that cannot be decoded is always withheld and dropped. Only a
 Dutch document prints a BSN, so a photo of a document known not to be Dutch
 is released and stored as taken; one whose issuing state is not known is
 treated as Dutch (`coversDocumentBSN`).

@@ -2,6 +2,7 @@ package proofingengine
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"log/slog"
@@ -23,7 +24,7 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 		storedState = sess.Steps.Document.Parsed.IssuingState
 	}
 	if coversDocumentBSN(redaction, bsnPolicy, storedState) {
-		redactStoredDocumentPhoto(sess)
+		redactStoredDocumentPhoto(sess, redaction.BlurBSN)
 	}
 	if !redaction.KeepFacePhotos && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
 		// A copy, not a write through the pointer (see handleSubmitNFCStep). The
@@ -134,7 +135,8 @@ func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
 // known not to be Dutch. Only a Dutch document prints a BSN, so another
 // country's photo has none to cover and is released as taken; a Dutch one, or
 // one whose issuing state is not known, is covered where the app located the
-// BSN, and kept as taken where it did not (coverBSN).
+// BSN. Where it did not, it is kept as taken, unless the flow blacks out the
+// BSN (coverBSN).
 func coversDocumentBSN(redaction privacy.RedactionPolicy, bsnPolicy privacy.BSNPolicy, issuingState string) bool {
 	if issuingState != "" && issuingState != dutchIssuingState {
 		return false
@@ -174,22 +176,22 @@ func documentImageFromSide(side *session.DocumentPhotoSide) *documentImageInfo {
 }
 
 // redactStoredDocumentPhoto covers the printed BSN in the stored photos as
-// buildResult did in the result, and drops a photo it could not decode.
-func redactStoredDocumentPhoto(sess *session.Session) {
+// buildResult did in the result, and drops a photo it could not cover.
+func redactStoredDocumentPhoto(sess *session.Session, blackOut bool) {
 	p := sess.Steps.DocumentPhoto
 	if p == nil {
 		return
 	}
 	photo := *p
-	photo.Front = redactedSide(sess, photo.Front)
+	photo.Front = redactedSide(sess, photo.Front, blackOut)
 	if photo.Back != nil {
-		back := redactedSide(sess, *photo.Back)
+		back := redactedSide(sess, *photo.Back, blackOut)
 		photo.Back = &back
 	}
 	sess.Steps.DocumentPhoto = &photo
 }
 
-func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session.DocumentPhotoSide {
+func redactedSide(sess *session.Session, side session.DocumentPhotoSide, blackOut bool) session.DocumentPhotoSide {
 	if side.Image == "" {
 		return side
 	}
@@ -197,7 +199,7 @@ func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session
 	if r := side.BSNRegion; r != nil {
 		region = &imageRegion{X: r.X, Y: r.Y, W: r.W, H: r.H}
 	}
-	if blurred, mime, err := coverBSN(side.Image, side.MimeType, region); err != nil {
+	if blurred, mime, err := coverBSN(side.Image, side.MimeType, region, blackOut); err != nil {
 		slog.Warn("identity proofing: could not blur the BSN in a document photo; dropping it", slog.String("session_id", sess.ID), slog.Any("error", err))
 		side.Image, side.MimeType = "", ""
 	} else {
@@ -206,12 +208,21 @@ func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session
 	return side
 }
 
+// errNoBSNRegion is a document photo whose BSN the app did not locate, under a
+// flow that blacks out the BSN: the server never guesses where it is, so the
+// photo is withheld rather than kept or released readable.
+var errNoBSNRegion = errors.New("no BSN region to cover")
+
 // coverBSN fills the printed BSN's region in a document photo. A photo whose
-// BSN the app did not locate is returned as taken: the server never guesses
-// where the BSN is, and the flow asked for the photo. Either way a photo that
-// is not a readable image fails, so it is withheld and dropped.
-func coverBSN(imageBase64, mimeType string, region *imageRegion) (string, string, error) {
+// BSN the app did not locate fails under blackOut (the flow's Black out the
+// BSN), and is returned as taken otherwise: the flow asked for the photo.
+// Either way a photo that is not a readable image fails, so it is withheld and
+// dropped.
+func coverBSN(imageBase64, mimeType string, region *imageRegion, blackOut bool) (string, string, error) {
 	if region == nil {
+		if blackOut {
+			return "", "", errNoBSNRegion
+		}
 		if err := decodable(imageBase64); err != nil {
 			return "", "", err
 		}

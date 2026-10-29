@@ -258,7 +258,8 @@ type imageRegion struct {
 // documentImageInfo is a photograph of the document's data page, as opposed to
 // the chip portrait. Dutch ID cards print the BSN on it: BSNRegion, when known,
 // is where buildResult covers it under a BlurBSN, mask or omit policy. Without it the photo
-// is released as taken; the server never guesses where the BSN is.
+// is withheld under BlurBSN and released as taken otherwise; the server never
+// guesses where the BSN is.
 type documentImageInfo struct {
 	ImageBase64 string       `json:"imageBase64,omitempty"`
 	MimeType    string       `json:"mimeType,omitempty"`

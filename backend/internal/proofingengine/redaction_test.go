@@ -16,48 +16,48 @@ import (
 
 // Under BlurBSN a document image whose BSN cannot be covered (here: bytes
 // Go cannot decode) is withheld from the result, never released readable, and
-// one that came without a region is withheld and dropped as well.
+// so is one that came without a region under a mask or omit policy.
 func TestReleasedImageFailsClosed(t *testing.T) {
 	undecodable := &documentImageInfo{
 		ImageBase64: base64.StdEncoding.EncodeToString([]byte("not an image")), MimeType: "image/heic",
 		BSNRegion: &imageRegion{X: 0.1, Y: 0.1, W: 0.2, H: 0.05},
 	}
-	if got := releasedDocumentImage(session.Session{}, undecodable, privacy.RedactionPolicy{BlurBSN: true}); got != nil {
+	if got := releasedDocumentImage(session.Session{}, undecodable, privacy.RedactionPolicy{BlurBSN: true}, true); got != nil {
 		t.Errorf("released %q under BlurBSN, want it withheld", got.MimeType)
 	}
-	if got := releasedDocumentImage(session.Session{}, undecodable, privacy.RedactionPolicy{}); got == nil {
+	if got := releasedDocumentImage(session.Session{}, undecodable, privacy.RedactionPolicy{}, false); got == nil {
 		t.Error("withheld without a BlurBSN policy, want it released as sent")
 	}
-	if got := releasedDocumentImage(session.Session{}, nil, privacy.RedactionPolicy{BlurBSN: true}); got != nil {
+	if got := releasedDocumentImage(session.Session{}, nil, privacy.RedactionPolicy{BlurBSN: true}, true); got != nil {
 		t.Error("released an image that was never sent")
 	}
 
 	unlocated := &documentImageInfo{ImageBase64: undecodable.ImageBase64, MimeType: undecodable.MimeType}
-	if got := releasedDocumentImage(session.Session{}, unlocated, privacy.RedactionPolicy{BlurBSN: true}); got != nil {
-		t.Errorf("released %q without a region under BlurBSN, want it withheld", got.MimeType)
+	if got := releasedDocumentImage(session.Session{}, unlocated, privacy.RedactionPolicy{BlurBSN: true}, false); got != nil {
+		t.Errorf("released an undecodable %q without a region, want it withheld", got.MimeType)
 	}
 	sess := session.Session{Steps: session.StepEvidence{DocumentPhoto: &session.DocumentPhotoStepEvidence{
 		Front: session.DocumentPhotoSide{Image: unlocated.ImageBase64, MimeType: unlocated.MimeType},
 	}}}
-	redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, privacy.RedactionPolicy{BlurBSN: true})
+	redactStepsForStorage(&sess, privacy.BSNPolicyOmit, privacy.RedactionPolicy{})
 	if stored := sess.Steps.DocumentPhoto.Front.Image; stored != "" {
-		t.Error("stored an undecodable document photo without a region under BlurBSN, want it dropped")
+		t.Error("stored an undecodable document photo without a region, want it dropped")
 	}
 }
 
-// Under BlurBSN a document photo without a located BSN region is released and
-// stored as taken: the server never guesses where the BSN is, and the flow
-// asked for the photo.
-func TestUnlocatedBSNKept(t *testing.T) {
+// Under BlurBSN a document photo without a located BSN region is withheld,
+// from the result and from storage: the server never guesses where the BSN
+// is, so it never releases or keeps the photo readable.
+func TestUnlocatedBSNWithheld(t *testing.T) {
 	photo := checkerboardPNG(t)
 	policy := privacy.RedactionPolicy{BlurBSN: true}
 
-	if got := releasedDocumentImage(session.Session{}, &documentImageInfo{ImageBase64: photo, MimeType: "image/png"}, policy); got == nil || got.ImageBase64 != photo {
-		t.Error("a document photo under BlurBSN without a region was not released as taken")
+	if got := releasedDocumentImage(session.Session{}, &documentImageInfo{ImageBase64: photo, MimeType: "image/png"}, policy, true); got != nil {
+		t.Error("released a document photo under BlurBSN without a region, want it withheld")
 	}
 
 	located := &documentImageInfo{ImageBase64: photo, MimeType: "image/png", BSNRegion: &imageRegion{X: 0.1, Y: 0.1, W: 0.2, H: 0.05}}
-	if got := releasedDocumentImage(session.Session{}, located, policy); got == nil || got.ImageBase64 == photo {
+	if got := releasedDocumentImage(session.Session{}, located, policy, true); got == nil || got.ImageBase64 == photo {
 		t.Error("a photo with a located BSN was not released covered")
 	}
 
@@ -65,8 +65,8 @@ func TestUnlocatedBSNKept(t *testing.T) {
 		Front: session.DocumentPhotoSide{Image: photo, MimeType: "image/png"},
 	}}}
 	redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, policy)
-	if stored := sess.Steps.DocumentPhoto.Front.Image; stored != photo {
-		t.Error("a document photo under BlurBSN without a region was not stored as taken")
+	if stored := sess.Steps.DocumentPhoto.Front.Image; stored != "" {
+		t.Error("stored a document photo under BlurBSN without a region, want it dropped")
 	}
 }
 

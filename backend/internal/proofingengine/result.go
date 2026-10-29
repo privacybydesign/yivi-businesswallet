@@ -144,10 +144,10 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	if attrRequested(sess, attrDocumentImage) {
 		docRedaction := redaction
 		docRedaction.BlurBSN = coversDocumentBSN(redaction, bsnPolicy, resultIssuingState(sess, req))
-		if img := releasedDocumentImage(sess, req.DocumentImage, docRedaction); img != nil {
+		if img := releasedDocumentImage(sess, req.DocumentImage, docRedaction, redaction.BlurBSN); img != nil {
 			result["documentImage"] = img
 		}
-		if img := releasedDocumentImage(sess, req.DocumentImageBack, docRedaction); img != nil {
+		if img := releasedDocumentImage(sess, req.DocumentImageBack, docRedaction, redaction.BlurBSN); img != nil {
 			result["documentImageBack"] = img
 		}
 	}
@@ -177,15 +177,15 @@ const faceReferenceRelyingParty = "relying_party"
 
 // releasedDocumentImage is docImage as the result carries it: its BSN region
 // covered under a BlurBSN policy. Nil when there is none, or when the BSN
-// could not be covered (no region came in, or covering failed): the photo is
-// then withheld, never released readable.
-func releasedDocumentImage(sess session.Session, docImage *documentImageInfo, redaction privacy.RedactionPolicy) *documentImageInfo {
+// could not be covered (no region came in under blackOut, or covering
+// failed): the photo is then withheld, never released readable.
+func releasedDocumentImage(sess session.Session, docImage *documentImageInfo, redaction privacy.RedactionPolicy, blackOut bool) *documentImageInfo {
 	if docImage == nil {
 		return nil
 	}
 	out := *docImage
 	if redaction.BlurBSN {
-		blurred, mime, err := coverBSN(out.ImageBase64, out.MimeType, out.BSNRegion)
+		blurred, mime, err := coverBSN(out.ImageBase64, out.MimeType, out.BSNRegion, blackOut)
 		if err != nil {
 			slog.Warn("identity proofing: could not cover the BSN in a document image; withholding it", slog.String("session_id", sess.ID), slog.Any("error", err))
 			return nil
