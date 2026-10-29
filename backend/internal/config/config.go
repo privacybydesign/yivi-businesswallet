@@ -74,8 +74,7 @@ const (
 
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
-	// point at instead, so a deployment that wants the real check opts in
-	// explicitly via VogValidatorProvider rather than by an environment default.
+	// point at instead.
 	envVogValidatorProvider = "VOG_VALIDATOR_PROVIDER"
 	envVogValidatorURL      = "VOG_VALIDATOR_URL"
 	// VogReferenceHashKey keys the HMAC that turns a VOG's kenmerk into a
@@ -315,11 +314,11 @@ const (
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
 
-	// ProviderValidatieNL selects the real validatie.nl HTTP client for VOG
-	// screening; ProviderStub (shared with every other provider) is the
-	// dev/CI default.
+	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
+	// default; ProviderStub accepts every VOG and runs only when set explicitly
+	// (the dev stack sets it, as for diplomas).
 	ProviderValidatieNL         = "validatie_nl"
-	defaultVogValidatorProvider = ProviderStub
+	defaultVogValidatorProvider = ProviderValidatieNL
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
 
 	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
@@ -920,6 +919,7 @@ func requireProductionSettings(c *Config) error {
 		envIdentityProofingStubOutcome: c.IdentityProofingStubOutcome != "",
 		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
 		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
+		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
 	} {
 		if stubbed {
 			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)

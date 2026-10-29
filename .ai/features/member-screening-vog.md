@@ -127,7 +127,8 @@ about Justis' document, not about members or orgs.
 
 - **`validator.go`** is the external-provider seam
   (`.ai/conventions/BACKEND.md`'s pattern): `HTTPClient` (real,
-  `VOG_VALIDATOR_PROVIDER=validatie_nl`) or `StubValidator` (dev/CI default),
+  `VOG_VALIDATOR_PROVIDER=validatie_nl`, the default) or `StubValidator`
+  (needs `DEV_MODE`; the dev stack sets it),
   chosen in `cmd/api/main.go` exactly like `registryprovider`/`qerdsprovider`.
   `Validate` retries a transient answer (a retryable GAAV code, or a
   transport/5xx error) up to three times with 1s/2s backoff; a decisive

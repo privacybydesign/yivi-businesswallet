@@ -393,6 +393,20 @@ func TestLoadEmploymentDefaultUWV(t *testing.T) {
 	}
 }
 
+// The real validatie.nl check is the default, as the DUO and UWV ones are.
+func TestLoadVogDefaultValidatieNL(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.VogValidatorProvider != ProviderValidatieNL {
+		t.Errorf("vog validator = %q, want %q", cfg.VogValidatorProvider, ProviderValidatieNL)
+	}
+	if _, err := loadWith(t, map[string]string{envVogValidatorProvider: "duo"}); err == nil {
+		t.Error("an unknown vog validator loaded, want an error")
+	}
+}
+
 // The pinned roots hold no root UWV's seal chains to, so pinning them under
 // the real UWV check would reject every statement: it fails the boot instead.
 func TestLoadRefusesPinnedForUWV(t *testing.T) {
@@ -512,6 +526,7 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 		},
 		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
 		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
+		envVogValidatorProvider:        {envVogValidatorProvider: ProviderStub},
 	} {
 		t.Run(name+" without", func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {

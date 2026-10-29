@@ -35,6 +35,9 @@ services:
       # Verzekeringsbericht uploads likewise: dev accepts any statement's seal.
       # Set EMPLOYMENT_VALIDATOR_PROVIDER=uwv in .env to check for real.
       EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-stub}
+      # VOG uploads likewise: dev accepts any VOG. Set
+      # VOG_VALIDATOR_PROVIDER=validatie_nl in .env to check for real.
+      VOG_VALIDATOR_PROVIDER: ${VOG_VALIDATOR_PROVIDER:-stub}
       # The EU Trusted Lists cache, on the diploma-trust-cache volume so a
       # restart does not fetch them again.
       DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-/var/cache/diploma-trust}
