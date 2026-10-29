@@ -1403,19 +1403,24 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		if status != StatusApproved || origin != outcomeByEngine || employmentCT == nil {
 			return nil
 		}
-		// A statement kept while the engine reviewed the identity opens the
-		// wallet's review now, as it would have on an approved request.
-		emp, err := s.decryptEmployment(req.ID, employmentCT)
-		if err != nil {
-			return err
-		}
-		reason := emp.reviewReason()
-		if reason == "" {
-			return nil
-		}
 		decided.Status = StatusApproved
-		return openWalletReview(audit.WithoutActor(ctx), q, s.audit, decided, reason)
+		return s.reviewKeptEmployment(ctx, q, decided, employmentCT)
 	})
+}
+
+// reviewKeptEmployment opens the wallet's review on req, just approved by the
+// engine, when the statement kept while the engine reviewed the identity calls
+// for one, as it would have on an approved request.
+func (s *RequestStore) reviewKeptEmployment(ctx context.Context, q database.Querier, req Request, employmentCT []byte) error {
+	emp, err := s.decryptEmployment(req.ID, employmentCT)
+	if err != nil {
+		return err
+	}
+	reason := emp.reviewReason()
+	if reason == "" {
+		return nil
+	}
+	return openWalletReview(audit.WithoutActor(ctx), q, s.audit, req, reason)
 }
 
 // sealProofedName seals the name a session proofed for req, with retainSecs
