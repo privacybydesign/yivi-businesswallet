@@ -251,6 +251,15 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	if err != nil || got.AddressReview != AddressReviewConfirmed || got.Status != StatusApproved {
 		t.Errorf("Get = %s %q, %v; want approved, address confirmed", got.Status, got.AddressReview, err)
 	}
+	assertAddressReviewReported(t, pool, webhooks, orgID)
+}
+
+// assertAddressReviewReported checks that a confirmed address decision is
+// audited once with its reason, and sent once as session.address_reviewed
+// carrying the decision.
+func assertAddressReviewReported(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookStore, orgID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
 	if auditCount(t, pool, audit.IdentityProofingAddressReviewed) != 1 {
 		t.Error("want one address_reviewed event")
 	}

@@ -219,6 +219,19 @@ function WaitingTable({
   );
 }
 
+// Why a row waits: its address, or what put the session in review.
+function reviewWhy(request: ProofingRequest, t: TFunction): string {
+  if (!isAddressReview(request)) {
+    return t(
+      `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
+    );
+  }
+  if (request.address?.verification === "registered_mismatch") {
+    return t("identityProofing.reviews.why.addressMismatch");
+  }
+  return t("identityProofing.reviews.why.address");
+}
+
 // How a data request's person was proven: the app, and the level reached.
 function provenLine(request: ProofingRequest, t: TFunction): string {
   const how =
@@ -302,17 +315,7 @@ function WaitingRow({
             })}
       </PersonCell>
       <WhatCell request={request} />
-      <Table.Cell>
-        {isAddressReview(request)
-          ? t(
-              request.address?.verification === "registered_mismatch"
-                ? "identityProofing.reviews.why.addressMismatch"
-                : "identityProofing.reviews.why.address",
-            )
-          : t(
-              `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
-            )}
-      </Table.Cell>
+      <Table.Cell>{reviewWhy(request, t)}</Table.Cell>
       <Table.Cell className="whitespace-nowrap">
         {formatWhen(waitingSince(request))}
         {due && (
