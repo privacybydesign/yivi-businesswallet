@@ -45,13 +45,26 @@ func addressReviewOf(addr Address) *AddressReview {
 	return &pending
 }
 
+// AddressReviewInput is a reviewer's decision on an address waiting for
+// review: confirm or reject it, for Reason, which is required and audited.
+type AddressReviewInput struct {
+	Confirm bool
+	Reason  string
+	// ReviewerID is the member deciding.
+	ReviewerID uuid.UUID
+	// Scope is the requests the deciding member reaches.
+	Scope ReviewScope
+	// OwnAllowed lets the reviewer decide a check they sent or are the subject
+	// of (auth.SelfReview: a platform admin on a dev stack only).
+	OwnAllowed bool
+}
+
 // DecideAddressReview confirms or rejects the address of a request the
-// reviewer's scope reaches that waits for a review, for reason, which is
-// required and audited. The session keeps its outcome. A reviewer never
-// decides a request they sent or are the subject of, unless ownAllowed
-// (auth.SelfReview).
-func (s *Service) DecideAddressReview(ctx context.Context, orgID, id, reviewerID uuid.UUID, scope ReviewScope, ownAllowed, confirm bool, reason string) (Request, error) {
-	reason = strings.TrimSpace(reason)
+// reviewer's scope reaches that waits for a review. The session keeps its
+// outcome. A reviewer never decides a request they sent or are the subject
+// of, unless in.OwnAllowed.
+func (s *Service) DecideAddressReview(ctx context.Context, orgID, id uuid.UUID, in AddressReviewInput) (Request, error) {
+	reason := strings.TrimSpace(in.Reason)
 	if reason == "" || utf8.RuneCountInString(reason) > maxReviewReasonLength {
 		return Request{}, fmt.Errorf("%w: give a reason of at most %d characters", ErrInvalidInput, maxReviewReasonLength)
 	}
@@ -64,20 +77,20 @@ func (s *Service) DecideAddressReview(ctx context.Context, orgID, id, reviewerID
 	if err != nil {
 		return Request{}, err
 	}
-	if !scope.reachesAddress(req) {
+	if !in.Scope.reachesAddress(req) {
 		return Request{}, ErrRequestNotFound
 	}
 	if req.AddressReview != AddressReviewPending {
 		return Request{}, ErrAddressNotUnderReview
 	}
-	if ownReview(req, reviewerID) && !ownAllowed {
+	if ownReview(req, in.ReviewerID) && !in.OwnAllowed {
 		return Request{}, ErrOwnReview
 	}
 	decided := AddressReviewRejected
-	if confirm {
+	if in.Confirm {
 		decided = AddressReviewConfirmed
 	}
-	reviewedAt, err := s.requests.DecideAddressReview(ctx, req, reviewerID, decided, reason)
+	reviewedAt, err := s.requests.DecideAddressReview(ctx, req, in.ReviewerID, decided, reason)
 	if err != nil {
 		return Request{}, err
 	}

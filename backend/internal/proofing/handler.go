@@ -721,8 +721,10 @@ func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) er
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is confirm or reject"}
 	}
 	caller := auth.UserFromContext(r.Context())
-	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, caller.ID,
-		reviewScope(r.Context()), h.selfReview.Allows(caller.Email), body.Decision == "confirm", body.Reason)
+	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, AddressReviewInput{
+		Confirm: body.Decision == "confirm", Reason: body.Reason, ReviewerID: caller.ID,
+		Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
+	})
 	if err != nil {
 		return mapError(err)
 	}
