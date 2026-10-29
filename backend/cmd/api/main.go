@@ -616,6 +616,8 @@ type wiring struct {
 	qerdsStore         *qerds.Store
 	qerdsService       *qerds.Service
 	proofingEngine     *proofingengine.Engine
+	proofingReviews    *proofing.ReviewFeed
+	selfReview         auth.SelfReview
 
 	authHandler           *auth.Handler
 	orgHandler            *organization.Handler
@@ -708,6 +710,10 @@ func (w *wiring) buildAuth(ctx context.Context) error {
 		slog.WarnContext(ctx, "DEV_MODE is on: stub providers may run, and the first unknown Yivi login becomes the platform admin")
 	}
 	w.authHandler = auth.NewHandler(w.authService, w.sessionStore, w.userStore, cookieCfg, w.platformAdmins)
+	// On a dev stack a platform admin may decide their own checks, to test a
+	// review alone; a deployment never allows it.
+	w.selfReview = auth.NewSelfReview(cfg.DevMode, w.platformAdmins)
+	w.authHandler.SetSelfReview(w.selfReview)
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, w.sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
@@ -1174,7 +1180,12 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
 	w.proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
+	w.proofingHandler.SetSelfReview(w.selfReview)
 	w.proofingHandler.SetAppBranding(brandingResolver)
+	// A reviewer's open pages follow the org's reviews as they change.
+	w.proofingReviews = proofing.NewReviewFeed()
+	go w.proofingReviews.Run(proofingJobs, w.pool)
+	w.proofingHandler.SetReviewFeed(w.proofingReviews)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 	return nil
@@ -1258,6 +1269,10 @@ func (w *wiring) httpServer() *http.Server {
 	// the drain past shutdownTimeout.
 	if w.proofingEngine != nil {
 		httpServer.RegisterOnShutdown(w.proofingEngine.StopWaiting)
+	}
+	// An open review stream ends at once too; the page reconnects elsewhere.
+	if w.proofingReviews != nil {
+		httpServer.RegisterOnShutdown(w.proofingReviews.Stop)
 	}
 	return httpServer
 }

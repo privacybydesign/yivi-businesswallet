@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { AuditEvent } from "../api/organization";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
@@ -11,6 +12,8 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import {
+  ADDRESS_REVIEWS,
+  ADDRESS_VERIFICATIONS,
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
   EMPLOYMENT_KIND,
@@ -110,6 +113,7 @@ import {
   ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
+  latestAddressDecision,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -1814,6 +1818,46 @@ describe("session method and timeline", () => {
     ).toEqual(["eIDAS substantial"]);
     expect(sessionEventDetail({}, t)).toEqual([]);
   });
+
+  it("says an entered address goes to a reviewer, and what was decided", () => {
+    expect(
+      sessionEventDetail({ after: { verification: "registered_mismatch" } }, t),
+    ).toEqual(["Goes to a reviewer"]);
+    expect(
+      sessionEventDetail({ after: { verification: "registered" } }, t),
+    ).toEqual([]);
+    expect(
+      sessionEventDetail(
+        {
+          before: { addressReview: "pending" },
+          after: { addressReview: "rejected", reason: "Moved last year" },
+        },
+        t,
+      ),
+    ).toEqual(["Address rejected", "Reason: Moved last year"]);
+    expect(
+      sessionEventDetail({ after: { addressReview: "confirmed" } }, t),
+    ).toEqual(["Address confirmed"]);
+  });
+
+  it("says what a reviewer decided on the session, and why", () => {
+    expect(
+      sessionEventDetail(
+        {
+          after: {
+            decision: "rejected",
+            reason: "Not the holder",
+            errorCode: "REVIEW_NOT_HOLDER",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      t("identityProofing.rejectionReasons.reviewNotHolder"),
+      "Rejected",
+      "Reason: Not the holder",
+    ]);
+  });
 });
 
 describe("secondsUntil", () => {
@@ -1950,6 +1994,46 @@ describe("flow kinds mirror backend/internal/proofing", () => {
     expect([...DATA_REQUEST_KINDS].sort()).toEqual(
       backend.filter((kind) => kind !== "identity").sort(),
     );
+  });
+});
+
+// How an address was checked, and where its review stands, are the backend's,
+// both ways: the schema reads a value it lacks as none, which would hide a
+// mismatch or a pending review.
+describe("address verifications mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL("../../../backend/internal/proofing/address.go", import.meta.url),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/Address\w+\s+AddressVerification = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend verification and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_VERIFICATIONS].sort()).toEqual([...backend].sort());
+  });
+});
+
+describe("address reviews mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/address_review.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/AddressReview\w+\s+AddressReview = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend review state and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_REVIEWS].sort()).toEqual([...backend].sort());
   });
 });
 
@@ -2935,5 +3019,43 @@ describe("hosted page languages", () => {
   it("round-trips none and a subset", () => {
     expect(savedLocales(selectedLocales([]))).toEqual([]);
     expect(savedLocales(selectedLocales(["en"]))).toEqual(["en"]);
+  });
+});
+
+describe("latestAddressDecision", () => {
+  const event = (over: Partial<AuditEvent>): AuditEvent => ({
+    id: "e",
+    occurredAt: "2026-10-29T10:00:00Z",
+    action: "identity_proofing.address_reviewed",
+    targetType: "identity_proofing_request",
+    targetId: "r1",
+    metadata: {},
+    actor: null,
+    actorLabel: null,
+    ...over,
+  });
+
+  it("is the last address decision, with its reason", () => {
+    const got = latestAddressDecision([
+      event({ id: "a", metadata: { after: { reason: "first" } } }),
+      event({ id: "x", action: "identity_proofing.result_read" }),
+      event({
+        id: "b",
+        occurredAt: "2026-10-29T11:00:00Z",
+        metadata: { after: { addressReview: "rejected", reason: "moved" } },
+      }),
+    ]);
+    expect(got).toEqual({
+      by: null,
+      at: "2026-10-29T11:00:00Z",
+      reason: "moved",
+    });
+  });
+
+  it("has no reason where the backend left it out, and none without a decision", () => {
+    expect(
+      latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
+    ).toBeUndefined();
+    expect(latestAddressDecision([])).toBeUndefined();
   });
 });

@@ -37,7 +37,7 @@ func RunOnNotify(ctx context.Context, pool *pgxpool.Pool, channel, name string, 
 		default:
 		}
 	}
-	go listen(ctx, pool, channel, signal)
+	go Listen(ctx, pool, channel, signal, func(string) { signal() })
 	go func() {
 		retry := listenRetryMin
 		for {
@@ -83,13 +83,13 @@ func runJob(ctx context.Context, job Job) (next time.Time, err error) {
 	return job(ctx)
 }
 
-// listen holds a dedicated connection LISTENing on channel, reconnecting with
-// backoff; each time LISTEN holds it signals once for anything missed before.
-func listen(ctx context.Context, pool *pgxpool.Pool, channel string, signal func()) {
+// Listen holds a dedicated connection LISTENing on channel until ctx ends,
+// reconnecting with backoff, and calls notified with each NOTIFY's payload.
+// Each time LISTEN holds it calls listening once, for anything missed before.
+func Listen(ctx context.Context, pool *pgxpool.Pool, channel string, listening func(), notified func(payload string)) {
 	retry := listenRetryMin
 	for ctx.Err() == nil {
-		// Once LISTEN holds, run again for anything committed before it did.
-		err := listenOnce(ctx, pool, channel, signal, func() { retry = listenRetryMin; signal() })
+		err := listenOnce(ctx, pool, channel, notified, func() { retry = listenRetryMin; listening() })
 		if ctx.Err() != nil {
 			return
 		}
@@ -103,7 +103,7 @@ func listen(ctx context.Context, pool *pgxpool.Pool, channel string, signal func
 	}
 }
 
-func listenOnce(ctx context.Context, pool *pgxpool.Pool, channel string, signal, connected func()) error {
+func listenOnce(ctx context.Context, pool *pgxpool.Pool, channel string, notified func(payload string), connected func()) error {
 	pooled, err := pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -116,9 +116,10 @@ func listenOnce(ctx context.Context, pool *pgxpool.Pool, channel string, signal,
 	}
 	connected()
 	for {
-		if _, err := conn.WaitForNotification(ctx); err != nil {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
 			return err
 		}
-		signal()
+		notified(n.Payload)
 	}
 }

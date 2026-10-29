@@ -78,7 +78,7 @@ export function IdentityCheckReview({
   const me = useMeQuery();
   const waiting = request.status === "needs_review";
   // A check the reader sent or that is about them is another reviewer's.
-  const own = ownReview(request, me.data?.id);
+  const own = ownReview(request, me.data);
   const readable =
     request.purgedAt === undefined &&
     (waiting || request.status === "approved" || request.status === "rejected");

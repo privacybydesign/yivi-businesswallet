@@ -16,9 +16,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
 type fakeSettings struct {
@@ -243,12 +246,13 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview) (bool, error) {
+func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (*time.Time, error) {
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
-		return false, nil
+		return nil, nil
 	}
-	f.stored.AddressReview = decided
-	return true, nil
+	now := time.Now()
+	f.stored.AddressReview, f.stored.AddressReviewedAt = decided, &now
+	return &now, nil
 }
 
 func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
@@ -282,9 +286,9 @@ func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, re
 	return nil
 }
 
-func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr Address) error {
+func (f *fakeRequests) SetRegisteredAddress(_ context.Context, req Request, addr *Address) error {
 	if f.stored != nil && f.stored.ID == req.ID && f.stored.SubjectAddress == nil {
-		f.registeredAddress = &addr
+		f.registeredAddress = addr
 	}
 	return nil
 }
@@ -2113,6 +2117,21 @@ func TestOwnReviewRefused(t *testing.T) {
 	}
 }
 
+// A reviewer SelfReview allows (a platform admin on a dev stack) decides a
+// check they sent.
+func TestOwnReviewAllowed(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	sender := uuid.New()
+	f.requests.stored.RequestedBy = &sender
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	if req, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "root@acme.test",
+		ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: sender, OwnAllowed: true}); err != nil || req.Status != StatusApproved {
+		t.Errorf("the sender deciding, allowed = %+v, %v; want approved", req, err)
+	}
+}
+
 // A reviewer who is not an admin reaches what the Reviews page shows: a
 // request waiting for review, and a data request in any status. An identity
 // check that is not waiting is an admin's alone.
@@ -2139,23 +2158,57 @@ func TestReviewScopeReaches(t *testing.T) {
 	}
 }
 
-// A pending self-declared address opens the request and its address to a
-// reviewer, never the result of the check it came with.
+// An address in review, waiting or decided, opens the request and its address
+// to a reviewer, never the result of the check it came with. A check without
+// one stays closed.
 func TestReviewScopeReachesAddress(t *testing.T) {
-	purgedAt := time.Now()
 	pending := Request{FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending}
-	purged := pending
-	purged.PurgedAt = &purgedAt
 	decided := pending
 	decided.AddressReview = AddressReviewConfirmed
-	if ReviewScopeReviews.reaches(pending) {
-		t.Error("a reviewer reaches the result of an approved check whose address waits")
+	unreviewed := pending
+	unreviewed.AddressReview = ""
+	if ReviewScopeReviews.reaches(pending) || ReviewScopeReviews.reaches(decided) {
+		t.Error("a reviewer reaches the result of an approved check whose address is reviewed")
 	}
 	if !ReviewScopeReviews.reachesAddress(pending) {
 		t.Error("a reviewer does not reach an address that waits")
 	}
-	if ReviewScopeReviews.reachesAddress(purged) || ReviewScopeReviews.reachesAddress(decided) {
-		t.Error("a reviewer reaches an address that no longer waits")
+	if !ReviewScopeReviews.reachesAddress(decided) {
+		t.Error("a reviewer does not reach an address that was decided")
+	}
+	if ReviewScopeReviews.reachesAddress(unreviewed) {
+		t.Error("a reviewer reaches an approved check whose address was never reviewed")
+	}
+}
+
+// A reviewer who reaches a check only for its pending address reads it
+// without the person's proofed name, employment or diplomas. An admin and the
+// sender read all of it.
+func TestAddressOnlyResponseLeavesOutThePerson(t *testing.T) {
+	sender, reviewer := uuid.New(), uuid.New()
+	req := Request{
+		FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending, RequestedBy: &sender,
+		ProofedName: "Anna Jansen", SubjectEmployment: &Employment{},
+	}
+	diplomas := []Diploma{{}}
+	as := func(id uuid.UUID, role string) context.Context {
+		return auth.ContextWithUser(organization.ContextWithRole(context.Background(), role), user.User{ID: id})
+	}
+
+	got := requestResponseFor(as(reviewer, organization.RoleMember), req, diplomas, time.Now())
+	if got.ProofedName != "" || got.Employment != nil || len(got.Diplomas) != 0 {
+		t.Errorf("address-only reviewer reads proofed name %q, employment %v, %d diplomas; want none",
+			got.ProofedName, got.Employment, len(got.Diplomas))
+	}
+	for name, ctx := range map[string]context.Context{
+		"admin":  as(reviewer, organization.RoleAdmin),
+		"sender": as(sender, organization.RoleMember),
+	} {
+		got := requestResponseFor(ctx, req, diplomas, time.Now())
+		if got.ProofedName == "" || got.Employment == nil || len(got.Diplomas) != 1 {
+			t.Errorf("%s reads proofed name %q, employment %v, %d diplomas; want all of it",
+				name, got.ProofedName, got.Employment, len(got.Diplomas))
+		}
 	}
 }
 

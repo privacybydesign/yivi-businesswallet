@@ -416,6 +416,8 @@ type Request struct {
 	AddressAddedAt *time.Time
 	// AddressReview is a self-declared address's review; empty for none.
 	AddressReview AddressReview
+	// AddressReviewedAt is when a reviewer decided it; nil while it waits.
+	AddressReviewedAt *time.Time
 	// Employment is whether the request asks for the subject's UWV
 	// Verzekeringsbericht once the identity check finished: its flow's
 	// EmploymentMode when it was sent. SubjectEmployment is what was kept of
@@ -845,11 +847,6 @@ const orgPausedReviewer = "system: organisation paused"
 // for one known person (ExpectsSubject) is approved for someone else: the
 // identity read off the document is not that name and birth date.
 const errorIdentityMismatch = "IDENTITY_MISMATCH"
-
-// errorAddressMismatch is the error code the wallet records when the address
-// the subject entered after approval is not the registered (BRP) address
-// their Yivi app disclosed.
-const errorAddressMismatch = "ADDRESS_MISMATCH"
 
 // birthDateLayout is how a request's expected birth date is written.
 const birthDateLayout = time.DateOnly

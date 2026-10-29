@@ -67,10 +67,10 @@ func (sc ReviewScope) reaches(req Request) bool {
 }
 
 // reachesAddress reports whether the scope reaches req's request and address:
-// what reaches does, and a self-declared address waiting for a reviewer. Never
-// the result of a check it holds.
+// what reaches does, and an address a reviewer reviews, waiting or decided.
+// Never the result of a check it holds.
 func (sc ReviewScope) reachesAddress(req Request) bool {
-	return sc.reaches(req) || (req.AddressReview == AddressReviewPending && req.PurgedAt == nil)
+	return sc.reaches(req) || req.AddressReview != ""
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with
@@ -90,6 +90,9 @@ type ReviewInput struct {
 	ReviewerID uuid.UUID
 	// Scope is the requests the deciding member reaches.
 	Scope ReviewScope
+	// OwnAllowed lets the reviewer decide a check they sent or are the subject
+	// of (auth.SelfReview: a platform admin on a dev stack only).
+	OwnAllowed bool
 }
 
 // ownReview reports whether reviewer is the one who sent req or its subject:
@@ -143,7 +146,7 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if req.Status != StatusNeedsReview || req.session == nil || req.PurgedAt != nil {
 		return Request{}, ErrNotUnderReview
 	}
-	if ownReview(req, in.ReviewerID) {
+	if ownReview(req, in.ReviewerID) && !in.OwnAllowed {
 		return Request{}, ErrOwnReview
 	}
 	switch {

@@ -1,6 +1,12 @@
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import type { ProofingRequest } from "../api/identity-proofing";
+import { useMeQuery } from "../api/auth.queries";
+import type {
+  AddressReviewInput,
+  ProofingRequest,
+} from "../api/identity-proofing";
 import { useDecideAddressReviewMutation } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
@@ -9,13 +15,18 @@ import {
   proofingErrorMessage,
   proofingMethodLabel,
   requestSubject,
+  REVIEW_REASON_MAX_CHARS,
 } from "../lib/identity-proofing";
-import { reviewPath } from "../lib/proofing-reviews";
+import { toast } from "../lib/toast";
+import { ownReview, reasonProblem, reviewPath } from "../lib/proofing-reviews";
 import { Button, TopBar } from "../ui";
 import {
   BackToReviews,
+  DecisionReasons,
   REVIEW_ERROR,
+  REVIEW_FIELD_LABEL,
   REVIEW_HINT,
+  REVIEW_TEXTAREA,
   ReviewFacts,
   ReviewSection,
 } from "./proofing-review-parts";
@@ -26,9 +37,9 @@ const DECIDED_KEYS = {
   rejected: "rejected",
 } as const;
 
-// A self-declared address that waits for a person, or was decided: the
-// address, the identity check it came with (decided already, and never
-// changed by this), and the decision.
+// An address that waits for a person, or was decided: the address (and the
+// registered one it differs from), the identity check it came with (decided
+// already, and never changed by this), and the decision.
 export function AddressReview({
   slug,
   request,
@@ -38,7 +49,10 @@ export function AddressReview({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
-  const decide = useDecideAddressReviewMutation(slug, request.id);
+  const me = useMeQuery();
+  // An address of a check the reader sent or that is about them is another
+  // reviewer's.
+  const own = ownReview(request, me.data);
   const address = request.address;
   const review = request.addressReview;
   const subtitle = [
@@ -60,7 +74,11 @@ export function AddressReview({
         <ReviewSection
           id="address-review-why"
           title={t("identityProofing.reviews.address.whyTitle")}
-          hint={t("identityProofing.reviews.address.why")}
+          hint={t(
+            address?.verification === "registered_mismatch"
+              ? "identityProofing.reviews.address.whyMismatch"
+              : "identityProofing.reviews.address.why",
+          )}
         >
           {address === undefined ? (
             <p className={REVIEW_HINT}>
@@ -72,6 +90,14 @@ export function AddressReview({
           <p className={REVIEW_HINT}>
             {addressVerificationNote(address?.verification, t)}
           </p>
+          {address?.registered !== undefined && (
+            <>
+              <h3 className={REVIEW_FIELD_LABEL}>
+                {t("identityProofing.sessions.address.registeredTitle")}
+              </h3>
+              <PostalAddress address={address.registered} />
+            </>
+          )}
         </ReviewSection>
         <ReviewSection
           id="address-review-check"
@@ -97,39 +123,116 @@ export function AddressReview({
           id="address-review-decision"
           title={t("identityProofing.reviews.address.decisionTitle")}
         >
-          {review === "pending" ? (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                loading={decide.isPending && decide.variables === "confirm"}
-                disabled={decide.isPending}
-                onClick={() => decide.mutate("confirm")}
-              >
-                {t("identityProofing.sessions.address.confirm")}
-              </Button>
-              <Button
-                variant="secondary"
-                loading={decide.isPending && decide.variables === "reject"}
-                disabled={decide.isPending}
-                onClick={() => decide.mutate("reject")}
-              >
-                {t("identityProofing.sessions.address.reject")}
-              </Button>
-            </div>
-          ) : (
-            review !== undefined && (
-              <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
-                {t(`identityProofing.reviews.address.${DECIDED_KEYS[review]}`)}
+          {review === "pending" &&
+            (own ? (
+              <output className="block text-[13.5px]">
+                {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
-            )
-          )}
-          {decide.isError && (
-            <p role="alert" className={REVIEW_ERROR}>
-              {proofingErrorMessage(decide.error, t)}
-            </p>
+            ) : (
+              <AddressDecision slug={slug} requestId={request.id} />
+            ))}
+          {review !== undefined && review !== "pending" && (
+            <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
+              {t(`identityProofing.reviews.address.${DECIDED_KEYS[review]}`)}
+              <DecisionReasons request={request} kind="address" />
+            </output>
           )}
         </ReviewSection>
         <BackToReviews to={reviewPath(slug)} />
       </div>
     </>
+  );
+}
+
+// Confirm or reject, with a reason the audit log keeps. A decided address
+// leaves the reader's reach, so the page goes back to the Reviews page.
+function AddressDecision({
+  slug,
+  requestId,
+}: Readonly<{
+  slug: string;
+  requestId: string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const decide = useDecideAddressReviewMutation(slug, requestId);
+  const [reason, setReason] = useState("");
+  const [touched, setTouched] = useState(false);
+  const problem = reasonProblem(reason);
+  const idPrefix = `address-review-${requestId}`;
+
+  function submit(decision: AddressReviewInput["decision"]): void {
+    setTouched(true);
+    if (problem !== undefined) return;
+    decide.mutate(
+      { decision, reason: reason.trim() },
+      {
+        onSuccess: () => {
+          toast.success(
+            t(
+              decision === "confirm"
+                ? "identityProofing.reviews.address.confirmed"
+                : "identityProofing.reviews.address.rejected",
+            ),
+          );
+          void navigate(reviewPath(slug));
+        },
+      },
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={`${idPrefix}-reason`} className={REVIEW_FIELD_LABEL}>
+          {t("identityProofing.reviews.check.decision.reason")}
+        </label>
+        <textarea
+          id={`${idPrefix}-reason`}
+          value={reason}
+          aria-invalid={touched && problem !== undefined}
+          aria-describedby={`${idPrefix}-reason-hint`}
+          onChange={(event) => setReason(event.target.value)}
+          className={REVIEW_TEXTAREA}
+        />
+        <p id={`${idPrefix}-reason-hint`} className={REVIEW_HINT}>
+          {t("identityProofing.reviews.check.decision.reasonHint")}
+        </p>
+        {touched && problem === "reason" && (
+          <p className={REVIEW_ERROR}>
+            {t("identityProofing.sessions.review.reasonRequired")}
+          </p>
+        )}
+        {problem === "reasonTooLong" && (
+          <p className={REVIEW_ERROR}>
+            {t("identityProofing.sessions.review.reasonTooLong", {
+              max: REVIEW_REASON_MAX_CHARS,
+            })}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          loading={decide.isPending && decide.variables?.decision === "confirm"}
+          disabled={decide.isPending}
+          onClick={() => submit("confirm")}
+        >
+          {t("identityProofing.reviews.address.confirm")}
+        </Button>
+        <Button
+          variant="secondary"
+          loading={decide.isPending && decide.variables?.decision === "reject"}
+          disabled={decide.isPending}
+          onClick={() => submit("reject")}
+        >
+          {t("identityProofing.reviews.address.reject")}
+        </Button>
+      </div>
+      {decide.isError && (
+        <p role="alert" className={REVIEW_ERROR}>
+          {proofingErrorMessage(decide.error, t)}
+        </p>
+      )}
+    </div>
   );
 }
