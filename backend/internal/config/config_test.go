@@ -448,17 +448,17 @@ func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
 	}
 }
 
-// The URLs the Idem app sends chip data and selfies to are https, or plain
-// http to this machine, outside a local stack; a local stack may use a LAN
-// address for the phone.
-func TestLoadPhoneURLsNeedHTTPS(t *testing.T) {
+// The URLs the Idem app sends chip data and selfies to, and the one a VOG PDF
+// goes to, are https, or plain http to this machine, outside a local stack; a
+// local stack may use a LAN address for the phone.
+func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 	for raw, ok := range map[string]bool{
 		"https://proofing.example.org": true,
 		"http://localhost:8080":        true,
 		"http://proofing.example.org":  false,
 		"http://192.168.1.20:8080":     false,
 	} {
-		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL} {
+		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
 					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
