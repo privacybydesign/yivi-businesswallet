@@ -94,6 +94,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
+	mux.Handle("POST /proof/{token}/employment", h.limitHosted(h.hostedAddEmployment))
 	mux.Handle("GET /proof/{token}/address/lookup", h.limitHosted(h.hostedLookUpAddress))
 	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }
@@ -145,6 +146,11 @@ type hostedProgressResponse struct {
 	// while they cannot, and once they did (AddressGiven).
 	AddressUntil *time.Time `json:"addressUntil,omitempty"`
 	AddressGiven bool       `json:"addressGiven"`
+	// EmploymentUntil is when the subject can last upload their
+	// Verzekeringsbericht; absent while they cannot, and once one was kept
+	// (EmploymentGiven).
+	EmploymentUntil *time.Time `json:"employmentUntil,omitempty"`
+	EmploymentGiven bool       `json:"employmentGiven"`
 	// DataExportUntil is until when an approved "see my data" request's data
 	// downloads (GET /proof/{token}/data-export); absent otherwise.
 	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
@@ -198,6 +204,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
+		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
 	}
 }
 
@@ -245,6 +252,9 @@ type hostedViewResponse struct {
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
 		AddressMode AddressMode `json:"addressMode"`
+		// EmploymentMode is whether the session asks for the UWV
+		// Verzekeringsbericht.
+		EmploymentMode EmploymentMode `json:"employmentMode"`
 		// Kind is what the session is for: an identity check, or the person
 		// asking for their data or its erasure.
 		Kind FlowKind `json:"kind"`
@@ -327,7 +337,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	var out hostedViewResponse
 	out.hostedProgressResponse = newHostedProgress(hosted.Request, time.Now())
 	out.SessionID = publicSessionID(hosted.Request.ID)
-	out.RedirectURL, out.Language = hosted.Request.RedirectURL, string(hosted.Request.Language)
+	out.RedirectURL = liveRedirect(hosted.Request.RedirectURL, hosted.Settings, hosted.FlowSettings)
+	out.Language = string(hosted.Request.Language)
 
 	st := hosted.Settings
 	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)
@@ -364,6 +375,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)
+	out.Flow.EmploymentMode = employmentModeOf(hosted.Request)
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
 

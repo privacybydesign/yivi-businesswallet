@@ -10,18 +10,19 @@ import (
 // stores come in built, as the API server also uses them on their own.
 func NewStores(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, requests *RequestStore, webhooks *WebhookStore) Stores {
 	return Stores{
-		Settings:      NewSettingsStore(db, recorder),
-		Requests:      requests,
-		OrgSettings:   NewOrgSettingsStore(db, recorder),
-		APIKeys:       NewAPIKeyStore(db, recorder),
-		Webhooks:      webhooks,
-		Events:        audit.NewReader(db),
-		Pauses:        NewPauseStore(db, recorder),
-		FlowHosted:    NewFlowHostedStore(db, recorder),
-		FlowBranding:  NewFlowBrandingStore(db, recorder),
-		FlowDiplomas:  NewFlowDiplomaStore(db, recorder),
-		Diplomas:      NewDiplomaStore(db, recorder),
-		FlowAddresses: NewFlowAddressStore(db, recorder),
-		DataRequests:  NewDataRequestStore(db, recorder, cipher),
+		Settings:       NewSettingsStore(db, recorder),
+		Requests:       requests,
+		OrgSettings:    NewOrgSettingsStore(db, recorder),
+		APIKeys:        NewAPIKeyStore(db, recorder),
+		Webhooks:       webhooks,
+		Events:         audit.NewReader(db),
+		Pauses:         NewPauseStore(db, recorder),
+		FlowHosted:     NewFlowHostedStore(db, recorder),
+		FlowBranding:   NewFlowBrandingStore(db, recorder),
+		FlowDiplomas:   NewFlowDiplomaStore(db, recorder),
+		Diplomas:       NewDiplomaStore(db, recorder),
+		FlowAddresses:  NewFlowAddressStore(db, recorder),
+		FlowEmployment: NewFlowEmploymentStore(db, recorder),
+		DataRequests:   NewDataRequestStore(db, recorder, cipher),
 	}
 }

@@ -184,6 +184,16 @@ func (f *fakeFlowHosted) Disabled(context.Context, uuid.UUID) ([]string, error) 
 	return out, nil
 }
 
+func (f *fakeFlowHosted) ReturnURLs(context.Context, uuid.UUID) (map[string]string, error) {
+	out := map[string]string{}
+	for id, h := range f.byFlow {
+		if h.ReturnURL != "" {
+			out[id] = h.ReturnURL
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFlowHosted) Save(_ context.Context, _ uuid.UUID, flowID string, s FlowHosted) (FlowHosted, error) {
 	f.byFlow[flowID] = s
 	return s, nil
@@ -240,6 +250,145 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	}
 }
 
+const testReturnOrigin, testReturnPage = "https://portal.acme.example", "https://portal.acme.example/verified"
+
+// returnPageFixture is an org whose redirect origins hold testReturnOrigin and
+// https://other.example.
+func returnPageFixture(t *testing.T) fixture {
+	t.Helper()
+	f := newFixture()
+	f.svc.flowHostedSettings = &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
+	f.svc.SetHostedBaseURL(testHostedBase)
+	if _, err := saveOrigins(f.svc, []string{testReturnOrigin, "https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestFlowReturnPageSave(t *testing.T) {
+	f := returnPageFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
+	}); !errors.Is(err, ErrRedirectNotAllowed) {
+		t.Errorf("a return page off the origins: %v, want ErrRedirectNotAllowed", err)
+	}
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionDone, ReturnURL: testReturnPage,
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("a return page on a thank-you-page flow: %v, want ErrInvalidInput", err)
+	}
+	saved, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: " " + testReturnPage + " ",
+	})
+	if err != nil || saved.ReturnURL != testReturnPage {
+		t.Fatalf("SaveFlowHosted = %+v, %v; want the return page trimmed", saved, err)
+	}
+}
+
+func TestFlowReturnPage(t *testing.T) {
+	f := returnPageFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: testReturnPage,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	by := Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)}
+	create := func(in NewRequest) (Request, error) {
+		if in.Channel == "" {
+			in.Channel = ChannelHosted
+		}
+		sent, err := f.svc.CreateRequest(ctx, testOrg, by, in)
+		return sent.Request, err
+	}
+
+	for name, tc := range map[string]struct {
+		in   NewRequest
+		want string
+	}{
+		"no redirect of its own": {NewRequest{}, testReturnPage},
+		"its own redirect":       {NewRequest{RedirectURL: "https://other.example/next"}, "https://other.example/next"},
+		"no redirect wanted":     {NewRequest{NoRedirect: true}, ""},
+	} {
+		req, err := create(tc.in)
+		if err != nil || req.RedirectURL != tc.want {
+			t.Errorf("%s: redirect %q, %v; want %q", name, req.RedirectURL, err, tc.want)
+		}
+	}
+	if _, err := create(NewRequest{NoRedirect: true, RedirectURL: testReturnPage}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("no redirect wanted with a redirect: %v, want ErrInvalidInput", err)
+	}
+	if _, err := create(NewRequest{Channel: ChannelOnScreen, NoRedirect: true}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("an on-screen request without a redirect: %v, want ErrInvalidInput", err)
+	}
+
+	flows, err := f.svc.Flows(ctx, testOrg, FlowsAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(flows, func(of OrgFlow) bool { return of.ID == appFlow.ID }); i < 0 || flows[i].HostedReturnURL != testReturnPage {
+		t.Errorf("flow list = %+v, want the flow's return page", flows)
+	}
+
+	if _, err := saveOrigins(f.svc, []string{"https://other.example"}); !errors.Is(err, ErrRedirectOriginInUse) {
+		t.Errorf("removing the return page's origin: %v, want ErrRedirectOriginInUse", err)
+	}
+	if _, err := saveOrigins(f.svc, []string{testReturnOrigin}); err != nil {
+		t.Errorf("removing an origin no return page is on: %v", err)
+	}
+}
+
+// A link keeps its redirect only while its origin is still allowed and its
+// flow still ends on a redirect.
+func TestHostedViewDropsStaleRedirect(t *testing.T) {
+	f := newFixture()
+	hosted := &fakeFlowHosted{byFlow: map[string]FlowHosted{}}
+	f.svc.flowHostedSettings = hosted
+	f.svc.SetHostedBaseURL(testHostedBase)
+	ctx := context.Background()
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example", "https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	const redirect = "https://other.example/next"
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
+		NewRequest{Channel: ChannelHosted, RedirectURL: redirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := strings.CutPrefix(sent.HostedURL, testHostedBase)
+	viewRedirect := func() string {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/proof/"+token, nil)
+		r.SetPathValue("token", token)
+		w := httptest.NewRecorder()
+		if err := NewHandler(f.svc, nil, nil).hostedView(w, r); err != nil {
+			t.Fatalf("hostedView: %v", err)
+		}
+		var out hostedViewResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.RedirectURL
+	}
+
+	if _, err := saveOrigins(f.svc, []string{"https://portal.acme.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := viewRedirect(); got != "" {
+		t.Errorf("redirect on a removed origin = %q, want none", got)
+	}
+	if _, err := saveOrigins(f.svc, []string{"https://other.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := viewRedirect(); got != redirect {
+		t.Errorf("redirect on an allowed origin = %q, want %q", got, redirect)
+	}
+	hosted.byFlow[appFlow.ID] = FlowHosted{Enabled: true, Completion: CompletionDone}
+	if got := viewRedirect(); got != "" {
+		t.Errorf("redirect once the flow ends on its thank-you page = %q, want none", got)
+	}
+}
+
 // unreadBody fails the test when the handler reads it.
 type unreadBody struct{ t *testing.T }
 
@@ -258,6 +407,33 @@ func TestHostedDiplomaChecksLink(t *testing.T) {
 	var apiErr *respond.APIError
 	if err := h.hostedAddDiplomas(httptest.NewRecorder(), r); !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
 		t.Errorf("upload to an unknown link = %v, want 404", err)
+	}
+}
+
+// A Verzekeringsbericht upload is refused before its body is read: to an
+// unknown link, and to one whose window closed.
+func TestHostedEmploymentChecksLink(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	_, token := e.sendHosted(t)
+	checked := time.Now().Add(-EmploymentWindow - time.Minute)
+	e.requests.stored.Status, e.requests.stored.CompletedAt, e.requests.stored.CheckedAt = StatusApproved, &checked, &checked
+	h := NewHandler(e.svc, nil, nil)
+
+	for _, tc := range []struct {
+		name, token, code string
+	}{
+		{"unknown link", "unknown", "session_not_found"},
+		{"window closed", token, "employment_closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/proof/"+tc.token+"/employment", unreadBody{t})
+			r.SetPathValue("token", tc.token)
+			r.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+			var apiErr *respond.APIError
+			if err := h.hostedAddEmployment(httptest.NewRecorder(), r); !errors.As(err, &apiErr) || apiErr.Code != tc.code {
+				t.Errorf("upload = %v, want %s", err, tc.code)
+			}
+		})
 	}
 }
 

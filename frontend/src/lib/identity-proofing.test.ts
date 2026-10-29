@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { AuditEvent } from "../api/organization";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
@@ -11,8 +12,11 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import {
+  ADDRESS_REVIEWS,
+  ADDRESS_VERIFICATIONS,
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
+  EMPLOYMENT_KIND,
   ERASURE_HANDLINGS,
   FLOW_KINDS,
   MAX_LISTED_REQUESTS,
@@ -37,10 +41,14 @@ import {
   dropsOwnBranding,
   hostedDraft,
   hostedDraftDirty,
+  hostedToSave,
   savedLocales,
   selectedLocales,
   diplomaRejectionReason,
   diplomaStepDone,
+  employmentRejectionReason,
+  employmentReview,
+  employmentStepDone,
   OUTCOME_ONLY,
   MAX_ATTRIBUTE_REASON_CHARS,
   collectedAttributes,
@@ -57,6 +65,7 @@ import {
   methodChoices,
   currentStage,
   progressPollContinues,
+  employmentOwed,
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
@@ -104,6 +113,7 @@ import {
   ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
+  latestAddressDecision,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -1021,6 +1031,8 @@ describe("identity for diplomas", () => {
   it("is needed by required diplomas", () => {
     expect(identityRequired("off")).toBe(false);
     expect(identityRequired("required")).toBe(true);
+    expect(identityRequired("off", "off")).toBe(false);
+    expect(identityRequired("off", "required")).toBe(true);
   });
 
   it("refuses a draft that drops the name and date of birth when needed", () => {
@@ -1343,6 +1355,7 @@ describe("proofingErrorMessage", () => {
     [404, "api_key_not_found", "apiKeyNotFound"],
     [404, "session_not_found", "sessionNotFound"],
     [409, "not_under_review", "notUnderReview"],
+    [409, "address_not_under_review", "addressNotUnderReview"],
     [422, "reference_photo_required", "referencePhotoRequired"],
     [404, "organization_not_found", "organizationNotFound"],
     [404, "webhook_not_found", "webhookNotFound"],
@@ -1350,6 +1363,11 @@ describe("proofingErrorMessage", () => {
     [422, "address_not_found", "addressNotFound"],
     [409, "legal_retention", "legalRetention"],
     [400, "reasons_missing", "reasonsMissing"],
+    [422, "employment_needs_page", "employmentNeedsPage"],
+    [409, "employment_closed", "employmentClosed"],
+    [409, "employment_not_asked", "employmentNotAsked"],
+    [409, "no_employment_checker", "noEmploymentChecker"],
+    [503, "seal_check_unavailable", "sealCheckUnavailable"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);
     expect(copy).not.toBe(`identityProofing.errors.${key}`);
@@ -1407,6 +1425,8 @@ describe("addressVerificationNote", () => {
     ["verified", "verified"],
     ["unchecked", "unchecked"],
     ["unsupported", "unsupported"],
+    ["registered", "registered"],
+    ["registered_mismatch", "registeredMismatch"],
     [undefined, "declared"],
   ] as const)("says how a %s address was checked", (verification, key) => {
     const copy = t(`identityProofing.sessions.address.${key}`);
@@ -1798,6 +1818,46 @@ describe("session method and timeline", () => {
     ).toEqual(["eIDAS substantial"]);
     expect(sessionEventDetail({}, t)).toEqual([]);
   });
+
+  it("says an entered address goes to a reviewer, and what was decided", () => {
+    expect(
+      sessionEventDetail({ after: { verification: "registered_mismatch" } }, t),
+    ).toEqual(["Goes to a reviewer"]);
+    expect(
+      sessionEventDetail({ after: { verification: "registered" } }, t),
+    ).toEqual([]);
+    expect(
+      sessionEventDetail(
+        {
+          before: { addressReview: "pending" },
+          after: { addressReview: "rejected", reason: "Moved last year" },
+        },
+        t,
+      ),
+    ).toEqual(["Address rejected", "Reason: Moved last year"]);
+    expect(
+      sessionEventDetail({ after: { addressReview: "confirmed" } }, t),
+    ).toEqual(["Address confirmed"]);
+  });
+
+  it("says what a reviewer decided on the session, and why", () => {
+    expect(
+      sessionEventDetail(
+        {
+          after: {
+            decision: "rejected",
+            reason: "Not the holder",
+            errorCode: "REVIEW_NOT_HOLDER",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      t("identityProofing.rejectionReasons.reviewNotHolder"),
+      "Rejected",
+      "Reason: Not the holder",
+    ]);
+  });
 });
 
 describe("secondsUntil", () => {
@@ -1841,6 +1901,7 @@ describe("rejection codes mirror the backend", () => {
     "service.go",
     "data_request.go",
     "review.go",
+    "employment.go",
   ].flatMap((file) => codes(read(`proofing/${file}`), walletCodes));
   const reviewer = codes(read("proofing/review.go"), walletCodes);
   const backend = [...new Set([...engine, ...wallet])];
@@ -1883,6 +1944,34 @@ describe("diploma modes mirror backend/internal/proofing", () => {
   });
 });
 
+// The "Benefit" and "Other income" tags compare against these: a kind renamed
+// on one side only would drop them without a word.
+describe("employment kinds mirror backend/internal/employment", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/employment/statement.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/\bKind\w+\s+Kind = "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend kind and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    const frontend: string[] = Object.values(EMPLOYMENT_KIND);
+    for (const kind of backend) {
+      expect(frontend).toContain(kind);
+    }
+    for (const kind of frontend) {
+      expect(backend).toContain(kind);
+    }
+  });
+});
+
 // The flow kinds, and of them the data requests the send form offers, are the
 // backend's, both ways.
 describe("flow kinds mirror backend/internal/proofing", () => {
@@ -1905,6 +1994,46 @@ describe("flow kinds mirror backend/internal/proofing", () => {
     expect([...DATA_REQUEST_KINDS].sort()).toEqual(
       backend.filter((kind) => kind !== "identity").sort(),
     );
+  });
+});
+
+// How an address was checked, and where its review stands, are the backend's,
+// both ways: the schema reads a value it lacks as none, which would hide a
+// mismatch or a pending review.
+describe("address verifications mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL("../../../backend/internal/proofing/address.go", import.meta.url),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/Address\w+\s+AddressVerification = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend verification and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_VERIFICATIONS].sort()).toEqual([...backend].sort());
+  });
+});
+
+describe("address reviews mirror backend/internal/proofing", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/address_review.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [
+    ...source.matchAll(/AddressReview\w+\s+AddressReview = "(\w+)"/g),
+  ].map((m) => m[1]);
+
+  it("has every backend review state and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...ADDRESS_REVIEWS].sort()).toEqual([...backend].sort());
   });
 });
 
@@ -1938,6 +2067,9 @@ describe("sessionView", () => {
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
     diplomasDone: false,
+    employmentMode: "off" as const,
+    employmentUntil: undefined,
+    employmentDone: false,
     secondsLeft: 60,
   };
 
@@ -2021,6 +2153,67 @@ describe("sessionView", () => {
       sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
     ).toBe("outcome");
   });
+
+  it("asks for the Verzekeringsbericht after the diplomas", () => {
+    const settled = {
+      ...running,
+      status: "approved",
+      diplomaMode: "required" as const,
+      diplomasUntil: until,
+      employmentMode: "required" as const,
+      employmentUntil: until,
+    };
+    expect(sessionView(settled)).toBe("diplomas");
+    expect(sessionView({ ...settled, diplomasDone: true })).toBe("employment");
+    expect(
+      sessionView({ ...settled, diplomasDone: true, employmentDone: true }),
+    ).toBe("outcome");
+    expect(
+      sessionView({
+        ...settled,
+        diplomasDone: true,
+        employmentUntil: undefined,
+      }),
+    ).toBe("outcome");
+  });
+
+  it("asks for the Verzekeringsbericht in review too", () => {
+    expect(
+      sessionView({
+        ...running,
+        status: "needs_review",
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("employment");
+  });
+
+  // The subject continued, but what the page read still owes the statement:
+  // the outcome waits for a read after it (kept, or the window's rejection).
+  it("holds the Verzekeringsbericht step while the backend still owes it", () => {
+    const done = {
+      ...running,
+      status: "approved",
+      employmentMode: "required" as const,
+      employmentUntil: until,
+      employmentDone: true,
+    };
+    expect(sessionView({ ...done, employmentOwed: true })).toBe("employment");
+    expect(sessionView({ ...done, employmentOwed: false })).toBe("outcome");
+  });
+
+  it("does not ask for the Verzekeringsbericht while live or unasked", () => {
+    expect(
+      sessionView({
+        ...running,
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("running");
+    expect(
+      sessionView({ ...running, status: "approved", employmentUntil: until }),
+    ).toBe("outcome");
+  });
 });
 
 describe("app step", () => {
@@ -2065,6 +2258,7 @@ describe("address step", () => {
       step: "session",
       inAddress: false,
       inDiplomas: false,
+      inEmployment: false,
     } as const;
     expect(currentStage(at)).toBe("session");
     expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
@@ -2079,6 +2273,118 @@ describe("address step", () => {
     expect(
       sendableByMail({ addressMode: "required", diplomaMode: "off" }),
     ).toBe(false);
+  });
+});
+
+describe("employment step", () => {
+  it("adds the employment stage after the diplomas", () => {
+    expect(
+      verifyStages({ address: true, diplomas: true, employment: true }),
+    ).toEqual([
+      "overview",
+      "method",
+      "session",
+      "address",
+      "diplomas",
+      "employment",
+    ]);
+    expect(verifyStages({ diplomas: false, employment: true })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "employment",
+    ]);
+  });
+
+  it("is at the employment step while it is open", () => {
+    const at = {
+      step: "session",
+      inAddress: false,
+      inDiplomas: false,
+      inEmployment: false,
+    } as const;
+    expect(currentStage({ ...at, inEmployment: true })).toBe("employment");
+    expect(currentStage({ ...at, inDiplomas: true, inEmployment: true })).toBe(
+      "diplomas",
+    );
+  });
+
+  it("ends the step once a statement is kept or the time is up", () => {
+    const kept = {
+      statementDate: "2026-10-15",
+      employed: true,
+      relations: [],
+    };
+    expect(employmentStepDone(undefined, 60)).toBe(false);
+    expect(employmentStepDone(kept, 60)).toBe(true);
+    expect(employmentStepDone(undefined, 0)).toBe(true);
+  });
+
+  it("sends a statement without a job or with a benefit to review", () => {
+    const relation = (kind: string) => ({
+      kind,
+      employer: "",
+      payrollTaxNumber: "",
+      contractForm: "",
+      from: "",
+      to: "",
+    });
+    const statement = (kinds: string[]) => ({
+      statementDate: "2026-10-15",
+      relations: kinds.map(relation),
+    });
+    const withJob = (kinds: string[]) => ({
+      ...statement(kinds),
+      employed: true,
+    });
+    const withoutJob = (kinds: string[]) => ({
+      ...statement(kinds),
+      employed: false,
+    });
+    expect(employmentReview(withJob(["employment"]))).toBeUndefined();
+    expect(employmentReview(withJob(["employment", "benefit"]))).toBe(
+      "benefit",
+    );
+    expect(employmentReview(withJob(["employment", "other_income"]))).toBe(
+      "otherIncome",
+    );
+    expect(
+      employmentReview(withJob(["employment", "other_income", "benefit"])),
+    ).toBe("benefit");
+    expect(employmentReview(withoutJob(["benefit"]))).toBe("noJob");
+  });
+
+  it("mails only a flow that asks for no Verzekeringsbericht", () => {
+    expect(sendableByMail({ employmentMode: "off" })).toBe(true);
+    expect(sendableByMail({ employmentMode: "required" })).toBe(false);
+    expect(
+      sendableByMail({
+        employmentMode: "required",
+        diplomaMode: "off",
+        addressMode: "off",
+      }),
+    ).toBe(false);
+  });
+
+  it("explains every refusal the backend gives, and shows another as is", () => {
+    const t = i18n.getFixedT("en");
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/employment/checker.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const reasons = [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(reasons).toHaveLength(4);
+    for (const reason of reasons) {
+      expect(employmentRejectionReason(reason, t)).not.toBe(reason);
+    }
+    expect(employmentRejectionReason("something_new", t)).toBe("something_new");
   });
 });
 
@@ -2143,7 +2449,7 @@ describe("diploma step", () => {
     const reasons = sources.flatMap((source) =>
       [...source.matchAll(/Reason\w*\s*= "(\w+)"/g)].map((m) => m[1]),
     );
-    expect(reasons.length).toBe(4);
+    expect(reasons).toHaveLength(4);
     for (const reason of reasons) {
       expect(diplomaRejectionReason(reason, t)).not.toBe(reason);
     }
@@ -2368,6 +2674,36 @@ describe("progress poll", () => {
     expect(progressPollContinues({ status: "approved" }, null)).toBe(false);
   });
 
+  it("polls an approved session owing its Verzekeringsbericht once the window passed", () => {
+    const until = "2026-10-12T12:00:00Z";
+    const owing = { status: "approved", employmentUntil: until };
+    const before = Date.parse(until) - 1000;
+    const after = Date.parse(until) + 1000;
+    expect(progressPollContinues(owing, null, before)).toBe(false);
+    expect(progressPollContinues(owing, null, after)).toBe(true);
+    expect(progressPollContinues({ status: "rejected" }, null, after)).toBe(
+      false,
+    );
+    expect(
+      progressPollContinues(
+        { status: "needs_review", employmentUntil: until },
+        null,
+        after,
+      ),
+    ).toBe(false);
+  });
+
+  it("owes the statement only while approved and asked", () => {
+    const until = "2026-10-12T12:00:00Z";
+    expect(employmentOwed({ status: "approved", employmentUntil: until })).toBe(
+      true,
+    );
+    expect(employmentOwed({ status: "approved" })).toBe(false);
+    expect(
+      employmentOwed({ status: "needs_review", employmentUntil: until }),
+    ).toBe(false);
+  });
+
   it("stops after a 403 or a 404", () => {
     expect(progressPollContinues(undefined, notAllowed)).toBe(false);
     expect(progressPollContinues({ status: "pending" }, gone)).toBe(false);
@@ -2423,6 +2759,10 @@ describe("hostedErrorMessage", () => {
     const started = apiError(409, "link_started", "started");
     expect(hostedErrorMessage(started, t)).toBe(
       proofingErrorMessage(started, t),
+    );
+    const sealCheck = apiError(503, "seal_check_unavailable", "down");
+    expect(hostedErrorMessage(sealCheck, t)).toBe(
+      t("identityProofing.errors.sealCheckUnavailable"),
     );
     expect(hostedErrorMessage(new Error("offline"), t)).toBe(
       t("identityProofing.errors.generic"),
@@ -2611,6 +2951,7 @@ describe("hosted page form", () => {
     enabled: true,
     locales: [],
     completion: "redirect",
+    returnUrl: "",
   };
 
   it("starts from what is saved, every language ticked for none", () => {
@@ -2632,6 +2973,29 @@ describe("hosted page form", () => {
         saved,
       ),
     ).toBe(true);
+  });
+
+  it("holds a return page as it is saved", () => {
+    const page = "https://portal.example.com/verified";
+    expect(
+      hostedDraftDirty({ ...hostedDraft(saved), returnUrl: page }, saved),
+    ).toBe(true);
+    expect(
+      hostedDraftDirty({ ...hostedDraft(saved), returnUrl: "  " }, saved),
+    ).toBe(false);
+    expect(
+      hostedToSave({ ...hostedDraft(saved), returnUrl: ` ${page} ` }),
+    ).toEqual({ ...saved, returnUrl: page });
+  });
+
+  it("saves no return page on a flow that ends on its thank-you page", () => {
+    const done = { ...saved, completion: "done" as const };
+    const draft = {
+      ...hostedDraft(done),
+      returnUrl: "https://portal.example.com/verified",
+    };
+    expect(hostedToSave(draft)).toEqual(done);
+    expect(hostedDraftDirty(draft, done)).toBe(false);
   });
 });
 
@@ -2655,5 +3019,43 @@ describe("hosted page languages", () => {
   it("round-trips none and a subset", () => {
     expect(savedLocales(selectedLocales([]))).toEqual([]);
     expect(savedLocales(selectedLocales(["en"]))).toEqual(["en"]);
+  });
+});
+
+describe("latestAddressDecision", () => {
+  const event = (over: Partial<AuditEvent>): AuditEvent => ({
+    id: "e",
+    occurredAt: "2026-10-29T10:00:00Z",
+    action: "identity_proofing.address_reviewed",
+    targetType: "identity_proofing_request",
+    targetId: "r1",
+    metadata: {},
+    actor: null,
+    actorLabel: null,
+    ...over,
+  });
+
+  it("is the last address decision, with its reason", () => {
+    const got = latestAddressDecision([
+      event({ id: "a", metadata: { after: { reason: "first" } } }),
+      event({ id: "x", action: "identity_proofing.result_read" }),
+      event({
+        id: "b",
+        occurredAt: "2026-10-29T11:00:00Z",
+        metadata: { after: { addressReview: "rejected", reason: "moved" } },
+      }),
+    ]);
+    expect(got).toEqual({
+      by: null,
+      at: "2026-10-29T11:00:00Z",
+      reason: "moved",
+    });
+  });
+
+  it("has no reason where the backend left it out, and none without a decision", () => {
+    expect(
+      latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
+    ).toBeUndefined();
+    expect(latestAddressDecision([])).toBeUndefined();
   });
 });

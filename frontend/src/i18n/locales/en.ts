@@ -595,6 +595,8 @@ export const en = {
       legalRetention: "the organisation is bound by law to keep this data",
       orgPaused:
         "identity proofing was paused while the session waited for review; try again later",
+      employmentNotProvided:
+        "no Verzekeringsbericht was added in time after the identity check",
       identityMismatch:
         "a different person: the name or date of birth on the document is not the one the request was for",
       unknown: "the check did not pass ({{code}})",
@@ -619,6 +621,8 @@ export const en = {
         "This session is no longer waiting for review: someone may have decided it already.",
       ownReview:
         "You sent this check, or it is about you, so another reviewer decides it.",
+      addressNotUnderReview:
+        "This address is no longer waiting for review: someone may have decided it already.",
       referencePhotoRequired:
         "This flow compares the face with your own photo of the person, which can only be sent through the API. Pick another flow.",
       organizationNotFound: "That organisation does not exist.",
@@ -631,20 +635,31 @@ export const en = {
         "The Idem app still has this session open: carry on there, or close it first.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
+      redirectNotAllowed:
+        "This page is not on one of your redirect origins. Add its origin under Settings › Data and privacy first.",
+      redirectOriginInUse:
+        "A flow's return page is on an origin you removed. Change the return page on that flow's Hosted page tab first.",
       dataRequestFlow:
         "See my data and Delete my data are the wallet's own flows: they cannot be changed.",
       diplomasNeedPage:
         "This flow asks for diplomas, which are uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       diplomasClosed:
-        "Diplomas can only be added for a while after the identity check succeeded.",
+        "Diplomas can only be added for a while after the identity check.",
       diplomasNotAsked: "This check does not ask for diplomas.",
       addressNeedsPage:
         "This flow asks for the address, which is entered on the page that runs the check. Show it on this screen or send a hosted link.",
       addressClosed:
-        "The address can only be entered once, for a while after the identity check succeeded.",
+        "The address can only be entered once, for a while after the identity check.",
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
         "This address is not in the Dutch address register. Check the postal code, house number and street.",
+      employmentNeedsPage:
+        "This flow asks for the UWV Verzekeringsbericht, which is uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
+      employmentClosed:
+        "The Verzekeringsbericht can only be uploaded once, for a while after the identity check.",
+      employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
+      noEmploymentChecker:
+        "This server checks no Verzekeringsbericht. Ask your administrator to set EMPLOYMENT_VALIDATOR_PROVIDER.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:
@@ -657,6 +672,8 @@ export const en = {
       legalRetention:
         "A session the law makes you keep cannot be erased yet. Untick it.",
       tooLarge: "The file is too large.",
+      sealCheckUnavailable:
+        "The seal on the file cannot be checked right now. Try again in a few minutes.",
       generic: "Something went wrong. Please try again.",
     },
     address: {
@@ -722,6 +739,52 @@ export const en = {
         duplicate: "This diploma was added already.",
       },
     },
+    employment: {
+      overview: {
+        label: "Employment history",
+        detail:
+          "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
+      },
+      identityDone: "Your identity is verified.",
+      heading: "Now add your Verzekeringsbericht",
+      intro:
+        "Upload the Verzekeringsbericht from UWV. It lists your employment. We check that UWV issued it and that it is in your name.",
+      how: {
+        login: "Log in to Mijn UWV with DigiD.",
+        openUwv: "Open Mijn UWV",
+        download:
+          "Under “Persoonlijke gegevens”, open “Arbeidsverleden” and download it as a PDF.",
+        upload:
+          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF, because that removes UWV's seal.",
+      },
+      choose: "Choose PDF",
+      chooseAgain: "Choose another PDF",
+      checking: "Checking…",
+      closed: "The time to add your Verzekeringsbericht is up.",
+      continue: "Continue",
+      kept: "Verzekeringsbericht of {{date}} accepted",
+      keptChecks:
+        "UWV's seal is valid, the file is unchanged, and it is in your name.",
+      noRelations: "It lists no current employment.",
+      period: "since {{from}}, last reported {{to}}",
+      benefit: "(benefit)",
+      otherIncome: "(other income)",
+      review:
+        "It lists no current job. The organisation reviews your check before a decision.",
+      reviewBenefit:
+        "It lists a current benefit. The organisation reviews your check before a decision.",
+      reviewOtherIncome:
+        "It lists other current income, paid without hours worked. The organisation reviews your check before a decision.",
+      reasons: {
+        notAStatement:
+          "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
+        signatureInvalid:
+          "UWV's seal does not hold: the file was changed or not made by UWV. Download it again and upload the original file.",
+        holderMismatch: "This Verzekeringsbericht is in another person's name.",
+        stale:
+          "This Verzekeringsbericht is older than 30 days. Download a new one.",
+      },
+    },
     flows: {
       eidas: "eIDAS {{level}}",
       noAssurance: "No minimum level",
@@ -758,6 +821,10 @@ export const en = {
           hint: "You send the link yourself. It can be started once, within 72 hours.",
         },
       },
+      linkReturn: {
+        title: "Send back after the check",
+        hint: "To {{url}}",
+      },
       mailLifetime: "It works for {{minutes}} minutes after sending.",
       submitOnScreen: "Open page",
       submitLink: "Create link",
@@ -773,7 +840,7 @@ export const en = {
       emailPlaceholder: "name@example.nl",
       emailRequired: "Enter a valid e-mail address.",
       diplomasOnScreen:
-        "This flow asks for an address or diplomas, which are given on the page that runs the check, so it runs on this screen or as a link.",
+        "This flow asks for an address, diplomas or a Verzekeringsbericht, which are given on the page that runs the check, so it runs on this screen or as a link.",
       notLinkable:
         "This flow is not sent by e-mail or as a link, so the person does it on this screen.",
       addName: {
@@ -803,12 +870,15 @@ export const en = {
       title: "Verify a person",
       missingFlow:
         "This flow no longer exists or cannot be sent from here. Go back and pick another one.",
+      identityInReview:
+        "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
         diplomas: "Diploma",
+        employment: "Employment",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -1011,12 +1081,33 @@ export const en = {
         title: "Address",
         none: "No address entered.",
         missing: "No address",
-        declared: "As the person entered it; not checked against a document.",
-        verified: "Found in the Dutch address register (BAG).",
+        declared:
+          "Self-declared: as the person entered it, not checked against a document.",
+        verified:
+          "Self-declared: the address exists in the Dutch address register (BAG), but is not confirmed as where the person lives.",
         unchecked:
-          "As the person entered it; the Dutch address register could not be reached to check it.",
+          "Self-declared: the Dutch address register could not be reached to check it.",
         unsupported:
-          "As the person entered it; only Dutch addresses are checked against a register.",
+          "Self-declared: only Dutch addresses are checked against a register.",
+        registered:
+          "Confirmed: the same as the registered address (BRP) the person shared from the Yivi app.",
+        registeredMismatch:
+          "Differs from the registered address (BRP) the person shared from the Yivi app.",
+        registeredTitle: "Registered address (BRP)",
+        review: {
+          pending:
+            "Waiting for a reviewer to confirm the address. The identity check is not affected.",
+          confirmed: "A reviewer confirmed the address.",
+          rejected:
+            "A reviewer rejected the address. The identity check is not affected.",
+        },
+        openReview: "Open the review",
+        tag: {
+          pending: "Address in review",
+          confirmed: "Address confirmed",
+          rejected: "Address rejected",
+        },
+        toReview: "Goes to a reviewer",
       },
       diplomas: {
         title: "Diplomas",
@@ -1025,6 +1116,21 @@ export const en = {
         tag_other: "{{count}} diplomas",
         missing: "No diploma",
         number: "DUO number {{number}}",
+      },
+      employment: {
+        title: "Current employment",
+        none: "No Verzekeringsbericht uploaded.",
+        missing: "No employment history",
+        statementDate: "Verzekeringsbericht of {{date}}",
+        noRelations: "No current employment or benefit in UWV's records",
+        employed: "Currently employed: yes",
+        notEmployed: "Currently employed: no",
+        benefit: "Benefit",
+        otherIncome: "Other income",
+        payrollTaxNumber: "Payroll tax number {{number}}",
+        period: "since {{from}}, last reported {{to}}",
+        source:
+          "From UWV's Verzekeringsbericht, checked against UWV's seal and the verified name and date of birth. Only the employment current on the statement's date is kept.",
       },
       purged: "Personal data purged",
       purgedSubject: "Purged",
@@ -1205,8 +1311,26 @@ export const en = {
       reviewOf: "Review {{name}}",
       viewOf: "View {{name}}",
       empty: "Nothing waits for a decision.",
-      emptyClosed: "No data request has been closed yet.",
+      emptyClosed: "Nothing has been closed yet.",
       identityCheck: "Identity check",
+      addressCheck: "Address",
+      address: {
+        title: "Review an address",
+        whyTitle: "Why this waits for you",
+        why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
+        whyMismatch:
+          "This address differs from the registered address (BRP) the person shared from the Yivi app. They may have moved recently, so a reviewer decides.",
+        checkTitle: "Identity check",
+        checkHint:
+          "The identity check itself is approved. Your decision only concerns the address.",
+        method: "Checked with",
+        level: "Assurance level",
+        decisionTitle: "Decision",
+        confirm: "Confirm address",
+        reject: "Reject address",
+        confirmed: "The address was confirmed.",
+        rejected: "The address was rejected.",
+      },
       requestedBy: "Requested by {{name}}",
       provenWith: {
         idem_app: "Proven with the Idem app",
@@ -1216,17 +1340,30 @@ export const en = {
       },
       why: {
         identity: "Part of it is not signed or sourced",
+        address: "Self-declared address, no register confirms it",
+        addressMismatch: "Differs from the registered address (BRP)",
         data_access: "A reviewer approves every request to see data",
         data_erasure: "A reviewer approves every request to delete data",
+        no_current_employment: "The Verzekeringsbericht lists no current job",
+        current_benefit: "The Verzekeringsbericht lists a current UWV benefit",
+        current_other_income:
+          "The Verzekeringsbericht lists other current income without hours worked",
       },
       answerBy: "Answer by {{date}}",
       outcome: {
         approved: "Approved",
         rejected: "Rejected",
+        confirmed: "Address confirmed",
+        addressRejected: "Address rejected",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",
       back: "Back to reviews",
+      decided: {
+        by: "Decided by {{name}} · {{when}}",
+        at: "Decided · {{when}}",
+        reason: "Reason: {{reason}}",
+      },
       notWaiting: {
         approved:
           "This request no longer waits for a decision. It was approved.",
@@ -1239,6 +1376,12 @@ export const en = {
         why: {
           title: "Why this waits for you",
           body: "No signature or register vouches for part of this check, so a person has to check it.",
+          no_current_employment:
+            "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below.",
+          current_benefit:
+            "The identity is verified, but the Verzekeringsbericht lists a current UWV benefit. Check the employment below.",
+          current_other_income:
+            "The identity is verified, but the Verzekeringsbericht lists other current income paid without hours worked: a pension, AOW, social assistance, or a final payment. Check the employment below.",
         },
         auto: {
           title: "Checked automatically",
@@ -1505,10 +1648,15 @@ export const en = {
         "Fill in the reasons in {{languages}} on the Check tab first: every item the flow collects needs one in each language the page offers.",
       openCheck: "Go to the Check tab",
       completion: "When the check ends",
+      returnUrl: {
+        label: "Return page",
+        hint: "Optional. Links for this flow send the person here, unless the request names its own page. It must be on one of the redirect origins under Settings › Data and privacy.",
+        placeholder: "https://portal.example.com/verified",
+      },
       completions: {
         redirect: {
           title: "Go back to your website",
-          hint: "To the address the request came with; a thank-you page if there is none.",
+          hint: "To the address the request came with, else to the return page below. Without either, a thank-you page.",
         },
         done: {
           title: "Always show a thank-you page",
@@ -1532,6 +1680,7 @@ export const en = {
       face_verification: "Face check",
       address: "Enter the address",
       diploma_upload: "Upload diplomas (DUO)",
+      employment_upload: "Upload Verzekeringsbericht (UWV)",
     },
     bsnPolicies: {
       retrieve: "Keep the full BSN",
@@ -1652,6 +1801,8 @@ export const en = {
           "A selfie, checked to be a live person and compared with the photo on the chip.",
         diplomaHint:
           "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
+        employmentHint:
+          "After the identity check, in the browser: the person uploads the Verzekeringsbericht from Mijn UWV, checked against UWV's seal and their name and date of birth. Only on screen or as a link, never by e-mail.",
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
         lifetime: "QR code lifetime",
@@ -1682,7 +1833,7 @@ export const en = {
         title: "What you receive",
         hint: "With nothing ticked you only get the outcome. Every item you tick needs a reason in each language of the hosted page; the person reads it before they start.",
         identityLocked:
-          "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma is checked against them.",
+          "Name and document details stays on: a data request finds the person's sessions by their name and date of birth, and a diploma or Verzekeringsbericht is checked against them.",
         ageOver: "Minimum age",
         ageOverOption: "{{age}} or older",
         ageOverHint:
@@ -2332,6 +2483,11 @@ export const en = {
       identityProofingFlowAddressConfigured:
         "Changed whether a flow asks for the address",
       identityProofingAddressAdded: "Entered an address",
+      identityProofingAddressReviewed: "Reviewed an address",
+      identityProofingFlowEmploymentConfigured:
+        "Changed whether a flow asks for the Verzekeringsbericht",
+      identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
+      identityProofingEmploymentRejected: "Refused a Verzekeringsbericht",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",

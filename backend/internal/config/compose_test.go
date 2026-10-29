@@ -168,6 +168,20 @@ func TestComposePassesTrustedProxiesToBackend(t *testing.T) {
 	}
 }
 
+// Same passthrough rule: without it VOG_VALIDATOR_PROVIDER=validatie_nl set in
+// .env never reaches the container, and the dev stack keeps the stub.
+func TestComposePassesVogValidatorToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envVogValidatorProvider]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envVogValidatorProvider)
+	}
+	if want := "${" + envVogValidatorProvider + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envVogValidatorProvider, value, want)
+	}
+}
+
 // Same passthrough rule: a certificate set in .env that never reaches the
 // container fails the boot probe while looking configured.
 func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
@@ -187,8 +201,8 @@ func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {
 
 // TestComposePassesProofing holds the identity-proofing vars to
 // the passthrough rule: without them a value set in .env (the encryption key,
-// the phone-reachable URL, Regula, the stub outcome, the diploma validator
-// and its trust cache) never reaches the container.
+// the phone-reachable URL, Regula, the stub outcome, the diploma and
+// employment validators and the trust cache) never reaches the container.
 func TestComposePassesProofing(t *testing.T) {
 	backendEnvironment := backendComposeEnvironment(t)
 
@@ -198,6 +212,7 @@ func TestComposePassesProofing(t *testing.T) {
 		envRegulaFaceAPIURL, envRegulaFaceAPIPublicURL, envRegulaFaceMatchThreshold,
 		envIdentityProofingEDLCSCAPaths,
 		envDiplomaValidatorProvider, envDiplomaTrustSource, envDiplomaTrustCacheDir, envDiplomaOCSP,
+		envEmploymentValidatorProvider,
 	} {
 		value, ok := backendEnvironment[key]
 		if !ok {

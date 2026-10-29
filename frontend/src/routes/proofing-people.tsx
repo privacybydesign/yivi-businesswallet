@@ -11,13 +11,14 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
+  AddressReviewState,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
   ProofingResult,
   ProofingSettings,
 } from "../api/identity-proofing";
-import { isDataRequest } from "../api/identity-proofing";
+import { EMPLOYMENT_KIND, isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import {
@@ -25,7 +26,11 @@ import {
   auditActionLabel,
   auditVisual,
 } from "../lib/audit-event";
-import { useWhenFormatter } from "../lib/format-when";
+import {
+  useDateFormatter,
+  useMonthFormatter,
+  useWhenFormatter,
+} from "../lib/format-when";
 import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
@@ -36,6 +41,7 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
+  latestAddressDecision,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -56,7 +62,7 @@ import {
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
 import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
-import { ResultText } from "./proofing-ui";
+import { PostalAddress, ResultText } from "./proofing-ui";
 import { DataRequestNote } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
@@ -69,6 +75,13 @@ const LABEL = "text-ink text-[13px] font-semibold";
 const BASE_COLUMNS = 5;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
+// How an address's review reads beside the session's status: waiting is not
+// done yet.
+const ADDRESS_REVIEW_TONES = {
+  pending: "amber",
+  confirmed: "green",
+  rejected: "red",
+} as const satisfies Record<AddressReviewState, string>;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
@@ -365,6 +378,7 @@ function SessionRow({
           <ResultText request={request} compact />
           <AddressNote request={request} />
           <DiplomaNote request={request} />
+          <EmploymentNote request={request} />
           <DataRequestNote request={request} />
         </Table.Cell>
         <Table.Cell className="text-ink-soft whitespace-nowrap">
@@ -508,10 +522,17 @@ function SessionRow({
                   </p>
                 )}
                 {request.addressMode !== "off" && (
-                  <SessionAddress request={request} />
+                  <SessionAddress
+                    slug={slug}
+                    request={request}
+                    isAdmin={isAdmin}
+                  />
                 )}
                 {request.diplomaMode !== "off" && (
                   <SessionDiplomas request={request} />
+                )}
+                {request.employmentMode !== "off" && (
+                  <SessionEmployment request={request} />
                 )}
               </div>
               <SessionTimeline slug={slug} request={request} />
@@ -562,14 +583,31 @@ function AddressNote({
       </div>
     );
   }
+  // The identity's status says nothing of the address: until a reviewer
+  // decides it, the session is not done.
+  const review = request.addressReview;
+  if (review !== undefined) {
+    return (
+      <div className="text-[12px]">
+        <StatusText tone={ADDRESS_REVIEW_TONES[review]}>
+          {t(`identityProofing.sessions.address.tag.${review}`)}
+        </StatusText>
+      </div>
+    );
+  }
   return null;
 }
 
-// The postal address the subject entered, and how it was checked.
+// The postal address the subject entered, how it was checked, and where a
+// self-declared one stands with a reviewer.
 function SessionAddress({
+  slug,
   request,
+  isAdmin,
 }: Readonly<{
+  slug: string;
   request: ProofingRequest;
+  isAdmin: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const a = request.address;
@@ -581,16 +619,99 @@ function SessionAddress({
       {a === undefined ? (
         <p className={HINT}>{t("identityProofing.sessions.address.none")}</p>
       ) : (
-        <address className="border-line text-ink rounded-lg border px-3 py-2 text-[13px] not-italic">
-          {`${a.street} ${a.houseNumber}`}
-          <br />
-          {`${a.postalCode} ${a.city}`}
-          <br />
-          {a.country}
-        </address>
+        <PostalAddress address={a} />
       )}
       <p className={HINT}>{addressVerificationNote(a?.verification, t)}</p>
+      {a?.registered !== undefined && (
+        <>
+          <h4 className="text-ink text-[13px] font-semibold">
+            {t("identityProofing.sessions.address.registeredTitle")}
+          </h4>
+          <PostalAddress address={a.registered} />
+        </>
+      )}
+      {request.addressReview !== undefined && (
+        <AddressReviewNote slug={slug} request={request} isAdmin={isAdmin} />
+      )}
     </div>
+  );
+}
+
+// Where an address waiting for a reviewer stands. It is decided on the
+// Reviews page, which an admin opens from here while it waits.
+function AddressReviewNote({
+  slug,
+  request,
+  isAdmin,
+}: Readonly<{
+  slug: string;
+  request: ProofingRequest;
+  isAdmin: boolean;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const review = request.addressReview;
+  if (review === undefined) {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>
+        {t(`identityProofing.sessions.address.review.${review}`)}
+        {isAdmin && review === "pending" && (
+          <>
+            {" "}
+            <Link
+              to={reviewPath(slug, request.id)}
+              className="text-link underline"
+            >
+              {t("identityProofing.sessions.address.openReview")}
+            </Link>
+          </>
+        )}
+      </p>
+      {review !== "pending" && (
+        <AddressDecisionNote slug={slug} request={request} />
+      )}
+    </div>
+  );
+}
+
+// Who decided the address, when and why, from the session's timeline, which
+// the open row reads anyway.
+function AddressDecisionNote({
+  slug,
+  request,
+}: Readonly<{
+  slug: string;
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const events = useProofingRequestEventsQuery(slug, request);
+  const decision = latestAddressDecision(events.data ?? []);
+  if (decision === undefined) {
+    return null;
+  }
+  return (
+    <>
+      <p className={HINT}>
+        {decision.by
+          ? t("identityProofing.reviews.decided.by", {
+              name: decision.by,
+              when: formatWhen(decision.at),
+            })
+          : t("identityProofing.reviews.decided.at", {
+              when: formatWhen(decision.at),
+            })}
+      </p>
+      {decision.reason && (
+        <p className="text-ink text-[13px]">
+          {t("identityProofing.reviews.decided.reason", {
+            reason: decision.reason,
+          })}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -670,6 +791,117 @@ function SessionDiplomas({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// For an approved session that requires the Verzekeringsbericht, that none
+// was kept.
+function EmploymentNote({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    request.employmentMode === "required" &&
+    request.status === "approved" &&
+    request.employment === undefined &&
+    request.purgedAt === undefined
+  ) {
+    return (
+      <div className="text-[12px]">
+        <StatusText tone="amber">
+          {t("identityProofing.sessions.employment.missing")}
+        </StatusText>
+      </div>
+    );
+  }
+  return null;
+}
+
+// The employment relations UWV's Verzekeringsbericht lists, as of the date
+// UWV made it.
+export function SessionEmployment({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const formatDate = useDateFormatter();
+  const formatMonth = useMonthFormatter();
+  const e = request.employment;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-ink text-[13.5px] font-bold">
+        {t("identityProofing.sessions.employment.title")}
+      </h3>
+      {e === undefined ? (
+        <p className={HINT}>{t("identityProofing.sessions.employment.none")}</p>
+      ) : (
+        <>
+          <p className="text-ink text-[13px]">
+            {t("identityProofing.sessions.employment.statementDate", {
+              date: formatDate(e.statementDate),
+            })}
+          </p>
+          <p className="text-ink text-[13px] font-semibold">
+            {e.employed
+              ? t("identityProofing.sessions.employment.employed")
+              : t("identityProofing.sessions.employment.notEmployed")}
+          </p>
+          {e.relations.length === 0 ? (
+            <p className={HINT}>
+              {t("identityProofing.sessions.employment.noRelations")}
+            </p>
+          ) : (
+            <ul className="border-line divide-y rounded-lg border">
+              {e.relations.map((r) => (
+                <li
+                  key={`${r.employer}-${r.payrollTaxNumber}-${r.contractForm}-${r.from}`}
+                  className="flex flex-col gap-0.5 px-3 py-2"
+                >
+                  <span className="text-ink flex items-center gap-2 text-[13px] font-semibold">
+                    {r.employer}
+                    {r.kind === EMPLOYMENT_KIND.benefit && (
+                      <StatusText tone="amber">
+                        {t("identityProofing.sessions.employment.benefit")}
+                      </StatusText>
+                    )}
+                    {r.kind === EMPLOYMENT_KIND.otherIncome && (
+                      <StatusText tone="amber">
+                        {t("identityProofing.sessions.employment.otherIncome")}
+                      </StatusText>
+                    )}
+                  </span>
+                  <span className={HINT}>
+                    {[
+                      t("identityProofing.sessions.employment.period", {
+                        from: formatMonth(r.from),
+                        to: formatMonth(r.to),
+                      }),
+                      r.contractForm,
+                    ]
+                      .filter((part) => part.trim() !== "")
+                      .join(" · ")}
+                  </span>
+                  <span className="text-muted font-mono text-[11.5px]">
+                    {t(
+                      "identityProofing.sessions.employment.payrollTaxNumber",
+                      {
+                        number: r.payrollTaxNumber,
+                      },
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className={HINT}>
+            {t("identityProofing.sessions.employment.source")}
+          </p>
+        </>
       )}
     </div>
   );

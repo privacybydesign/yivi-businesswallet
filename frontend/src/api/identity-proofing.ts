@@ -39,24 +39,55 @@ const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;
 
 // How an address was checked when it was kept: found in the Dutch address
-// register, Dutch but the register could not be asked, or outside the
-// Netherlands. An address kept before addresses were checked has none.
-const ADDRESS_VERIFICATIONS = ["verified", "unchecked", "unsupported"] as const;
+// register, Dutch but the register could not be asked, outside the
+// Netherlands, or the same as or other than the registered (BRP) address the
+// Yivi app disclosed. An address kept before addresses were checked has none.
+export const ADDRESS_VERIFICATIONS = [
+  "verified",
+  "unchecked",
+  "unsupported",
+  "registered",
+  "registered_mismatch",
+] as const;
 export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
 
-// The postal address a subject entered.
-const proofingAddressSchema = z.object({
+// Where an address that waits for a reviewer stands: a self-declared one, or
+// one other than the registered address. An unknown state reads as none.
+export const ADDRESS_REVIEWS = ["pending", "confirmed", "rejected"] as const;
+export type AddressReviewState = (typeof ADDRESS_REVIEWS)[number];
+
+// A reviewer's decision on a request: its session's review or its address,
+// the outcome, why, by whom and when.
+const proofingDecisionSchema = z.object({
+  kind: z.enum(["review", "address"]),
+  outcome: z.string(),
+  reason: z.string().optional(),
+  errorCode: z.string().optional(),
+  decidedBy: z.string().optional(),
+  decidedAt: z.string(),
+});
+
+const postalAddressSchema = z.object({
   street: z.string(),
   houseNumber: z.string(),
   postalCode: z.string(),
   city: z.string(),
   country: z.string(),
+});
+
+// The postal address a subject entered; registered is the BRP address a
+// registered_mismatch differs from.
+const proofingAddressSchema = postalAddressSchema.extend({
   verification: z.enum(ADDRESS_VERIFICATIONS).optional().catch(undefined),
+  registered: postalAddressSchema.optional(),
 });
 
 export type ProofingAddress = z.infer<typeof proofingAddressSchema>;
 // What the address step sends; the backend sets the verification.
-export type ProofingAddressInput = Omit<ProofingAddress, "verification">;
+export type ProofingAddressInput = Omit<
+  ProofingAddress,
+  "verification" | "registered"
+>;
 
 // An address as the Dutch address register writes it.
 const registerAddressSchema = z.object({
@@ -67,6 +98,48 @@ const registerAddressSchema = z.object({
 });
 
 export type RegisterAddress = z.infer<typeof registerAddressSchema>;
+
+// Whether a flow has the employment step: once their identity is approved,
+// its subject uploads their UWV Verzekeringsbericht (the sealed PDF from
+// mijn.uwv.nl), checked by the wallet.
+const EMPLOYMENT_MODES = ["off", "required"] as const;
+// An unknown mode reads as required, as diplomaModeSchema.
+const employmentModeSchema = z.enum(EMPLOYMENT_MODES).catch("required");
+export type EmploymentMode = z.infer<typeof employmentModeSchema>;
+
+// The relation kinds a Verzekeringsbericht holds, as the backend names them
+// (employment.Kind*). Sick pay through the employer is kept as that job.
+export const EMPLOYMENT_KIND = {
+  employment: "employment",
+  benefit: "benefit",
+  otherIncome: "other_income",
+} as const;
+
+// The employment relations a UWV Verzekeringsbericht lists, as of the date
+// UWV made it; relations is empty when it lists none.
+const proofingEmploymentSchema = z.object({
+  statementDate: z.string(),
+  // A current relation that is not a benefit; without one the session goes
+  // to review.
+  employed: z.boolean(),
+  relations: z.array(
+    z.object({
+      // employment, benefit (paid by UWV) or other_income (paid without
+      // hours worked).
+      kind: z.string(),
+      // The employer, or "UWV" for a benefit, never the benefit's name.
+      employer: z.string(),
+      // "" for a UWV benefit.
+      payrollTaxNumber: z.string(),
+      // "" when the statement gives none.
+      contractForm: z.string(),
+      from: z.string(),
+      to: z.string(),
+    }),
+  ),
+});
+
+export type ProofingEmployment = z.infer<typeof proofingEmploymentSchema>;
 
 // What a flow's sessions are for: an identity check, or an external person
 // asking for the data held of them ("see my data") or for its erasure
@@ -177,11 +250,16 @@ const proofingFlowSchema = z.object({
   // Absent on a single version, as diplomaMode.
   addressMode: addressModeSchema.optional(),
   // Absent on a single version, as diplomaMode.
+  employmentMode: employmentModeSchema.optional(),
+  // Absent on a single version, as diplomaMode.
   kind: flowKindSchema.optional(),
   // The flow's "Allow sending this flow as a link" switch: off, the send
   // form offers only Show on this screen. Absent on a single version, as
   // diplomaMode.
   hostedEnabled: z.boolean().optional(),
+  // The page the flow's links send the person back to. Absent for none and on
+  // a single version, as diplomaMode.
+  hostedReturnUrl: z.string().optional(),
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
@@ -227,6 +305,25 @@ const proofingRequestSchema = z.object({
   addressMode: addressModeSchema,
   address: proofingAddressSchema.optional(),
   addressUntil: z.string().optional(),
+  // A self-declared address, or one other than the registered address, waits
+  // for a reviewer: pending until confirmed or rejected. The session keeps its
+  // outcome.
+  addressReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  // When a reviewer decided it.
+  addressReviewedAt: z.string().optional(),
+  // What reviewers decided, with their reasons, oldest first: only on the
+  // single request, for an admin or a reviewer.
+  decisions: z.array(proofingDecisionSchema).optional(),
+  // Whether the session asks for the UWV Verzekeringsbericht, the employment
+  // kept from it, and until when the subject can upload it (absent until
+  // approved, and once kept).
+  employmentMode: employmentModeSchema,
+  employment: proofingEmploymentSchema.optional(),
+  employmentUntil: z.string().optional(),
+  // Why the wallet put the session in review after the identity was
+  // approved (no_current_employment, current_benefit,
+  // current_other_income); absent otherwise.
+  reviewReason: z.string().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -237,6 +334,7 @@ const proofingRequestSchema = z.object({
 });
 
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
+export type ProofingDecision = z.infer<typeof proofingDecisionSchema>;
 
 // mailSent is false when the org's mail could not be sent: the request stands,
 // but the recipient never got its link. deepLink is an on-screen Idem session's
@@ -299,6 +397,9 @@ export type ProofingRequestInput =
       birthDate?: string;
       method?: ProofingMethod;
       channel?: ProofingChannel;
+      // False ends a link on its own thank-you page, though its flow has a
+      // return page.
+      redirect?: boolean;
     } & ({ flowId: string } | { flowKind: DataRequestKind }));
 
 // How the org's "delete my data" requests are decided once the person is
@@ -608,11 +709,13 @@ function flowBase(slug: string, flowId: string): string {
 }
 
 // How a flow's hosted page behaves: whether links may be made for it, the
-// languages it offers (empty: every one), and how it ends.
+// languages it offers (empty: every one), how it ends, and the page its links
+// go back to (empty: none).
 const proofingFlowHostedSchema = z.object({
   enabled: z.boolean(),
   locales: z.array(z.string()),
   completion: z.enum(["redirect", "done"]).catch("done"),
+  returnUrl: z.string(),
 });
 
 export type ProofingFlowHosted = z.infer<typeof proofingFlowHostedSchema>;
@@ -676,6 +779,24 @@ export function saveProofingFlowAddress(
     body: { addressMode },
     signal,
   }).then((r) => r.addressMode);
+}
+
+const proofingFlowEmploymentSchema = z.object({
+  employmentMode: employmentModeSchema,
+});
+
+export function saveProofingFlowEmployment(
+  slug: string,
+  flowId: string,
+  employmentMode: EmploymentMode,
+  signal?: AbortSignal,
+): Promise<EmploymentMode> {
+  return request(`${flowBase(slug, flowId)}/employment`, {
+    schema: proofingFlowEmploymentSchema,
+    method: "PUT",
+    body: { employmentMode },
+    signal,
+  }).then((r) => r.employmentMode);
 }
 
 export function getProofingFlowVersions(
@@ -770,6 +891,7 @@ export function getProofingRequests(
     flowId?: string;
     status?: ListedStatus;
     flowKind?: "data_request";
+    addressReview?: AddressReviewState;
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -779,11 +901,18 @@ export function getProofingRequests(
   if (filter.flowId) params.set("flowId", filter.flowId);
   if (filter.status) params.set("status", filter.status);
   if (filter.flowKind) params.set("flowKind", filter.flowKind);
+  if (filter.addressReview) params.set("addressReview", filter.addressReview);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
     signal,
   });
+}
+
+// The stream that tells a reviewer's page when the org's reviews change: a
+// Server-Sent Events URL, for an EventSource.
+export function reviewEventsUrl(slug: string): string {
+  return absoluteApiUrl(`${base(slug)}/reviews/events`);
 }
 
 // language is the sender's wallet language: the mail's, and the Idem app's.
@@ -1188,6 +1317,9 @@ export interface ProofingProgress {
   // was created with.
   started?: boolean;
   sessionTtlSeconds?: number;
+  // Until when the subject can upload their Verzekeringsbericht, once
+  // approved and while none is kept.
+  employmentUntil?: string;
 }
 
 export function startProofingYivi(
@@ -1289,6 +1421,10 @@ const hostedProgressSchema = z.object({
   // and once they did (addressGiven).
   addressUntil: z.string().optional(),
   addressGiven: z.boolean(),
+  // Until when the subject can upload their Verzekeringsbericht; absent while
+  // they cannot, and once one is kept (employmentGiven).
+  employmentUntil: z.string().optional(),
+  employmentGiven: z.boolean(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1344,6 +1480,7 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     yiviAvailable: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,
+    employmentMode: employmentModeSchema,
     kind: flowKindSchema,
     // The most days the session's data is kept, as the page tells the subject.
     retentionDays: z.number(),
@@ -1443,6 +1580,36 @@ export function uploadProofingDiplomas(
   });
 }
 
+// What became of an uploaded Verzekeringsbericht: kept, or refused with a
+// reason (not_a_statement, signature_invalid, holder_mismatch, stale).
+const employmentVerdictSchema = z.object({
+  fileName: z.string(),
+  accepted: z.boolean(),
+  employment: proofingEmploymentSchema.optional(),
+  reason: z.string().optional(),
+  failedCheck: z.string().optional(),
+});
+
+export type EmploymentVerdict = z.infer<typeof employmentVerdictSchema>;
+
+// Uploads a UWV Verzekeringsbericht on a verify page, after an approved
+// identity. Its seal is checked as a diploma's signature is.
+export function uploadProofingEmployment(
+  target: VerifyTarget,
+  file: File,
+  signal?: AbortSignal,
+): Promise<EmploymentVerdict> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`${verifyPath(target)}/employment`, {
+    schema: employmentVerdictSchema,
+    method: "POST",
+    body: form,
+    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+    signal,
+  });
+}
+
 // Every Dutch address at a postal code and house number typed on a verify
 // page, while it takes the address. Not retried: the next keystroke asks again.
 export function lookUpAddress(
@@ -1484,6 +1651,30 @@ export interface ProofingReviewInput {
   reason: string;
   errorCode?: string;
   requestIds?: string[];
+}
+
+// A reviewer's decision on an address waiting for one; reason is required. The
+// session keeps its outcome.
+export interface AddressReviewInput {
+  decision: "confirm" | "reject";
+  reason: string;
+}
+
+export function decideAddressReview(
+  slug: string,
+  requestId: string,
+  input: AddressReviewInput,
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/address/review`,
+    {
+      schema: proofingRequestSchema,
+      method: "POST",
+      body: input,
+      signal,
+    },
+  );
 }
 
 export function decideProofingReview(

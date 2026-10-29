@@ -29,6 +29,7 @@ function request(over: Partial<ProofingRequest> = {}): ProofingRequest {
     diplomaMode: "off",
     diplomas: [],
     addressMode: "off",
+    employmentMode: "off",
     expectedSubject: false,
     flowKind: "identity",
     ...over,
@@ -140,6 +141,18 @@ describe("waitingForOthers", () => {
   it("leaves a reviewer's held checks to Waiting for your decision", () => {
     const rows = waitingForOthers([...open, held], { canReview: true });
     expect(rows.map((r) => r.id)).not.toContain("held");
+  });
+  it("leaves out an approved check whose address waits for a reviewer", () => {
+    const addressPending = request({
+      id: "address",
+      status: "approved",
+      completedAt: "2026-10-17T10:00:00Z",
+      addressReview: "pending",
+    });
+    const rows = waitingForOthers([...open, addressPending], {
+      canReview: false,
+    });
+    expect(rows.map((r) => r.id)).not.toContain("address");
   });
 });
 

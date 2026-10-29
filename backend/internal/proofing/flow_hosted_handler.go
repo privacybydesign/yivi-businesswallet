@@ -8,15 +8,18 @@ import (
 )
 
 // flowHostedResponse is a flow's hosted page settings; locales empty is every
-// supported language.
+// supported language, returnUrl empty is no return page.
 type flowHostedResponse struct {
 	Enabled    bool           `json:"enabled"`
 	Locales    []email.Locale `json:"locales"`
 	Completion Completion     `json:"completion"`
+	ReturnURL  string         `json:"returnUrl"`
 }
 
 func newFlowHostedResponse(f FlowHosted) flowHostedResponse {
-	return flowHostedResponse{Enabled: f.Enabled, Locales: append([]email.Locale{}, f.Locales...), Completion: f.Completion}
+	return flowHostedResponse{
+		Enabled: f.Enabled, Locales: append([]email.Locale{}, f.Locales...), Completion: f.Completion, ReturnURL: f.ReturnURL,
+	}
 }
 
 func (h *Handler) getFlowHosted(w http.ResponseWriter, r *http.Request) error {
@@ -32,6 +35,8 @@ type saveFlowHostedRequest struct {
 	Enabled    *bool          `json:"enabled"`
 	Locales    []email.Locale `json:"locales"`
 	Completion Completion     `json:"completion"`
+	// ReturnURL absent or empty leaves the flow without a return page.
+	ReturnURL string `json:"returnUrl"`
 }
 
 func (h *Handler) saveFlowHosted(w http.ResponseWriter, r *http.Request) error {
@@ -43,7 +48,7 @@ func (h *Handler) saveFlowHosted(w http.ResponseWriter, r *http.Request) error {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_body", Message: "enabled is required"}
 	}
 	f, err := h.service.SaveFlowHosted(r.Context(), orgFromRequest(r), r.PathValue("flowID"),
-		FlowHosted{Enabled: *body.Enabled, Locales: body.Locales, Completion: body.Completion})
+		FlowHosted{Enabled: *body.Enabled, Locales: body.Locales, Completion: body.Completion, ReturnURL: body.ReturnURL})
 	if err != nil {
 		return mapError(err)
 	}

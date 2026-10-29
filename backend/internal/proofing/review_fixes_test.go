@@ -31,9 +31,9 @@ func TestRequiredDiplomasNeedIdentity(t *testing.T) {
 	}
 }
 
-// A flow requiring diplomas keeps reading the name and birth date: an edit or
-// an older version that drops dg1 is refused. A flow without that need is
-// edited and rolled back freely.
+// A flow requiring diplomas or the Verzekeringsbericht keeps reading the name
+// and birth date: an edit or an older version that drops dg1 is refused. A
+// flow without that need is edited and rolled back freely.
 func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	ctx := context.Background()
 	reasons := documentReasons()
@@ -64,6 +64,12 @@ func TestFlowEditsKeepTheIdentityRead(t *testing.T) {
 	if _, err := d.svc.ActivateFlowVersion(ctx, testOrg, appFlow.ID, 1); err != nil {
 		t.Errorf("identity flow back to version 1 = %v, want activated", err)
 	}
+
+	e := newFixture()
+	e.svc.flowEmploymentSettings = &fakeFlowEmployment{modes: map[string]EmploymentMode{chipFlow.ID: EmploymentRequired}}
+	if _, err := e.svc.EditFlow(ctx, testOrg, chipFlow.ID, noIdentity); !errors.Is(err, ErrFlowNoIdentity) {
+		t.Errorf("employment-required flow edited without dg1 = %v, want ErrFlowNoIdentity", err)
+	}
 }
 
 // A member reads the timeline of a request they sent without the reviewer's
@@ -78,7 +84,11 @@ func TestMemberTimelineHidesAdminDetail(t *testing.T) {
 		},
 		{
 			ID: uuid.New(), Action: audit.IdentityProofingReviewDecided, Actor: &audit.EventActor{UserID: admin},
-			Metadata: json.RawMessage(`{"decision":"rejected","reason":"name on passport differs: J. Jansen"}`),
+			Metadata: json.RawMessage(`{"after":{"decision":"rejected","reason":"name on passport differs: J. Jansen"}}`),
+		},
+		{
+			ID: uuid.New(), Action: audit.IdentityProofingAddressReviewed, Actor: &audit.EventActor{UserID: admin},
+			Metadata: json.RawMessage(`{"before":{"addressReview":"pending","subjectName":"Anna Jansen"},"after":{"addressReview":"confirmed","reason":"moved in May"}}`),
 		},
 		{ID: uuid.New(), Action: audit.IdentityProofingResultRead, Actor: &audit.EventActor{UserID: admin}},
 	}
@@ -88,8 +98,11 @@ func TestMemberTimelineHidesAdminDetail(t *testing.T) {
 	if events[0].Actor == nil || string(events[0].Metadata) != `{"flowVersion":2}` {
 		t.Errorf("own event = actor %v, metadata %s; want the member and no subject name", events[0].Actor, events[0].Metadata)
 	}
-	if string(events[1].Metadata) != `{"decision":"rejected"}` {
+	if string(events[1].Metadata) != `{"after":{"decision":"rejected"}}` {
 		t.Errorf("review metadata = %s, want the decision without its reason", events[1].Metadata)
+	}
+	if string(events[2].Metadata) != `{"after":{"addressReview":"confirmed"},"before":{"addressReview":"pending"}}` {
+		t.Errorf("address review metadata = %s, want the decision without its reason or the subject's name", events[2].Metadata)
 	}
 	for _, e := range events[1:] {
 		if e.Actor != nil || e.ActorLabel == nil || *e.ActorLabel != adminActorLabel {

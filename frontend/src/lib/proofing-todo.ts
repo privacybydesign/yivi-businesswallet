@@ -1,6 +1,6 @@
 import type { ListedStatus, ProofingRequest } from "../api/identity-proofing";
 import { isProofingLive } from "./identity-proofing";
-import { waitingOldestFirst } from "./proofing-reviews";
+import { inReviewOldestFirst } from "./proofing-reviews";
 
 // How many rows a list shows before it leaves the rest to All people.
 export const TODO_ROWS = 5;
@@ -69,7 +69,7 @@ export function waitingForOthers(
   { canReview }: { canReview: boolean },
 ): ProofingRequest[] {
   return [
-    ...(canReview ? [] : waitingOldestFirst(requests)),
+    ...(canReview ? [] : inReviewOldestFirst(requests)),
     ...unfinishedChecks(requests),
   ];
 }

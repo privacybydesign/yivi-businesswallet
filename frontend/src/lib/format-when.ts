@@ -43,6 +43,23 @@ export function useDayMonthFormatter(): (iso: string) => string {
   }, [i18n.language]);
 }
 
+// Formats a calendar date as its month ("Jun 2026"), in UTC so a bare
+// YYYY-MM-DD date stays in its own month.
+export function useMonthFormatter(): (iso: string) => string {
+  const { i18n } = useTranslation();
+  return useMemo(() => {
+    const month = new Intl.DateTimeFormat(i18n.language, {
+      year: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    });
+    return (iso: string): string => {
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? iso : month.format(date);
+    };
+  }, [i18n.language]);
+}
+
 // Formats an event timestamp for "when it happened": 24-hour time, with Today /
 // Yesterday labels for the two most recent days and an absolute date before that.
 export function useWhenFormatter(): (iso: string) => string {

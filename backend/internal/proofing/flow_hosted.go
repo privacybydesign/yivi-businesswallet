@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,11 +32,14 @@ const (
 )
 
 // FlowHosted is how a flow's hosted page behaves in an org. Locales empty is
-// every supported language.
+// every supported language. ReturnURL is where a link sends its subject when
+// the request names no redirect of its own: on one of the org's redirect
+// origins, empty for none, and always empty under CompletionDone.
 type FlowHosted struct {
 	Enabled    bool
 	Locales    []email.Locale
 	Completion Completion
+	ReturnURL  string
 }
 
 // DefaultFlowHosted is a flow's hosted page before an admin set it.
@@ -49,7 +53,9 @@ func (f FlowHosted) Offers(locale email.Locale) bool {
 }
 
 func (f FlowHosted) auditFields() map[string]any {
-	return map[string]any{"enabled": f.Enabled, "locales": f.Locales, "completion": string(f.Completion)}
+	return map[string]any{
+		"enabled": f.Enabled, "locales": f.Locales, "completion": string(f.Completion), "returnUrl": f.ReturnURL,
+	}
 }
 
 // FlowHostedStore persists each flow's hosted page settings per org.
@@ -70,8 +76,9 @@ func (s *FlowHostedStore) Get(ctx context.Context, orgID uuid.UUID, flowID strin
 func getFlowHosted(ctx context.Context, q database.Querier, orgID uuid.UUID, flowID string) (FlowHosted, error) {
 	var f FlowHosted
 	var completion string
-	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion FROM identity_proofing_flow_settings
-		WHERE organization_id = $1 AND flow_id = $2`, orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion)
+	err := q.QueryRow(ctx, `SELECT hosted_enabled, hosted_locales, hosted_completion, hosted_return_url
+		FROM identity_proofing_flow_settings WHERE organization_id = $1 AND flow_id = $2`,
+		orgID, flowID).Scan(&f.Enabled, &f.Locales, &completion, &f.ReturnURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultFlowHosted(), nil
 	}
@@ -97,6 +104,24 @@ func (s *FlowHostedStore) Disabled(ctx context.Context, orgID uuid.UUID) ([]stri
 	return ids, nil
 }
 
+// ReturnURLs is the return page of each of the org's flows that has one.
+func (s *FlowHostedStore) ReturnURLs(ctx context.Context, orgID uuid.UUID) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT flow_id, hosted_return_url FROM identity_proofing_flow_settings
+		WHERE organization_id = $1 AND hosted_return_url <> ''`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list return pages org %s: %w", orgID, err)
+	}
+	out := map[string]string{}
+	var flowID, returnURL string
+	if _, err := pgx.ForEachRow(rows, []any{&flowID, &returnURL}, func() error {
+		out[flowID] = returnURL
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("proofing: list return pages org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
 // Save replaces the flow's settings and audits
 // identity_proofing.flow_hosted_configured with before and after. Saving what
 // it already has changes and audits nothing.
@@ -106,16 +131,18 @@ func (s *FlowHostedStore) Save(ctx context.Context, orgID uuid.UUID, flowID stri
 		if err != nil {
 			return err
 		}
-		if before.Enabled == f.Enabled && before.Completion == f.Completion && slices.Equal(before.Locales, f.Locales) {
+		if before.Enabled == f.Enabled && before.Completion == f.Completion && before.ReturnURL == f.ReturnURL &&
+			slices.Equal(before.Locales, f.Locales) {
 			return nil
 		}
 		if _, err := q.Exec(ctx, `INSERT INTO identity_proofing_flow_settings
-				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion)
-			VALUES ($1, $2, $3, $4, $5)
+				(organization_id, flow_id, hosted_enabled, hosted_locales, hosted_completion, hosted_return_url)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (organization_id, flow_id) DO UPDATE SET
 				hosted_enabled = EXCLUDED.hosted_enabled, hosted_locales = EXCLUDED.hosted_locales,
-				hosted_completion = EXCLUDED.hosted_completion, updated_at = now()`,
-			orgID, flowID, f.Enabled, f.Locales, string(f.Completion)); err != nil {
+				hosted_completion = EXCLUDED.hosted_completion, hosted_return_url = EXCLUDED.hosted_return_url,
+				updated_at = now()`,
+			orgID, flowID, f.Enabled, f.Locales, string(f.Completion), f.ReturnURL); err != nil {
 			return fmt.Errorf("proofing: save hosted settings flow %s: %w", flowID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingFlowHostedConfigured,
@@ -137,6 +164,15 @@ func (s *Service) flowHosted(ctx context.Context, orgID uuid.UUID, flowID string
 	return s.flowHostedSettings.Get(ctx, orgID, flowID)
 }
 
+// flowReturnURLs is the return page of each of the org's flows that has one;
+// none without a store.
+func (s *Service) flowReturnURLs(ctx context.Context, orgID uuid.UUID) (map[string]string, error) {
+	if s.flowHostedSettings == nil {
+		return nil, nil
+	}
+	return s.flowHostedSettings.ReturnURLs(ctx, orgID)
+}
+
 // hostedDisabledFlows is the org's flows whose hosted page is switched off;
 // none without a store.
 func (s *Service) hostedDisabledFlows(ctx context.Context, orgID uuid.UUID) ([]string, error) {
@@ -156,14 +192,28 @@ func (s *Service) FlowHosted(ctx context.Context, org Org, flowID string) (FlowH
 
 // SaveFlowHosted replaces one of the org's flows' hosted page settings: the
 // languages are supported ones, kept once in the order given, and ones the
-// flow's active version gives its reasons in (hostedOffersReasons). A data
-// request flow's stay the defaults.
+// flow's active version gives its reasons in (hostedOffersReasons); the return
+// page is on one of the org's redirect origins, and only on a flow that
+// redirects. A data request flow's stay the defaults.
 func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f FlowHosted) (FlowHosted, error) {
 	if s.flowHostedSettings == nil {
 		return FlowHosted{}, errors.New("proofing: no hosted settings store configured")
 	}
 	if f.Completion != CompletionRedirect && f.Completion != CompletionDone {
 		return FlowHosted{}, fmt.Errorf("%w: completion is redirect or done", ErrInvalidInput)
+	}
+	f.ReturnURL = strings.TrimSpace(f.ReturnURL)
+	if f.ReturnURL != "" {
+		if f.Completion == CompletionDone {
+			return FlowHosted{}, fmt.Errorf("%w: a flow that ends on its own thank-you page has no return page", ErrInvalidInput)
+		}
+		settings, err := s.orgSettings.Get(ctx, org.ID)
+		if err != nil {
+			return FlowHosted{}, err
+		}
+		if err := checkRedirect(f.ReturnURL, settings); err != nil {
+			return FlowHosted{}, err
+		}
 	}
 	locales := make([]email.Locale, 0, len(f.Locales))
 	for _, raw := range f.Locales {

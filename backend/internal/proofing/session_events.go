@@ -54,6 +54,13 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	if lapsed == maxReconcilePerRound {
 		return now, nil
 	}
+	missing, err := s.requests.RejectMissingEmployment(ctx, now, maxReconcilePerRound)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if missing == maxReconcilePerRound {
+		return now, nil
+	}
 	due, err := s.requests.ListDue(ctx, now, maxReconcilePerRound)
 	if err != nil {
 		return time.Time{}, err
@@ -73,13 +80,23 @@ func (s *Service) ReconcileDue(ctx context.Context) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	if retry := now.Add(deadlineRetry); open && (next.IsZero() || retry.Before(next)) {
-		next = retry
+	employmentDue, err := s.requests.NextMissingEmployment(ctx, now)
+	if err != nil {
+		return time.Time{}, err
 	}
-	if net := now.Add(deadlineSafetyNet); next.IsZero() || net.Before(next) {
-		next = net
+	next = earliest(next, employmentDue)
+	if open {
+		next = earliest(next, now.Add(deadlineRetry))
 	}
-	return next, nil
+	return earliest(next, now.Add(deadlineSafetyNet)), nil
+}
+
+// earliest is the earlier of a and b, a zero time standing for none.
+func earliest(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+	return a
 }
 
 func (r Request) stillOpen() bool {

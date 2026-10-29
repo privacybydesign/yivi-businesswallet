@@ -15,6 +15,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -56,6 +57,10 @@ type Handler struct {
 	// appBranding dresses the hosted page as the Idem app dresses the
 	// session; nil leaves the page the org's own colour only.
 	appBranding *AppBrandingResolver
+	// reviews tells a reviewer's open pages when the org's reviews change.
+	reviews *ReviewFeed
+	// selfReview is who may decide their own identity check.
+	selfReview auth.SelfReview
 }
 
 // SetIdempotencyStore turns on Idempotency-Key handling for the API.
@@ -66,6 +71,14 @@ func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
 // one, else the org's theme.
 func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 
+// SetSelfReview lets whom s allows decide a check they sent or are the
+// subject of.
+func (h *Handler) SetSelfReview(s auth.SelfReview) { h.selfReview = s }
+
+// SetReviewFeed streams the org's review changes from f; without it a stream
+// stays open and quiet.
+func (h *Handler) SetReviewFeed(f *ReviewFeed) { h.reviews = f }
+
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		service: service, requireUser: requireUser, authorize: authorize,
@@ -73,6 +86,7 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		hostedCalls:  ratelimit.New(hostedCallLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
+		reviews: NewReviewFeed(),
 	}
 }
 
@@ -102,6 +116,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/diplomas", admin(respond.HandlerFunc(h.saveFlowDiplomas)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.getFlowAddress)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/address", admin(respond.HandlerFunc(h.saveFlowAddress)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/flows/{flowID}/employment", admin(respond.HandlerFunc(h.getFlowEmployment)))
+	mux.Handle("PUT /orgs/{slug}/identity-proofing/flows/{flowID}/employment", admin(respond.HandlerFunc(h.saveFlowEmployment)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions", admin(respond.HandlerFunc(h.editFlow)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/flows/{flowID}/versions/{version}/activate", admin(respond.HandlerFunc(h.activateFlowVersion)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
@@ -109,6 +125,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/reviews/events", reviewer(respond.HandlerFunc(h.reviewEvents)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
@@ -117,7 +134,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address/review", reviewer(respond.HandlerFunc(h.decideAddressReview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
@@ -161,6 +180,9 @@ type flowResponse struct {
 	// AddressMode is whether the flow asks for the subject's postal address
 	// after the identity check; absent on a single version, as DiplomaMode.
 	AddressMode AddressMode `json:"addressMode,omitempty"`
+	// EmploymentMode is whether the flow asks for the UWV Verzekeringsbericht
+	// after the identity check; absent on a single version, as DiplomaMode.
+	EmploymentMode EmploymentMode `json:"employmentMode,omitempty"`
 	// flowNeedsReferencePhoto is a flow that matches the face without reading the
 	// chip: only the API can send it, with the sender's own photo.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
@@ -172,6 +194,9 @@ type flowResponse struct {
 	// off, the Verify a person dialog offers only Show on this screen. Absent
 	// on a single version, as DiplomaMode.
 	HostedEnabled *bool `json:"hostedEnabled,omitempty"`
+	// HostedReturnURL is the page the flow's links send their subject back
+	// to; absent for none and on a single version.
+	HostedReturnURL string `json:"hostedReturnUrl,omitempty"`
 	// RetentionDays is how many days an external person's data is kept at most
 	// on this flow, as the on-screen page tells them; absent on a single version.
 	RetentionDays int `json:"retentionDays,omitempty"`
@@ -183,7 +208,8 @@ func newFlowResponse(f OrgFlow) flowResponse {
 	}
 	return flowResponse{
 		Flow: f.Flow, Completable: flowCompletable(f.Flow), Allowed: f.Allowed, Default: f.Default, DiplomaMode: f.Diplomas,
-		AddressMode: f.Address, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind, RetentionDays: f.RetentionDays,
+		AddressMode: f.Address, EmploymentMode: f.Employment, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow), Kind: f.Kind,
+		RetentionDays: f.RetentionDays,
 	}
 }
 
@@ -191,7 +217,7 @@ func newFlowResponse(f OrgFlow) flowResponse {
 // settings for it.
 func newListedFlowResponse(f OrgFlow) flowResponse {
 	out := newFlowResponse(f)
-	out.HostedEnabled = &f.HostedEnabled
+	out.HostedEnabled, out.HostedReturnURL = &f.HostedEnabled, f.HostedReturnURL
 	return out
 }
 
@@ -344,9 +370,28 @@ type requestResponse struct {
 	AddressMode  AddressMode `json:"addressMode"`
 	Address      *Address    `json:"address,omitempty"`
 	AddressUntil *time.Time  `json:"addressUntil,omitempty"`
+	// AddressReview is a self-declared address's review: pending, confirmed
+	// or rejected.
+	AddressReview AddressReview `json:"addressReview,omitempty"`
+	// AddressReviewedAt is when a reviewer decided it.
+	AddressReviewedAt *time.Time `json:"addressReviewedAt,omitempty"`
+	// Decisions are the reviewers' decisions, with their reasons: only on
+	// GET .../requests/{id}, for an admin or a reviewer (decisionsFor).
+	Decisions []decisionResponse `json:"decisions,omitempty"`
+	// EmploymentMode is whether the request asks for the UWV
+	// Verzekeringsbericht; Employment what was kept of it, and EmploymentUntil
+	// when the subject can last upload it (absent until the identity is
+	// approved, and once kept).
+	EmploymentMode  EmploymentMode `json:"employmentMode"`
+	Employment      *Employment    `json:"employment,omitempty"`
+	EmploymentUntil *time.Time     `json:"employmentUntil,omitempty"`
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// ReviewReason is why the wallet put the request in review after the
+	// identity was approved (no_current_employment, current_benefit,
+	// current_other_income); absent otherwise.
+	ReviewReason string `json:"reviewReason,omitempty"`
 	// FlowKind is what the session is for; a data request goes to review once
 	// the person is proven. DataExportUntil is until when an approved "see my
 	// data" request's data downloads.
@@ -363,7 +408,9 @@ func (r requestResponse) withDiplomas(diplomas []Diploma) requestResponse {
 func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
-		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req),
+		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
+		AddressReviewedAt: req.AddressReviewedAt,
+		EmploymentMode:    employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -371,7 +418,8 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
-		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ReviewReason: req.ReviewReason,
+		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
@@ -412,10 +460,34 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	now := time.Now()
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, newRequestResponse(req, now).withDiplomas(diplomas[req.ID]))
+		out = append(out, requestResponseFor(r.Context(), req, diplomas[req.ID], now))
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// requestResponseFor is req's response as the caller sees it: a member who
+// reaches it only for its reviewed address (onlyAddress) gets it
+// without its diplomas, proofed name and employment, which deciding the
+// address does not need.
+func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
+	out := newRequestResponse(req, now)
+	if onlyAddress(ctx, req) {
+		out.ProofedName, out.Employment = "", nil
+		return out
+	}
+	return out.withDiplomas(diplomas)
+}
+
+// onlyAddress reports whether the caller reaches req only for its reviewed
+// address: not an admin, not its sender, and not on the Reviews page for the
+// request itself.
+func onlyAddress(ctx context.Context, req Request) bool {
+	if organization.ActsAsAdmin(ctx) {
+		return false
+	}
+	caller := auth.UserFromContext(ctx).ID
+	return (req.RequestedBy == nil || *req.RequestedBy != caller) && !ReviewScopeReviews.reaches(req)
 }
 
 // requestFilterFrom reads a request list's filter from its query, refusing a
@@ -452,13 +524,31 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 		}
 		filter.DataRequests = true
 	}
+	review, err := addressReviewFilterFrom(query.Get("addressReview"))
+	if err != nil {
+		return RequestFilter{}, err
+	}
+	filter.AddressReview = review
 	return filter, nil
+}
+
+// addressReviewFilterFrom reads ?addressReview: nil when absent.
+func addressReviewFilterFrom(raw string) (*AddressReview, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	review := AddressReview(raw)
+	if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
+		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
+	}
+	return &review, nil
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request). Any other list is the ones they sent.
+// requests (?flowKind=data_request), or the addresses a reviewer reviews,
+// waiting or decided (?addressReview=). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -466,7 +556,8 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if !organization.MayReview(ctx) {
 		return false
 	}
-	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview)
+	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
+		filter.AddressReview != nil
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -478,6 +569,9 @@ func reviewScope(ctx context.Context) ReviewScope {
 	}
 	return ReviewScopeReviews
 }
+
+// invalidRequestIDMessage is the 400 to a request id parseRequestID cannot read.
+const invalidRequestIDMessage = "invalid request id"
 
 // parseRequestID reads a request id as the dashboard has it (a UUID) or as the
 // API and webhooks show it (a ps_ id), so either can be looked up.
@@ -494,7 +588,7 @@ func parseRequestID(s string) (uuid.UUID, error) {
 func sentRequestTarget(r *http.Request) (uuid.UUID, *uuid.UUID, error) {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
-		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+		return uuid.Nil, nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
 	if organization.ActsAsAdmin(r.Context()) {
 		return id, nil, nil
@@ -509,7 +603,7 @@ func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
 	if req.RequestedBy != nil && *req.RequestedBy == caller {
 		return true
 	}
-	return organization.MayReview(ctx) && ReviewScopeReviews.reaches(req)
+	return organization.MayReview(ctx) && ReviewScopeReviews.reachesAddress(req)
 }
 
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
@@ -528,8 +622,46 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()).withDiplomas(diplomas[req.ID]))
+	out := requestResponseFor(r.Context(), req, diplomas[req.ID], time.Now())
+	if out.Decisions, err = h.decisionsFor(r.Context(), req); err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// decisionResponse is a reviewer's decision on the request (Decision).
+type decisionResponse struct {
+	Kind      DecisionKind `json:"kind"`
+	Outcome   string       `json:"outcome"`
+	Reason    string       `json:"reason,omitempty"`
+	ErrorCode string       `json:"errorCode,omitempty"`
+	DecidedBy string       `json:"decidedBy,omitempty"`
+	DecidedAt time.Time    `json:"decidedAt"`
+}
+
+// decisionsFor is what reviewers decided on req, with their reasons, for an
+// admin or a reviewer: those who read the reasons in its timeline and on the
+// Reviews page. A member who only sent it gets none, as their timeline leaves
+// the reasons out. One reached only for its address (onlyAddress) gets the
+// address decisions alone.
+func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
+	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
+		return nil, nil
+	}
+	decisions, err := h.service.RequestDecisions(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	addressOnly := onlyAddress(ctx, req)
+	out := []decisionResponse{}
+	for _, d := range decisions {
+		if addressOnly && d.Kind != DecisionAddress {
+			continue
+		}
+		out = append(out, decisionResponse(d))
+	}
+	return out, nil
 }
 
 // reviewDecisionRequest is a reviewer's decision on a request under review:
@@ -547,7 +679,7 @@ type reviewDecisionRequest struct {
 func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid request id"}
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
 	var body reviewDecisionRequest
 	if err := decode(r, &body); err != nil {
@@ -560,12 +692,43 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id, string(caller.Email),
 		ReviewInput{
 			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
-			ReviewerID: caller.ID, Scope: reviewScope(r.Context()),
+			ReviewerID: caller.ID, Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
 		})
 	if err != nil {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, newRequestResponse(req, time.Now()))
+	return nil
+}
+
+// addressReviewRequest is a reviewer's decision on an address waiting for
+// review: decision "confirm" or "reject", and the required reason.
+type addressReviewRequest struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseRequestID(r.PathValue("requestID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
+	}
+	var body addressReviewRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	if body.Decision != "confirm" && body.Decision != "reject" {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is confirm or reject"}
+	}
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, AddressReviewInput{
+		Confirm: body.Decision == "confirm", Reason: body.Reason, ReviewerID: caller.ID,
+		Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
+	})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
 	return nil
 }
 
@@ -696,6 +859,9 @@ type createRequestRequest struct {
 	// BirthDate (YYYY-MM-DD) with Name makes an external request one for
 	// that person only.
 	BirthDate string `json:"birthDate"`
+	// Redirect false ends a link on its own done screen, though its flow has
+	// a return page.
+	Redirect *bool `json:"redirect"`
 }
 
 type createRequestResponse struct {
@@ -723,6 +889,7 @@ func (h *Handler) createRequest(w http.ResponseWriter, r *http.Request) error {
 			SubjectUserID: body.UserID,
 			SubjectEmail:  body.Email, SubjectName: body.Name, SubjectBirthDate: body.BirthDate, FlowID: body.FlowID,
 			FlowKind: body.FlowKind, Method: body.Method, Channel: body.Channel, Language: body.Language,
+			NoRedirect: body.Redirect != nil && !*body.Redirect,
 		})
 	if err != nil {
 		return mapError(err)
@@ -793,94 +960,84 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
+// sealCheckUnavailable is a seal the checker could not check: the file is
+// not at fault.
+var sealCheckUnavailable = respond.APIError{Status: http.StatusServiceUnavailable, Code: "seal_check_unavailable", Message: "the seal cannot be checked right now: the trust lists or the revocation responder cannot be reached; try again later"}
+
+// errorResponses is the API error each sentinel maps to, matched in order.
+var errorResponses = []struct {
+	err      error
+	response respond.APIError
+}{
+	{ErrNoEncryptionKey, respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}},
+	{ErrFlowNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}},
+	{ErrFlowNotCompletable, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}},
+	{ErrMemberNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}},
+	{ErrAPIKeyNotFound, respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}},
+	{ErrRequestNotFound, respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}},
+	{ErrWebhookNotFound, respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}},
+	{ErrNoDefaultFlow, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "no_default_flow", Message: "name a flow: the organization has no default flow"}},
+	{ErrNoLogo, respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}},
+	{ErrFlowNotAllowed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}},
+	{ErrWrongMethod, respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}},
+	{ErrNotHosted, respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}},
+	{ErrResultNotReady, respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}},
+	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
+	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
+	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
+	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
+	{ErrOwnReview, respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}},
+	{ErrLinkStarted, respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}},
+	{ErrDiplomasNotAsked, respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}},
+	{ErrDiplomasClosed, respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity check: " + DiplomaUploadWindow.String()}},
+	{ErrAddressNotAsked, respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}},
+	{ErrAddressClosed, respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}},
+	{ErrEmploymentNotAsked, respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}},
+	{ErrEmploymentClosed, respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}},
+	{ErrAddressNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}},
+	{ErrAddressLookupUnavailable, respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}},
+	{ErrReferencePhotoRequired, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}},
+	{ErrDiplomasNeedPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}},
+	{ErrAddressNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}},
+	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
+	{diploma.ErrTrustUnavailable, sealCheckUnavailable},
+	{diploma.ErrRevocationUnavailable, sealCheckUnavailable},
+	{ErrEmploymentNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}},
+	{ErrHostedDisabled, respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}},
+	{ErrProofingPaused, respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}},
+	{ErrOrgNotFound, respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}},
+	{ErrFlowNoIdentity, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's or Verzekeringsbericht's holder is matched against them"}},
+	{ErrDataRequestFlow, respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}},
+	{ErrDataFlowForMember, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}},
+	{ErrLegalRetention, respond.APIError{Status: http.StatusConflict, Code: "legal_retention", Message: "a session within the organisation's legal retention cannot be erased yet"}},
+	{ErrExportUnavailable, respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}},
+	{ErrRedirectNotAllowed, respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}},
+	{ErrRedirectOriginInUse, respond.APIError{Status: http.StatusConflict, Code: "redirect_origin_in_use", Message: "a flow's return page is on a redirect origin this removes: change that flow's return page first"}},
+}
+
 func mapError(err error) error {
-	var rejected *proofingprovider.RejectedError
-	switch {
-	case err == nil:
+	if err == nil {
 		return nil
-	case errors.Is(err, ErrInvalidInput):
+	}
+	if errors.Is(err, ErrInvalidInput) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
-	case errors.Is(err, ErrReasonsMissing):
+	}
+	if errors.Is(err, ErrReasonsMissing) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}
-	case errors.Is(err, ErrNoEncryptionKey):
-		return &respond.APIError{Status: http.StatusConflict, Code: "no_encryption_key", Message: "this deployment has no identity proofing encryption key configured; set IDENTITY_PROOFING_ENCRYPTION_KEY on the server"}
-	case errors.Is(err, ErrFlowNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}
-	case errors.Is(err, ErrFlowNotCompletable):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}
-	case errors.Is(err, ErrMemberNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}
-	case errors.Is(err, ErrAPIKeyNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}
-	case errors.Is(err, ErrRequestNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}
-	case errors.Is(err, ErrWebhookNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}
-	case errors.Is(err, ErrNoDefaultFlow):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "no_default_flow", Message: "name a flow: the organization has no default flow"}
-	case errors.Is(err, ErrNoLogo):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no logo set"}
-	case errors.Is(err, ErrFlowNotAllowed):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}
-	case errors.Is(err, ErrWrongMethod):
-		return &respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}
-	case errors.Is(err, ErrNotHosted):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}
-	case errors.Is(err, ErrResultNotReady):
-		return &respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}
-	case errors.Is(err, ErrDeviceActive):
-		return &respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}
-	case errors.Is(err, ErrSessionOver):
-		return &respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}
-	case errors.Is(err, ErrNotUnderReview):
-		return &respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}
-	case errors.Is(err, ErrOwnReview):
-		return &respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}
-	case errors.Is(err, ErrLinkStarted):
-		return &respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}
-	case errors.Is(err, ErrDiplomasNotAsked):
-		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}
-	case errors.Is(err, ErrDiplomasClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "diplomas_closed", Message: "diplomas can be added for a while after the identity is approved: " + DiplomaUploadWindow.String()}
-	case errors.Is(err, ErrAddressNotAsked):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}
-	case errors.Is(err, ErrAddressClosed):
-		return &respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity is approved: " + AddressWindow.String()}
-	case errors.Is(err, ErrAddressNotFound):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}
-	case errors.Is(err, ErrAddressLookupUnavailable):
-		return &respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}
-	case errors.Is(err, ErrReferencePhotoRequired):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}
-	case errors.Is(err, ErrDiplomasNeedPage):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}
-	case errors.Is(err, ErrAddressNeedsPage):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}
-	case errors.Is(err, ErrHostedDisabled):
-		return &respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}
-	case errors.Is(err, ErrProofingPaused):
-		return &respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}
-	case errors.Is(err, ErrOrgNotFound):
-		return &respond.APIError{Status: http.StatusNotFound, Code: "organization_not_found", Message: "organisation not found"}
-	case errors.Is(err, ErrFlowNoIdentity):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_no_identity", Message: "the flow must read the name and date of birth: a data request finds a person's sessions by them, and a diploma's holder is matched against them"}
-	case errors.Is(err, ErrDataRequestFlow):
-		return &respond.APIError{Status: http.StatusConflict, Code: "data_request_flow", Message: "See my data and Delete my data are the wallet's own flows: they cannot be changed"}
-	case errors.Is(err, ErrDataFlowForMember):
-		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "data_flow_for_member", Message: "a data request flow is for external people, not for members"}
-	case errors.Is(err, ErrLegalRetention):
-		return &respond.APIError{Status: http.StatusConflict, Code: "legal_retention", Message: "a session within the organisation's legal retention cannot be erased yet"}
-	case errors.Is(err, ErrExportUnavailable):
-		return &respond.APIError{Status: http.StatusGone, Code: "export_unavailable", Message: "no data is available to download for this session"}
-	case errors.Is(err, ErrRedirectNotAllowed):
-		return &respond.APIError{Status: http.StatusBadRequest, Code: "redirect_not_allowed", Message: "redirectUrl must be on one of the organization's allowed redirect origins"}
-	case errors.As(err, &rejected):
+	}
+	for _, m := range errorResponses {
+		if errors.Is(err, m.err) {
+			response := m.response
+			return &response
+		}
+	}
+	var rejected *proofingprovider.RejectedError
+	if errors.As(err, &rejected) {
 		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "rejected_by_provider", Message: rejected.Message}
-	default:
-		return fmt.Errorf("identity proofing: %w", err)
 	}
+	return fmt.Errorf("identity proofing: %w", err)
 }
 
 // flowView is the flows a caller sees: every one for an admin, the ones

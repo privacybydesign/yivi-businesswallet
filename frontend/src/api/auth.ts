@@ -11,6 +11,9 @@ export const meSchema = z.object({
   lastName: z.string(),
   avatarUri: z.string(),
   isPlatformAdmin: z.boolean(),
+  // Whether they may decide an identity check they sent or that is about them:
+  // a platform admin on a dev stack only.
+  reviewsOwn: z.boolean(),
 });
 
 export type Me = z.infer<typeof meSchema>;

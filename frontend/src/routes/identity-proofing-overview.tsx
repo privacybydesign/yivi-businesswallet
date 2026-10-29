@@ -19,7 +19,6 @@ import {
   proofingErrorMessage,
   proofingMethodLabel,
   proofingStatusLabel,
-  requestListCapped,
   requestSubject,
   sumProofingStats,
 } from "../lib/identity-proofing";
@@ -167,12 +166,8 @@ function DecisionSection({
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const waiting = useWaitingReviewsQuery(slug, { enabled: true });
-  const held = waitingOldestFirst(waiting.data ?? []);
-  const count = listedCount(
-    held.length,
-    requestListCapped(waiting.data ?? []),
-    t,
-  );
+  const held = waitingOldestFirst(waiting.data?.requests ?? []);
+  const count = listedCount(held.length, waiting.data?.capped === true, t);
 
   return (
     <TaskSection

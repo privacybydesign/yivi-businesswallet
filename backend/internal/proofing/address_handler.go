@@ -53,14 +53,13 @@ func addressModeOf(req Request) AddressMode {
 }
 
 // addressUntil is when the subject can last enter their address: AddressWindow
-// after the approval of a request that asks for it and holds none yet, nil
-// otherwise.
+// after the identity check of a request that asks for it and holds none yet
+// finished (stepsUntil), nil otherwise.
 func addressUntil(req Request) *time.Time {
-	if !req.Address.asked() || req.SubjectAddress != nil || req.Status != StatusApproved || req.CompletedAt == nil {
+	if !req.Address.asked() || req.SubjectAddress != nil {
 		return nil
 	}
-	until := req.CompletedAt.Add(AddressWindow)
-	return &until
+	return req.stepsUntil(AddressWindow)
 }
 
 // addAddress keeps the address entered on a request's on-screen page; the

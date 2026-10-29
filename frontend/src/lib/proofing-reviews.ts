@@ -1,4 +1,5 @@
 import { isDataRequest } from "../api/identity-proofing";
+import type { Me } from "../api/auth";
 import type {
   ProofingRequest,
   ProofingResult,
@@ -47,10 +48,28 @@ export function reviewTabFrom(raw: string | null): ReviewTab {
   return REVIEW_TABS.find((tab) => tab === raw) ?? DEFAULT_REVIEW_TAB;
 }
 
-// Whether the request waits for a decision: a purged one has no person left
-// to decide on.
-function isWaiting(request: ProofingRequest): boolean {
+// Whether the request waits for a decision on its self-declared address
+// alone: the check itself is decided.
+export function isAddressReview(request: ProofingRequest): boolean {
+  return (
+    request.flowKind === "identity" &&
+    request.status !== "needs_review" &&
+    request.addressReview !== undefined
+  );
+}
+
+// Whether the check itself waits for a decision. A purged one has no person
+// left to decide on.
+function isInReview(request: ProofingRequest): boolean {
   return request.status === "needs_review" && request.purgedAt === undefined;
+}
+
+// Whether the request waits for a decision: in review, or its address is.
+function isWaiting(request: ProofingRequest): boolean {
+  return (
+    isInReview(request) ||
+    (request.addressReview === "pending" && request.purgedAt === undefined)
+  );
 }
 
 // When it went to review: the person was proven, or the check ended its steps.
@@ -75,6 +94,16 @@ export function waitingOldestFirst(
 ): ProofingRequest[] {
   return requests
     .filter(isWaiting)
+    .sort((a, b) => sinceMillis(a) - sinceMillis(b));
+}
+
+// The checks in review, the longest first: what waits without its address.
+// An approved check whose address waits is finished for its sender.
+export function inReviewOldestFirst(
+  requests: readonly ProofingRequest[],
+): ProofingRequest[] {
+  return requests
+    .filter(isInReview)
     .sort((a, b) => sinceMillis(a) - sinceMillis(b));
 }
 
@@ -108,25 +137,39 @@ export function waitingOfTab(
   }
 }
 
-// The data requests that ended, the latest first, whoever ended them: a
-// reviewer, or no one (the engine rejected the person, the review lapsed, the
-// org paused, the law keeps the data). The list carries no mark of which, so
-// the page claims no decision and shows each one's error code. Identity checks
-// are not listed: none goes to review yet.
+// Whether a reviewer confirmed or rejected the request's address.
+export function isDecidedAddress(request: ProofingRequest): boolean {
+  return (
+    request.addressReview === "confirmed" ||
+    request.addressReview === "rejected"
+  );
+}
+
+// When a closed request closed: its address was decided, or it ended.
+export function closedAt(request: ProofingRequest): string {
+  if (isDecidedAddress(request) && request.addressReviewedAt) {
+    return request.addressReviewedAt;
+  }
+  return request.completedAt ?? request.createdAt;
+}
+
+// What was closed, the latest first: the addresses a reviewer decided, and the
+// data requests that ended, whoever ended them: a reviewer, or no one (the
+// engine rejected the person, the review lapsed, the org paused, the law keeps
+// the data). A data request carries no mark of which, so the page claims no
+// decision and shows each one's error code. Identity checks themselves are not
+// listed: a decided one is closed to a reviewer.
 export function closedRequests(
   requests: readonly ProofingRequest[],
 ): ProofingRequest[] {
   return requests
     .filter(
       (r) =>
-        isDataRequest(r.flowKind) &&
-        (r.status === "approved" || r.status === "rejected"),
+        isDecidedAddress(r) ||
+        (isDataRequest(r.flowKind) &&
+          (r.status === "approved" || r.status === "rejected")),
     )
-    .sort(
-      (a, b) =>
-        Date.parse(b.completedAt ?? b.createdAt) -
-        Date.parse(a.completedAt ?? a.createdAt),
-    );
+    .sort((a, b) => Date.parse(closedAt(b)) - Date.parse(closedAt(a)));
 }
 
 // Until when a data request in review can be answered: its review lapses then
@@ -152,10 +195,30 @@ export const REJECT_REASONS = [
 export type RejectReasonKey = (typeof REJECT_REASONS)[number]["key"];
 export const DEFAULT_REJECT_REASON: RejectReasonKey = "someoneElse";
 
+// Why the wallet itself held an approved check for review
+// (proofing.ReviewNoCurrentEmployment, ReviewCurrentBenefit,
+// ReviewCurrentOtherIncome): the Verzekeringsbericht lists no current job, or
+// a current UWV benefit or other income beside one.
+export const WALLET_REVIEW_REASONS = [
+  "no_current_employment",
+  "current_benefit",
+  "current_other_income",
+] as const;
+export type WalletReviewReason = (typeof WALLET_REVIEW_REASONS)[number];
+
+export function walletReviewReason(
+  request: Pick<ProofingRequest, "reviewReason">,
+): WalletReviewReason | undefined {
+  return WALLET_REVIEW_REASONS.find(
+    (reason) => reason === request.reviewReason,
+  );
+}
+
 // Why the reader may not decide an identity check: they sent it, or it is
 // about them. Another reviewer decides it (the backend's ownReview, 403
-// own_review). A data request is the person's own ask: whoever sent its link
-// may decide it.
+// own_review), unless the backend lets the reader (reviewsOwn: a platform
+// admin on a dev stack). A data request is the person's own ask: whoever sent
+// its link may decide it.
 export type OwnReview = "sent" | "subject";
 
 export function ownReview(
@@ -163,11 +226,13 @@ export function ownReview(
     ProofingRequest,
     "flowKind" | "requestedById" | "subjectUserId"
   >,
-  userId: string | undefined,
+  reader: Pick<Me, "id" | "reviewsOwn"> | null | undefined,
 ): OwnReview | undefined {
-  if (userId === undefined || isDataRequest(request.flowKind)) return undefined;
-  if (request.requestedById === userId) return "sent";
-  if (request.subjectUserId === userId) return "subject";
+  if (reader == null || reader.reviewsOwn || isDataRequest(request.flowKind)) {
+    return undefined;
+  }
+  if (request.requestedById === reader.id) return "sent";
+  if (request.subjectUserId === reader.id) return "subject";
   return undefined;
 }
 
@@ -177,7 +242,16 @@ export interface CheckDecisionDraft {
   reason: string;
 }
 
-type CheckDecisionProblem = "choice" | "reason" | "reasonTooLong";
+type ReasonProblem = "reason" | "reasonTooLong";
+type CheckDecisionProblem = "choice" | ReasonProblem;
+
+// What keeps a decision's reason from being sent: none, or too long.
+export function reasonProblem(reason: string): ReasonProblem | undefined {
+  const trimmed = reason.trim();
+  if (trimmed === "") return "reason";
+  if ([...trimmed].length > REVIEW_REASON_MAX_CHARS) return "reasonTooLong";
+  return undefined;
+}
 
 // What keeps a decision from being sent yet, in the order the form shows it.
 export function checkDecisionProblems(
@@ -185,10 +259,8 @@ export function checkDecisionProblems(
 ): CheckDecisionProblem[] {
   const problems: CheckDecisionProblem[] = [];
   if (draft.choice === undefined) problems.push("choice");
-  if (draft.reason.trim() === "") problems.push("reason");
-  else if ([...draft.reason.trim()].length > REVIEW_REASON_MAX_CHARS) {
-    problems.push("reasonTooLong");
-  }
+  const reason = reasonProblem(draft.reason);
+  if (reason !== undefined) problems.push(reason);
   return problems;
 }
 

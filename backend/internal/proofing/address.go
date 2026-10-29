@@ -39,8 +39,8 @@ func (m AddressMode) valid() bool {
 func (m AddressMode) asked() bool { return m == AddressRequired }
 
 const (
-	// AddressWindow is how long after the identity was approved the subject
-	// can still enter their address, on the page that ran the session.
+	// AddressWindow is how long after the identity check finished the
+	// subject can still enter their address, on the page that ran the session.
 	AddressWindow = time.Hour
 	// maxAddressFieldRunes bounds each field of an address.
 	maxAddressFieldRunes = 200
@@ -49,9 +49,9 @@ const (
 var (
 	// ErrAddressNotAsked is an address on a request whose flow asks for none.
 	ErrAddressNotAsked = errors.New("proofing: the request asks for no address")
-	// ErrAddressClosed is an address before the identity was approved, once
-	// AddressWindow passed, or after one was entered already.
-	ErrAddressClosed = errors.New("proofing: the address can be entered once, within AddressWindow of an approved identity")
+	// ErrAddressClosed is an address before the identity check finished,
+	// once AddressWindow passed, or after one was entered already.
+	ErrAddressClosed = errors.New("proofing: the address can be entered once, within AddressWindow of the identity check")
 	// ErrAddressNeedsPage is an address flow sent where its subject gets no
 	// page to enter it on: by mail, or as a bare deep link.
 	ErrAddressNeedsPage = errors.New("proofing: a flow that asks for the address runs on a page: show it on screen or send a hosted link")
@@ -85,6 +85,12 @@ const (
 	// AddressUnsupported is outside the Netherlands, which has the only
 	// register addresses are checked against.
 	AddressUnsupported AddressVerification = "unsupported"
+	// AddressRegistered is the registered (BRP) address the subject's Yivi app
+	// disclosed: same postal code and house number (with any letter or addition).
+	AddressRegistered AddressVerification = "registered"
+	// AddressRegisteredMismatch differs from the registered address the Yivi
+	// app disclosed, which the address carries as Registered.
+	AddressRegisteredMismatch AddressVerification = "registered_mismatch"
 )
 
 const (
@@ -112,6 +118,16 @@ type Address struct {
 	// Verification is set when the address is kept; what a page sends is
 	// ignored. An address kept before it was checked has none.
 	Verification AddressVerification `json:"verification,omitempty"`
+	// Registered is the registered address an AddressRegisteredMismatch
+	// differs from, for the reviewer: never sent to the integrator.
+	Registered *Address `json:"registered,omitempty"`
+}
+
+// forIntegrator is a without the registered address: its verification says
+// it differs.
+func (a Address) forIntegrator() Address {
+	a.Registered = nil
+	return a
 }
 
 // normalized trims every field and refuses an address with one empty or too
@@ -141,6 +157,10 @@ func (a Address) normalized() (Address, error) {
 // webhookAddressKey is where a session.address_added delivery carries the
 // address; Purge drops it from the request's deliveries.
 const webhookAddressKey = "address"
+
+// webhookAddressReviewKey is where a session.address_reviewed delivery
+// carries the decision.
+const webhookAddressReviewKey = "addressReview"
 
 type flowAddressStore interface {
 	Get(ctx context.Context, orgID uuid.UUID, flowID string) (AddressMode, error)
@@ -225,8 +245,10 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 }
 
 // AddAddress seals addr on req, audited identity_proofing.address_added
-// (without the address), and sends session.address_added. It is false, and
-// changes nothing, when the request holds an address already or was erased.
+// (with its verification, without the address), and sends session.address_added.
+// One the registered address did not confirm waits for a reviewer
+// (AddressReviewPending). It is false, and changes nothing, when the request
+// holds an address already or was erased.
 func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address) (bool, error) {
 	if s.cipher == nil {
 		return false, ErrNoEncryptionKey
@@ -244,8 +266,9 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	added := false
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL, updated_at = now()
-			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed)
+			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL,
+				address_review = $3, updated_at = now()
+			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed, addressReviewOf(addr))
 		if err != nil {
 			return fmt.Errorf("proofing: add address request %s: %w", req.ID, err)
 		}
@@ -256,12 +279,12 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingAddressAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(map[string]any{}))); err != nil {
+			audit.Created(req.auditFields(map[string]any{"verification": string(addr.Verification)}))); err != nil {
 			return err
 		}
 
 		data := sessionEventData(req, req.Status)
-		data[webhookAddressKey] = addr
+		data[webhookAddressKey] = addr.forIntegrator()
 		return enqueueRequestWebhook(ctx, q, req, EventSessionAddressAdded, data)
 	})
 	if err != nil {
@@ -271,19 +294,21 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 }
 
 // SetRegisteredAddress seals the registered address a Yivi disclosure carried
-// on req, until AddAddress keeps the entered one. It changes
-// nothing once an address was entered or the request was erased.
-func (s *RequestStore) SetRegisteredAddress(ctx context.Context, req Request, addr Address) error {
-	if s.cipher == nil {
-		return ErrNoEncryptionKey
-	}
-	plain, err := json.Marshal(addr)
-	if err != nil {
-		return fmt.Errorf("proofing: marshal registered address request %s: %w", req.ID, err)
-	}
-	sealed, err := s.cipher.Encrypt(plain)
-	if err != nil {
-		return fmt.Errorf("proofing: encrypt registered address request %s: %w", req.ID, err)
+// on req, until AddAddress compares the entered one with it; nil clears it. It
+// changes nothing once an address was entered or the request was erased.
+func (s *RequestStore) SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error {
+	var sealed []byte
+	if addr != nil {
+		if s.cipher == nil {
+			return ErrNoEncryptionKey
+		}
+		plain, err := json.Marshal(addr)
+		if err != nil {
+			return fmt.Errorf("proofing: marshal registered address request %s: %w", req.ID, err)
+		}
+		if sealed, err = s.cipher.Encrypt(plain); err != nil {
+			return fmt.Errorf("proofing: encrypt registered address request %s: %w", req.ID, err)
+		}
 	}
 	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_requests
 		SET registered_address_ciphertext = $2, updated_at = now()
@@ -386,7 +411,8 @@ func (s *Service) HostedAddAddress(ctx context.Context, token string, addr Addre
 }
 
 // addressOpen reports whether req takes an address now: it asks for one, holds
-// none yet, is approved, not erased or cancelled, and within AddressWindow.
+// none yet, is not erased or cancelled, and its steps are open for
+// AddressWindow (stepsOpen).
 func (s *Service) addressOpen(req Request) error {
 	if !req.Address.asked() {
 		return ErrAddressNotAsked
@@ -395,8 +421,7 @@ func (s *Service) addressOpen(req Request) error {
 		return ErrSessionOver
 	}
 	now := s.now()
-	if req.SubjectAddress != nil || req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil ||
-		now.Sub(*req.CompletedAt) > AddressWindow {
+	if req.SubjectAddress != nil || !req.stepsOpen(now, AddressWindow) {
 		return ErrAddressClosed
 	}
 	return nil
@@ -417,6 +442,14 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 		return Request{}, err
 	}
 
+	registered, err := s.requests.RegisteredAddress(ctx, req.ID)
+	if err != nil {
+		return Request{}, err
+	}
+	if registered != nil {
+		addr = compareRegistered(addr, *registered)
+	}
+
 	added, err := s.requests.AddAddress(ctx, req, addr)
 	if err != nil {
 		return Request{}, err
@@ -428,6 +461,9 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 
 	now := s.now()
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
+	if review := addressReviewOf(addr); review != nil {
+		req.AddressReview = *review
+	}
 	return req, nil
 }
 
@@ -483,6 +519,38 @@ func registeredAddress(claims map[string]string) Address {
 		PostalCode: claims[openid4vpverifier.ClaimAddressPostalCode], City: claims[openid4vpverifier.ClaimAddressCity],
 		Country: registerCountry,
 	}
+}
+
+// compareRegistered marks addr, as verifyAddress kept it, against the
+// registered address the subject's Yivi app disclosed, by postal code and
+// house number, which name one Dutch address. Street and city are left out:
+// the BRP may shorten a name the BAG writes in full. A match the BAG did not
+// check is kept as the registered address, so a made-up street is not. One
+// that differs only in its letter or addition, or in how the number is
+// written, is left as it is: how the card writes those is not certain, so it
+// is self-declared rather than a mismatch. A registered address without both
+// (the card's house number is optional) leaves addr as it is too.
+func compareRegistered(addr, registered Address) Address {
+	brp, ok := addresslookup.PostalCode(registered.PostalCode)
+	brpNumber, numbered := addresslookup.HouseNumber(registered.HouseNumber)
+	if !ok || !numbered {
+		return addr
+	}
+	entered, _ := addresslookup.PostalCode(addr.PostalCode)
+	// The number apart, so 12-1 is not 121.
+	enteredNumber, _ := addresslookup.HouseNumber(addr.HouseNumber)
+	if entered != brp || enteredNumber != brpNumber {
+		addr.Verification, addr.Registered = AddressRegisteredMismatch, &registered
+		return addr
+	}
+	if addressKey(addr.HouseNumber) != addressKey(registered.HouseNumber) {
+		return addr
+	}
+	if addr.Verification != AddressVerified {
+		addr = registered
+	}
+	addr.Verification = AddressRegistered
+	return addr
 }
 
 // addressKey is a street or house number as compared with the register's:

@@ -89,14 +89,14 @@ func diplomaModeOf(req Request) DiplomaMode {
 	return req.Diplomas
 }
 
-// diplomasUntil is when the subject can last add an extract: an hour after
-// the approval of a request that asks for them, nil otherwise.
+// diplomasUntil is when the subject can last add an extract:
+// DiplomaUploadWindow after the identity check of a request that asks for
+// them finished (stepsUntil), nil otherwise.
 func diplomasUntil(req Request) *time.Time {
-	if !req.Diplomas.asked() || req.Status != StatusApproved || req.CompletedAt == nil {
+	if !req.Diplomas.asked() {
 		return nil
 	}
-	until := req.CompletedAt.Add(DiplomaUploadWindow)
-	return &until
+	return req.stepsUntil(DiplomaUploadWindow)
 }
 
 // diplomaVerdictResponse is what became of one uploaded file.

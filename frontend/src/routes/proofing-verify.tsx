@@ -166,9 +166,11 @@ function VerifyFlow({
   const stages = verifyStages({
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
+  const [inEmployment, setInEmployment] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateRequestMutation(slug);
   const name = org.branding.displayName || org.name;
@@ -206,7 +208,9 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-        current={stages.indexOf(currentStage({ step, inAddress, inDiplomas }))}
+        current={stages.indexOf(
+          currentStage({ step, inAddress, inDiplomas, inEmployment }),
+        )}
       />
       {step === "overview" && (
         <Overview
@@ -254,6 +258,8 @@ function VerifyFlow({
           onDiplomaStep={setInDiplomas}
           addressMode={sent.addressMode}
           onAddressStep={setInAddress}
+          employmentMode={sent.employmentMode}
+          onEmploymentStep={setInEmployment}
           onRestart={restart}
           renderEnded={() => (
             <CheckEnded message={t("identityProofing.onScreen.ended.message")}>

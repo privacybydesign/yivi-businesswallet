@@ -131,6 +131,12 @@ services:
       DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-}
       # "false" stops the online revocation check of DUO's signing chain; on by default.
       DIPLOMA_OCSP: ${DIPLOMA_OCSP:-}
+      # Verzekeringsbericht verification: the validator (`stub` or the real UWV
+      # seal check, on the diploma trust anchors); empty keeps the config default.
+      EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-}
+      # VOG verification: the validator (`stub` or validatie.nl); empty keeps
+      # the config default.
+      VOG_VALIDATOR_PROVIDER: ${VOG_VALIDATOR_PROVIDER:-}
     depends_on:
       db:
         condition: service_healthy

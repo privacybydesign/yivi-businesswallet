@@ -4,7 +4,7 @@ import * as React from "react";
 import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useClosedDataRequestsQuery,
+  useClosedReviewsQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -15,7 +15,6 @@ import {
   listedCount,
   proofingErrorMessage,
   proofingRejectionReason,
-  requestListCapped,
   requestSubject,
   requestedBy,
 } from "../lib/identity-proofing";
@@ -23,7 +22,10 @@ import {
   DEFAULT_REVIEW_TAB,
   REVIEW_TABS,
   answerBy,
+  closedAt,
   closedRequests,
+  isAddressReview,
+  isDecidedAddress,
   personName,
   reviewCounts,
   reviewPath,
@@ -31,6 +33,7 @@ import {
   waitingOfTab,
   waitingOldestFirst,
   waitingSince,
+  walletReviewReason,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
 import { Card, StatusText, Table, TopBar } from "../ui";
@@ -53,11 +56,11 @@ export default function ProofingReviews(): React.JSX.Element {
   const waiting = useWaitingReviewsQuery(slug, { enabled: canReview });
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
-  const waitingNow = waitingOldestFirst(waiting.data ?? []);
+  const waitingNow = waitingOldestFirst(waiting.data?.requests ?? []);
   const counts = reviewCounts(waitingNow);
   // The backend lists at most the 200 longest in review: past that the counts
   // are lower bounds.
-  const capped = requestListCapped(waiting.data ?? []);
+  const capped = waiting.data?.capped === true;
   // What shows instead of the reviews to anyone without the right, and until
   // the org is known.
   const notice = org.isPending
@@ -218,6 +221,19 @@ function WaitingTable({
   );
 }
 
+// Why a row waits: its address, or what put the session in review.
+function reviewWhy(request: ProofingRequest, t: TFunction): string {
+  if (!isAddressReview(request)) {
+    return t(
+      `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
+    );
+  }
+  if (request.address?.verification === "registered_mismatch") {
+    return t("identityProofing.reviews.why.addressMismatch");
+  }
+  return t("identityProofing.reviews.why.address");
+}
+
 // How a data request's person was proven: the app, and the level reached.
 function provenLine(request: ProofingRequest, t: TFunction): string {
   const how =
@@ -263,6 +279,14 @@ function WhatCell({
       </Table.Cell>
     );
   }
+  if (isAddressReview(request)) {
+    return (
+      <Table.Cell>
+        {t("identityProofing.reviews.addressCheck")}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
   return (
     <Table.Cell>
       {t("identityProofing.reviews.identityCheck")}
@@ -293,9 +317,7 @@ function WaitingRow({
             })}
       </PersonCell>
       <WhatCell request={request} />
-      <Table.Cell>
-        {t(`identityProofing.reviews.why.${request.flowKind}`)}
-      </Table.Cell>
+      <Table.Cell>{reviewWhy(request, t)}</Table.Cell>
       <Table.Cell className="whitespace-nowrap">
         {formatWhen(waitingSince(request))}
         {due && (
@@ -317,11 +339,11 @@ function WaitingRow({
   );
 }
 
-// The data requests that ended, read as such: no identity check takes their
-// place under the list's cap.
+// The addresses decided and the data requests that ended, each read as such:
+// no identity check takes their place under the list's cap.
 function ClosedTable({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useClosedDataRequestsQuery(slug, { enabled: true });
+  const requests = useClosedReviewsQuery(slug, { enabled: true });
   const closed = closedRequests(requests.data ?? []);
   // The one line the table shows instead of rows, if any.
   let state: string | undefined;
@@ -373,28 +395,26 @@ function ClosedRow({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
-  const approved = request.status === "approved";
   const name = personName(request, t);
   return (
     <Table.Row>
-      <PersonCell request={request}>{provenLine(request, t)}</PersonCell>
+      <PersonCell request={request}>
+        {isDataRequest(request.flowKind)
+          ? provenLine(request, t)
+          : t("identityProofing.reviews.requestedBy", {
+              name: requestedBy(request, t),
+            })}
+      </PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        <StatusText tone={approved ? "green" : "red"}>
-          {t(
-            approved
-              ? "identityProofing.reviews.outcome.approved"
-              : "identityProofing.reviews.outcome.rejected",
-          )}
-        </StatusText>
-        {request.errorCode && (
-          <div className={SUB_LINE}>
-            {proofingRejectionReason(request.errorCode, t)}
-          </div>
+        {isDecidedAddress(request) ? (
+          <AddressOutcome request={request} />
+        ) : (
+          <DataRequestOutcome request={request} />
         )}
       </Table.Cell>
       <Table.Cell className="whitespace-nowrap">
-        {formatWhen(request.completedAt ?? request.createdAt)}
+        {formatWhen(closedAt(request))}
       </Table.Cell>
       <Table.Cell className="text-right">
         <Link
@@ -406,5 +426,50 @@ function ClosedRow({
         </Link>
       </Table.Cell>
     </Table.Row>
+  );
+}
+
+// What a reviewer decided on the address.
+function AddressOutcome({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const confirmed = request.addressReview === "confirmed";
+  return (
+    <StatusText tone={confirmed ? "green" : "red"}>
+      {t(
+        confirmed
+          ? "identityProofing.reviews.outcome.confirmed"
+          : "identityProofing.reviews.outcome.addressRejected",
+      )}
+    </StatusText>
+  );
+}
+
+// How a data request ended, and its error code in words.
+function DataRequestOutcome({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const approved = request.status === "approved";
+  return (
+    <>
+      <StatusText tone={approved ? "green" : "red"}>
+        {t(
+          approved
+            ? "identityProofing.reviews.outcome.approved"
+            : "identityProofing.reviews.outcome.rejected",
+        )}
+      </StatusText>
+      {request.errorCode && (
+        <div className={SUB_LINE}>
+          {proofingRejectionReason(request.errorCode, t)}
+        </div>
+      )}
+    </>
   );
 }

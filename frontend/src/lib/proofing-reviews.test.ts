@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -13,14 +15,20 @@ import {
   automaticChecks,
   checkDecisionInput,
   checkDecisionProblems,
+  closedAt,
   closedRequests,
+  inReviewOldestFirst,
+  isAddressReview,
   ownReview,
   personName,
   provenWithParts,
   reviewCounts,
   reviewTabFrom,
   waitingOfTab,
+  reasonProblem,
   waitingOldestFirst,
+  WALLET_REVIEW_REASONS,
+  walletReviewReason,
 } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
@@ -41,6 +49,7 @@ function request(over: Partial<ProofingRequest> = {}): ProofingRequest {
     diplomaMode: "off",
     diplomas: [],
     addressMode: "off",
+    employmentMode: "off",
     expectedSubject: false,
     flowKind: "identity",
     ...over,
@@ -154,6 +163,30 @@ describe("closedRequests", () => {
       "REVIEW_LAPSED",
     ]);
   });
+
+  it("lists a decided address by when it was decided, not a waiting one", () => {
+    const data = request({
+      id: "data",
+      flowKind: "data_access",
+      status: "approved",
+      completedAt: "2026-10-18T09:00:00Z",
+    });
+    const decided = request({
+      id: "decided",
+      status: "approved",
+      addressReview: "rejected",
+      completedAt: "2026-10-16T09:00:00Z",
+      addressReviewedAt: "2026-10-19T09:00:00Z",
+    });
+    const waiting = request({
+      id: "waiting",
+      status: "approved",
+      addressReview: "pending",
+    });
+    const closed = closedRequests([data, waiting, decided]);
+    expect(closed.map((r) => r.id)).toEqual(["decided", "data"]);
+    expect(closedAt(decided)).toBe("2026-10-19T09:00:00Z");
+  });
 });
 
 describe("closed copy", () => {
@@ -210,17 +243,23 @@ describe("askedAt", () => {
 describe("ownReview", () => {
   const check = request({ requestedById: "sam", subjectUserId: "alex" });
 
+  const reader = (id: string, reviewsOwn = false) => ({ id, reviewsOwn });
+
   it("is a check the reader sent or that is about them", () => {
-    expect(ownReview(check, "sam")).toBe("sent");
-    expect(ownReview(check, "alex")).toBe("subject");
-    expect(ownReview(check, "anna")).toBeUndefined();
+    expect(ownReview(check, reader("sam"))).toBe("sent");
+    expect(ownReview(check, reader("alex"))).toBe("subject");
+    expect(ownReview(check, reader("anna"))).toBeUndefined();
     expect(ownReview(check, undefined)).toBeUndefined();
   });
 
   it("is never a data request, which its link's sender may decide", () => {
     expect(
-      ownReview({ ...check, flowKind: "data_erasure" }, "sam"),
+      ownReview({ ...check, flowKind: "data_erasure" }, reader("sam")),
     ).toBeUndefined();
+  });
+
+  it("is none for a reader the backend lets decide their own", () => {
+    expect(ownReview(check, reader("sam", true))).toBeUndefined();
   });
 });
 
@@ -358,5 +397,78 @@ describe("provenWithParts", () => {
       provenWithParts({ type: "reference_photo", faceMatch: 0.9 }),
     ).toEqual(["faceMatch"]);
     expect(provenWithParts(undefined)).toEqual([]);
+  });
+});
+
+describe("address reviews", () => {
+  const address = request({
+    id: "address",
+    status: "approved",
+    addressMode: "required",
+    addressReview: "pending",
+    completedAt: "2026-10-17T09:00:00Z",
+  });
+
+  it("waits while the address is pending, beside the checks in review", () => {
+    const decided = request({
+      id: "decided",
+      status: "approved",
+      addressReview: "confirmed",
+    });
+    expect(
+      waitingOldestFirst([address, decided, request()]).map((r) => r.id),
+    ).toEqual(["r1", "address"]);
+  });
+
+  it("leaves the address out of what waits in review", () => {
+    expect(inReviewOldestFirst([address, request()]).map((r) => r.id)).toEqual([
+      "r1",
+    ]);
+  });
+
+  it("asks for a reason of at most the bound", () => {
+    expect(reasonProblem("  ")).toBe("reason");
+    expect(reasonProblem("x".repeat(REVIEW_REASON_MAX_CHARS + 1))).toBe(
+      "reasonTooLong",
+    );
+    expect(reasonProblem(" moved last month ")).toBeUndefined();
+  });
+
+  it("is an address review only once the check is decided", () => {
+    expect(isAddressReview(address)).toBe(true);
+    expect(isAddressReview(request())).toBe(false);
+    expect(
+      isAddressReview(request({ flowKind: "data_access", status: "approved" })),
+    ).toBe(false);
+  });
+});
+
+// The wallet's own review reasons are the ones backend/internal/proofing
+// opens a review with, both ways.
+describe("wallet review reasons mirror the backend", () => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../../backend/internal/proofing/employment.go",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  const backend = [...source.matchAll(/\bReview[A-Z]\w*\s*= "(\w+)"/g)].map(
+    (m) => m[1],
+  );
+
+  it("has every backend reason and no other", () => {
+    expect(backend.length).toBeGreaterThan(0);
+    expect([...WALLET_REVIEW_REASONS].sort()).toEqual(backend.sort());
+  });
+
+  it("reads only a known reason", () => {
+    expect(walletReviewReason({ reviewReason: "current_benefit" })).toBe(
+      "current_benefit",
+    );
+    expect(walletReviewReason({ reviewReason: "other" })).toBeUndefined();
+    expect(walletReviewReason({})).toBeUndefined();
   });
 });

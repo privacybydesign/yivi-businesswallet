@@ -41,7 +41,7 @@ const (
 	// MaxDiplomaFileBytes bounds one uploaded extract: DUO's are well under
 	// half a megabyte, also with a grade list.
 	MaxDiplomaFileBytes = 5 << 20
-	// DiplomaUploadWindow is how long after the identity was approved the
+	// DiplomaUploadWindow is how long after the identity check finished the
 	// subject can still add extracts, on the page that ran the session.
 	DiplomaUploadWindow = time.Hour
 )
@@ -52,9 +52,9 @@ const DiplomaReasonDuplicate = "duplicate"
 var (
 	// ErrDiplomasNotAsked is an upload on a request whose flow asks for none.
 	ErrDiplomasNotAsked = errors.New("proofing: the request asks for no diplomas")
-	// ErrDiplomasClosed is an upload before the identity was approved, or
+	// ErrDiplomasClosed is an upload before the identity check finished, or
 	// once DiplomaUploadWindow passed.
-	ErrDiplomasClosed = errors.New("proofing: diplomas can only be added within DiplomaUploadWindow of an approved identity")
+	ErrDiplomasClosed = errors.New("proofing: diplomas can only be added within DiplomaUploadWindow of the identity check")
 	// ErrDiplomasNeedPage is a diploma flow sent where its subject gets no
 	// page to upload on: by mail, or as a bare deep link.
 	ErrDiplomasNeedPage = errors.New("proofing: a flow that asks for diplomas runs on a page: show it on screen or send a hosted link")
@@ -321,7 +321,7 @@ func (s *DiplomaStore) RecordRejected(ctx context.Context, req Request, reason, 
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingDiplomaRejected,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			req.auditFields(fields))
+			audit.Created(req.auditFields(fields)))
 	})
 }
 
@@ -360,21 +360,32 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 	if !mode.valid() {
 		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
 	}
-	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
+	flow, err := s.editableFlow(ctx, org, flowID)
 	if err != nil {
-		return "", fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
-	}
-	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
-	if i < 0 {
-		return "", ErrFlowNotFound
-	}
-	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return "", err
 	}
-	if mode.asked() && !readsIdentity(flows[i]) {
+	if mode.asked() && !readsIdentity(flow) {
 		return "", ErrFlowNoIdentity
 	}
 	return s.flowDiplomaSettings.Save(ctx, org.ID, flowID, mode)
+}
+
+// editableFlow is one of the org's flows whose settings may change:
+// ErrFlowNotFound for a flow that is not one of the org's, and
+// ErrDataRequestFlow for a data request flow.
+func (s *Service) editableFlow(ctx context.Context, org Org, flowID string) (proofingprovider.Flow, error) {
+	flows, err := s.ips.ListFlows(ctx, orgTenant(org.ID))
+	if err != nil {
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: list flows org %s: %w", org.ID, err)
+	}
+	i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.ID == flowID })
+	if i < 0 {
+		return proofingprovider.Flow{}, ErrFlowNotFound
+	}
+	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	return flows[i], nil
 }
 
 // RequestDiplomas returns the extracts each request holds.
@@ -427,7 +438,8 @@ func (s *Service) HostedAddDiplomas(ctx context.Context, token string, files []D
 }
 
 // diplomasOpen reports whether req takes extracts now: it asks for them, is
-// approved, not erased or cancelled, and within DiplomaUploadWindow.
+// not erased or cancelled, and its steps are open for DiplomaUploadWindow
+// (stepsOpen).
 func (s *Service) diplomasOpen(req Request) error {
 	if s.diplomaChecker == nil || s.diplomas == nil {
 		return ErrNoDiplomaChecker
@@ -439,7 +451,7 @@ func (s *Service) diplomasOpen(req Request) error {
 		return ErrSessionOver
 	}
 	now := s.now()
-	if req.EffectiveStatus(now) != StatusApproved || req.CompletedAt == nil || now.Sub(*req.CompletedAt) > DiplomaUploadWindow {
+	if !req.stepsOpen(now, DiplomaUploadWindow) {
 		return ErrDiplomasClosed
 	}
 	return nil
@@ -464,15 +476,9 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	if req.session == nil {
 		return nil, ErrDiplomasClosed
 	}
-	tenant := requestTenant(req)
-	identity, err := s.ips.SessionIdentity(ctx, tenant, req.session.ID, req.session.Token)
+	holder, err := s.sessionHolder(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: identity for diplomas request %s: %w", req.ID, err)
-	}
-	// The chip's DG11 name when it has one: the MRZ's cuts a long name off.
-	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
-	if identity.FullFamilyName != "" {
-		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+		return nil, err
 	}
 
 	verdicts := make([]DiplomaVerdict, 0, len(files))
@@ -484,6 +490,24 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 		verdicts = append(verdicts, verdict)
 	}
 	return verdicts, nil
+}
+
+// sessionHolder is the identity the engine approved for req, as a document's
+// holder is matched against it: the chip's DG11 name when it has one, as the
+// MRZ's cuts a long name off.
+func (s *Service) sessionHolder(ctx context.Context, req Request) (diploma.Person, error) {
+	if req.session == nil {
+		return diploma.Person{}, fmt.Errorf("proofing: request %s has no session to read the identity of", req.ID)
+	}
+	identity, err := s.ips.SessionIdentity(ctx, requestTenant(req), req.session.ID, req.session.Token)
+	if err != nil {
+		return diploma.Person{}, fmt.Errorf("proofing: identity for request %s: %w", req.ID, err)
+	}
+	holder := diploma.Person{GivenNames: identity.GivenName, Surname: identity.FamilyName, DateOfBirth: identity.BirthDate}
+	if identity.FullFamilyName != "" {
+		holder.GivenNames, holder.Surname = identity.FullGivenName, identity.FullFamilyName
+	}
+	return holder, nil
 }
 
 func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (DiplomaVerdict, error) {

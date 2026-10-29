@@ -19,6 +19,10 @@ import (
 // signature cannot be validated at all. The document itself is not at fault.
 var ErrTrustUnavailable = errors.New("trust anchors unavailable")
 
+// ErrRevocationUnavailable is a signature whose every check passed but
+// revocation, which could not be asked: the document is not at fault.
+var ErrRevocationUnavailable = errors.New("revocation could not be checked")
+
 // Verification is the outcome of the cryptographic verification of one
 // extract: the PAdES signature, the timestamp, the certificate chain and the
 // identity of the signer (DUO).
@@ -116,7 +120,10 @@ type TrustStore struct {
 	description string
 	// loadedAt is when source was loaded from config.Source; zero while the
 	// store runs on the pinned fallback.
-	loadedAt    time.Time
+	loadedAt time.Time
+	// pinned is a source of the pinned roots: TrustSourcePinned, or the
+	// fallback.
+	pinned      bool
 	attemptedAt time.Time
 	reloading   bool
 }
@@ -152,7 +159,7 @@ func (s *TrustStore) init(ctx context.Context) error {
 	s.attemptedAt = now
 	source, description, err := s.load(ctx)
 	if err == nil {
-		s.source, s.description, s.loadedAt = source, description, now
+		s.source, s.description, s.loadedAt, s.pinned = source, description, now, s.config.Source == TrustSourcePinned
 		slog.InfoContext(ctx, "diploma: trust anchors loaded", slog.String("source", description))
 		return nil
 	}
@@ -163,7 +170,7 @@ func (s *TrustStore) init(ctx context.Context) error {
 	if perr != nil {
 		return perr
 	}
-	s.source, s.description = pinned, "pinned roots (EU trusted lists unavailable)"
+	s.source, s.description, s.pinned = pinned, "pinned roots (EU trusted lists unavailable)", true
 	slog.WarnContext(ctx, "diploma: EU trusted lists unavailable, using the pinned roots until a reload succeeds",
 		slog.String("error", err.Error()))
 	return nil
@@ -208,6 +215,12 @@ func (s *TrustStore) load(ctx context.Context) (verify.TrustSource, string, erro
 // it starts one in the background, detached from ctx: an upload cut short must
 // not cut a reload short halfway, nor wait for one.
 func (s *TrustStore) Current(ctx context.Context) verify.TrustSource {
+	source, _ := s.current(ctx)
+	return source
+}
+
+// current is Current, and whether its anchors are the pinned roots.
+func (s *TrustStore) current(ctx context.Context) (verify.TrustSource, bool) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -217,7 +230,7 @@ func (s *TrustStore) Current(ctx context.Context) verify.TrustSource {
 		s.reloads.Add(1)
 		go s.reload(context.WithoutCancel(ctx))
 	}
-	return s.source
+	return s.source, s.pinned
 }
 
 // reload loads the anchors anew; a failure keeps the current ones until the
@@ -236,14 +249,16 @@ func (s *TrustStore) reload(ctx context.Context) {
 			slog.String("current", s.description), slog.String("error", err.Error()))
 		return
 	}
-	s.source, s.description, s.loadedAt = source, description, s.now()
+	s.source, s.description, s.loadedAt, s.pinned = source, description, s.now(), s.config.Source == TrustSourcePinned
 	slog.InfoContext(ctx, "diploma: trust anchors reloaded", slog.String("source", description))
 }
 
-// PadesValidator verifies the PAdES signature DUO puts on every extract
-// against the anchors of a TrustStore.
+// PadesValidator verifies the PAdES signature an issuer puts on every
+// document it seals (DUO's extracts, UWV's Verzekeringsbericht) against the
+// anchors of a TrustStore.
 type PadesValidator struct {
 	trust      *TrustStore
+	issuer     trust.Issuer
 	ocsp       bool
 	httpClient *http.Client
 }
@@ -259,32 +274,48 @@ const (
 	RevocationOCSP
 )
 
-// NewPadesValidator creates a validator that checks revocation as asked.
-func NewPadesValidator(store *TrustStore, revocation Revocation) *PadesValidator {
-	return &PadesValidator{trust: store, ocsp: revocation == RevocationOCSP, httpClient: &http.Client{Timeout: verify.OCSPTimeout}}
+// NewPadesValidator creates a validator for issuer's seal that checks
+// revocation as asked, or online for an issuer that embeds none.
+func NewPadesValidator(store *TrustStore, issuer trust.Issuer, revocation Revocation) *PadesValidator {
+	return &PadesValidator{trust: store, issuer: issuer, ocsp: revocation == RevocationOCSP, httpClient: &http.Client{Timeout: verify.OCSPTimeout}}
 }
 
-// Ping fails when no anchors are loaded.
+// Ping fails when no anchors are loaded, or only the pinned roots for an
+// issuer they do not hold.
 func (v *PadesValidator) Ping(ctx context.Context) error {
-	if v.trust.Current(ctx) == nil {
-		return ErrTrustUnavailable
-	}
-	return nil
+	_, err := v.anchors(ctx)
+	return err
 }
 
-// Validate verifies the signature of the PDF.
-func (v *PadesValidator) Validate(ctx context.Context, pdf []byte) (*Verification, error) {
-	source := v.trust.Current(ctx)
-	if source == nil {
+// anchors are the store's current anchors, ErrTrustUnavailable when they
+// cannot verify the issuer: on the pinned fallback every UWV seal would fail
+// its chain, the document blamed for the EU lists being down.
+func (v *PadesValidator) anchors(ctx context.Context) (verify.TrustSource, error) {
+	source, pinned := v.trust.current(ctx)
+	if source == nil || (pinned && !v.issuer.Pinned) {
 		return nil, ErrTrustUnavailable
 	}
+	return source, nil
+}
+
+// Validate verifies the signature of the PDF. A signature failing only on a
+// revocation source that could not be reached is ErrRevocationUnavailable.
+func (v *PadesValidator) Validate(ctx context.Context, pdf []byte) (*Verification, error) {
+	source, err := v.anchors(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result, err := verify.PDF(ctx, pdf, verify.Options{
+		Issuer:     &v.issuer,
 		Trust:      source,
 		OCSP:       v.ocsp,
 		HTTPClient: v.httpClient,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("diploma: verify signature: %w", err)
+	}
+	if failed := result.FirstFailure(); result.RevocationUnreachable && failed != nil && failed.ID == verify.CheckRevocation {
+		return nil, fmt.Errorf("%w: %s", ErrRevocationUnavailable, failed.Detail)
 	}
 	return fromResult(result), nil
 }

@@ -122,9 +122,11 @@ function HostedFlow({
   const stages = verifyStages({
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
   });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
+  const [inEmployment, setInEmployment] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(
     page.method === "yivi_app" ? "yivi_app" : "idem_app",
@@ -201,7 +203,7 @@ function HostedFlow({
   const actionError = start.isError
     ? hostedErrorMessage(start.error, t)
     : undefined;
-  const stage = currentStage({ step, inAddress, inDiplomas });
+  const stage = currentStage({ step, inAddress, inDiplomas, inEmployment });
   const showsEnded =
     step === "session" && (sessionEnded || page.status === "expired");
   let outcomeActions: React.ReactNode;
@@ -301,6 +303,8 @@ function HostedFlow({
               onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
+              employmentMode={flow.employmentMode}
+              onEmploymentStep={setInEmployment}
               renderEnded={(progress) => (
                 <HostedCheckEnded
                   name={organization.name}

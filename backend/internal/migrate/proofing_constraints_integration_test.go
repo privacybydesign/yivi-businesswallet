@@ -50,6 +50,10 @@ func TestProofingRequestConstraints(t *testing.T) {
 		name, update string
 	}{
 		{"purged with the subject's e-mail kept", `UPDATE identity_proofing_requests SET purged_at = now(), subject_name = '' WHERE id = $1`},
+		{"purged with the employment kept", `UPDATE identity_proofing_requests
+			SET purged_at = now(), subject_name = '', subject_email = '', employment_ciphertext = '\x00' WHERE id = $1`},
+		{"purged with the registered address kept", `UPDATE identity_proofing_requests
+			SET purged_at = now(), subject_name = '', subject_email = '', registered_address_ciphertext = '\x00' WHERE id = $1`},
 		{"unknown method", `UPDATE identity_proofing_requests SET method = 'carrier_pigeon' WHERE id = $1`},
 		{"unknown eIDAS level", `UPDATE identity_proofing_requests SET eidas_level = 'medium' WHERE id = $1`},
 		{"unknown required level", `UPDATE identity_proofing_requests SET required_assurance_level = 'medium' WHERE id = $1`},
