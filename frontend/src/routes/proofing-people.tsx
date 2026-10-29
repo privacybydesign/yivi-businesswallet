@@ -11,6 +11,7 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
+  AddressReviewState,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
@@ -73,6 +74,13 @@ const LABEL = "text-ink text-[13px] font-semibold";
 const BASE_COLUMNS = 5;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
+// How an address's review reads beside the session's status: waiting is not
+// done yet.
+const ADDRESS_REVIEW_TONES = {
+  pending: "amber",
+  confirmed: "green",
+  rejected: "red",
+} as const satisfies Record<AddressReviewState, string>;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
@@ -570,6 +578,18 @@ function AddressNote({
       <div className="text-[12px]">
         <StatusText tone="amber">
           {t("identityProofing.sessions.address.missing")}
+        </StatusText>
+      </div>
+    );
+  }
+  // The identity's status says nothing of the address: until a reviewer
+  // decides it, the session is not done.
+  const review = request.addressReview;
+  if (review !== undefined) {
+    return (
+      <div className="text-[12px]">
+        <StatusText tone={ADDRESS_REVIEW_TONES[review]}>
+          {t(`identityProofing.sessions.address.tag.${review}`)}
         </StatusText>
       </div>
     );

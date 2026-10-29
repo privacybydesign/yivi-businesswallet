@@ -246,12 +246,13 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (bool, error) {
+func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (*time.Time, error) {
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
-		return false, nil
+		return nil, nil
 	}
-	f.stored.AddressReview = decided
-	return true, nil
+	now := time.Now()
+	f.stored.AddressReview, f.stored.AddressReviewedAt = decided, &now
+	return &now, nil
 }
 
 func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
@@ -2116,6 +2117,21 @@ func TestOwnReviewRefused(t *testing.T) {
 	}
 }
 
+// A reviewer SelfReview allows (a platform admin on a dev stack) decides a
+// check they sent.
+func TestOwnReviewAllowed(t *testing.T) {
+	f := newFixture()
+	sent := f.send(t)
+	sender := uuid.New()
+	f.requests.stored.RequestedBy = &sender
+	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusNeedsReview}
+	f.reconcile(t)
+	if req, err := f.svc.DecideReview(context.Background(), testOrg.ID, sent.Request.ID, "root@acme.test",
+		ReviewInput{Approve: true, Reason: "looks fine", ReviewerID: sender, OwnAllowed: true}); err != nil || req.Status != StatusApproved {
+		t.Errorf("the sender deciding, allowed = %+v, %v; want approved", req, err)
+	}
+}
+
 // A reviewer who is not an admin reaches what the Reviews page shows: a
 // request waiting for review, and a data request in any status. An identity
 // check that is not waiting is an admin's alone.
@@ -2142,20 +2158,26 @@ func TestReviewScopeReaches(t *testing.T) {
 	}
 }
 
-// A pending address opens the request and its address to a reviewer, never
-// the result of the check it came with.
+// An address in review, waiting or decided, opens the request and its address
+// to a reviewer, never the result of the check it came with. A check without
+// one stays closed.
 func TestReviewScopeReachesAddress(t *testing.T) {
 	pending := Request{FlowKind: FlowIdentity, Status: StatusApproved, AddressReview: AddressReviewPending}
 	decided := pending
 	decided.AddressReview = AddressReviewConfirmed
-	if ReviewScopeReviews.reaches(pending) {
-		t.Error("a reviewer reaches the result of an approved check whose address waits")
+	unreviewed := pending
+	unreviewed.AddressReview = ""
+	if ReviewScopeReviews.reaches(pending) || ReviewScopeReviews.reaches(decided) {
+		t.Error("a reviewer reaches the result of an approved check whose address is reviewed")
 	}
 	if !ReviewScopeReviews.reachesAddress(pending) {
 		t.Error("a reviewer does not reach an address that waits")
 	}
-	if ReviewScopeReviews.reachesAddress(decided) {
-		t.Error("a reviewer reaches an address that no longer waits")
+	if !ReviewScopeReviews.reachesAddress(decided) {
+		t.Error("a reviewer does not reach an address that was decided")
+	}
+	if ReviewScopeReviews.reachesAddress(unreviewed) {
+		t.Error("a reviewer reaches an approved check whose address was never reviewed")
 	}
 }
 

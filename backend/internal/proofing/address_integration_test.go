@@ -241,15 +241,21 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
 	}
 
-	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Matches the rental contract"); err != nil || !ok {
-		t.Fatalf("DecideAddressReview = %v, %v; want decided", ok, err)
+	reviewedAt, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Matches the rental contract")
+	if err != nil || reviewedAt == nil {
+		t.Fatalf("DecideAddressReview = %v, %v; want decided", reviewedAt, err)
 	}
-	if ok, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected, "Another address"); err != nil || ok {
-		t.Errorf("DecideAddressReview again = %v, %v; want refused", ok, err)
+	if again, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected, "Another address"); err != nil || again != nil {
+		t.Errorf("DecideAddressReview again = %v, %v; want refused", again, err)
 	}
 	got, err := requests.Get(ctx, orgID, pending.ID)
-	if err != nil || got.AddressReview != AddressReviewConfirmed || got.Status != StatusApproved {
-		t.Errorf("Get = %s %q, %v; want approved, address confirmed", got.Status, got.AddressReview, err)
+	if err != nil || got.AddressReview != AddressReviewConfirmed || got.Status != StatusApproved ||
+		got.AddressReviewedAt == nil || !got.AddressReviewedAt.Equal(*reviewedAt) {
+		t.Errorf("Get = %s %q at %v, %v; want approved, address confirmed at %v", got.Status, got.AddressReview, got.AddressReviewedAt, err, reviewedAt)
+	}
+	confirmed := AddressReviewConfirmed
+	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &confirmed}); err != nil || len(listed) != 1 {
+		t.Errorf("List confirmed addresses = %d, %v; want the one", len(listed), err)
 	}
 	assertAddressReviewReported(t, pool, webhooks, orgID)
 }

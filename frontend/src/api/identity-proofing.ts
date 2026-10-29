@@ -56,6 +56,17 @@ export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
 export const ADDRESS_REVIEWS = ["pending", "confirmed", "rejected"] as const;
 export type AddressReviewState = (typeof ADDRESS_REVIEWS)[number];
 
+// A reviewer's decision on a request: its session's review or its address,
+// the outcome, why, by whom and when.
+const proofingDecisionSchema = z.object({
+  kind: z.enum(["review", "address"]),
+  outcome: z.string(),
+  reason: z.string().optional(),
+  errorCode: z.string().optional(),
+  decidedBy: z.string().optional(),
+  decidedAt: z.string(),
+});
+
 const postalAddressSchema = z.object({
   street: z.string(),
   houseNumber: z.string(),
@@ -298,6 +309,11 @@ const proofingRequestSchema = z.object({
   // for a reviewer: pending until confirmed or rejected. The session keeps its
   // outcome.
   addressReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  // When a reviewer decided it.
+  addressReviewedAt: z.string().optional(),
+  // What reviewers decided, with their reasons, oldest first: only on the
+  // single request, for an admin or a reviewer.
+  decisions: z.array(proofingDecisionSchema).optional(),
   // Whether the session asks for the UWV Verzekeringsbericht, the employment
   // kept from it, and until when the subject can upload it (absent until
   // approved, and once kept).
@@ -318,6 +334,7 @@ const proofingRequestSchema = z.object({
 });
 
 export type ProofingRequest = z.infer<typeof proofingRequestSchema>;
+export type ProofingDecision = z.infer<typeof proofingDecisionSchema>;
 
 // mailSent is false when the org's mail could not be sent: the request stands,
 // but the recipient never got its link. deepLink is an on-screen Idem session's
@@ -890,6 +907,12 @@ export function getProofingRequests(
     schema: z.array(proofingRequestSchema),
     signal,
   });
+}
+
+// The stream that tells a reviewer's page when the org's reviews change: a
+// Server-Sent Events URL, for an EventSource.
+export function reviewEventsUrl(slug: string): string {
+  return absoluteApiUrl(`${base(slug)}/reviews/events`);
 }
 
 // language is the sender's wallet language: the mail's, and the Idem app's.

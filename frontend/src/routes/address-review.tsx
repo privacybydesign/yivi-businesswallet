@@ -22,6 +22,7 @@ import { ownReview, reasonProblem, reviewPath } from "../lib/proofing-reviews";
 import { Button, TopBar } from "../ui";
 import {
   BackToReviews,
+  DecisionReasons,
   REVIEW_ERROR,
   REVIEW_FIELD_LABEL,
   REVIEW_HINT,
@@ -51,7 +52,7 @@ export function AddressReview({
   const me = useMeQuery();
   // An address of a check the reader sent or that is about them is another
   // reviewer's.
-  const own = ownReview(request, me.data?.id);
+  const own = ownReview(request, me.data);
   const address = request.address;
   const review = request.addressReview;
   const subtitle = [
@@ -133,6 +134,7 @@ export function AddressReview({
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
               {t(`identityProofing.reviews.address.${DECIDED_KEYS[review]}`)}
+              <DecisionReasons request={request} kind="address" />
             </output>
           )}
         </ReviewSection>

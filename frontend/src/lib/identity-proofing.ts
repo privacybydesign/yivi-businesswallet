@@ -2200,6 +2200,39 @@ export function sessionEventDetail(
       t("identityProofingFlows.versionShort", { version: fields.flowVersion }),
     );
   }
+  return [...parts, ...decisionEventDetail(fields, t)];
+}
+
+// What a review or address event adds: that an entered address goes to a
+// reviewer, what a reviewer decided, and why. The backend leaves the reason
+// out for a reader who may not see it.
+function decisionEventDetail(
+  fields: Record<string, unknown>,
+  t: TFunction,
+): string[] {
+  const parts: string[] = [];
+  if (
+    typeof fields.verification === "string" &&
+    fields.verification !== "registered"
+  ) {
+    parts.push(t("identityProofing.sessions.address.toReview"));
+  }
+  if (fields.decision === "approved" || fields.decision === "rejected") {
+    parts.push(t(`identityProofing.reviews.outcome.${fields.decision}`));
+  }
+  if (
+    fields.addressReview === "confirmed" ||
+    fields.addressReview === "rejected"
+  ) {
+    parts.push(
+      t(`identityProofing.sessions.address.tag.${fields.addressReview}`),
+    );
+  }
+  if (typeof fields.reason === "string" && fields.reason !== "") {
+    parts.push(
+      t("identityProofing.reviews.decided.reason", { reason: fields.reason }),
+    );
+  }
   return parts;
 }
 

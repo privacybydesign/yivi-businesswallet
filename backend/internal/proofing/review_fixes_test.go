@@ -84,7 +84,11 @@ func TestMemberTimelineHidesAdminDetail(t *testing.T) {
 		},
 		{
 			ID: uuid.New(), Action: audit.IdentityProofingReviewDecided, Actor: &audit.EventActor{UserID: admin},
-			Metadata: json.RawMessage(`{"decision":"rejected","reason":"name on passport differs: J. Jansen"}`),
+			Metadata: json.RawMessage(`{"after":{"decision":"rejected","reason":"name on passport differs: J. Jansen"}}`),
+		},
+		{
+			ID: uuid.New(), Action: audit.IdentityProofingAddressReviewed, Actor: &audit.EventActor{UserID: admin},
+			Metadata: json.RawMessage(`{"before":{"addressReview":"pending","subjectName":"Anna Jansen"},"after":{"addressReview":"confirmed","reason":"moved in May"}}`),
 		},
 		{ID: uuid.New(), Action: audit.IdentityProofingResultRead, Actor: &audit.EventActor{UserID: admin}},
 	}
@@ -94,8 +98,11 @@ func TestMemberTimelineHidesAdminDetail(t *testing.T) {
 	if events[0].Actor == nil || string(events[0].Metadata) != `{"flowVersion":2}` {
 		t.Errorf("own event = actor %v, metadata %s; want the member and no subject name", events[0].Actor, events[0].Metadata)
 	}
-	if string(events[1].Metadata) != `{"decision":"rejected"}` {
+	if string(events[1].Metadata) != `{"after":{"decision":"rejected"}}` {
 		t.Errorf("review metadata = %s, want the decision without its reason", events[1].Metadata)
+	}
+	if string(events[2].Metadata) != `{"after":{"addressReview":"confirmed"},"before":{"addressReview":"pending"}}` {
+		t.Errorf("address review metadata = %s, want the decision without its reason or the subject's name", events[2].Metadata)
 	}
 	for _, e := range events[1:] {
 		if e.Actor != nil || e.ActorLabel == nil || *e.ActorLabel != adminActorLabel {

@@ -416,6 +416,8 @@ type Request struct {
 	AddressAddedAt *time.Time
 	// AddressReview is a self-declared address's review; empty for none.
 	AddressReview AddressReview
+	// AddressReviewedAt is when a reviewer decided it; nil while it waits.
+	AddressReviewedAt *time.Time
 	// Employment is whether the request asks for the subject's UWV
 	// Verzekeringsbericht once the identity check finished: its flow's
 	// EmploymentMode when it was sent. SubjectEmployment is what was kept of

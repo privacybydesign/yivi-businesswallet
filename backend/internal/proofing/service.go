@@ -99,7 +99,7 @@ type requestStore interface {
 	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
 	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (bool, error)
+	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (*time.Time, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 
@@ -2209,20 +2209,50 @@ func memberTimeline(events []audit.Event, member uuid.UUID) error {
 		if len(e.Metadata) == 0 {
 			continue
 		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(e.Metadata, &fields); err != nil {
-			return fmt.Errorf("proofing: read event %s metadata: %w", e.ID, err)
-		}
-		for _, key := range audit.IdentityProofingPersonalKeys {
-			delete(fields, key)
-		}
-		trimmed, err := json.Marshal(fields)
+		trimmed, err := withoutPersonalKeys(e.Metadata)
 		if err != nil {
 			return fmt.Errorf("proofing: trim event %s metadata: %w", e.ID, err)
 		}
 		e.Metadata = trimmed
 	}
 	return nil
+}
+
+// auditSnapshotKeys are the metadata keys an audit event nests its fields
+// under (audit.Created, audit.Updated, audit.Deleted).
+var auditSnapshotKeys = []string{"before", "after"}
+
+// withoutPersonalKeys drops audit.IdentityProofingPersonalKeys from an event's
+// metadata, at its top level and in its before and after snapshots, as
+// audit.StripFields does on a purge.
+func withoutPersonalKeys(metadata json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &fields); err != nil {
+		return nil, err
+	}
+	for _, key := range audit.IdentityProofingPersonalKeys {
+		delete(fields, key)
+	}
+	for _, snapshot := range auditSnapshotKeys {
+		raw, ok := fields[snapshot]
+		if !ok {
+			continue
+		}
+		var inner map[string]json.RawMessage
+		if json.Unmarshal(raw, &inner) != nil {
+			// Not an object: nothing personal is nested in it.
+			continue
+		}
+		for _, key := range audit.IdentityProofingPersonalKeys {
+			delete(inner, key)
+		}
+		trimmed, err := json.Marshal(inner)
+		if err != nil {
+			return nil, err
+		}
+		fields[snapshot] = trimmed
+	}
+	return json.Marshal(fields)
 }
 
 // CreateAPIKey adds a key with every scope to the org; the returned secret is

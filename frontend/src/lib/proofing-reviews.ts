@@ -1,4 +1,5 @@
 import { isDataRequest } from "../api/identity-proofing";
+import type { Me } from "../api/auth";
 import type {
   ProofingRequest,
   ProofingResult,
@@ -136,25 +137,39 @@ export function waitingOfTab(
   }
 }
 
-// The data requests that ended, the latest first, whoever ended them: a
-// reviewer, or no one (the engine rejected the person, the review lapsed, the
-// org paused, the law keeps the data). The list carries no mark of which, so
-// the page claims no decision and shows each one's error code. Identity checks
-// are not listed: none goes to review yet.
+// Whether a reviewer confirmed or rejected the request's address.
+export function isDecidedAddress(request: ProofingRequest): boolean {
+  return (
+    request.addressReview === "confirmed" ||
+    request.addressReview === "rejected"
+  );
+}
+
+// When a closed request closed: its address was decided, or it ended.
+export function closedAt(request: ProofingRequest): string {
+  if (isDecidedAddress(request) && request.addressReviewedAt) {
+    return request.addressReviewedAt;
+  }
+  return request.completedAt ?? request.createdAt;
+}
+
+// What was closed, the latest first: the addresses a reviewer decided, and the
+// data requests that ended, whoever ended them: a reviewer, or no one (the
+// engine rejected the person, the review lapsed, the org paused, the law keeps
+// the data). A data request carries no mark of which, so the page claims no
+// decision and shows each one's error code. Identity checks themselves are not
+// listed: a decided one is closed to a reviewer.
 export function closedRequests(
   requests: readonly ProofingRequest[],
 ): ProofingRequest[] {
   return requests
     .filter(
       (r) =>
-        isDataRequest(r.flowKind) &&
-        (r.status === "approved" || r.status === "rejected"),
+        isDecidedAddress(r) ||
+        (isDataRequest(r.flowKind) &&
+          (r.status === "approved" || r.status === "rejected")),
     )
-    .sort(
-      (a, b) =>
-        Date.parse(b.completedAt ?? b.createdAt) -
-        Date.parse(a.completedAt ?? a.createdAt),
-    );
+    .sort((a, b) => Date.parse(closedAt(b)) - Date.parse(closedAt(a)));
 }
 
 // Until when a data request in review can be answered: its review lapses then
@@ -201,8 +216,9 @@ export function walletReviewReason(
 
 // Why the reader may not decide an identity check: they sent it, or it is
 // about them. Another reviewer decides it (the backend's ownReview, 403
-// own_review). A data request is the person's own ask: whoever sent its link
-// may decide it.
+// own_review), unless the backend lets the reader (reviewsOwn: a platform
+// admin on a dev stack). A data request is the person's own ask: whoever sent
+// its link may decide it.
 export type OwnReview = "sent" | "subject";
 
 export function ownReview(
@@ -210,11 +226,13 @@ export function ownReview(
     ProofingRequest,
     "flowKind" | "requestedById" | "subjectUserId"
   >,
-  userId: string | undefined,
+  reader: Pick<Me, "id" | "reviewsOwn"> | null | undefined,
 ): OwnReview | undefined {
-  if (userId === undefined || isDataRequest(request.flowKind)) return undefined;
-  if (request.requestedById === userId) return "sent";
-  if (request.subjectUserId === userId) return "subject";
+  if (reader == null || reader.reviewsOwn || isDataRequest(request.flowKind)) {
+    return undefined;
+  }
+  if (request.requestedById === reader.id) return "sent";
+  if (request.subjectUserId === reader.id) return "subject";
   return undefined;
 }
 

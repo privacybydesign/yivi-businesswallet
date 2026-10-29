@@ -5601,12 +5601,14 @@ paths:
             enum: [pending, confirmed, rejected]
           description: >-
             Only the requests whose self-declared address stands so with a reviewer. A member with
-            the reviewer right lists `pending` for the whole organisation.
+            the reviewer right lists each of them for the whole organisation, without
+            `proofedName`, `employment` and diplomas.
       responses:
         '200':
           description: >-
             The requests, newest first; for `status=needs_review` the longest in review first, for
-            `addressReview=pending` the longest waiting first.
+            `addressReview=pending` the longest waiting first, for `confirmed` and `rejected` the
+            latest decided first.
           content:
             application/json:
               schema:
@@ -5807,7 +5809,9 @@ paths:
         Requires organisation membership. The request, re-checked with the engine
         (at most every 10 seconds) while it is live: what an on-screen session's page
         polls. An administrator sees any request, a member only one they sent, and a member
-        with the reviewer right also one waiting for review and a data request in any status.
+        with the reviewer right also one waiting for review, a data request in any status, and
+        a check whose address is reviewed, waiting or decided (without `proofedName`,
+        `employment` and diplomas).
       responses:
         '200':
           description: The request.
@@ -7303,6 +7307,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/reviews/events:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: Follow the organisation's reviews
+      description: >-
+        Requires the reviewer right (an administrator has it). A Server-Sent Events stream that
+        sends a `reviews` event, with no data, each time a request of the organisation goes into
+        or out of review, its address review moves, or it is purged, so a page re-reads its
+        lists then. A comment line keeps the stream open. It carries nothing about a request:
+        the lists apply the reader's own scope. A member without the right gets 403.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: The reviews changed
+                  value: "event: reviews\ndata: \n\n"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/events:
     parameters:
       - name: slug
@@ -12281,6 +12317,40 @@ components:
             The review of an address the registered (BRP) address did not confirm: `pending`
             until a reviewer confirms or rejects it. Absent on a registered address, without an
             address, and once a pending one was erased.
+        addressReviewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When a reviewer confirmed or rejected the address; absent while it waits.
+        decisions:
+          type: array
+          readOnly: true
+          description: >-
+            What reviewers decided, oldest first: the session's review (`kind: review`, outcome
+            `approved` or `rejected`) and its address (`kind: address`, outcome `confirmed` or
+            `rejected`), each with its reason, reviewer and time, read from the request's audit
+            events. Only on `GET .../requests/{requestID}`, and only for an administrator or a
+            member with the reviewer right; one who reaches the check only for its address gets
+            the address decisions alone. A purge erases the reasons.
+          items:
+            type: object
+            required: [kind, outcome, decidedAt]
+            properties:
+              kind:
+                type: string
+                enum: [review, address]
+              outcome:
+                type: string
+              reason:
+                type: string
+              errorCode:
+                type: string
+              decidedBy:
+                type: string
+                description: The reviewer's name; absent when the wallet decided on its own.
+              decidedAt:
+                type: string
+                format: date-time
         employmentMode:
           type: string
           enum: ['off', required]

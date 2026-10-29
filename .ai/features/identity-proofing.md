@@ -1371,15 +1371,16 @@ Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and th
 overview count what waits).
 The page lists what waits, oldest first (waiting since = `completed_at`, when it
 went to review), under All, Identity checks and Data requests, and beside them
-the addresses waiting for review (§16); Closed lists the
-data requests that ended, whoever ended them. The list carries no mark of a
-reviewer's decision (the audit event is not read), and a data request is also
+the addresses waiting for review (§16). Closed lists:
+- the addresses a reviewer confirmed or rejected, by `addressReviewedAt`;
+- the data requests that ended, whoever ended them.
+
+A data request carries no mark of a reviewer's decision (the audit event is not read), and a data request is also
 rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
 the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
 data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
 that a reviewer decided, and the Outcome column shows the error code in words.
-An identity check has no closed list yet: no identity session goes to review
-today, and a decided address leaves the page (§16). A data
+A decided identity check is not listed: it is closed to a reviewer. A data
 request shows "Answer by" = `purge_at`, a calendar month after it went to review
 (`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
 The list is two reads, `GET .../requests?status=needs_review` and
@@ -1388,8 +1389,28 @@ before its read's cap of 200, and each read is the longest waiting first, so the
 cap leaves out the newest, never the most overdue. A count shows "200+" when
 either read hit its cap (`capped`, returned with the joined list), on the tabs
 and the sidebar. Closed reads
-`?flowKind=data_request&status=approved` and `...&status=rejected`, each narrowed
-before its cap. A row opens its review page, `reviews/{requestId}`: for an identity check
+`?flowKind=data_request&status=approved`, `...&status=rejected`,
+`?addressReview=confirmed` and `...=rejected` (`useClosedReviewsQuery`), each
+narrowed before its cap.
+
+**Live updates, no polling.**
+- A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
+  `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
+  `address_review`, `purged_at` or `ips_session_ended_at` changes, whoever writes
+  the row.
+- `proofing.ReviewFeed` holds one LISTEN per API process (`database.Listen`) and
+  tells that org's subscribers. Each (re)connect of the LISTEN tells all of them.
+- `GET .../identity-proofing/reviews/events` (reviewer route) is a Server-Sent
+  Events stream: a `reviews` event with no data per change, and a comment every
+  25 s so a proxy keeps it open. It ends on `RegisterOnShutdown(feed.Stop)`.
+- The sidebar mounts `useReviewEvents` for a reader who may review: every event,
+  and every (re)open of the stream, invalidates the requests key, so the count,
+  the Reviews tabs, Closed and the Overview re-read at once.
+- The tabs of one browser share one stream (`api/review-events.ts`): over
+  HTTP/1.1 a browser holds at most six connections per host for all its tabs,
+  so a stream per tab left other requests queued until they timed out. The tab
+  holding the Web Lock `review-events:{slug}` opens it and passes each change to
+  the others over a `BroadcastChannel`; the next tab takes over when it closes. A row opens its review page, `reviews/{requestId}`: for an identity check
 (`identity-check-review.tsx`) why it waits, the checks the engine ran, the data
 from the chip (an audited result read) and the decision; for a data request §15.
 A session decision is approve or reject with a required reason; an address
@@ -1435,13 +1456,14 @@ reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
 request waiting for review, and a data request (`data_access`, `data_erasure`)
 in any status. An identity check that is not waiting holds a person's identity
 and photos the right was never given for. So `GET .../requests` lists every
-request in the org only for `?status=needs_review` and `?addressReview=pending`
-(Waiting) and for `?flowKind=data_request` (Closed reads it with
-`status=approved` and `rejected`); any other list is the requests they sent. So
+request in the org only for `?status=needs_review` and `?addressReview=` (Waiting
+reads `pending`, Closed `confirmed` and `rejected`) and for
+`?flowKind=data_request` (Closed reads it with `status=approved` and
+`rejected`); any other list is the requests they sent. So
 are the stats, All people and the member routes.
 - `GET .../requests/{id}` opens one they sent or one in the wider
-  `reachesAddress` scope: that scope plus an approved check whose address waits
-  for review (`mayOpen`, judged on the stored request through
+  `reachesAddress` scope: that scope plus a check whose address is reviewed,
+  waiting or decided (`mayOpen`, judged on the stored request through
   `Service.RequestIf`, before the engine is asked).
   - One reached only for its address (`onlyAddress`) answers without
     `proofedName`, `employment` and diplomas, in the list too (`requestResponseFor`).
@@ -2114,14 +2136,19 @@ and on a Yivi app request against the registered (BRP) address too.
   - `POST .../requests/{id}/address/review` `{decision: confirm|reject,
     reason}`, reviewer route. The reason is required (at most 500
     characters) and audited.
-    - `ownReview` applies to everyone, a platform admin too.
-    - A decided or erased one is 409 `address_not_under_review` to an admin;
-      a reviewer who is not one no longer reaches it, so 404.
-    - The page leaves for Reviews after a decision, as the session review
-      does: the refetch would 404 for such a reviewer.
-  - A reviewer reaches a pending address through `ReviewScope.reachesAddress`
-    (the request and this decision), never `reaches`: that one opens the
-    result, data-matches and export, so the check's identity and photos.
+    - `ownReview` applies to everyone in a deployment, a platform admin too.
+      On a dev stack (`DEV_MODE`) a platform admin may decide their own
+      checks, session and address, to test a review alone (`auth.SelfReview`,
+      `reviewsOwn` on `GET /me`, which drops the "another reviewer decides" note).
+    - A decided or erased one is 409 `address_not_under_review`.
+    - The page leaves for Reviews after a decision, with a toast.
+    - `addressReviewedAt` (`address_reviewed_at`, returned by the update) is
+      when it was decided.
+  - A reviewer reaches a reviewed address, pending or decided, through
+    `ReviewScope.reachesAddress` (the request and this decision), never
+    `reaches`: that one opens the result, data-matches and export, so the
+    check's identity and photos. A decided one stays listed under Closed and
+    opens read-only, still without `proofedName`, `employment` and diplomas.
   - `Purge` clears a pending review (`NULLIF(address_review, 'pending')`),
     keeping a decided one, so no reader masks it; migration
     `20261028150000` clears the ones purged before.
@@ -2133,7 +2160,27 @@ and on a Yivi app request against the registered (BRP) address too.
       org-wide (`listsEveryRequest`). It counts under "Identity checks".
     - `isAddressReview` sends its page to `routes/address-review.tsx`: the
       address, the approved check, Confirm / Reject.
-    - The Sessions page only shows the status, with a link to the review.
+    - The Sessions page shows where it stands, next to the session's status,
+      which is the identity's: "Address in review", "Address confirmed" or
+      "Address rejected" (`AddressNote`). The expanded row adds a link to the
+      review while it waits.
+    - The session's timeline says an entered address goes to a reviewer, and
+      what a reviewer decided, the address or the session review, with the
+      reason for whoever may read it (`sessionEventDetail`).
+    - `memberTimeline` strips the personal keys (`reason`, `subjectName`, ...)
+      inside `before` and `after` too, where the events keep them, as
+      `audit.StripFields` does on a purge.
+  - **Decisions with their reasons.** `GET .../requests/{id}` returns
+    `decisions` (`RequestDecisions`, read from the request's
+    `review_decided` and `address_reviewed` events, oldest first): kind,
+    outcome, reason, reviewer, time.
+    - Only for an admin or a reviewer (`decisionsFor`); one who reaches the
+      check only for its address gets the address decisions alone.
+    - Not stored anywhere else: a purge erases the reasons from the events,
+      and so from here.
+    - The review pages show them under a decided request (`DecisionReasons`):
+      the address review page, and the closed note of a session or data
+      request review.
   - A match the BAG did not check (`unchecked`) is kept as the BRP address,
     so a made-up street with the right postal code and number is not.
   - A mismatch never changes the session: it keeps its status (approved, or

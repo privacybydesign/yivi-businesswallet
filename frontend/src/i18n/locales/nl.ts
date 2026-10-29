@@ -1050,6 +1050,12 @@ export const nl: Translation<typeof en> = {
             "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
         },
         openReview: "Open de beoordeling",
+        tag: {
+          pending: "Adres in beoordeling",
+          confirmed: "Adres bevestigd",
+          rejected: "Adres afgewezen",
+        },
+        toReview: "Gaat naar een beoordelaar",
       },
       diplomas: {
         title: "Diploma's",
@@ -1256,7 +1262,7 @@ export const nl: Translation<typeof en> = {
       reviewOf: "Beoordeel {{name}}",
       viewOf: "Bekijk {{name}}",
       empty: "Er wacht niets op een besluit.",
-      emptyClosed: "Er is nog geen gegevensverzoek afgehandeld.",
+      emptyClosed: "Er is nog niets afgehandeld.",
       identityCheck: "Identiteitscontrole",
       addressCheck: "Adres",
       address: {
@@ -1302,11 +1308,18 @@ export const nl: Translation<typeof en> = {
       outcome: {
         approved: "Goedgekeurd",
         rejected: "Afgewezen",
+        confirmed: "Adres bevestigd",
+        addressRejected: "Adres afgewezen",
       },
       footer:
         "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
       footerWho: "Wie dat heeft: <members>Leden</members>.",
       back: "Terug naar beoordelingen",
+      decided: {
+        by: "Besloten door {{name}} · {{when}}",
+        at: "Besloten · {{when}}",
+        reason: "Reden: {{reason}}",
+      },
       notWaiting: {
         approved:
           "Dit verzoek wacht niet meer op een besluit. Het is goedgekeurd.",

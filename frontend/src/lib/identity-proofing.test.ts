@@ -1816,6 +1816,46 @@ describe("session method and timeline", () => {
     ).toEqual(["eIDAS substantial"]);
     expect(sessionEventDetail({}, t)).toEqual([]);
   });
+
+  it("says an entered address goes to a reviewer, and what was decided", () => {
+    expect(
+      sessionEventDetail({ after: { verification: "registered_mismatch" } }, t),
+    ).toEqual(["Goes to a reviewer"]);
+    expect(
+      sessionEventDetail({ after: { verification: "registered" } }, t),
+    ).toEqual([]);
+    expect(
+      sessionEventDetail(
+        {
+          before: { addressReview: "pending" },
+          after: { addressReview: "rejected", reason: "Moved last year" },
+        },
+        t,
+      ),
+    ).toEqual(["Address rejected", "Reason: Moved last year"]);
+    expect(
+      sessionEventDetail({ after: { addressReview: "confirmed" } }, t),
+    ).toEqual(["Address confirmed"]);
+  });
+
+  it("says what a reviewer decided on the session, and why", () => {
+    expect(
+      sessionEventDetail(
+        {
+          after: {
+            decision: "rejected",
+            reason: "Not the holder",
+            errorCode: "REVIEW_NOT_HOLDER",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      t("identityProofing.rejectionReasons.reviewNotHolder"),
+      "Rejected",
+      "Reason: Not the holder",
+    ]);
+  });
 });
 
 describe("secondsUntil", () => {

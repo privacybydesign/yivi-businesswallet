@@ -45,7 +45,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	COALESCE(r.address_review, ''),
+	COALESCE(r.address_review, ''), r.address_reviewed_at,
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''), ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
@@ -241,7 +241,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -868,6 +868,9 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	}
 	if filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending {
 		order = `r.address_added_at, r.created_at`
+	} else if filter.AddressReview != nil {
+		// A decided one, the latest decision first, as the Closed tab shows it.
+		order = `r.address_reviewed_at DESC, r.created_at DESC`
 	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)

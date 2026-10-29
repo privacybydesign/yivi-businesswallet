@@ -4,7 +4,10 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
-import { useWaitingReviewsQuery } from "../api/identity-proofing.queries";
+import {
+  useReviewEvents,
+  useWaitingReviewsQuery,
+} from "../api/identity-proofing.queries";
 import { waitingOldestFirst } from "../lib/proofing-reviews";
 import { listedCount } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
@@ -225,6 +228,7 @@ export function Sidebar({
   const waiting = useWaitingReviewsQuery(activeSlug ?? "", {
     enabled: activeSlug !== undefined && canReview,
   });
+  useReviewEvents(activeSlug ?? "", activeSlug !== undefined && canReview);
   const navItems = activeSlug
     ? orgNavItems(activeSlug, {
         signing: showSigning,

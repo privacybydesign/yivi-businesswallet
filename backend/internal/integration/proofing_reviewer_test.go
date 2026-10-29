@@ -364,13 +364,16 @@ type addressReviewResp struct {
 	AddressReview string            `json:"addressReview"`
 	ProofedName   string            `json:"proofedName"`
 	Diplomas      []json.RawMessage `json:"diplomas"`
+	// AddressReviewedAt is when the address was decided.
+	AddressReviewedAt string `json:"addressReviewedAt"`
 }
 
 // A reviewer reaches an approved check only for its address waiting for
 // review: they list it and open it without the person's proofed name or
 // diplomas, never its result, and decide the address with a reason. Once
-// decided it is closed to them. A plain member reaches none of it, and the
-// check's sender, an admin, does not decide their own.
+// decided they still list and open it so, under Closed, but cannot decide it
+// again. A plain member reaches none of it, and the check's sender, an admin,
+// does not decide their own.
 func TestProofingAddressReviewFlow(t *testing.T) {
 	env := setup(t)
 	env.proofing.Outcome = proofingprovider.StatusApproved
@@ -426,10 +429,23 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 	if decided.AddressReview != "confirmed" || decided.Status != "approved" || decided.ProofedName != "" {
 		t.Errorf("decided = %+v, want approved, address confirmed, no proofed name", decided)
 	}
-	wantProofingError(t, "a reviewer opening a check whose address was decided", env.do(http.MethodGet, one, nil),
-		http.StatusNotFound, "session_not_found")
+	if decided.AddressReviewedAt == "" {
+		t.Error("decided carries no addressReviewedAt")
+	}
+	closed := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?addressReview=confirmed", nil))
+	if len(closed) != 1 || closed[0].ID != decided.ID || closed[0].ProofedName != "" || len(closed[0].Diplomas) != 0 {
+		t.Errorf("confirmed addresses for a reviewer = %+v, want the one, without proofed name or diplomas", closed)
+	}
+	reopened := decodeJSON[addressReviewResp](t, env.do(http.MethodGet, one, nil))
+	if reopened.AddressReview != "confirmed" || reopened.ProofedName != "" || len(reopened.Diplomas) != 0 {
+		t.Errorf("decided request opened by a reviewer = %+v, want its confirmed address, without proofed name or diplomas", reopened)
+	}
+	for _, route := range []string{"/result", "/data-matches", "/data-export"} {
+		wantProofingError(t, "a reviewer reading "+route+" of a check whose address was decided", env.do(http.MethodGet, one+route, nil),
+			http.StatusNotFound, "session_not_found")
+	}
 	wantProofingError(t, "a reviewer deciding a decided address again", env.postJSON(review,
-		map[string]any{"decision": "reject", "reason": "again"}), http.StatusNotFound, "session_not_found")
+		map[string]any{"decision": "reject", "reason": "again"}), http.StatusConflict, "address_not_under_review")
 }
 
 // assertReviewerReachesOnlyAddress checks that the reviewer, the caller, lists

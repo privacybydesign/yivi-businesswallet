@@ -57,6 +57,10 @@ type Handler struct {
 	// appBranding dresses the hosted page as the Idem app dresses the
 	// session; nil leaves the page the org's own colour only.
 	appBranding *AppBrandingResolver
+	// reviews tells a reviewer's open pages when the org's reviews change.
+	reviews *ReviewFeed
+	// selfReview is who may decide their own identity check.
+	selfReview auth.SelfReview
 }
 
 // SetIdempotencyStore turns on Idempotency-Key handling for the API.
@@ -67,6 +71,14 @@ func (h *Handler) SetIdempotencyStore(s *IdempotencyStore) { h.idempotency = s }
 // one, else the org's theme.
 func (h *Handler) SetAppBranding(r *AppBrandingResolver) { h.appBranding = r }
 
+// SetSelfReview lets whom s allows decide a check they sent or are the
+// subject of.
+func (h *Handler) SetSelfReview(s auth.SelfReview) { h.selfReview = s }
+
+// SetReviewFeed streams the org's review changes from f; without it a stream
+// stays open and quiet.
+func (h *Handler) SetReviewFeed(f *ReviewFeed) { h.reviews = f }
+
 func NewHandler(service *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		service: service, requireUser: requireUser, authorize: authorize,
@@ -74,6 +86,7 @@ func NewHandler(service *Service, requireUser, authorize func(http.Handler) http
 		hostedCalls:  ratelimit.New(hostedCallLimit),
 		authFailures: newAuthFailures(), hostedSources: ratelimit.New(hostedSourceLimit),
 		webhookTests: ratelimit.New(webhookTestLimit), staleLinks: ratelimit.New(staleLinkLimit),
+		reviews: NewReviewFeed(),
 	}
 }
 
@@ -112,6 +125,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.listRequests)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/reviews/events", reviewer(respond.HandlerFunc(h.reviewEvents)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}", member(respond.HandlerFunc(h.getRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/events", member(respond.HandlerFunc(h.requestEvents)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/start", member(respond.HandlerFunc(h.startYivi)))
@@ -359,6 +373,11 @@ type requestResponse struct {
 	// AddressReview is a self-declared address's review: pending, confirmed
 	// or rejected.
 	AddressReview AddressReview `json:"addressReview,omitempty"`
+	// AddressReviewedAt is when a reviewer decided it.
+	AddressReviewedAt *time.Time `json:"addressReviewedAt,omitempty"`
+	// Decisions are the reviewers' decisions, with their reasons: only on
+	// GET .../requests/{id}, for an admin or a reviewer (decisionsFor).
+	Decisions []decisionResponse `json:"decisions,omitempty"`
 	// EmploymentMode is whether the request asks for the UWV
 	// Verzekeringsbericht; Employment what was kept of it, and EmploymentUntil
 	// when the subject can last upload it (absent until the identity is
@@ -390,7 +409,8 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
-		EmploymentMode: employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
+		AddressReviewedAt: req.AddressReviewedAt,
+		EmploymentMode:    employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -447,7 +467,7 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 }
 
 // requestResponseFor is req's response as the caller sees it: a member who
-// reaches it only for its address waiting for review (onlyAddress) gets it
+// reaches it only for its reviewed address (onlyAddress) gets it
 // without its diplomas, proofed name and employment, which deciding the
 // address does not need.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
@@ -459,9 +479,9 @@ func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, no
 	return out.withDiplomas(diplomas)
 }
 
-// onlyAddress reports whether the caller reaches req only for its address
-// waiting for review: not an admin, not its sender, and not on the Reviews
-// page for the request itself.
+// onlyAddress reports whether the caller reaches req only for its reviewed
+// address: not an admin, not its sender, and not on the Reviews page for the
+// request itself.
 func onlyAddress(ctx context.Context, req Request) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return false
@@ -527,8 +547,8 @@ func addressReviewFilterFrom(raw string) (*AddressReview, error) {
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request), or the addresses waiting for one
-// (?addressReview=pending). Any other list is the ones they sent.
+// requests (?flowKind=data_request), or the addresses a reviewer reviews,
+// waiting or decided (?addressReview=). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -537,7 +557,7 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 		return false
 	}
 	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
-		(filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending)
+		filter.AddressReview != nil
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -602,8 +622,46 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, diplomas[req.ID], time.Now()))
+	out := requestResponseFor(r.Context(), req, diplomas[req.ID], time.Now())
+	if out.Decisions, err = h.decisionsFor(r.Context(), req); err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// decisionResponse is a reviewer's decision on the request (Decision).
+type decisionResponse struct {
+	Kind      DecisionKind `json:"kind"`
+	Outcome   string       `json:"outcome"`
+	Reason    string       `json:"reason,omitempty"`
+	ErrorCode string       `json:"errorCode,omitempty"`
+	DecidedBy string       `json:"decidedBy,omitempty"`
+	DecidedAt time.Time    `json:"decidedAt"`
+}
+
+// decisionsFor is what reviewers decided on req, with their reasons, for an
+// admin or a reviewer: those who read the reasons in its timeline and on the
+// Reviews page. A member who only sent it gets none, as their timeline leaves
+// the reasons out. One reached only for its address (onlyAddress) gets the
+// address decisions alone.
+func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
+	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
+		return nil, nil
+	}
+	decisions, err := h.service.RequestDecisions(ctx, req.OrganizationID, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	addressOnly := onlyAddress(ctx, req)
+	out := []decisionResponse{}
+	for _, d := range decisions {
+		if addressOnly && d.Kind != DecisionAddress {
+			continue
+		}
+		out = append(out, decisionResponse(d))
+	}
+	return out, nil
 }
 
 // reviewDecisionRequest is a reviewer's decision on a request under review:
@@ -634,7 +692,7 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	req, err := h.service.DecideReview(r.Context(), orgFromRequest(r).ID, id, string(caller.Email),
 		ReviewInput{
 			Approve: body.Decision == "approve", ErrorCode: body.ErrorCode, Reason: body.Reason, RequestIDs: body.RequestIDs,
-			ReviewerID: caller.ID, Scope: reviewScope(r.Context()),
+			ReviewerID: caller.ID, Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
 		})
 	if err != nil {
 		return mapError(err)
@@ -664,7 +722,7 @@ func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) er
 	}
 	caller := auth.UserFromContext(r.Context())
 	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, caller.ID,
-		reviewScope(r.Context()), body.Decision == "confirm", body.Reason)
+		reviewScope(r.Context()), h.selfReview.Allows(caller.Email), body.Decision == "confirm", body.Reason)
 	if err != nil {
 		return mapError(err)
 	}

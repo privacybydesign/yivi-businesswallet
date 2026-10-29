@@ -15,6 +15,7 @@ import {
   automaticChecks,
   checkDecisionInput,
   checkDecisionProblems,
+  closedAt,
   closedRequests,
   inReviewOldestFirst,
   isAddressReview,
@@ -162,6 +163,30 @@ describe("closedRequests", () => {
       "REVIEW_LAPSED",
     ]);
   });
+
+  it("lists a decided address by when it was decided, not a waiting one", () => {
+    const data = request({
+      id: "data",
+      flowKind: "data_access",
+      status: "approved",
+      completedAt: "2026-10-18T09:00:00Z",
+    });
+    const decided = request({
+      id: "decided",
+      status: "approved",
+      addressReview: "rejected",
+      completedAt: "2026-10-16T09:00:00Z",
+      addressReviewedAt: "2026-10-19T09:00:00Z",
+    });
+    const waiting = request({
+      id: "waiting",
+      status: "approved",
+      addressReview: "pending",
+    });
+    const closed = closedRequests([data, waiting, decided]);
+    expect(closed.map((r) => r.id)).toEqual(["decided", "data"]);
+    expect(closedAt(decided)).toBe("2026-10-19T09:00:00Z");
+  });
 });
 
 describe("closed copy", () => {
@@ -218,17 +243,23 @@ describe("askedAt", () => {
 describe("ownReview", () => {
   const check = request({ requestedById: "sam", subjectUserId: "alex" });
 
+  const reader = (id: string, reviewsOwn = false) => ({ id, reviewsOwn });
+
   it("is a check the reader sent or that is about them", () => {
-    expect(ownReview(check, "sam")).toBe("sent");
-    expect(ownReview(check, "alex")).toBe("subject");
-    expect(ownReview(check, "anna")).toBeUndefined();
+    expect(ownReview(check, reader("sam"))).toBe("sent");
+    expect(ownReview(check, reader("alex"))).toBe("subject");
+    expect(ownReview(check, reader("anna"))).toBeUndefined();
     expect(ownReview(check, undefined)).toBeUndefined();
   });
 
   it("is never a data request, which its link's sender may decide", () => {
     expect(
-      ownReview({ ...check, flowKind: "data_erasure" }, "sam"),
+      ownReview({ ...check, flowKind: "data_erasure" }, reader("sam")),
     ).toBeUndefined();
+  });
+
+  it("is none for a reader the backend lets decide their own", () => {
+    expect(ownReview(check, reader("sam", true))).toBeUndefined();
   });
 });
 

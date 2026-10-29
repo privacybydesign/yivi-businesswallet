@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { followReviewEvents } from "./review-events";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
   activateProofingFlowVersion,
@@ -52,6 +53,7 @@ import {
   listProofingPauses,
   setPlatformProofingPause,
   getProofingRequestResult,
+  reviewEventsUrl,
   getProofingYiviDisclosure,
   newProofingClaimLink,
   startProofingYivi,
@@ -117,9 +119,6 @@ import {
 // flight is re-fetched until it settles. The recipient's own page polls faster:
 // it is watching one phone finish.
 const REQUESTS_POLL_INTERVAL_MS = 10_000;
-// What waits for a decision changes when a person finishes a data request, which
-// no page of the reviewer is watching: the sidebar's count is re-read now and then.
-const WAITING_REVIEWS_POLL_INTERVAL_MS = 60_000;
 // The on-screen page is watching one phone finish, so it re-reads its request
 // and the Yivi disclosure much sooner.
 const ON_SCREEN_POLL_INTERVAL_MS = 2_000;
@@ -504,6 +503,32 @@ export function useMemberRequestsQuery(
   });
 }
 
+// Re-reads the org's requests each time the backend says its reviews changed,
+// and each time the stream (re)connects, for what changed while it was down:
+// the sidebar's count and the Reviews lists follow at once, with no timer.
+// Mounted once, by the sidebar, for a reader who may review. The browser's
+// tabs share one stream (followReviewEvents).
+export function useReviewEvents(slug: string, enabled: boolean): void {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!enabled || slug === "") {
+      return;
+    }
+    return followReviewEvents(
+      slug,
+      () =>
+        new EventSource(reviewEventsUrl(slug), {
+          withCredentials: true,
+        }),
+      () => {
+        void queryClient.invalidateQueries({
+          queryKey: proofingRequestsQueryKey(slug),
+        });
+      },
+    );
+  }, [queryClient, slug, enabled]);
+}
+
 // What waits for a reviewer, and whether either read hit its cap, so a count
 // of it is only a lower bound.
 export interface WaitingReviews {
@@ -513,7 +538,8 @@ export interface WaitingReviews {
 
 // The requests held in review, the longest in review first: what waits for a
 // decision. The backend caps the list after that order, so what it leaves out
-// is the newest. Under the requests key, so a decision refreshes it. A request
+// is the newest. Under the requests key, so a decision, and the review stream
+// (useReviewEvents), refresh it. A request
 // whose engine session ended is still held here but reads expired: the caller
 // keeps the ones that still read needs_review.
 export function useWaitingReviewsQuery(
@@ -535,30 +561,33 @@ export function useWaitingReviewsQuery(
       };
     },
     enabled: options.enabled && slug !== "",
-    refetchInterval: WAITING_REVIEWS_POLL_INTERVAL_MS,
   });
 }
 
-// The data requests that ended, approved or rejected: two reads, each narrowed
-// by the backend before its cap, so a busy org's identity checks never push
-// them off. Under the requests key, so a decision refreshes it.
-export function useClosedDataRequestsQuery(
+// What was closed: the data requests that ended, approved or rejected, and the
+// addresses a reviewer confirmed or rejected. Four reads, each narrowed by the
+// backend before its cap, so a busy org's identity checks never push them
+// off. Under the requests key, so a decision refreshes it.
+export function useClosedReviewsQuery(
   slug: string,
   options: { enabled: boolean },
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), "closed-data"],
+    queryKey: [...proofingRequestsQueryKey(slug), "closed"],
     queryFn: async ({ signal }) => {
-      const [approved, rejected] = await Promise.all(
-        (["approved", "rejected"] as const).map((status) =>
+      const reads = await Promise.all([
+        ...(["approved", "rejected"] as const).map((status) =>
           getProofingRequests(
             slug,
             { status, flowKind: "data_request" },
             signal,
           ),
         ),
-      );
-      return [...approved, ...rejected];
+        ...(["confirmed", "rejected"] as const).map((addressReview) =>
+          getProofingRequests(slug, { addressReview }, signal),
+        ),
+      ]);
+      return reads.flat();
     },
     enabled: options.enabled && slug !== "",
   });

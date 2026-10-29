@@ -1023,6 +1023,12 @@ export const en = {
             "A reviewer rejected the address. The identity check is not affected.",
         },
         openReview: "Open the review",
+        tag: {
+          pending: "Address in review",
+          confirmed: "Address confirmed",
+          rejected: "Address rejected",
+        },
+        toReview: "Goes to a reviewer",
       },
       diplomas: {
         title: "Diplomas",
@@ -1226,7 +1232,7 @@ export const en = {
       reviewOf: "Review {{name}}",
       viewOf: "View {{name}}",
       empty: "Nothing waits for a decision.",
-      emptyClosed: "No data request has been closed yet.",
+      emptyClosed: "Nothing has been closed yet.",
       identityCheck: "Identity check",
       addressCheck: "Address",
       address: {
@@ -1268,10 +1274,17 @@ export const en = {
       outcome: {
         approved: "Approved",
         rejected: "Rejected",
+        confirmed: "Address confirmed",
+        addressRejected: "Address rejected",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",
       back: "Back to reviews",
+      decided: {
+        by: "Decided by {{name}} · {{when}}",
+        at: "Decided · {{when}}",
+        reason: "Reason: {{reason}}",
+      },
       notWaiting: {
         approved:
           "This request no longer waits for a decision. It was approved.",
