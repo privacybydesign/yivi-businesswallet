@@ -2336,3 +2336,36 @@ export function timelineActor(
   if (label) return label;
   return detail.length > 0 ? null : t("auditLog.system");
 }
+
+// The last decision on a session's address in its timeline: who decided, when
+// and why (absent for a reader the backend leaves the reason out for).
+export interface AddressDecision {
+  by: string | null;
+  at: string;
+  reason?: string;
+}
+
+export function latestAddressDecision(
+  events: readonly AuditEvent[],
+): AddressDecision | undefined {
+  const event = events.findLast(
+    (e) => e.action === "identity_proofing.address_reviewed",
+  );
+  if (event === undefined) {
+    return undefined;
+  }
+  const after = event.metadata.after;
+  const reason =
+    typeof after === "object" &&
+    after !== null &&
+    "reason" in after &&
+    typeof after.reason === "string" &&
+    after.reason !== ""
+      ? after.reason
+      : undefined;
+  return {
+    by: event.actor ? fullName(event.actor) : null,
+    at: event.occurredAt,
+    reason,
+  };
+}

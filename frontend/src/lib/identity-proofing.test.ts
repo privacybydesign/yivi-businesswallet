@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { AuditEvent } from "../api/organization";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/http";
@@ -112,6 +113,7 @@ import {
   ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
+  latestAddressDecision,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -3017,5 +3019,43 @@ describe("hosted page languages", () => {
   it("round-trips none and a subset", () => {
     expect(savedLocales(selectedLocales([]))).toEqual([]);
     expect(savedLocales(selectedLocales(["en"]))).toEqual(["en"]);
+  });
+});
+
+describe("latestAddressDecision", () => {
+  const event = (over: Partial<AuditEvent>): AuditEvent => ({
+    id: "e",
+    occurredAt: "2026-10-29T10:00:00Z",
+    action: "identity_proofing.address_reviewed",
+    targetType: "identity_proofing_request",
+    targetId: "r1",
+    metadata: {},
+    actor: null,
+    actorLabel: null,
+    ...over,
+  });
+
+  it("is the last address decision, with its reason", () => {
+    const got = latestAddressDecision([
+      event({ id: "a", metadata: { after: { reason: "first" } } }),
+      event({ id: "x", action: "identity_proofing.result_read" }),
+      event({
+        id: "b",
+        occurredAt: "2026-10-29T11:00:00Z",
+        metadata: { after: { addressReview: "rejected", reason: "moved" } },
+      }),
+    ]);
+    expect(got).toEqual({
+      by: null,
+      at: "2026-10-29T11:00:00Z",
+      reason: "moved",
+    });
+  });
+
+  it("has no reason where the backend left it out, and none without a decision", () => {
+    expect(
+      latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
+    ).toBeUndefined();
+    expect(latestAddressDecision([])).toBeUndefined();
   });
 });

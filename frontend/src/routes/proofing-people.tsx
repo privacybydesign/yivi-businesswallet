@@ -41,6 +41,7 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
+  latestAddressDecision,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -653,20 +654,64 @@ function AddressReviewNote({
     return null;
   }
   return (
-    <p className={HINT}>
-      {t(`identityProofing.sessions.address.review.${review}`)}
-      {isAdmin && review === "pending" && (
-        <>
-          {" "}
-          <Link
-            to={reviewPath(slug, request.id)}
-            className="text-link underline"
-          >
-            {t("identityProofing.sessions.address.openReview")}
-          </Link>
-        </>
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>
+        {t(`identityProofing.sessions.address.review.${review}`)}
+        {isAdmin && review === "pending" && (
+          <>
+            {" "}
+            <Link
+              to={reviewPath(slug, request.id)}
+              className="text-link underline"
+            >
+              {t("identityProofing.sessions.address.openReview")}
+            </Link>
+          </>
+        )}
+      </p>
+      {review !== "pending" && (
+        <AddressDecisionNote slug={slug} request={request} />
       )}
-    </p>
+    </div>
+  );
+}
+
+// Who decided the address, when and why, from the session's timeline, which
+// the open row reads anyway.
+function AddressDecisionNote({
+  slug,
+  request,
+}: Readonly<{
+  slug: string;
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const events = useProofingRequestEventsQuery(slug, request);
+  const decision = latestAddressDecision(events.data ?? []);
+  if (decision === undefined) {
+    return null;
+  }
+  return (
+    <>
+      <p className={HINT}>
+        {decision.by
+          ? t("identityProofing.reviews.decided.by", {
+              name: decision.by,
+              when: formatWhen(decision.at),
+            })
+          : t("identityProofing.reviews.decided.at", {
+              when: formatWhen(decision.at),
+            })}
+      </p>
+      {decision.reason && (
+        <p className="text-ink text-[13px]">
+          {t("identityProofing.reviews.decided.reason", {
+            reason: decision.reason,
+          })}
+        </p>
+      )}
+    </>
   );
 }
 
