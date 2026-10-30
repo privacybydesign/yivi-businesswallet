@@ -334,17 +334,7 @@ func TestBewindCredentialsAreWellFormed(t *testing.T) {
 		seenVCTs[s.VCT] = true
 		assertLangs(t, s.VCT+" display", toLangs(s.Display))
 
-		keys := map[string]bool{}
-		for _, a := range s.Attributes {
-			if keys[a.Key] {
-				t.Errorf("%s attribute key %q is duplicated", s.VCT, a.Key)
-			}
-			keys[a.Key] = true
-			if !supported[a.Type] {
-				t.Errorf("%s attribute %q has unsupported type %q", s.VCT, a.Key, a.Type)
-			}
-			assertLangs(t, s.VCT+" attribute "+a.Key+" display", toLangsLabel(a.Display))
-		}
+		keys := assertBewindAttributes(t, s, supported)
 		for key := range c.template.DefaultAttributes {
 			if !keys[key] {
 				t.Errorf("%s template default %q is not a schema attribute", s.VCT, key)
@@ -354,4 +344,22 @@ func TestBewindCredentialsAreWellFormed(t *testing.T) {
 			t.Errorf("%s template sources: %v", s.VCT, err)
 		}
 	}
+}
+
+// assertBewindAttributes checks s's attributes have unique keys, a supported
+// type and both languages, and returns the keys.
+func assertBewindAttributes(t *testing.T, s attestation.Schema, supported map[string]bool) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	for _, a := range s.Attributes {
+		if keys[a.Key] {
+			t.Errorf("%s attribute key %q is duplicated", s.VCT, a.Key)
+		}
+		keys[a.Key] = true
+		if !supported[a.Type] {
+			t.Errorf("%s attribute %q has unsupported type %q", s.VCT, a.Key, a.Type)
+		}
+		assertLangs(t, s.VCT+" attribute "+a.Key+" display", toLangsLabel(a.Display))
+	}
+	return keys
 }

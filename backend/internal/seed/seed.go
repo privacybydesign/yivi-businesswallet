@@ -2,7 +2,7 @@ package seed
 
 import (
 	"context"
-	_ "embed"
+	_ "embed" // Gemeente Nijmegen's logo
 	"errors"
 	"fmt"
 	"log/slog"
@@ -417,7 +417,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	if err := seedEmailSettings(ctx, pool, demoOrg.ID, "Yivi B.V.", "noreply@yivi.app"); err != nil {
+	if err := seedEmailSettings(ctx, pool, demoOrg.ID, yiviOrg.name, "noreply@yivi.app"); err != nil {
 		return err
 	}
 	if err := seedIssuerSettings(ctx, pool, demoOrg.ID, "yivi", "Yivi B.V."); err != nil {
@@ -1110,14 +1110,17 @@ var nijmegenApvSchema = attestation.Schema{
 //go:embed assets/nijmegen-logo.png
 var nijmegenLogoPNG []byte
 
+// nijmegenRed is nijmegen.nl's brand red, its web manifest's theme colour.
+const nijmegenRed = "#A80A2D"
+
 // nijmegenTheme is nijmegen.nl's red (the web manifest's theme colour, and the
 // site's darker shade for the chrome), so the dev demo's municipality is told
 // apart from the court and the office at a glance, logo in the org switcher
 // included. Dev seed only: on staging the partner sets its own theme.
 var nijmegenTheme = &demoTheme{
 	settings: themesettings.SettingsInput{
-		PrimaryColor: "#A80A2D", AccentColor: "#830823", TextColor: "#2B1A1E", SurfaceColor: "#FBF6F7",
-		BorderColor: "#E8D5DA", LinkColor: "#A80A2D", SidebarColor: "#830823", TopbarColor: "#A80A2D",
+		PrimaryColor: nijmegenRed, AccentColor: "#830823", TextColor: "#2B1A1E", SurfaceColor: "#FBF6F7",
+		BorderColor: "#E8D5DA", LinkColor: nijmegenRed, SidebarColor: "#830823", TopbarColor: nijmegenRed,
 		FontFamily: fontSystemUI,
 	},
 	logo: nijmegenLogoPNG,

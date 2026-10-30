@@ -764,7 +764,6 @@ function RequestForm({
                   )}
                   aria-label={t("credentialRequests.form.templateName")}
                   aria-invalid={templateError ? true : undefined}
-                  autoFocus
                 />
                 {templateError && (
                   <span role="alert" className="text-error text-[12px]">

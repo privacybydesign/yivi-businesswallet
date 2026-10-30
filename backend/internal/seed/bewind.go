@@ -2,7 +2,7 @@ package seed
 
 import (
 	"context"
-	_ "embed"
+	_ "embed" // the court's and the office's logos
 	"fmt"
 	"log/slog"
 	"slices"
@@ -62,22 +62,28 @@ var (
 	waalstadLogoSVG []byte
 )
 
+// The court's and the office's colours.
+const (
+	courtNavy  = "#1B2A41"
+	officeTeal = "#0B6E5B"
+)
+
 // The court and the office get clearly different chrome, so a screen recording
 // shows at a glance whose wallet is on screen: the court in navy and gold, the
 // office in teal. Gemeente Nijmegen keeps whatever theme it has.
 var (
 	bewindCourtTheme = &demoTheme{
 		settings: themesettings.SettingsInput{
-			PrimaryColor: "#1B2A41", AccentColor: "#8A6A1F", TextColor: "#1B2A41", SurfaceColor: "#F6F4EE",
-			BorderColor: "#DAD4C3", LinkColor: "#1B2A41", SidebarColor: "#1B2A41", TopbarColor: "#1B2A41",
+			PrimaryColor: courtNavy, AccentColor: "#8A6A1F", TextColor: courtNavy, SurfaceColor: "#F6F4EE",
+			BorderColor: "#DAD4C3", LinkColor: courtNavy, SidebarColor: courtNavy, TopbarColor: courtNavy,
 			FontFamily: fontSystemUI,
 		},
 		logo: rechtbankLogoSVG,
 	}
 	bewindOfficeTheme = &demoTheme{
 		settings: themesettings.SettingsInput{
-			PrimaryColor: "#0B6E5B", AccentColor: "#0B6E5B", TextColor: "#14302A", SurfaceColor: "#F2F8F6",
-			BorderColor: "#CFE3DD", LinkColor: "#0B6E5B", SidebarColor: "#0B4F45", TopbarColor: "#0B6E5B",
+			PrimaryColor: officeTeal, AccentColor: officeTeal, TextColor: "#14302A", SurfaceColor: "#F2F8F6",
+			BorderColor: "#CFE3DD", LinkColor: officeTeal, SidebarColor: "#0B4F45", TopbarColor: officeTeal,
 			FontFamily: fontOpenSans,
 		},
 		logo: waalstadLogoSVG,
@@ -117,6 +123,13 @@ type bewindCredential struct {
 	template attestation.Template
 }
 
+// The demo's credential names: each one's Dutch display name and its template's.
+const (
+	beschikkingName = "Beschikking beschermingsbewind"
+	toekenningName  = "Toekenning bijzondere bijstand bewindskosten"
+	medewerkerName  = "Medewerker beschermingsbewind"
+)
+
 // Attribute keys the templates pre-fill, shared by the court's and the
 // municipality's schemas.
 const (
@@ -124,62 +137,64 @@ const (
 	attrBewindvoerderKVK  = "bewindvoerder_kvk"
 )
 
+// attr is one attribute with its English label (also its default label) and
+// its Dutch one.
+func attr(key, typ, en, nl string, required bool) attestation.AttributeDef {
+	return attestation.AttributeDef{
+		Key: key, Label: en, Type: typ, Required: required,
+		Display: []attestation.LocalizedLabel{{Lang: "en", Label: en}, {Lang: "nl", Label: nl}},
+	}
+}
+
+// The client and the office, as both the court's beschikking and Nijmegen's
+// decision name them.
+var (
+	attrClientName = attr("rechthebbende_naam", attestation.AttributeTypeString, "Client name", "Naam rechthebbende", true)
+	attrClientBSN  = attr("rechthebbende_bsn", attestation.AttributeTypeString, "Client BSN", "BSN rechthebbende", true)
+	attrOfficeName = attr(attrBewindvoerderNaam, attestation.AttributeTypeString, "Administrator", "Bewindvoerder", true)
+	attrOfficeKVK  = attr(attrBewindvoerderKVK, attestation.AttributeTypeString, "Administrator KVK number", "KVK-nummer bewindvoerder", true)
+)
+
+// bewindOfficeSources pre-fills the office's name and KVK number from the
+// recipient organization in the issue wizard.
+var bewindOfficeSources = map[string]string{
+	attrBewindvoerderNaam: attestation.SourceOrgName,
+	attrBewindvoerderKVK:  attestation.SourceOrgKVKNumber,
+}
+
 // bewindCourtCredential is the beschikking beschermingsbewind: the court's
 // appointment of the office as bewindvoerder for one client (art. 1:431 BW).
 // Revoking it is the court ending or transferring the bewind.
 var bewindCourtCredential = bewindCredential{
 	schema: attestation.Schema{
 		VCT:                "nl.rechtspraak.beschermingsbewind",
-		DisplayName:        "Beschikking beschermingsbewind",
+		DisplayName:        beschikkingName,
 		CredentialConfigID: "RechtbankBeschermingsbewindSdJwt",
 		SubjectType:        attestation.SubjectOrganization,
 		Display: []attestation.LocalizedName{
 			{Lang: "en", Name: "Protective administration order"},
-			{Lang: "nl", Name: "Beschikking beschermingsbewind"},
+			{Lang: "nl", Name: beschikkingName},
 		},
 		Attributes: []attestation.AttributeDef{
-			{Key: "zaaknummer", Label: "Case number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Case number"}, {Lang: "nl", Label: "Zaaknummer"},
-			}},
-			{Key: "beschikkingsdatum", Label: "Date of order", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Date of order"}, {Lang: "nl", Label: "Datum beschikking"},
-			}},
-			{Key: "kantongerecht", Label: "Court", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Court"}, {Lang: "nl", Label: "Kantongerecht"},
-			}},
-			{Key: "rechthebbende_naam", Label: "Client name", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Client name"}, {Lang: "nl", Label: "Naam rechthebbende"},
-			}},
-			{Key: "rechthebbende_geboortedatum", Label: "Client date of birth", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Client date of birth"}, {Lang: "nl", Label: "Geboortedatum rechthebbende"},
-			}},
-			{Key: "rechthebbende_bsn", Label: "Client BSN", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Client BSN"}, {Lang: "nl", Label: "BSN rechthebbende"},
-			}},
-			{Key: attrBewindvoerderNaam, Label: "Administrator", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Administrator"}, {Lang: "nl", Label: "Bewindvoerder"},
-			}},
-			{Key: attrBewindvoerderKVK, Label: "Administrator KVK number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Administrator KVK number"}, {Lang: "nl", Label: "KVK-nummer bewindvoerder"},
-			}},
-			{Key: "omvang", Label: "Scope", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Scope"}, {Lang: "nl", Label: "Omvang bewind"},
-			}},
-			{Key: "ingangsdatum", Label: "Effective from", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Effective from"}, {Lang: "nl", Label: "Ingangsdatum"},
-			}},
+			attr("zaaknummer", attestation.AttributeTypeString, "Case number", "Zaaknummer", true),
+			attr("beschikkingsdatum", attestation.AttributeTypeDate, "Date of order", "Datum beschikking", true),
+			attr("kantongerecht", attestation.AttributeTypeString, "Court", "Kantongerecht", true),
+			attrClientName,
+			attr("rechthebbende_geboortedatum", attestation.AttributeTypeDate, "Client date of birth", "Geboortedatum rechthebbende", true),
+			attrClientBSN,
+			attrOfficeName,
+			attrOfficeKVK,
+			attr("omvang", attestation.AttributeTypeString, "Scope", "Omvang bewind", true),
+			attr("ingangsdatum", attestation.AttributeTypeDate, "Effective from", "Ingangsdatum", true),
 		},
 	},
 	template: attestation.Template{
-		Name: "Beschikking beschermingsbewind",
+		Name: beschikkingName,
 		DefaultAttributes: map[string]string{
 			"kantongerecht": "Rechtbank Gelderland, locatie Nijmegen",
 			"omvang":        "Alle goederen die (zullen) toebehoren aan de rechthebbende",
 		},
-		AttributeSources: map[string]string{
-			attrBewindvoerderNaam: attestation.SourceOrgName,
-			attrBewindvoerderKVK:  attestation.SourceOrgKVKNumber,
-		},
+		AttributeSources: bewindOfficeSources,
 	},
 }
 
@@ -189,55 +204,32 @@ var bewindCourtCredential = bewindCredential{
 var bewindNijmegenCredential = bewindCredential{
 	schema: attestation.Schema{
 		VCT:                "nl.nijmegen.bijzondere-bijstand.bewindskosten",
-		DisplayName:        "Toekenning bijzondere bijstand bewindskosten",
+		DisplayName:        toekenningName,
 		CredentialConfigID: "NijmegenBijzondereBijstandBewindskostenSdJwt",
 		SubjectType:        attestation.SubjectOrganization,
 		Display: []attestation.LocalizedName{
 			{Lang: "en", Name: "Special assistance grant for administration fees"},
-			{Lang: "nl", Name: "Toekenning bijzondere bijstand bewindskosten"},
+			{Lang: "nl", Name: toekenningName},
 		},
 		Attributes: []attestation.AttributeDef{
-			{Key: "besluitnummer", Label: "Decision number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Decision number"}, {Lang: "nl", Label: "Besluitnummer"},
-			}},
-			{Key: "besluitdatum", Label: "Decision date", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Decision date"}, {Lang: "nl", Label: "Besluitdatum"},
-			}},
-			{Key: "regeling", Label: "Scheme", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Scheme"}, {Lang: "nl", Label: "Regeling"},
-			}},
-			{Key: "rechthebbende_naam", Label: "Client name", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Client name"}, {Lang: "nl", Label: "Naam rechthebbende"},
-			}},
-			{Key: "rechthebbende_bsn", Label: "Client BSN", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Client BSN"}, {Lang: "nl", Label: "BSN rechthebbende"},
-			}},
-			{Key: attrBewindvoerderNaam, Label: "Administrator", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Administrator"}, {Lang: "nl", Label: "Bewindvoerder"},
-			}},
-			{Key: attrBewindvoerderKVK, Label: "Administrator KVK number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Administrator KVK number"}, {Lang: "nl", Label: "KVK-nummer bewindvoerder"},
-			}},
-			{Key: "bedrag_per_maand", Label: "Amount per month (EUR)", Type: attestation.AttributeTypeNumber, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Amount per month (EUR)"}, {Lang: "nl", Label: "Bedrag per maand (EUR)"},
-			}},
-			{Key: "geldig_van", Label: "Valid from", Type: attestation.AttributeTypeDate, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Valid from"}, {Lang: "nl", Label: "Geldig van"},
-			}},
-			{Key: "geldig_tot", Label: "Valid until", Type: attestation.AttributeTypeDate, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Valid until"}, {Lang: "nl", Label: "Geldig tot"},
-			}},
+			attr("besluitnummer", attestation.AttributeTypeString, "Decision number", "Besluitnummer", true),
+			attr("besluitdatum", attestation.AttributeTypeDate, "Decision date", "Besluitdatum", true),
+			attr("regeling", attestation.AttributeTypeString, "Scheme", "Regeling", true),
+			attrClientName,
+			attrClientBSN,
+			attrOfficeName,
+			attrOfficeKVK,
+			attr("bedrag_per_maand", attestation.AttributeTypeNumber, "Amount per month (EUR)", "Bedrag per maand (EUR)", false),
+			attr("geldig_van", attestation.AttributeTypeDate, "Valid from", "Geldig van", true),
+			attr("geldig_tot", attestation.AttributeTypeDate, "Valid until", "Geldig tot", false),
 		},
 	},
 	template: attestation.Template{
-		Name: "Toekenning bijzondere bijstand bewindskosten",
+		Name: toekenningName,
 		DefaultAttributes: map[string]string{
 			"regeling": "Bijzondere bijstand kosten beschermingsbewind (art. 35 Participatiewet)",
 		},
-		AttributeSources: map[string]string{
-			attrBewindvoerderNaam: attestation.SourceOrgName,
-			attrBewindvoerderKVK:  attestation.SourceOrgKVKNumber,
-		},
+		AttributeSources: bewindOfficeSources,
 	},
 }
 
@@ -248,33 +240,23 @@ var bewindNijmegenCredential = bewindCredential{
 var bewindOfficeCredential = bewindCredential{
 	schema: attestation.Schema{
 		VCT:                "nl.waalstad.bewindvoering.medewerker",
-		DisplayName:        "Medewerker beschermingsbewind",
+		DisplayName:        medewerkerName,
 		CredentialConfigID: "WaalstadMedewerkerBewindvoeringSdJwt",
 		SubjectType:        attestation.SubjectNaturalPerson,
 		Display: []attestation.LocalizedName{
 			{Lang: "en", Name: "Protective administration officer"},
-			{Lang: "nl", Name: "Medewerker beschermingsbewind"},
+			{Lang: "nl", Name: medewerkerName},
 		},
 		Attributes: []attestation.AttributeDef{
-			{Key: "naam", Label: "Full name", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Full name"}, {Lang: "nl", Label: "Volledige naam"},
-			}},
-			{Key: "functie", Label: "Role", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Role"}, {Lang: "nl", Label: "Functie"},
-			}},
-			{Key: "team", Label: "Team", Type: attestation.AttributeTypeString, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Team"}, {Lang: "nl", Label: "Team"},
-			}},
-			{Key: "kantoor_naam", Label: "Office", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Office"}, {Lang: "nl", Label: "Bewindvoeringskantoor"},
-			}},
-			{Key: "kantoor_kvk", Label: "Office KVK number", Type: attestation.AttributeTypeString, Required: true, Display: []attestation.LocalizedLabel{
-				{Lang: "en", Label: "Office KVK number"}, {Lang: "nl", Label: "KVK-nummer kantoor"},
-			}},
+			attr("naam", attestation.AttributeTypeString, "Full name", "Volledige naam", true),
+			attr("functie", attestation.AttributeTypeString, "Role", "Functie", false),
+			attr("team", attestation.AttributeTypeString, "Team", "Team", false),
+			attr("kantoor_naam", attestation.AttributeTypeString, "Office", "Bewindvoeringskantoor", true),
+			attr("kantoor_kvk", attestation.AttributeTypeString, "Office KVK number", "KVK-nummer kantoor", true),
 		},
 	},
 	template: attestation.Template{
-		Name: "Medewerker beschermingsbewind",
+		Name: medewerkerName,
 		DefaultAttributes: map[string]string{
 			"kantoor_naam": bewindOfficeOrg.name,
 			"kantoor_kvk":  bewindOfficeOrg.kvkNumber,
@@ -291,10 +273,10 @@ var bewindOfficeCredential = bewindCredential{
 // before paying the fees: just enough of the beschikking to tie the office to
 // its resident and show the bewind is in force and covers their finances.
 var bewindRequestTemplate = openid4vprequester.NewTemplate{
-	Name: "Beschikking beschermingsbewind",
+	Name: beschikkingName,
 	Credentials: []openid4vprequester.CredentialRequest{{
 		VCT:    bewindCourtCredential.schema.VCT,
-		Claims: []string{"zaaknummer", "rechthebbende_bsn", attrBewindvoerderKVK, "omvang", "ingangsdatum"},
+		Claims: []string{"zaaknummer", attrClientBSN.Key, attrBewindvoerderKVK, "omvang", "ingangsdatum"},
 	}},
 }
 
