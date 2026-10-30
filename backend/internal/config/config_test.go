@@ -4,6 +4,8 @@ import (
 	"maps"
 	"strings"
 	"testing"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 )
 
 // loadWith sets the given environment for one Load call, plus the DATABASE_URL
@@ -440,6 +442,28 @@ func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
 	}
 }
 
+// The ID Scan key id and secret go together, and the API defaults to CM.com's.
+func TestLoadIDScan(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"key id alone": {envIDScanKeyID: "key"},
+		"secret alone": {envIDScanSecret: "secret"},
+		"no api url":   {envIDScanAPIURL: "api.cm.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("%v loaded, want an error", env)
+			}
+		})
+	}
+	c, err := loadWith(t, map[string]string{envIDScanKeyID: "key", envIDScanSecret: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.IDScanKeyID != "key" || c.IDScanSecret != "secret" || c.IDScanAPIURL != idscan.DefaultBaseURL {
+		t.Errorf("ID Scan = %q, %q, %q", c.IDScanKeyID, c.IDScanSecret, c.IDScanAPIURL)
+	}
+}
+
 // DEV_MODE needs APP_BASE_URL set: its default is localhost, so a deployment
 // that left it out would otherwise pass the localhost check.
 func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
@@ -458,7 +482,7 @@ func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 		"http://proofing.example.org":  false,
 		"http://192.168.1.20:8080":     false,
 	} {
-		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL} {
+		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
 					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
