@@ -14,7 +14,7 @@ func TestNormalizeBaseURL(t *testing.T) {
 	}{
 		{name: "empty is kept empty", in: "  ", want: ""},
 		{name: "https is accepted", in: "https://qtsp.example.org", want: "https://qtsp.example.org"},
-		{name: "http localhost sample", in: "http://localhost:8085", want: "http://localhost:8085"},
+		{name: "http localhost accepted", in: "http://localhost:8085", want: "http://localhost:8085"},
 		{name: "host is lowercased", in: "https://QTSP.Example.ORG/csc", want: "https://qtsp.example.org/csc"},
 		{name: "trailing slash dropped", in: "https://qtsp.example.org/", want: "https://qtsp.example.org"},
 		{name: "fragment dropped", in: "https://qtsp.example.org/csc#frag", want: "https://qtsp.example.org/csc"},
