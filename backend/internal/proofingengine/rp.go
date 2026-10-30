@@ -647,18 +647,24 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	if b := res.Biometrics; b != nil {
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
 	}
-	if c := res.DocumentCheck; c != nil {
-		ev.DocumentVerdict, ev.DocumentScore = c.Verdict, c.Score
-		ev.DocumentFields, ev.DocumentZones = checkOf(c.FieldsValid), checkOf(c.ZonesMatch)
-		if ev.DocumentKind == "" {
-			ev.DocumentKind = c.DocumentKind
-		}
-	}
+	addDocumentCheckEvidence(ev, res.DocumentCheck)
 	out.Evidence = ev
 	out.AgeOver = res.AgeOver
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return out, nil
+}
+
+// addDocumentCheckEvidence adds the document scan's check c, if any, to ev.
+func addDocumentCheckEvidence(ev *pp.Evidence, c *documentCheckInfo) {
+	if c == nil {
+		return
+	}
+	ev.DocumentVerdict, ev.DocumentScore = c.Verdict, c.Score
+	ev.DocumentFields, ev.DocumentZones = checkOf(c.FieldsValid), checkOf(c.ZonesMatch)
+	if ev.DocumentKind == "" {
+		ev.DocumentKind = c.DocumentKind
+	}
 }
 
 // imageView is an image in a result.

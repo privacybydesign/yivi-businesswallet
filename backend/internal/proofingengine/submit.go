@@ -258,6 +258,11 @@ func sessionOutcome(fd *flow.FlowDefinition, sess session.Session, req appResult
 	if failed, code := flowComplianceFailure(fd, sess, req, now); failed {
 		return session.StatusRejected, code, reasonFlowPolicyViolation
 	}
+	// An age check the evidence did not answer (a scan that read no date of
+	// birth) is refused, as a Yivi disclosure without the age claim is.
+	if asksAge(fd) && req.AgeOver == nil {
+		return session.StatusRejected, errCodeAgeNotDisclosed, reasonFlowPolicyViolation
+	}
 	if failed, code := faceStepFailure(fd, req, checks); failed {
 		return session.StatusRejected, code, reasonCheckFailed
 	}
