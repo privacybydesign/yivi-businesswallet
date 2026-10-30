@@ -37,6 +37,7 @@ type Provider interface {
 	SessionStatus(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SessionResult(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SubmitReference(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
+	SubmitDocumentPhoto(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, photo proofingprovider.DocumentPhoto) error
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
 	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
@@ -75,6 +76,8 @@ type requestStore interface {
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
+	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
+	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
@@ -192,6 +195,9 @@ type Service struct {
 	readChecks *readThrottle
 	// hostedBaseURL is the public page a hosted link's token is appended to.
 	hostedBaseURL string
+	// documentScanner takes a document photo in the browser; nil sends no
+	// flow that takes one.
+	documentScanner documentScanner
 	// dataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	dataRequests dataRequestStore
@@ -739,6 +745,9 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	if plan.employment.asked() && s.employmentChecker == nil {
 		return Sent{}, ErrNoEmploymentChecker
 	}
+	if takesDocumentPhoto(plan.flow) && s.documentScanner == nil {
+		return Sent{}, ErrNoDocumentScanner
+	}
 	if in.Channel == ChannelHosted {
 		return s.createHosted(ctx, org, by, in, subject, *settings, plan)
 	}
@@ -754,7 +763,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	id := uuid.New()
 	override := time.Duration(flow.RetentionOverrideSeconds) * time.Second
 	input := proofingprovider.SessionInput{
-		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: in.Method,
+		FlowID: flow.ID, ClientReference: id.String(), TTL: ttl, Method: plan.method,
 		Language: string(in.Language), Retention: engineRetention(settings, plan.kind, override), ReferencePhoto: plan.photo,
 	}
 	sess, err := s.ips.CreateSession(ctx, tenant, input)
@@ -763,13 +772,13 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	sess = withSessionTTL(sess, ttl)
 	// An Idem session is the vcmrtd link; a Yivi one is started from the screen.
-	if in.Method == proofingprovider.MethodIdem && sess.Claim == nil {
+	if plan.method == proofingprovider.MethodIdem && sess.Claim == nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess,
 			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", id))
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: in.Method, Channel: in.Channel,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: plan.method, Channel: in.Channel,
 		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
 	})
 	if err != nil {
@@ -815,6 +824,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 // send.
 type requestPlan struct {
 	flow       proofingprovider.Flow
+	method     proofingprovider.Method
 	diplomas   DiplomaMode
 	address    AddressMode
 	employment EmploymentMode
@@ -835,8 +845,9 @@ func (s *Service) planRequest(ctx context.Context, org Org, tenant proofingprovi
 	if err != nil {
 		return requestPlan{}, err
 	}
-	if in.Method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return requestPlan{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+	method, err := sessionMethod(flow, in.Method)
+	if err != nil {
+		return requestPlan{}, err
 	}
 	if subject.BirthDate != "" && !readsIdentity(flow) {
 		return requestPlan{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
@@ -857,7 +868,7 @@ func (s *Service) planRequest(ctx context.Context, org Org, tenant proofingprovi
 		}
 		plan.diplomas, plan.address, plan.employment = DiplomasOff, AddressOff, EmploymentOff
 	}
-	plan.flow, plan.photo = flow, photo
+	plan.flow, plan.method, plan.photo = flow, method, photo
 	return plan, nil
 }
 
@@ -893,6 +904,8 @@ func (p requestPlan) checkChannel(channel Channel) error {
 		return ErrAddressNeedsPage
 	case p.employment.asked():
 		return ErrEmploymentNeedsPage
+	case takesDocumentPhoto(p.flow):
+		return ErrDocumentScanNeedsPage
 	}
 	return nil
 }
@@ -951,7 +964,7 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: uuid.New(), OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: in.Method, Channel: in.Channel,
+		Flow: flow, LinkExpiresAt: s.now().Add(hostedLinkTTL), Method: plan.method, Channel: in.Channel,
 		LinkTokenHash: hash, RedirectURL: redirect, Language: in.Language,
 		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
 		ReferencePhoto: plan.photo,
@@ -962,13 +975,11 @@ func (s *Service) createHosted(ctx context.Context, org Org, by Requester, in Ne
 	return Sent{Request: req, HostedURL: s.hostedBaseURL + token}, nil
 }
 
-// normalizeRequest fills in the default app and delivery and refuses a
-// combination that cannot run: the Yivi app's session starts from a QR code
-// shown in the browser, and a mailed subject has no such page.
+// normalizeRequest fills in the default delivery and refuses a combination
+// that cannot run: the Yivi app's session starts from a QR code shown in the
+// browser, and a mailed subject has no such page. The method's default
+// follows the flow (sessionMethod).
 func normalizeRequest(in NewRequest) (NewRequest, error) {
-	if in.Method == "" {
-		in.Method = proofingprovider.MethodIdem
-	}
 	if in.Channel == "" {
 		in.Channel = ChannelEmail
 	}
@@ -980,7 +991,7 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		in.Language = locale
 	}
 	switch {
-	case in.Method != proofingprovider.MethodIdem && in.Method != proofingprovider.MethodYivi:
+	case !slices.Contains(sessionMethods, in.Method):
 		return NewRequest{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
 	case in.Channel != ChannelEmail && in.Channel != ChannelOnScreen && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail, show it on screen or as a link", ErrInvalidInput)
@@ -2072,14 +2083,12 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 	return YiviStart{WalletLink: started.WalletLink, ExpiresAt: sess.ExpiresAt}, nil
 }
 
-// yiviClaims are the claims req's Yivi disclosure asks for besides the
-// identity: the photo when the flow keeps it, and an age check's age claim in
-// place of the date of birth. The flow is the version req's session pinned,
-// else the active one.
-func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error) {
+// sessionFlow is the flow req runs: the version its session pinned, else the
+// active one.
+func (s *Service) sessionFlow(ctx context.Context, req Request) (proofingprovider.Flow, error) {
 	versions, err := s.ips.ListFlowVersions(ctx, requestTenant(req), req.FlowID)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: flow of request %s: %w", req.ID, err)
+		return proofingprovider.Flow{}, fmt.Errorf("proofing: flow of request %s: %w", req.ID, err)
 	}
 
 	i := slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Version == req.FlowVersion })
@@ -2087,10 +2096,19 @@ func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error)
 		i = slices.IndexFunc(versions, func(f proofingprovider.Flow) bool { return f.Active })
 	}
 	if i < 0 {
-		return nil, ErrFlowNotFound
+		return proofingprovider.Flow{}, ErrFlowNotFound
 	}
+	return versions[i], nil
+}
 
-	f := versions[i]
+// yiviClaims are the claims req's Yivi disclosure asks for besides the
+// identity: the photo when the flow keeps it, and an age check's age claim in
+// place of the date of birth.
+func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error) {
+	f, err := s.sessionFlow(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	var claims []string
 	if keepsFacePhoto(f) {
 		claims = append(claims, openid4vpverifier.ClaimPhoto)
@@ -2153,6 +2171,12 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	disclosure, err := s.ips.SubmitReference(ctx, tenant, sess.ID, sess.Token, proofingprovider.Reference{
 		Credential: doc.Credential, Photo: doc.Claims[openid4vpverifier.ClaimPhoto], Attributes: attributes,
 	})
+	// The page shows the Yivi request only once the document photo is in, so
+	// this is a disclosure from a page that skipped it.
+	var rejected *proofingprovider.RejectedError
+	if errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeDocumentPhotoMissing {
+		return proofingprovider.YiviDisclosure{}, ErrDocumentScanPending
+	}
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, yiviStepError(err)
 	}

@@ -106,7 +106,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
 		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address, Employment: in.Employment,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
-		FlowKind: in.FlowKind,
+		FlowKind: in.FlowKind, DocumentScan: takesDocumentPhoto(in.Flow),
 	}
 	f.stored = &req
 	f.linkHash = in.LinkTokenHash
@@ -407,6 +407,20 @@ func (f *fakeRequests) SetYiviTransaction(_ context.Context, _ Request, _, trans
 	return nil
 }
 
+func (f *fakeRequests) SetDocumentScanTransaction(_ context.Context, _ Request, _, transactionID string) error {
+	f.stored.documentScanTransactionID = transactionID
+	return nil
+}
+
+func (f *fakeRequests) MarkDocumentScanned(_ context.Context, _ Request, _, transactionID string) error {
+	if f.stored.documentScanTransactionID != transactionID {
+		return ErrSessionOver
+	}
+	at := time.Now()
+	f.stored.DocumentScannedAt = &at
+	return nil
+}
+
 func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) ([]StatsRow, error) {
 	return []StatsRow{}, nil
 }
@@ -522,6 +536,11 @@ type fakeIPS struct {
 	noClaim bool
 	// references are the Yivi disclosures handed to IPS as face references.
 	references []proofingprovider.Reference
+	// documentPhotos are the document photos handed to IPS; referenceErr and
+	// documentPhotoErr fail those calls.
+	documentPhotos   []proofingprovider.DocumentPhoto
+	referenceErr     error
+	documentPhotoErr error
 	// handovers counts fresh claim links asked for; handoverErr fails them.
 	// slotClaimed makes the link a handover from a phone that held the session.
 	handovers   int
@@ -638,8 +657,19 @@ func (f *fakeIPS) SessionResult(context.Context, proofingprovider.Tenant, string
 }
 
 func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, _, _ string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
+	if f.referenceErr != nil {
+		return proofingprovider.YiviDisclosure{}, f.referenceErr
+	}
 	f.references = append(f.references, ref)
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+func (f *fakeIPS) SubmitDocumentPhoto(_ context.Context, _ proofingprovider.Tenant, _, _ string, photo proofingprovider.DocumentPhoto) error {
+	if f.documentPhotoErr != nil {
+		return f.documentPhotoErr
+	}
+	f.documentPhotos = append(f.documentPhotos, photo)
+	return nil
 }
 
 // fakeVerifier is the OpenID4VP verifier: a presentation stays pending until

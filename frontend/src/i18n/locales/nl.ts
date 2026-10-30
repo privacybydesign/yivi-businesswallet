@@ -2421,6 +2421,7 @@ export const nl: Translation<typeof en> = {
       identityProofingSessionStarted: "Identiteitsverificatie gestart",
       identityProofingSessionHandover:
         "Nieuwe code voor identiteitsverificatie uitgegeven",
+      identityProofingDocumentScanStarted: "Documentscan gestart",
       identityProofingSessionEnded:
         "Identiteitsverificatiesessie onafgerond beëindigd",
       identityProofingSessionCancelled:
