@@ -33,8 +33,14 @@ const (
 	taskDocumentScan = "document_scan"
 	captureCamera    = "camera"
 	// fieldPersonalNumber is the field the BSN is printed in on a Dutch
-	// document, as redactFields names it.
+	// document, as redactFields and desiredFields name it.
 	fieldPersonalNumber = "personal_number"
+	// fieldMRZ is the MRZ's lines as redactFields names them: an older Dutch
+	// document carries the BSN in the MRZ's optional data too.
+	fieldMRZ = "mrz_strings"
+	// fieldSignature is the holder's signature as redactFields names it,
+	// covered with the BSN.
+	fieldSignature = "signature"
 
 	// stateCompleted is a transaction's and a task's state once it is done.
 	stateCompleted = "completed"
@@ -49,6 +55,12 @@ const (
 	// says back.
 	fileSideB    = "side b"
 	fileSideBack = "back"
+
+	// The validity and comparison states of a result field.
+	validityValid      = "valid"
+	validityInvalid    = "invalid"
+	comparisonMatch    = "match"
+	comparisonMismatch = "no_match"
 
 	headerAuthorization = "Authorization"
 	headerContentType   = "Content-Type"
@@ -129,16 +141,49 @@ type Image struct {
 }
 
 // Result is a scan's outcome: whether the person finished it, ID Scan's
-// judgement of the document, and the document's front and, for a document
-// that has one, its back.
+// judgement of the document, what it read off it, and the document's front
+// and, for a document that has one, its back.
 type Result struct {
 	Completed    bool
 	Authenticity Authenticity
 	// Score is ID Scan's confidence the document is genuine, 0 to 1 (-1 when
 	// it could not tell); nil when it gave none.
 	Score *float64
-	Front Image
-	Back  *Image
+	// FieldsValid is whether every field ID Scan validated was valid, and
+	// ZonesMatch whether every field it read from two zones (MRZ, printed
+	// text, barcode) read the same; nil when it validated or compared none.
+	FieldsValid *bool
+	ZonesMatch  *bool
+	Document    Document
+	Front       Image
+	Back        *Image
+}
+
+// Document is what ID Scan read off the document. Dates are YYYY-MM-DD and
+// states ID Scan's codes; a field it did not read, or read in a form not
+// understood, is empty.
+type Document struct {
+	// Type is ID Scan's document type, e.g. passport, identity_card,
+	// residence_permit or driving_license.
+	Type           string
+	IssuingState   string
+	Nationality    string
+	Number         string
+	Surname        string
+	GivenNames     string
+	DateOfBirth    string
+	DateOfExpiry   string
+	Sex            string
+	PersonalNumber string
+}
+
+// ScanOptions are the rules ID Scan enforces during the scan, from the flow.
+type ScanOptions struct {
+	// RedactBSN covers the personal number (a Dutch document's BSN), the MRZ
+	// and the signature in the photos.
+	RedactBSN bool
+	// MinimumAge, when above 0, has ID Scan refuse a holder younger than it.
+	MinimumAge int
 }
 
 type createRequest struct {
@@ -154,7 +199,9 @@ type createSettings struct {
 type documentScanSettings struct {
 	CaptureSources   []string `json:"captureSources"`
 	RequireBothSides bool     `json:"requireBothSides"`
+	DesiredFields    []string `json:"desiredFields"`
 	RedactFields     []string `json:"redactFields,omitempty"`
+	MinimumAge       *int     `json:"minimumAge,omitempty"`
 }
 
 type createResponse struct {
@@ -165,12 +212,22 @@ type createResponse struct {
 // CreateTransaction starts a document scan in locale, whose page the wallet
 // embeds: it posts the parent page the transaction's id, state and result id
 // when done. Only the camera counts, so no stored picture stands in for the
-// document; both sides are asked of a document that has two. redactBSN
-// covers the personal number (a Dutch document's BSN) in the photos.
-func (c *Client) CreateTransaction(ctx context.Context, locale string, redactBSN bool) (Transaction, error) {
-	settings := documentScanSettings{CaptureSources: []string{captureCamera}, RequireBothSides: true}
-	if redactBSN {
-		settings.RedactFields = []string{fieldPersonalNumber}
+// document; both sides are asked of a document that has two, and the page
+// holding the personal number of one whose data page lacks it (a Dutch
+// passport's BSN is on the back). With
+// opts.MinimumAge ID Scan refuses a holder too young. allowedExpiration and
+// validateFields are left out: with them ID Scan stopped recognising a
+// document it otherwise reads (unknown_type_front), so the engine refuses an
+// expired document or an invalid field from the result instead.
+func (c *Client) CreateTransaction(ctx context.Context, locale string, opts ScanOptions) (Transaction, error) {
+	settings := documentScanSettings{
+		CaptureSources: []string{captureCamera}, RequireBothSides: true, DesiredFields: []string{fieldPersonalNumber},
+	}
+	if opts.RedactBSN {
+		settings.RedactFields = []string{fieldPersonalNumber, fieldMRZ, fieldSignature}
+	}
+	if opts.MinimumAge > 0 {
+		settings.MinimumAge = &opts.MinimumAge
 	}
 	body, err := json.Marshal(createRequest{
 		Tasks: []string{taskDocumentScan}, Locale: locale,
@@ -192,12 +249,41 @@ func (c *Client) CreateTransaction(ctx context.Context, locale string, redactBSN
 type resultResponse struct {
 	State string `json:"state"`
 	Tasks []struct {
-		Type  string   `json:"type"`
-		State string   `json:"state"`
-		Score *float64 `json:"score"`
-		Files []file   `json:"files"`
+		Type   string        `json:"type"`
+		State  string        `json:"state"`
+		Score  *float64      `json:"score"`
+		Result []resultField `json:"result"`
+		Files  []file        `json:"files"`
 	} `json:"tasks"`
 }
+
+// resultField is one field ID Scan read: its value per zone, whether it is
+// valid, and whether the zones agree.
+type resultField struct {
+	Field      string `json:"field"`
+	Validity   string `json:"validity"`
+	Comparison string `json:"comparison"`
+	Values     []struct {
+		Source string `json:"source"`
+		Value  string `json:"value"`
+	} `json:"values"`
+}
+
+// The fields ID Scan reads that Result carries.
+const (
+	fieldDocumentNumber   = "document_number"
+	fieldSurname          = "surname"
+	fieldGivenNames       = "given_names"
+	fieldDateOfBirth      = "date_of_birth"
+	fieldDateOfExpiry     = "date_of_expiry"
+	fieldIssuingStateCode = "issuing_state_code"
+	fieldNationalityCode  = "nationality_code"
+	fieldSex              = "sex"
+)
+
+// sourcePreference is the order a field's zones are read in: the MRZ first,
+// as ID Scan recommends, then the printed text, then a barcode.
+var sourcePreference = []string{"mrz", "visual", "barcode"}
 
 type file struct {
 	Category string `json:"category"`
@@ -215,6 +301,7 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 		return Result{}, fmt.Errorf("idscan: result of transaction %s: %w", transactionID, err)
 	}
 	var files []file
+	var fields []resultField
 	completed, scanned := out.State == stateCompleted, Authenticity("")
 	var score *float64
 	for _, task := range out.Tasks {
@@ -223,6 +310,7 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 		}
 		completed = completed && task.State == stateCompleted
 		scanned, score = authenticity(task.Score), task.Score
+		fields = append(fields, task.Result...)
 		for _, f := range task.Files {
 			if f.Category == fileCategoryDocument && f.Type != fileTypeRaw {
 				files = append(files, f)
@@ -236,7 +324,12 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	if front == nil {
 		return Result{}, ErrNoDocumentImage
 	}
-	res := Result{Completed: true, Authenticity: scanned, Score: score}
+	res := Result{
+		Completed: true, Authenticity: scanned, Score: score,
+		FieldsValid: fieldsAgree(fields, func(f resultField) string { return f.Validity }, validityValid, validityInvalid),
+		ZonesMatch:  fieldsAgree(fields, func(f resultField) string { return f.Comparison }, comparisonMatch, comparisonMismatch),
+		Document:    readDocument(fields, front.Type),
+	}
 	var err error
 	if res.Front, err = c.download(ctx, *front); err != nil {
 		return Result{}, err
@@ -251,23 +344,79 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	return res, nil
 }
 
-// sides picks the front and back photo out of a result's document files: the
-// one named as side B (or the back) is the back, else they come front first.
+// fieldsAgree is whether every field's state (of) is good: false when one
+// is bad, true when one is good and none bad, nil when none says either.
+func fieldsAgree(fields []resultField, of func(resultField) string, good, bad string) *bool {
+	var seen bool
+	for _, f := range fields {
+		switch of(f) {
+		case bad:
+			return new(false)
+		case good:
+			seen = true
+		}
+	}
+	if !seen {
+		return nil
+	}
+	return new(true)
+}
+
+// readDocument is the document's data in fields, typed by the front photo's
+// document type.
+func readDocument(fields []resultField, documentType string) Document {
+	values := make(map[string]string, len(fields))
+	for _, f := range fields {
+		if _, ok := values[f.Field]; !ok {
+			values[f.Field] = fieldValue(f)
+		}
+	}
+	return Document{
+		Type: strings.ToLower(documentType), IssuingState: values[fieldIssuingStateCode], Nationality: values[fieldNationalityCode],
+		Number: values[fieldDocumentNumber], Surname: values[fieldSurname], GivenNames: values[fieldGivenNames],
+		DateOfBirth: isoDate(values[fieldDateOfBirth]), DateOfExpiry: isoDate(values[fieldDateOfExpiry]),
+		Sex: values[fieldSex], PersonalNumber: values[fieldPersonalNumber],
+	}
+}
+
+// fieldValue is f's value from the most trusted zone that read it.
+func fieldValue(f resultField) string {
+	for _, source := range sourcePreference {
+		for _, v := range f.Values {
+			if v.Source == source && strings.TrimSpace(v.Value) != "" {
+				return strings.TrimSpace(v.Value)
+			}
+		}
+	}
+	return ""
+}
+
+// dateLayouts are the forms ID Scan may give a date in.
+var dateLayouts = []string{time.DateOnly, "02-01-2006", "02.01.2006", "02/01/2006", "2006/01/02"}
+
+// isoDate is raw as YYYY-MM-DD, or empty when it is in no known form.
+func isoDate(raw string) string {
+	for _, layout := range dateLayouts {
+		if d, err := time.Parse(layout, raw); err == nil {
+			return d.Format(time.DateOnly)
+		}
+	}
+	return ""
+}
+
+// sides picks the front and back photo out of a result's document files: only
+// the one named as side B (or the back) is the back, as a passport photographed
+// open gives its facing page as a second file; the first other file is the
+// front.
 func sides(files []file) (front, back *file) {
-	var rest []file
 	for _, f := range files {
 		name := strings.ToLower(f.Name)
-		if back == nil && (strings.Contains(name, fileSideB) || strings.Contains(name, fileSideBack)) {
+		switch {
+		case back == nil && (strings.Contains(name, fileSideB) || strings.Contains(name, fileSideBack)):
 			back = &f
-			continue
+		case front == nil:
+			front = &f
 		}
-		rest = append(rest, f)
-	}
-	if len(rest) > 0 {
-		front = &rest[0]
-	}
-	if back == nil && len(rest) > 1 {
-		back = &rest[1]
 	}
 	return front, back
 }

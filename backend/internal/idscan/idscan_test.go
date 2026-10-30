@@ -51,6 +51,9 @@ func checkToken(t *testing.T, r *http.Request) {
 	}
 }
 
+// testMinimumAge is a flow's age check, which ID Scan enforces.
+const testMinimumAge = 18
+
 func TestCreateTransaction(t *testing.T) {
 	for name, redact := range map[string]bool{"redacts the BSN": true, "keeps the BSN": false} {
 		t.Run(name, func(t *testing.T) {
@@ -68,7 +71,7 @@ func TestCreateTransaction(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, redact)
+			trx, err := New(testKeyID, testSecret, srv.URL+"/", srv.Client()).CreateTransaction(context.Background(), LocaleDutch, ScanOptions{RedactBSN: redact, MinimumAge: testMinimumAge})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,11 +83,24 @@ func TestCreateTransaction(t *testing.T) {
 				t.Errorf("body = %v", got)
 			}
 			scan := got["settings"].(map[string]any)["documentScan"].(map[string]any)
-			if scan["requireBothSides"] != true {
-				t.Errorf("documentScan = %v, want both sides", scan)
+			// A Dutch passport has its BSN on the back: only a desired
+			// personal number makes ID Scan ask for it.
+			desired, _ := scan["desiredFields"].([]any)
+			if scan["requireBothSides"] != true || len(desired) != 1 || desired[0] != fieldPersonalNumber {
+				t.Errorf("documentScan = %v, want both sides and the personal number desired", scan)
 			}
-			if _, has := scan["redactFields"]; has != redact {
-				t.Errorf("documentScan = %v, redactFields present %v, want %v", scan, has, redact)
+			// The BSN is printed as the personal number, and on an older
+			// Dutch document in the MRZ too. The signature goes with it.
+			redacted, has := scan["redactFields"].([]any)
+			if has != redact || has && !slices.Equal(redacted, []any{fieldPersonalNumber, fieldMRZ, fieldSignature}) {
+				t.Errorf("documentScan = %v, want redactFields %v", scan, redact)
+			}
+			// ID Scan enforces the flow's minimum age. allowedExpiration and
+			// validateFields stay out: with them it stops recognising documents.
+			_, expiration := scan["allowedExpiration"]
+			_, validate := scan["validateFields"]
+			if scan["minimumAge"] != float64(testMinimumAge) || expiration || validate {
+				t.Errorf("documentScan = %v, want minimum age %d, no allowedExpiration or validateFields", scan, testMinimumAge)
 			}
 		})
 	}
@@ -95,7 +111,7 @@ func TestCreateTransactionRefused(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(srv.Close)
-	if _, err := New(testKeyID, testSecret, srv.URL, srv.Client()).CreateTransaction(context.Background(), LocaleEnglish, true); err == nil {
+	if _, err := New(testKeyID, testSecret, srv.URL, srv.Client()).CreateTransaction(context.Background(), LocaleEnglish, ScanOptions{RedactBSN: true}); err == nil {
 		t.Fatal("CreateTransaction succeeded on a 401")
 	}
 }
@@ -124,7 +140,15 @@ func resultServer(t *testing.T, body string, photo []byte) *httptest.Server {
 func TestResult(t *testing.T) {
 	photo := pngBytes(t)
 	// As ID Scan names them: the raw images unnamed, the second side "Side B".
-	const completed = `{"id":"res-1","state":"completed","tasks":[{"type":"document_scan","state":"completed","score":0.97,"files":[
+	const completed = `{"id":"res-1","state":"completed","tasks":[{"type":"document_scan","state":"completed","score":0.97,
+		"result":[
+			{"field":"document_number","validity":"valid","comparison":"match","values":[{"source":"visual","value":"XR1234567"},{"source":"mrz","value":"XR1234567"}]},
+			{"field":"surname","validity":"not_checked","comparison":"not_performed","values":[{"source":"visual","value":"De Bruijn"}]},
+			{"field":"given_names","validity":"not_checked","comparison":"match","values":[{"source":"mrz","value":"WILLEKE LISELOTTE"},{"source":"visual","value":"Willeke Liselotte"}]},
+			{"field":"date_of_birth","validity":"valid","comparison":"match","values":[{"source":"mrz","value":"1990-03-10"}]},
+			{"field":"date_of_expiry","validity":"valid","comparison":"no_match","values":[{"source":"visual","value":"14.07.2031"}]},
+			{"field":"issuing_state_code","validity":"valid","comparison":"not_performed","values":[{"source":"mrz","value":"NLD"}]}],
+		"files":[
 		{"category":"document","type":"raw_document_image","url":"{base}/downloads/raw"},
 		{"category":"document","type":"DRIVING_LICENSE","name":"Netherlands - Driving License (2022) Side B","url":"{base}/downloads/back"},
 		{"category":"document","type":"DRIVING_LICENSE","name":"Netherlands - Driving License (2022)","url":"{base}/downloads/front"}]}]}`
@@ -137,11 +161,39 @@ func TestResult(t *testing.T) {
 	if !res.Completed || res.Authenticity != Authentic || res.Back == nil {
 		t.Fatalf("result = completed %v, %q, back %v; want completed, authentic, with a back", res.Completed, res.Authenticity, res.Back != nil)
 	}
+	// The MRZ's value first, dates as YYYY-MM-DD; one zone disagreeing is
+	// the zones not matching, every validated field valid is the fields valid.
+	want := Document{
+		Type: "driving_license", IssuingState: "NLD", Number: "XR1234567", Surname: "De Bruijn", GivenNames: "WILLEKE LISELOTTE",
+		DateOfBirth: "1990-03-10", DateOfExpiry: "2031-07-14",
+	}
+	if res.Document != want {
+		t.Errorf("document = %+v, want %+v", res.Document, want)
+	}
+	if res.FieldsValid == nil || !*res.FieldsValid || res.ZonesMatch == nil || *res.ZonesMatch {
+		t.Errorf("fields valid %v, zones match %v; want valid, not matching", res.FieldsValid, res.ZonesMatch)
+	}
 	if res.Front.MimeType != "image/png" || !bytes.HasSuffix(res.Front.Data, []byte("front")) {
 		t.Errorf("front = %s, %q…", res.Front.MimeType, res.Front.Data[len(res.Front.Data)-5:])
 	}
 	if !bytes.HasSuffix(res.Back.Data, []byte("back")) {
 		t.Error("back is not the Side B file")
+	}
+}
+
+// A passport photographed open comes as its data page and the facing page:
+// the facing page is no back.
+func TestResultPassportFacingPageIsNoBack(t *testing.T) {
+	const spread = `{"state":"completed","tasks":[{"type":"document_scan","state":"completed","files":[
+		{"category":"document","type":"PASSPORT","name":"Netherlands - Passport (2021)","url":"{base}/downloads/front"},
+		{"category":"document","type":"PASSPORT","name":"Netherlands - Passport (2021)","url":"{base}/downloads/facing"}]}]}`
+	srv := resultServer(t, spread, pngBytes(t))
+	res, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(res.Front.Data, []byte("front")) || res.Back != nil {
+		t.Errorf("front %q…, back %v; want the data page and no back", res.Front.Data[len(res.Front.Data)-5:], res.Back != nil)
 	}
 }
 
@@ -201,5 +253,20 @@ func TestResultRefusesNonPhoto(t *testing.T) {
 	srv := resultServer(t, one, []byte("<html>not a photo</html>"))
 	if _, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1"); err == nil {
 		t.Fatal("Result took a non-photo")
+	}
+}
+
+// An invalid field is the fields not valid; without any validated or
+// compared field neither is known.
+func TestFieldsAgree(t *testing.T) {
+	validity := func(f resultField) string { return f.Validity }
+	if got := fieldsAgree([]resultField{{Validity: validityValid}, {Validity: validityInvalid}}, validity, validityValid, validityInvalid); got == nil || *got {
+		t.Errorf("with an invalid field = %v, want false", got)
+	}
+	if got := fieldsAgree([]resultField{{Validity: "not_checked"}}, validity, validityValid, validityInvalid); got != nil {
+		t.Errorf("with nothing validated = %v, want nil", *got)
+	}
+	if isoDate("31/12/2030") != "2030-12-31" || isoDate("next year") != "" {
+		t.Error("isoDate does not read a slashed date or refuse an unknown form")
 	}
 }
