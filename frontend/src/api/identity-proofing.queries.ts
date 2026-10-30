@@ -57,6 +57,8 @@ import {
   getProofingYiviDisclosure,
   newProofingClaimLink,
   startProofingYivi,
+  startProofingDocumentScan,
+  finishProofingDocumentScan,
   uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
@@ -82,6 +84,7 @@ import type {
   ProofingApp,
   ProofingYiviDisclosure,
   ProofingYiviStart,
+  ProofingDocumentScanStart,
   ProofingProgress,
   ProofingMethod,
   HostedProofing,
@@ -996,6 +999,32 @@ export function useStartProofingYiviMutation(
   return useMutation({
     mutationFn: () => startProofingYivi(target),
     meta: { suppressErrorToast: true },
+  });
+}
+
+export function useStartDocumentScanMutation(
+  target: VerifyTarget,
+): UseMutationResult<ProofingDocumentScanStart, Error, { locale: string }> {
+  return useMutation({
+    mutationFn: (input) => startProofingDocumentScan(target, input),
+    meta: { suppressErrorToast: true },
+  });
+}
+
+// Adds the ID scan's photos to the session, then reads the progress again so
+// the page moves on from the scan step.
+export function useFinishDocumentScanMutation(
+  target: VerifyTarget,
+): UseMutationResult<void, Error, { transactionId: string; resultId: string }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => finishProofingDocumentScan(target, input),
+    meta: { suppressErrorToast: true },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: [...verifyQueryKey(target), "progress"],
+      });
+    },
   });
 }
 

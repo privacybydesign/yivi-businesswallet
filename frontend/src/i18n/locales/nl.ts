@@ -598,6 +598,17 @@ export const nl: Translation<typeof en> = {
       addressNotAsked: "Deze controle vraagt niet om een adres.",
       addressNotFound:
         "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
+      documentScanNeedsPage:
+        "Deze flow fotografeert het document, wat gebeurt op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      documentScanFailed:
+        "De foto's van het document zijn niet bruikbaar. Probeer het opnieuw.",
+      documentScanMismatch:
+        "Deze foto's horen bij een andere controle. Fotografeer het document opnieuw.",
+      documentScanDone: "Het document is al gefotografeerd.",
+      documentScanPending:
+        "Fotografeer eerst het document en deel daarna je gegevens vanuit de Yivi-app.",
+      noDocumentScanner:
+        "Deze server fotografeert geen documenten. Vraag je beheerder ID_SCAN_KEY_ID en ID_SCAN_SECRET in te stellen.",
       employmentNeedsPage:
         "Deze flow vraagt om het Verzekeringsbericht van UWV, dat wordt geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       employmentClosed:
@@ -871,6 +882,18 @@ export const nl: Translation<typeof en> = {
         },
         back: "Terug",
       },
+      documentScan: {
+        heading: "Fotografeer je identiteitsbewijs",
+        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van de voor- en achterkant van je ID-kaart of rijbewijs, of van de fotopagina van je paspoort.",
+        passportHint:
+          "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
+        frameTitle: "ID-scan van CM.com",
+        start: "Document fotograferen",
+        finishing: "Foto's toevoegen…",
+        loading: "De beveiligde scan van CM.com wordt geladen…",
+        cancelled: "De foto's zijn niet gemaakt. Probeer het opnieuw.",
+        retry: "Opnieuw proberen",
+      },
       scan: {
         yiviHeading: "Scan met de Yivi-app",
         yiviHint:
@@ -988,6 +1011,14 @@ export const nl: Translation<typeof en> = {
         passiveAuth: "Echtheid chip",
         faceMatch: "Gezichtsvergelijking",
         liveness: "Echtheid persoon",
+        documentCheck: "Documentcontrole",
+        documentVerdicts: {
+          authentic: "Echt",
+          doubtful: "Twijfelachtig",
+          fake: "Niet echt",
+        },
+        documentFields: "Gedrukte gegevens",
+        documentZones: "MRZ gelijk aan gedrukte tekst",
         checks: {
           valid: "Geldig",
           invalid: "Ongeldig",
@@ -1765,7 +1796,7 @@ export const nl: Translation<typeof en> = {
         addressHint:
           "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
         photoHint:
-          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
+          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
         faceHint:
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
         diplomaHint:
@@ -1839,7 +1870,7 @@ export const nl: Translation<typeof en> = {
         bsn: "BSN",
         bsnHint:
           "Bewaar het volledige BSN alleen als de wet je toestaat het te verwerken.",
-        blackOutBsn: "Het BSN op documentfoto's zwart maken",
+        blackOutBsn: "Het BSN en de handtekening op documentfoto's zwart maken",
         keepFacePhotos: "Gezichtsfoto's bewaren na de vergelijking",
         keepFacePhotosHint:
           "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
