@@ -2189,8 +2189,11 @@ export const en = {
       action: "Action",
       target: "Target",
       subject: "Subject",
+      details: "Details",
     },
     noSubject: "—",
+    detailsToggle: "Details of {{action}} on {{when}}",
+    noDetails: "No further details were recorded.",
     fields: {
       method: "Method",
       assuranceLevel: "Assurance",

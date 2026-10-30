@@ -2237,8 +2237,11 @@ export const nl: Translation<typeof en> = {
       action: "Actie",
       target: "Doel",
       subject: "Onderwerp",
+      details: "Details",
     },
     noSubject: "—",
+    detailsToggle: "Details van {{action}} op {{when}}",
+    noDetails: "Er zijn geen verdere details vastgelegd.",
     fields: {
       method: "Methode",
       assuranceLevel: "Betrouwbaarheid",

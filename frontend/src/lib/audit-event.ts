@@ -642,6 +642,23 @@ function fieldValue(
   return JSON.stringify(value);
 }
 
+// A field's value in words: a rejection reason and a proofing method by their
+// label, anything else as fieldValue reads it.
+function labelledValue(
+  key: string,
+  value: unknown,
+  dateFormatter: Intl.DateTimeFormat,
+  t: TFunction,
+): string {
+  if (key === "errorCode" && typeof value === "string") {
+    return proofingRejectionReason(value, t);
+  }
+  if (key === "method" && typeof value === "string") {
+    return proofingMethodLabel(value, t);
+  }
+  return fieldValue(value, dateFormatter);
+}
+
 // Fields that identify whom an event is about, most specific first. On an
 // update they ride along unchanged on both sides and lead the detail.
 const IDENTITY_KEYS = ["subjectName", "subjectEmail"] as const;
@@ -650,9 +667,9 @@ function isEmpty(value: unknown): boolean {
   return value === null || value === undefined || value === "";
 }
 
-// A field an update adds (absent before) reads as "label: value" rather than
-// "— → value" when it has a label.
-function addedFieldLabel(key: string, t: TFunction): string | null {
+// A field's label where it has one: an update adds it as "label: value" rather
+// than "— → value", and the details name it by it.
+function knownFieldLabel(key: string, t: TFunction): string | null {
   switch (key) {
     case "assuranceLevel":
       return t("auditLog.fields.assuranceLevel");
@@ -692,13 +709,8 @@ export function auditSubject(
           !(isEmpty(before[key]) && isEmpty(after[key])),
       )
       .map((key) => {
-        const label = isEmpty(before[key]) ? addedFieldLabel(key, t) : null;
-        const value =
-          key === "errorCode" && typeof after[key] === "string"
-            ? proofingRejectionReason(after[key], t)
-            : key === "method" && typeof after[key] === "string"
-              ? proofingMethodLabel(after[key], t)
-              : fieldValue(after[key], dateFormatter);
+        const label = isEmpty(before[key]) ? knownFieldLabel(key, t) : null;
+        const value = labelledValue(key, after[key], dateFormatter, t);
         return label
           ? `${label}: ${value}`
           : `${fieldValue(before[key], dateFormatter)} → ${value}`;
@@ -729,4 +741,71 @@ export function auditSubject(
     snapshot.recipient ??
     snapshot.role;
   return typeof id === "string" ? id : null;
+}
+
+// One row of an event's details: a field's value, or for an update that
+// changed it, its value before and after.
+export interface AuditDetailField {
+  key: string;
+  label: string;
+  value: string;
+  before?: string;
+}
+
+type Snapshot = Record<string, unknown> | null | undefined;
+
+// Every field of an event's metadata as label/value rows: the before/after
+// snapshot's fields, an update's changed ones as before → after, then any
+// other metadata. Fields empty on both sides are left out.
+export function auditDetailFields(
+  event: AuditEvent,
+  dateFormatter: Intl.DateTimeFormat,
+  t: TFunction,
+): AuditDetailField[] {
+  const { before, after, ...rest } = event.metadata as {
+    before?: Snapshot;
+    after?: Snapshot;
+  } & Record<string, unknown>;
+  // An empty value reads as none, never through a label's copy for an
+  // unknown value.
+  const show = (key: string, value: unknown): string =>
+    labelledValue(key, isEmpty(value) ? null : value, dateFormatter, t);
+  const field = (key: string, value: unknown): AuditDetailField => ({
+    key,
+    label: knownFieldLabel(key, t) ?? key,
+    value: show(key, value),
+  });
+  const snapshot =
+    before && after
+      ? changedFields(before, after, field, show)
+      : filledFields(after ?? before ?? {}, field);
+  return [...snapshot, ...filledFields(rest, field)];
+}
+
+// An update's fields, each with its value after and, when that differs, its
+// value before; fields empty on both sides are left out.
+function changedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  field: (key: string, value: unknown) => AuditDetailField,
+  show: (key: string, value: unknown) => string,
+): AuditDetailField[] {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+  return keys
+    .filter((key) => !(isEmpty(before[key]) && isEmpty(after[key])))
+    .map((key) => {
+      const row = field(key, after[key]);
+      const was = show(key, before[key]);
+      return was === row.value ? row : { ...row, before: was };
+    });
+}
+
+// The fields of values that are not empty.
+function filledFields(
+  values: Record<string, unknown>,
+  field: (key: string, value: unknown) => AuditDetailField,
+): AuditDetailField[] {
+  return Object.entries(values)
+    .filter(([, value]) => !isEmpty(value))
+    .map(([key, value]) => field(key, value));
 }
