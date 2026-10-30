@@ -164,8 +164,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     - With every attempt reserved and none leaving evidence, a submit is 409
       `face_attempts_spent`.
 - **Images.** Every uploaded image is decoded through `images.Decode`: its
-  header is checked first (4 megapixels, `images.MaxImagePixels`, above the
-  app's largest image, a 1600 px document photo; a JPEG2000 1 megapixel, as a
+  header is checked first (4 megapixels, `images.MaxImagePixels`, room for the
+  largest image, a document photo from the scan service; a JPEG2000 1 megapixel, as a
   chip portrait is well under it and JPEG2000 decodes slowly, and at most 4
   colour components), and at most 4 decode at once in the process. A slot
   waited for over 10 s is `ErrBusy`, a decode running over 10 s is
@@ -259,15 +259,9 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   `RequireOrgAdmin`. The rules are `flow.Validate`'s, mirrored in the editor:
   - Steps: `document_capture` (vcmrtd scans the MRZ to unlock the chip) and
     `nfc_read` (NFC chip read) toggle as a pair, shown as one step, "Scan and
-    read the document"; `document_photo` (a photo of
-    the printed page, `POST /app/{token}/steps/document_photo`) stands
-    alone; `face_verification` is one step. `draftSteps` lists
-    `document_photo` between `document_capture` and `nfc_read`: the Idem app
-    photographs the side it reads the MRZ from as it reads it, cut to the
-    frame, and shows it for review (use or retake) right after the scan,
-    whatever the listed order: a passport's photo page is then the whole
-    photo; a card's MRZ side is its back, so the front is taken next. The engine
-    does not enforce the order.
+    read the document"; `document_photo` (photos of the printed pages) stands
+    alone and is taken in the browser with CM.com's ID scan (§18), never by
+    an app; `face_verification` is one step.
   - Checks: `nfc.passive_auth` is locked on with `nfc_read`, and `face.match`
     with `face_verification`; `nfc.chip_auth` and `face.liveness` are optional;
     a check without its step is unavailable; the threshold is only for
@@ -542,14 +536,14 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   `regula` (anything else is 400): the engine has no face engine of its own.
   The subject picks the Yivi app or the Idem app on the verify page
   (`yiviAppAvailable`, the same name in the backend and the frontend), unless the flow
-  photographs the document or matches against a reference photo, which only
-  the Idem app does, or requires more than low, the level a Yivi session
+  matches against a reference photo, which only the Idem app does, or
+  requires more than low, the level a Yivi session
   reaches (`yiviEIDASLevel`; it would only end `ASSURANCE_NOT_MET`). A face step without `nfc_read` needs a
   per-session reference photo (§14): such a flow is not `completable` for
   members, but it is `externalCompletable`, so an admin or an API key may send it
   to an external person (only the API carries the photo). A flow with
-  `document_photo` (front and back, or a passport's photo page) runs in the
-  Idem app only: it rules out the Yivi app. "Edit" is
+  `document_photo` runs with either app: the photo is taken in the browser
+  first (§18). "Edit" is
   `POST /flows/{id}/versions`: the new version is active at once, and a session
   pins the version active when it is created, so sent requests keep theirs
   (`flow_version`). Activating an earlier version rolls back. Audited:
@@ -1532,12 +1526,17 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `proofedName`, never audited. A member's request, a rejected one, or an
 identity check in review keeps no name.
 
-Under a flow's BlurBSN policy (or a mask or omit BSN policy) a document photo
-is released and stored only with the BSN region the app located filled solid;
-a photo that came without one is withheld from the result and dropped from
-storage (`coverBSN`), since the server never guesses where the BSN is. Only a
-Dutch document prints a BSN, so a photo of a document known not to be Dutch
-is released and stored as taken; one whose issuing state is not known is
+Only a flow's "Black out the BSN" (BlurBSN) covers the BSN on a document
+photo. The BSN policy (retrieve, mask, omit) is about the BSN as data and
+leaves the photo as taken. Under BlurBSN a document photo is released and
+stored only with its BSN covered:
+- The ID scan blacks it out itself (§18), and the photo is marked so.
+- Otherwise the BSN region that came with it is filled solid, and a photo
+  without one is withheld from the result and dropped from storage
+  (`coverBSN`), since the server never guesses where the BSN is.
+
+Only a Dutch document prints a BSN, so a photo of a document known not to be
+Dutch is released and stored as taken; one whose issuing state is not known is
 treated as Dutch (`coversDocumentBSN`).
 
 A session is purged by the `identity_proofing_purge` pruner
@@ -2388,3 +2387,104 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     sweep's rejection lands (`progressPollContinues`), and the step holds its
     Continue until then, so `approved` is never handed back for a session
     about to be rejected.
+
+## 18. Document photo (ID scan)
+
+`document_photo` is taken in the browser, on CM.com's ID scan page, never by
+an app: the Idem app no longer photographs the document, and a flow with the
+step runs with the Idem app or the Yivi app alike.
+
+- **A page, never a mail**: the scan runs from the on-screen page or the
+  hosted page, so a flow with the step cannot be mailed or sent as a bare
+  deep link (`document_scan_needs_page`, 422); `sendableByMail` checks it.
+- **Order**: the page shows the scan step (`DocumentScanStep` in
+  `routes/proofing-verify-steps.tsx`) while the progress says
+  `documentScan: "pending"` (absent when the flow takes no photo), before the
+  app's QR or the Yivi disclosure. The app's part shows once it is `done`.
+- **No app**: the engine says where each step runs (`flow.Location`: the
+  photo in the browser, the face step where `selfieLocation` says, the scan
+  and chip read in the app) and marks a flow with no app step
+  `browserOnly`, on every flow it hands the wallet. Such a flow has no app
+  step and offers neither app:
+  - Its session runs with method `browser` (`sessionMethod` in the wallet,
+    `session.MethodBrowser` in the engine): no app link is minted, and the
+    engine refuses an app method on such a flow and `browser` on any other.
+  - Continue on the overview starts the session itself.
+  - The browser's steps decide the session in the engine
+    (`finishBrowserSession`), as an app's submit does, and the finish
+    reconciles the request at once.
+- **The flow's rules, enforced by CM during the scan** (`documentScanOptions`,
+  `idscan.CreateTransaction`): the person retakes, or the scan fails, before
+  any result reaches us.
+
+  | Rule | CM setting |
+  |---|---|
+  | The flow's age check | `minimumAge` = the flow's `ageOver` |
+  | Both sides, camera only | `requireBothSides`, `captureSources` |
+  | The page with the BSN (a Dutch passport's back) | `desiredFields: ["personal_number"]` |
+  | BSN blacked out, only under BlurBSN | `redactFields: ["personal_number", "mrz_strings", "signature"]` |
+  | Image quality (screen, copy, glare, focus, bounds) | the CM account's `PUT /config` |
+
+  - `allowedExpiration` and `validateFields` are left out: with them CM stopped
+    recognising a document it reads without them (`unknown_type_front`, tried
+    30 Oct). The engine refuses an expired document and an invalid field from
+    the result instead (below).
+  - An age-check flow keeps CM's age answer (`ageOverOf` on the date of birth
+    it read) and drops the date, as for the chip.
+
+- **CM's result, and where it lands**: the wallet reads it
+  (`idscan.Client.Result`) and hands it to the engine as a general
+  `DocumentCheck` (`proofingprovider`), which decides on it
+  (`documentPhotoOutcome`) and keeps it with the session.
+
+  | CM gives | Engine | Session log (All people) |
+  |---|---|---|
+  | `document_scan` score, by CM's ranges: below 0.40 fake, 0.90 and up authentic, between (or -1) doubtful | fake rejects (`DOC_NOT_AUTHENTIC`); doubtful goes to review | "Document check: Genuine (97%)" |
+  | field `validity` | any `invalid` rejects (`DOC_FIELDS_INVALID`) | "Printed data" |
+  | field `comparison` (MRZ, printed text, barcode) | any `no_match` goes to review | "MRZ matches printed text" |
+  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy | name, date of birth, document |
+  | document number | must equal the MRZ's, or the number Yivi disclosed (`DOCUMENT_MISMATCH`) | |
+  | document type | the document kind (`documentKinds`) | "Document" |
+
+  - The result carries `documentCheck` (verdict, score, fields, zones, kind:
+    no personal data), which the identity read (`pp.Evidence`) and the API's
+    `evidence[].documentCheck` expose.
+  - A browser session with no verdict at all goes to review.
+- **Sides**: CM names the second side "… Side B"; its raw images
+  (`raw_document_image`) are never used, as they show the BSN.
+  - Only a file named as side B (or back) is the back. A passport
+    photographed open comes back as two pages, and its facing page is no back.
+  - CM's `bounds` check is off on the account (30 Oct): with it on, a
+    passport only scanned held open, and then CM never asked for the BSN page.
+- **The embed**:
+  - `POST …/document-scan/start` (`/orgs/{slug}/identity-proofing/requests/{id}`
+    or `/proof/{token}`) with `locale` answers the scan page's `url`. The
+    backend creates the transaction with the secret, which never reaches the
+    browser. CM's embedded page needs no return URL.
+  - The step starts it as soon as it shows (once per step), so CM's page
+    loads while the person reads; a loading state covers the frame until
+    the page has loaded. Each start is a new CM transaction.
+  - The page shows that `url` in an iframe (`allow="camera"`, at least
+    650 px wide, full width on a phone); the page widens while it shows
+    (`DOCUMENT_SCAN_WIDE_PAGE`).
+  - When done, CM posts the parent a `message` with `transactionId`, `state`
+    and `resultId`. The page takes it only from the frame's window and the
+    scan URL's origin (`documentScanMessage`).
+  - For a `completed` scan with a result it calls
+    `POST …/document-scan/finish` with `transactionId` and `resultId` (204),
+    once. The backend checks the transaction is the request's
+    (`document_scan_mismatch`, 409), reads the result and its front and back
+    images, and hands them to the engine as the step's evidence.
+  - A failed scan (`document_scan_failed`, 422) or one left unfinished
+    shows the step again with "Try again", which starts a new transaction.
+  - A hosted page framed by a customer's own page reaches the camera only
+    when the customer's iframe has `allow="camera"` too.
+- **BSN**: only under the flow's BlurBSN the transaction asks CM to black
+  out the BSN on the images itself, so the engine needs no BSN region to cover.
+  - `personal_number`: the printed BSN.
+  - `mrz_strings`: the whole MRZ, as an older Dutch document carries the BSN
+    in its optional data (`mrz` is refused).
+  - `signature`: the holder's signature, under the same setting.
+- **Configuration**: `ID_SCAN_KEY_ID` and `ID_SCAN_SECRET` (an HS256 JWT per
+  call, `kid` the key id), and `ID_SCAN_API_URL` (default
+  `https://api.cm.com/id-scan/v1`).

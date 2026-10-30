@@ -109,6 +109,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.session_created": { icon: "time", tone: "blue" },
   "identity_proofing.session_started": { icon: "scan_qrcode", tone: "blue" },
   "identity_proofing.session_handover": { icon: "scan_qrcode", tone: "slate" },
+  "identity_proofing.document_scan_started": { icon: "personal", tone: "blue" },
   "identity_proofing.session_ended": { icon: "time", tone: "amber" },
   "identity_proofing.session_cancelled": { icon: "close", tone: "slate" },
   "identity_proofing.session_purged": { icon: "delete", tone: "red" },
@@ -455,6 +456,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingSessionStarted");
     case "identity_proofing.session_handover":
       return t("auditLog.actions.identityProofingSessionHandover");
+    case "identity_proofing.document_scan_started":
+      return t("auditLog.actions.identityProofingDocumentScanStarted");
     case "identity_proofing.session_ended":
       return t("auditLog.actions.identityProofingSessionEnded");
     case "identity_proofing.session_cancelled":

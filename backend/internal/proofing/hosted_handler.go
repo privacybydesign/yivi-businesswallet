@@ -92,6 +92,8 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/yivi/start", h.limitHosted(h.hostedStartYivi))
 	mux.Handle("POST /proof/{token}/claim-link", h.limitHosted(h.hostedClaimLink))
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
+	mux.Handle("POST /proof/{token}/document-scan/start", h.limitHosted(h.hostedStartDocumentScan))
+	mux.Handle("POST /proof/{token}/document-scan/finish", h.limitHosted(h.hostedFinishDocumentScan))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("POST /proof/{token}/employment", h.limitHosted(h.hostedAddEmployment))
@@ -165,6 +167,9 @@ type hostedProgressResponse struct {
 	// which a page that ran out names; absent before a start, and for a
 	// session started before the wallet kept it.
 	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
+	// DocumentScan is the document photo the page takes in the browser:
+	// pending or done; absent when the flow takes none.
+	DocumentScan string `json:"documentScan,omitempty"`
 }
 
 // hostedLegalRetention is what the person is told about the data an erasure
@@ -205,6 +210,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
 		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
+		DocumentScan: documentScanState(req),
 	}
 }
 
@@ -248,6 +254,8 @@ type hostedViewResponse struct {
 		// attribute and language; empty for a flow saved without reasons.
 		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
 		YiviAvailable    bool                         `json:"yiviAvailable"`
+		// BrowserOnly is a flow the browser runs alone: no app is chosen.
+		BrowserOnly bool `json:"browserOnly"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
 		DiplomaMode DiplomaMode `json:"diplomaMode"`
 		// AddressMode is whether the session asks for the postal address.
@@ -373,6 +381,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
+	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)
 	out.Flow.EmploymentMode = employmentModeOf(hosted.Request)

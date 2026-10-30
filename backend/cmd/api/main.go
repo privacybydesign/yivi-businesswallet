@@ -31,6 +31,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/emailchannel"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/issuersettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/logging"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/mailer"
@@ -89,6 +90,10 @@ const (
 
 	addressLookupProbeTimeout = 10 * time.Second
 	addressLookupHTTPTimeout  = 10 * time.Second
+
+	// idScanHTTPTimeout bounds one ID Scan call: a transaction, a result, or
+	// one document photo.
+	idScanHTTPTimeout = 30 * time.Second
 
 	// heldStatusRecheckEvery is how often held credentials' status lists are
 	// re-read: issuers publish revocations on the scale of hours, not seconds.
@@ -1154,6 +1159,12 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 		return fmt.Errorf("address lookup ping: %w", err)
 	}
 	proofingService.SetAddressLookup(addressLookup)
+	// A flow's document photo is taken in the browser through ID Scan; without
+	// its key no such flow is sent.
+	if cfg.IDScanKeyID != "" {
+		scanner := idscan.New(cfg.IDScanKeyID, cfg.IDScanSecret, cfg.IDScanAPIURL, &http.Client{Timeout: idScanHTTPTimeout})
+		proofingService.SetDocumentScanner(scanner)
+	}
 	// An external person's session keeps its personal data for the org's data retention.
 	startPruner(proofingJobs, "identity_proofing_purge", cfg.SessionPruneEvery, proofingService.PurgeDue)
 	// The engine tells the service about every session change; a session
