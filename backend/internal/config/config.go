@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 )
 
 const (
@@ -126,6 +127,13 @@ const (
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
 	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
 	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// CM.com's ID Scan: the document_photo step, taken in the browser on the
+	// on-screen and hosted pages. The key id and secret go together; unset
+	// leaves a flow with document_photo unsendable. ID_SCAN_API_URL defaults
+	// to CM.com's API.
+	envIDScanKeyID  = "ID_SCAN_KEY_ID"
+	envIDScanSecret = "ID_SCAN_SECRET"
+	envIDScanAPIURL = "ID_SCAN_API_URL"
 	// envIdentityProofingEDLCSCAPaths is a comma-separated list of the RDW's
 	// eDL CSCA certificate files (PEM or DER), mounted from the ops repo.
 	// Unset trusts no driving licence chip.
@@ -485,6 +493,11 @@ type Config struct {
 	RegulaFaceAPIURL         string
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
+	// IDScanKeyID and IDScanSecret are the ID Scan API key, IDScanAPIURL its
+	// API. An empty key id disables ID Scan.
+	IDScanKeyID  string
+	IDScanSecret string
+	IDScanAPIURL string
 	// IdentityProofingEDLCSCAPaths are the driving-licence CSCA files the
 	// engine trusts; empty trusts no licence.
 	IdentityProofingEDLCSCAPaths []string
@@ -805,6 +818,9 @@ func loadIdentityProofing(c *Config) error {
 		return err
 	}
 	c.RegulaFaceMatchThreshold = threshold
+	if err := loadIDScan(c); err != nil {
+		return err
+	}
 	c.IdentityProofingStubOutcome = os.Getenv(envIdentityProofingStubOutcome)
 	switch c.IdentityProofingStubOutcome {
 	case "", "approved", "rejected", "needs_review":
@@ -815,6 +831,18 @@ func loadIdentityProofing(c *Config) error {
 		return fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
 	}
 	return nil
+}
+
+// loadIDScan reads the ID Scan API key and API URL: the key id and secret
+// together or neither.
+func loadIDScan(c *Config) error {
+	c.IDScanKeyID = os.Getenv(envIDScanKeyID)
+	c.IDScanSecret = os.Getenv(envIDScanSecret)
+	if (c.IDScanKeyID == "") != (c.IDScanSecret == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envIDScanKeyID, envIDScanSecret)
+	}
+	c.IDScanAPIURL = envOrDefault(envIDScanAPIURL, idscan.DefaultBaseURL)
+	return requireAbsoluteHTTPURL(envIDScanAPIURL, c.IDScanAPIURL)
 }
 
 // parseFaceMatchThreshold reads the Regula face match threshold, 0 when unset.
@@ -913,12 +941,13 @@ func loadDevMode(c *Config) error {
 // of a real check.
 func requireProductionSettings(c *Config) error {
 	// The Idem app sends chip data, selfies and liveness frames to the first
-	// two, and the backend a member's VOG PDF to the last: over the network
-	// only with https. Plain http to this machine never leaves it.
+	// two, the backend a member's VOG PDF to the third and the ID Scan key to
+	// the last: over the network only with https. Plain http to this machine never leaves it.
 	for key, raw := range map[string]string{
 		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
 		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
 		envVogValidatorURL:           c.VogValidatorURL,
+		envIDScanAPIURL:              c.IDScanAPIURL,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
