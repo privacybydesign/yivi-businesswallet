@@ -75,7 +75,20 @@ precedent.
   its certificate lists `pbdf-staging.*` only, so the holder's
   `VerifyingValidator` refuses the request until ops registers one. The
   Compose dev stack with unverified request objects, or the dev verifier, is
-  the bench meanwhile.
+  the bench meanwhile. The org-to-org requester (`.ai/features/oid4vp-over-qerds.md`
+  §3) already signs a Request Object under a per-organization certificate from
+  its own CA (`relyingparty.CA`) and verifies the `vp_token` itself
+  (`internal/relyingparty`). Starting a check through that seam, with the QR
+  carrying its `request_uri` instead of the hosted verifier's, removes this
+  dependency on the hosted verifier's certificate.
+- **Two template concepts.** `verification_templates` (one vct, claims,
+  purpose; QR check) and `credential_request_templates`
+  (`oid4vp-over-qerds.md` §4a: several vct + claims rows, no purpose; sent over
+  QERDS) describe the same thing, a saved DCQL request, and the seed creates one
+  of each for Gemeente Nijmegen. Merging them into one template that both the
+  QR check and a QERDS send can pick is the follow-up; so is grading a QERDS
+  answer against the ledger (`issued_here`, `not_revoked`), which only the QR
+  check does today.
 - The holder's in-app scanner and paste field, the `/present?uri=` deep link,
   the `attestations:present` permission and the market/standplaats comparison
   (#245 remaining items) are not built here.

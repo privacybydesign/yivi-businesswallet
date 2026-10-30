@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -1165,7 +1166,8 @@ var nijmegenApvVerificationTemplate = verification.Template{
 
 // seedNijmegenVerification gives the Gemeente Nijmegen tenant its APV
 // verification template (issue #245). Idempotent: skips when the org already
-// has verification templates.
+// has a template by that name, like ensureRequestTemplate, so a template an
+// admin added since does not stop the seed.
 func seedNijmegenVerification(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
 	store := verification.NewStore(pool, audit.NewDBRecorder())
 
@@ -1173,7 +1175,7 @@ func seedNijmegenVerification(ctx context.Context, pool *pgxpool.Pool, orgID uui
 	if err != nil {
 		return fmt.Errorf("seed: list nijmegen verification templates: %w", err)
 	}
-	if len(existing) > 0 {
+	if slices.ContainsFunc(existing, func(t verification.Template) bool { return t.Name == nijmegenApvVerificationTemplate.Name }) {
 		return nil
 	}
 	if _, err := store.CreateTemplate(ctx, orgID, nijmegenApvVerificationTemplate); err != nil {
