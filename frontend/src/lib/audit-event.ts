@@ -97,6 +97,8 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "presentation.expired": { icon: "time", tone: "slate" },
   "presentation.request_received": { icon: "scan_qrcode", tone: "amber" },
   "presentation.request_sent": { icon: "email", tone: "blue" },
+  "presentation.request_template_created": { icon: "favourite", tone: "green" },
+  "presentation.request_template_deleted": { icon: "delete", tone: "slate" },
   "presentation.response_received": { icon: "valid", tone: "green" },
   "presentation.request_failed": { icon: "warning", tone: "red" },
   "verification.template_created": { icon: "add", tone: "green" },
@@ -441,6 +443,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.presentationRequestReceived");
     case "presentation.request_sent":
       return t("auditLog.actions.presentationRequestSent");
+    case "presentation.request_template_created":
+      return t("auditLog.actions.presentationRequestTemplateCreated");
+    case "presentation.request_template_deleted":
+      return t("auditLog.actions.presentationRequestTemplateDeleted");
     case "presentation.response_received":
       return t("auditLog.actions.presentationResponseReceived");
     case "presentation.request_failed":
@@ -622,6 +628,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.verificationTemplate");
     case "verification_session":
       return t("auditLog.targets.verificationSession");
+    case "presentation_request_template":
+      return t("auditLog.targets.presentationRequestTemplate");
     case "org_identity_proofing_settings":
       return t("auditLog.targets.orgIdentityProofingSettings");
     case "identity_proofing_flow":

@@ -171,6 +171,10 @@ const (
 	PresentationRequestSent      = "presentation.request_sent"
 	PresentationResponseReceived = "presentation.response_received"
 	PresentationRequestFailed    = "presentation.request_failed"
+	// A saved credential request: created or deleted by an admin, recording
+	// its name and the credential types it asks for.
+	PresentationRequestTemplateCreated = "presentation.request_template_created"
+	PresentationRequestTemplateDeleted = "presentation.request_template_deleted"
 
 	// Verification (#245): an organisation asking another business wallet to
 	// present a credential and grading the disclosure against its own ledger.
@@ -307,6 +311,7 @@ const (
 
 	TargetPresentationTransaction     = "presentation_transaction"
 	TargetOutboundPresentationRequest = "outbound_presentation_request"
+	TargetPresentationRequestTemplate = "presentation_request_template"
 
 	TargetVerificationTemplate = "verification_template"
 	TargetVerificationSession  = "verification_session"

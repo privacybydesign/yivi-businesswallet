@@ -1,11 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildSendPayload,
+  buildTemplatePayload,
   claimValueText,
   hasErrors,
   MAX_CLAIMS,
+  MAX_TEMPLATE_NAME,
   parseClaimList,
+  rowsFromTemplate,
   validateCredentialRequest,
+  validateTemplateName,
 } from "./credential-request";
 
 describe("parseClaimList", () => {
@@ -91,5 +96,54 @@ describe("claimValueText", () => {
     expect(claimValueText(42)).toBe("42");
     expect(claimValueText({ city: "Nijmegen" })).toBe('{"city":"Nijmegen"}');
     expect(claimValueText(null)).toBe("");
+  });
+});
+
+describe("request templates", () => {
+  const template = {
+    id: "t1",
+    name: "Beschikking beschermingsbewind",
+    credentials: [
+      {
+        vct: "nl.rechtspraak.beschermingsbewind",
+        claims: ["zaaknummer", "omvang"],
+      },
+    ],
+    createdAt: "2026-10-28T12:00:00Z",
+  };
+
+  it("fills the rows with the template's types and claims", () => {
+    expect(rowsFromTemplate(template)).toEqual([
+      {
+        vct: "nl.rechtspraak.beschermingsbewind",
+        claims: "zaaknummer, omvang",
+      },
+    ]);
+  });
+
+  it("saves the rows as a send would carry them", () => {
+    expect(
+      buildTemplatePayload("  Beschikking  ", rowsFromTemplate(template)),
+    ).toEqual({ name: "Beschikking", credentials: template.credentials });
+  });
+
+  it("needs a name of at most the backend's length", () => {
+    expect(validateTemplateName(" ")).toBe("templateNameRequired");
+    expect(validateTemplateName("x".repeat(MAX_TEMPLATE_NAME + 1))).toBe(
+      "templateNameTooLong",
+    );
+    expect(validateTemplateName("Beschikking")).toBeUndefined();
+  });
+
+  it("mirrors openid4vprequester.maxTemplateName", () => {
+    const source = readFileSync(
+      new URL(
+        "../../../backend/internal/openid4vprequester/template.go",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const match = /maxTemplateName = (\d+)/.exec(source);
+    expect(Number(match?.[1])).toBe(MAX_TEMPLATE_NAME);
   });
 });

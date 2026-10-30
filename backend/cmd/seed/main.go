@@ -12,9 +12,9 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/seed"
 )
 
-// envSeedEnvironment names where a seed runs. --proofing-demo creates demo
-// organisations named after real companies, so it runs only where this is
-// seedEnvironmentStaging, or on a local stack (DEV_MODE).
+// envSeedEnvironment names where a seed runs. --proofing-demo and --bewind-demo
+// create demo organisations named after real institutions, so they run only
+// where this is seedEnvironmentStaging, or on a local stack (DEV_MODE).
 const (
 	envSeedEnvironment     = "SEED_ENVIRONMENT"
 	seedEnvironmentStaging = "staging"
@@ -36,6 +36,8 @@ func run() error {
 		"provision the staging pilot partner organisations (Anoigo, Gemeente Nijmegen, Ver.iD, PinkRoccade, Stichting Nuts, Secumail) with their teams as admins — Gemeente Nijmegen also gets its APV standplaatsvergunning attestation catalogue; no other demo data, idempotent — staging only, not for production")
 	proofingDemo := flag.Bool("proofing-demo", false,
 		"provision the identity proofing demo orgs (Radboud, a.s.r., Unibet, CM) with their flows, and the Yivi team as their admins; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
+	bewindDemo := flag.Bool("bewind-demo", false,
+		"provision the beschermingsbewind demo: Rechtbank Gelderland (Demo) and Waalstad Bewindvoering (Demo) with its staff and mandate chain, plus a bijzondere bijstand credential for Gemeente Nijmegen; idempotent; staging only: needs SEED_ENVIRONMENT=staging, or DEV_MODE")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -46,7 +48,12 @@ func run() error {
 	logging.Setup(cfg.LogLevel, cfg.LogFormat, cfg.LogSource)
 
 	if *proofingDemo {
-		if err := checkProofingDemo(cfg.DevMode, os.Getenv(envSeedEnvironment)); err != nil {
+		if err := checkStagingOnly("--proofing-demo", cfg.DevMode, os.Getenv(envSeedEnvironment)); err != nil {
+			return err
+		}
+	}
+	if *bewindDemo {
+		if err := checkStagingOnly("--bewind-demo", cfg.DevMode, os.Getenv(envSeedEnvironment)); err != nil {
 			return err
 		}
 	}
@@ -55,9 +62,10 @@ func run() error {
 
 	// The partial seeds are idempotent, so they can be combined and run on
 	// every deploy of the environment they are for: --admins and --org on
-	// staging and production, --partners and --proofing-demo on staging only.
+	// staging and production, --partners, --proofing-demo and --bewind-demo on
+	// staging only.
 	// Only when no flag is set does the full dev demo seed run.
-	if *adminsOnly || *orgOnly || *partnersOnly || *proofingDemo {
+	if *adminsOnly || *orgOnly || *partnersOnly || *proofingDemo || *bewindDemo {
 		if *adminsOnly {
 			slog.Info("provisioning platform-admin accounts", slog.Int("count", len(cfg.PlatformAdminEmails)))
 			if err := seed.EnsurePlatformAdmins(ctx, cfg.DatabaseDSN, cfg.PlatformAdminEmails); err != nil {
@@ -92,6 +100,13 @@ func run() error {
 			}
 			slog.Info("identity proofing demo provisioning complete")
 		}
+		if *bewindDemo {
+			slog.Info("provisioning beschermingsbewind demo")
+			if err := seed.EnsureBewindDemo(ctx, cfg.DatabaseDSN, cfg.QerdsDefaultAddressDomain); err != nil {
+				return err
+			}
+			slog.Info("beschermingsbewind demo provisioning complete")
+		}
 		return nil
 	}
 
@@ -104,12 +119,12 @@ func run() error {
 	return nil
 }
 
-// checkProofingDemo refuses --proofing-demo outside staging (environment) and
-// a local stack (devMode).
-func checkProofingDemo(devMode bool, environment string) error {
+// checkStagingOnly refuses a staging-only seed flag outside staging
+// (environment) and a local stack (devMode).
+func checkStagingOnly(flagName string, devMode bool, environment string) error {
 	if devMode || environment == seedEnvironmentStaging {
 		return nil
 	}
-	return fmt.Errorf("--proofing-demo is for staging only: set %s=%s, or run it on a local stack (DEV_MODE)",
-		envSeedEnvironment, seedEnvironmentStaging)
+	return fmt.Errorf("%s is for staging only: set %s=%s, or run it on a local stack (DEV_MODE)",
+		flagName, envSeedEnvironment, seedEnvironmentStaging)
 }

@@ -333,3 +333,54 @@ func assertLangs(t *testing.T, what string, langs []string) {
 		}
 	}
 }
+
+// TestBewindCredentialsAreWellFormed holds the beschermingsbewind demo's
+// catalogue to what the editor accepts: supported types, unique keys, both
+// languages, and template pre-fills that name declared attributes with a
+// source valid for the schema's subject type.
+func TestBewindCredentialsAreWellFormed(t *testing.T) {
+	supported := map[string]bool{}
+	for _, s := range attestation.SupportedAttributeTypes {
+		supported[s] = true
+	}
+	seenVCTs := map[string]bool{}
+	for _, c := range bewindCredentials {
+		s := c.schema
+		if s.VCT == "" || s.CredentialConfigID == "" || c.template.Name == "" {
+			t.Fatalf("bewind credential %q needs a VCT, a CredentialConfigID and a template name", s.DisplayName)
+		}
+		if seenVCTs[s.VCT] {
+			t.Errorf("bewind VCT %q is duplicated", s.VCT)
+		}
+		seenVCTs[s.VCT] = true
+		assertLangs(t, s.VCT+" display", toLangs(s.Display))
+
+		keys := assertBewindAttributes(t, s, supported)
+		for key := range c.template.DefaultAttributes {
+			if !keys[key] {
+				t.Errorf("%s template default %q is not a schema attribute", s.VCT, key)
+			}
+		}
+		if err := attestation.ValidateAttributeSources(s.SubjectType, s.Attributes, c.template.AttributeSources); err != nil {
+			t.Errorf("%s template sources: %v", s.VCT, err)
+		}
+	}
+}
+
+// assertBewindAttributes checks s's attributes have unique keys, a supported
+// type and both languages, and returns the keys.
+func assertBewindAttributes(t *testing.T, s attestation.Schema, supported map[string]bool) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	for _, a := range s.Attributes {
+		if keys[a.Key] {
+			t.Errorf("%s attribute key %q is duplicated", s.VCT, a.Key)
+		}
+		keys[a.Key] = true
+		if !supported[a.Type] {
+			t.Errorf("%s attribute %q has unsupported type %q", s.VCT, a.Key, a.Type)
+		}
+		assertLangs(t, s.VCT+" attribute "+a.Key+" display", toLangsLabel(a.Display))
+	}
+	return keys
+}

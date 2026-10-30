@@ -47,6 +47,13 @@ type OfferRequest struct {
 	// CredentialConfigID is the issuer-registered credential type to issue (the
 	// Veramo credentialId our schema maps to).
 	CredentialConfigID string
+	// VCT, DisplayName and IssuerName are the credential type, its display
+	// name and the issuing organization's name. A real issuer takes these from
+	// its own configuration; only the stub reads them, to carry them to the stub
+	// holder (StubOfferContent).
+	VCT         string
+	DisplayName string
+	IssuerName  string
 	// Claims are the attribute values sealed into the credential
 	// (credentialDataSupplierInput).
 	Claims map[string]any
