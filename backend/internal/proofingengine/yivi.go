@@ -130,29 +130,17 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
-	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
-		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{
-			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
-			Message: "the document photo is taken in the browser and has not come in yet",
-		}
-	}
-
-	// The scanned document must be the disclosed one.
-	scanCode, doubtful := documentPhotoOutcome(sess, doc.Number)
-	if scanCode != "" {
-		details[detailReason] = disclosureCodeDocumentRefused
-		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, docRedaction.BlurBSN)
+	decided, err := s.decideByDocumentPhoto(sess, fd, doc.Number, details, docRedaction.BlurBSN)
+	switch {
+	case err != nil:
+		return proofingprovider.YiviDisclosure{}, err
+	case decided == session.StatusRejected:
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
 	}
 
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 	addDocumentPhoto(result, sess, docRedaction)
 	addDocumentCheck(result, sess)
-	decided := session.StatusApproved
-	if doubtful {
-		decided = session.StatusNeedsReview
-		details[detailReason] = reasonDocumentDoubtful
-	}
 
 	if sess.Status == session.StatusCreated {
 		opened := sess
@@ -164,6 +152,30 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not decided", sess.ID)
 	}
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+// decideByDocumentPhoto checks a disclosure of document number against the
+// browser's document photo: an error while the photo is not in yet, rejected
+// (sess is decided so) when the scanned document is refused or not the
+// disclosed one, needs_review when the scan was doubtful, else approved.
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, number string, details map[string]any, redactDocument bool) (session.Status, error) {
+	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
+		return "", &proofingprovider.RejectedError{
+			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
+			Message: "the document photo is taken in the browser and has not come in yet",
+		}
+	}
+	scanCode, doubtful := documentPhotoOutcome(sess, number)
+	switch {
+	case scanCode != "":
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, redactDocument)
+		return session.StatusRejected, nil
+	case doubtful:
+		details[detailReason] = reasonDocumentDoubtful
+		return session.StatusNeedsReview, nil
+	}
+	return session.StatusApproved, nil
 }
 
 // disclosedPhoto is the disclosed photo as the result releases it: only when

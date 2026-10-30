@@ -358,4 +358,20 @@ func TestDocumentScanAnswersAgeCheck(t *testing.T) {
 	if identity.Status != pp.StatusApproved || identity.AgeOver == nil || identity.AgeOver.Age != age || !identity.AgeOver.Over || identity.BirthDate != "" {
 		t.Errorf("identity = %+v, age %+v; want approved, %d or older, no date of birth", identity.Result, identity.AgeOver, age)
 	}
+
+	// A scan that read no date of birth leaves the age unanswered: refused.
+	unread := inProgress("ps_2")
+	unread.Method, unread.RequestedAttributes = session.MethodBrowser, []string{attrAgeOver}
+	unread.Flow, unread.FlowVersion, unread.ExpiresAt = "flow", 1, time.Now().UTC().Add(time.Hour)
+	scan := authenticScan()
+	scan.Document.DateOfBirth = ""
+	s, store = documentPhotoServer(unread, ageCheck)
+	if err := s.SubmitDocumentPhoto(ctx, tenant, unread.ID, unread.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	if stored, _ := store.Get("org", unread.ID); stored.Status != session.StatusRejected || stored.ErrorCode != errCodeAgeNotDisclosed {
+		t.Errorf("no date of birth: status %q, error %q; want rejected, %s", stored.Status, stored.ErrorCode, errCodeAgeNotDisclosed)
+	}
 }
