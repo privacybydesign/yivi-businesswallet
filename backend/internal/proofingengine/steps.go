@@ -382,6 +382,31 @@ func isFaceStep(step flow.Step) bool {
 	return false
 }
 
+// appSteps are fd's steps an app runs, in fd's order.
+func appSteps(fd *flow.FlowDefinition) []flow.Step {
+	var steps []flow.Step
+	for _, step := range fd.Steps {
+		if fd.Location(step) == flow.LocationNative {
+			steps = append(steps, step)
+		}
+	}
+	return steps
+}
+
+// documentPhotoMissing reports whether fd's document photo, the browser's
+// step, is all sess still lacks.
+func documentPhotoMissing(sess session.Session, fd *flow.FlowDefinition) bool {
+	if !slices.Contains(fd.Steps, flow.StepDocumentPhoto) || sess.Steps.DocumentPhoto != nil {
+		return false
+	}
+	for _, step := range appSteps(fd) {
+		if !stepHasEvidence(sess, step) {
+			return false
+		}
+	}
+	return true
+}
+
 func flowStepProgress(sess session.Session, fd *flow.FlowDefinition) (completed, remaining []string) {
 	completed, remaining = []string{}, []string{}
 	for _, step := range fd.Steps {

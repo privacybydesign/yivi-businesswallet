@@ -589,40 +589,6 @@ paths:
           $ref: '#/components/responses/IdemDocumentUnsupported'
         '500':
           $ref: '#/components/responses/IdemInternalError'
-  /api/v1/app/{token}/steps/document_photo:
-    parameters:
-      - $ref: '#/components/parameters/IdemSessionToken'
-    post:
-      tags: [idem-app]
-      summary: Submit the document_photo step
-      description: >-
-        Photos of the document's data page and optional back, with the located BSN region of a Dutch document.
-      security: []
-      parameters:
-        - $ref: '#/components/parameters/IdemDeviceToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/IdemDocumentPhotoRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/IdemStepRecorded'
-        '400':
-          $ref: '#/components/responses/IdemBadRequest'
-        '401':
-          $ref: '#/components/responses/IdemDeviceUnauthorized'
-        '403':
-          $ref: '#/components/responses/IdemDeviceHandedOver'
-        '404':
-          $ref: '#/components/responses/IdemSessionNotFound'
-        '409':
-          $ref: '#/components/responses/IdemConflict'
-        '410':
-          $ref: '#/components/responses/IdemSessionExpired'
-        '500':
-          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/nfc:
     parameters:
       - $ref: '#/components/parameters/IdemSessionToken'
@@ -13732,14 +13698,6 @@ components:
         bsnRegion:
           $ref: '#/components/schemas/IdemImageRegion'
       required: [image]
-    IdemDocumentPhotoRequest:
-      type: object
-      properties:
-        front:
-          $ref: '#/components/schemas/IdemDocumentPhotoSide'
-        back:
-          $ref: '#/components/schemas/IdemDocumentPhotoSide'
-      required: [front]
     IdemPhoto:
       type: object
       properties:

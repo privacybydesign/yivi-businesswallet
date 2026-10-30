@@ -19,7 +19,7 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	if sess.Steps.Document != nil {
 		storedState = sess.Steps.Document.Parsed.IssuingState
 	}
-	if coversDocumentBSN(redaction, bsnPolicy, storedState) {
+	if coversDocumentBSN(redaction, storedState) {
 		redactStoredDocumentPhoto(sess)
 	}
 	if !redaction.KeepFacePhotos && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
@@ -127,17 +127,17 @@ func dropDataGroups(ev *mrtdEvidenceRequest, names ...string) bool {
 }
 
 // coversDocumentBSN reports whether a document photo's printed BSN is
-// covered: under BlurBSN or a mask or omit BSN policy, unless the document is
-// known not to be Dutch. Only a Dutch document prints a BSN, so another
+// covered: when the flow's "Black out the BSN" is on (BlurBSN), unless the
+// document is known not to be Dutch. The BSN policy is about the BSN as data
+// (DG11, a scan's read fields), not the photo. Only a Dutch document prints a BSN, so another
 // country's photo has none to cover and is released as taken; a Dutch one, or
 // one whose issuing state is not known, is covered, and withheld where the app
 // did not locate the BSN (coverBSN).
-func coversDocumentBSN(redaction privacy.RedactionPolicy, bsnPolicy privacy.BSNPolicy, issuingState string) bool {
+func coversDocumentBSN(redaction privacy.RedactionPolicy, issuingState string) bool {
 	if issuingState != "" && issuingState != dutchIssuingState {
 		return false
 	}
-	p := bsnPolicy.Effective()
-	return redaction.BlurBSN || p == privacy.BSNPolicyMask || p == privacy.BSNPolicyOmit
+	return redaction.BlurBSN
 }
 
 // resultIssuingState is the issuing state of the document a result is built
@@ -163,7 +163,7 @@ func documentImageFromSide(side *session.DocumentPhotoSide) *documentImageInfo {
 	if side == nil {
 		return nil
 	}
-	img := &documentImageInfo{ImageBase64: side.Image, MimeType: side.MimeType}
+	img := &documentImageInfo{ImageBase64: side.Image, MimeType: side.MimeType, BSNRedacted: side.BSNRedacted}
 	if r := side.BSNRegion; r != nil {
 		img.BSNRegion = &imageRegion{X: r.X, Y: r.Y, W: r.W, H: r.H}
 	}
@@ -187,7 +187,7 @@ func redactStoredDocumentPhoto(sess *session.Session) {
 }
 
 func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session.DocumentPhotoSide {
-	if side.Image == "" {
+	if side.Image == "" || side.BSNRedacted {
 		return side
 	}
 	var region *imageRegion
@@ -203,8 +203,8 @@ func redactedSide(sess *session.Session, side session.DocumentPhotoSide) session
 	return side
 }
 
-// errNoBSNRegion is a document photo under a BlurBSN policy whose BSN the app
-// did not locate: the server never guesses where it is, so the photo is
+// errNoBSNRegion is a document photo under a BlurBSN policy whose BSN was
+// neither blacked out by the scan service nor located: the server never guesses where it is, so the photo is
 // withheld rather than kept or released readable.
 var errNoBSNRegion = errors.New("no BSN region to cover")
 

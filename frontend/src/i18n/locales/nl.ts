@@ -525,6 +525,10 @@ export const nl: Translation<typeof en> = {
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
+      docNotAuthentic: "het gefotografeerde document is niet echt",
+      docFieldsInvalid: "de gedrukte gegevens van het document zijn afgekeurd",
+      documentMismatch:
+        "het gefotografeerde document is niet het gelezen document",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
       manualReviewRejected: "geweigerd door een beoordelaar",
       reviewNotHolder:
