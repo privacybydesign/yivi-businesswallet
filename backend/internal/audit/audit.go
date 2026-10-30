@@ -171,6 +171,10 @@ const (
 	PresentationRequestSent      = "presentation.request_sent"
 	PresentationResponseReceived = "presentation.response_received"
 	PresentationRequestFailed    = "presentation.request_failed"
+	// A saved credential request: created or deleted by an admin, recording
+	// its name and the credential types it asks for.
+	PresentationRequestTemplateCreated = "presentation.request_template_created"
+	PresentationRequestTemplateDeleted = "presentation.request_template_deleted"
 
 	// identity proofing service
 	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
@@ -300,6 +304,7 @@ const (
 
 	TargetPresentationTransaction     = "presentation_transaction"
 	TargetOutboundPresentationRequest = "outbound_presentation_request"
+	TargetPresentationRequestTemplate = "presentation_request_template"
 
 	TargetIdentityProofingSettings = "org_identity_proofing_settings"
 	TargetIdentityProofingFlow     = "identity_proofing_flow"

@@ -1,5 +1,7 @@
 import type {
+  CreateRequestTemplate,
   OutboundStatus,
+  RequestTemplate,
   SendCredentialRequest,
 } from "../api/credential-requests";
 
@@ -7,6 +9,8 @@ import type {
 // server re-enforces them, these are for immediate feedback.
 export const MAX_CREDENTIALS = 10;
 export const MAX_CLAIMS = 50;
+// Mirrors openid4vprequester.maxTemplateName.
+export const MAX_TEMPLATE_NAME = 120;
 
 // Plausible address check only; the QERDS provider is the authority.
 const ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -25,6 +29,11 @@ export type CredentialRequestError =
   | "vctInvalid"
   | "claimInvalid"
   | "tooManyClaims";
+
+export type TemplateNameError =
+  | "templateNameRequired"
+  | "templateNameTooLong"
+  | "templateNameTaken";
 
 export interface CredentialRequestErrors {
   recipient?: CredentialRequestError;
@@ -82,6 +91,34 @@ export function buildSendPayload(
       vct: row.vct.trim(),
       claims: parseClaimList(row.claims),
     })),
+  };
+}
+
+// The form rows a picked template fills in, its claims as typed.
+export function rowsFromTemplate(template: RequestTemplate): CredentialRow[] {
+  return template.credentials.map((credential) => ({
+    vct: credential.vct,
+    claims: credential.claims.join(", "),
+  }));
+}
+
+export function validateTemplateName(
+  name: string,
+): TemplateNameError | undefined {
+  const trimmed = name.trim();
+  if (trimmed === "") return "templateNameRequired";
+  if (trimmed.length > MAX_TEMPLATE_NAME) return "templateNameTooLong";
+  return undefined;
+}
+
+// A template saves what the rows ask for, the same way a send carries it.
+export function buildTemplatePayload(
+  name: string,
+  rows: CredentialRow[],
+): CreateRequestTemplate {
+  return {
+    name: name.trim(),
+    credentials: buildSendPayload("", "", rows).credentials,
   };
 }
 

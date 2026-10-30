@@ -8,11 +8,15 @@ import type {
 } from "../api/credential-requests";
 import {
   useApproveIncomingRequestMutation,
+  useCreateRequestTemplateMutation,
   useDeclineIncomingRequestMutation,
+  useDeleteRequestTemplateMutation,
   useIncomingRequestsQuery,
   useOutboundRequestsQuery,
+  useRequestTemplatesQuery,
   useSendCredentialRequestMutation,
 } from "../api/credential-requests.queries";
+import { ApiError } from "../api/http";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useQerdsAddressesQuery,
@@ -23,19 +27,25 @@ import type {
   CredentialRequestError,
   CredentialRequestErrors,
   CredentialRow,
+  TemplateNameError,
 } from "../lib/credential-request";
 import {
   buildSendPayload,
+  buildTemplatePayload,
   claimValueText,
   hasErrors,
   MAX_CREDENTIALS,
   outboundStatusTone,
+  rowsFromTemplate,
   validateCredentialRequest,
+  validateTemplateName,
 } from "../lib/credential-request";
 import { useWhenFormatter } from "../lib/format-when";
+import { toast } from "../lib/toast";
 import { Button, Card, ConfirmDialog, Modal, Select, Tag, TopBar } from "../ui";
 
 const ADMIN_ROLE = "admin";
+const HTTP_CONFLICT = 409;
 const FORM_ID = "credential-request-form";
 
 const FIELD_LABEL = "text-ink-soft text-[12px] font-semibold";
@@ -472,13 +482,65 @@ function RequestForm({
   const addresses = useQerdsAddressesQuery(slug);
   const contacts = useQerdsContactsQuery(slug);
   const send = useSendCredentialRequestMutation(slug);
+  const templates = useRequestTemplatesQuery(slug);
+  const createTemplate = useCreateRequestTemplateMutation(slug);
+  const deleteTemplate = useDeleteRequestTemplateMutation(slug);
   const [from, setFrom] = useState("");
   const [recipient, setRecipient] = useState("");
   const [rows, setRows] = useState<CredentialRow[]>([EMPTY_ROW]);
   const [errors, setErrors] = useState<CredentialRequestErrors>({ rows: [] });
+  const [templateId, setTemplateId] = useState("");
+  const [naming, setNaming] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateError, setTemplateError] = useState<TemplateNameError>();
 
-  const errorText = (error?: CredentialRequestError): string | undefined =>
+  const errorText = (
+    error?: CredentialRequestError | TemplateNameError,
+  ): string | undefined =>
     error && t(`credentialRequests.form.errors.${error}`);
+
+  const applyTemplate = (id: string): void => {
+    setTemplateId(id);
+    const picked = templates.data?.find((template) => template.id === id);
+    if (!picked) return;
+    setRows(rowsFromTemplate(picked));
+    setErrors((prev) => ({ ...prev, rows: [] }));
+  };
+
+  const removeTemplate = (): void => {
+    deleteTemplate.mutate(
+      { id: templateId },
+      { onSuccess: () => setTemplateId("") },
+    );
+  };
+
+  const stopNaming = (): void => {
+    setNaming(false);
+    setTemplateName("");
+    setTemplateError(undefined);
+  };
+
+  // Saves the rows as they stand; the recipient is not part of a template.
+  const saveTemplate = (): void => {
+    const nameError = validateTemplateName(templateName);
+    setTemplateError(nameError);
+    const rowErrors = validateCredentialRequest(recipient, rows).rows;
+    setErrors((prev) => ({ ...prev, rows: rowErrors }));
+    if (nameError || rowErrors.some((e) => e !== undefined)) return;
+    createTemplate.mutate(buildTemplatePayload(templateName, rows), {
+      onSuccess: (saved) => {
+        setTemplateId(saved.id);
+        stopNaming();
+      },
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === HTTP_CONFLICT) {
+          setTemplateError("templateNameTaken");
+          return;
+        }
+        toast.error(t("toasts.error"));
+      },
+    });
+  };
 
   const updateRow = (index: number, patch: Partial<CredentialRow>): void => {
     setRows((prev) =>
@@ -576,6 +638,43 @@ function RequestForm({
           )}
         </div>
 
+        {(templates.data?.length ?? 0) > 0 && (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="credential-request-template"
+              className={FIELD_LABEL}
+            >
+              {t("credentialRequests.form.template")}
+            </label>
+            <div className="flex items-center gap-2">
+              <Select
+                id="credential-request-template"
+                value={templateId}
+                onChange={(event) => applyTemplate(event.target.value)}
+              >
+                <option value="">
+                  {t("credentialRequests.form.templateNone")}
+                </option>
+                {templates.data?.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </Select>
+              {templateId !== "" && (
+                <Button
+                  variant="dangerGhost"
+                  icon="delete"
+                  iconOnly
+                  loading={deleteTemplate.isPending}
+                  aria-label={t("credentialRequests.form.deleteTemplate")}
+                  onClick={removeTemplate}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-3">
           <span className={FIELD_LABEL}>
             {t("credentialRequests.form.credentials")}
@@ -624,8 +723,8 @@ function RequestForm({
               )}
             </div>
           ))}
-          {rows.length < MAX_CREDENTIALS && (
-            <div>
+          <div className="flex flex-wrap gap-2">
+            {rows.length < MAX_CREDENTIALS && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -633,6 +732,55 @@ function RequestForm({
                 onClick={() => setRows((prev) => [...prev, EMPTY_ROW])}
               >
                 {t("credentialRequests.form.addCredential")}
+              </Button>
+            )}
+            {!naming && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="favourite"
+                onClick={() => setNaming(true)}
+              >
+                {t("credentialRequests.form.saveAsTemplate")}
+              </Button>
+            )}
+          </div>
+          {naming && (
+            <div className="flex items-start gap-2">
+              <div className="flex grow flex-col gap-1">
+                <input
+                  className={`${control(controlState(templateError))} h-9`}
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Enter saves the template; it must not send the request.
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      saveTemplate();
+                    }
+                  }}
+                  placeholder={t(
+                    "credentialRequests.form.templateNamePlaceholder",
+                  )}
+                  aria-label={t("credentialRequests.form.templateName")}
+                  aria-invalid={templateError ? true : undefined}
+                  autoFocus
+                />
+                {templateError && (
+                  <span role="alert" className="text-error text-[12px]">
+                    {errorText(templateError)}
+                  </span>
+                )}
+              </div>
+              <Button
+                size="sm"
+                loading={createTemplate.isPending}
+                onClick={saveTemplate}
+              >
+                {t("credentialRequests.form.saveTemplate")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={stopNaming}>
+                {t("common.cancel")}
               </Button>
             </div>
           )}

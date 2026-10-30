@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
 )
 
 const stubRefBytes = 16
@@ -18,6 +21,9 @@ const stubRefBytes = 16
 // redeemed offer — the stub does not run a real OpenID4VCI flow, so there is no
 // issuer-supplied vct to read.
 const stubReceivedVCT = "eaa.received.stub"
+
+// stubIssuer is the issuer the stub writes into every payload it synthesises.
+const stubIssuer = "stub-issuer"
 
 // stubReceivedPayload is a synthetic verified SD-JWT payload the stub attaches to
 // a redeemed credential so the held-credential detail view has attributes to show
@@ -39,10 +45,16 @@ const stubReceivedLifetime = 365 * 24 * time.Hour
 type StubHolder struct {
 	mu    sync.Mutex
 	creds map[uuid.UUID]map[string]Credential
+	// displays keeps, per org and ref, the display name and issuer a stub offer
+	// carried: the stand-in for the type metadata a real issuer publishes.
+	displays map[uuid.UUID]map[string]HeldDisplay
 }
 
 func NewStubHolder() *StubHolder {
-	return &StubHolder{creds: make(map[uuid.UUID]map[string]Credential)}
+	return &StubHolder{
+		creds:    make(map[uuid.UUID]map[string]Credential),
+		displays: make(map[uuid.UUID]map[string]HeldDisplay),
+	}
 }
 
 func (*StubHolder) Ping(context.Context) error { return nil }
@@ -63,23 +75,48 @@ func (h *StubHolder) Store(_ context.Context, orgID uuid.UUID, cred Credential) 
 
 // Redeem synthesises a stored credential instead of running a real OpenID4VCI
 // flow, so the QERDS receive → held-index loop runs offline under the stub
-// (dev/CI default). offerURI is used only as a stable dedup hash. It mirrors the
-// engine contract: on return the credential is "held" and the ref can be indexed.
+// (dev/CI default). An offer from openid4vciissuer.StubIssuer carries the type
+// and claims that were issued, and those are what is held; any other offer
+// gets the synthetic placeholder. offerURI is also the stable dedup hash. It
+// mirrors the engine contract: on return the credential is "held" and the ref
+// can be indexed.
 func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (Redeemed, error) {
 	issuedAt := time.Now()
 	expiresAt := issuedAt.Add(stubReceivedLifetime)
+	vct, issuer, payload := stubReceivedVCT, offerURI, []byte(stubReceivedPayload)
+	offered, ok := openid4vciissuer.StubOfferContent(offerURI)
+	if ok {
+		offered.Claims["vct"] = offered.VCT
+		offered.Claims["iss"] = stubIssuer
+		encoded, err := json.Marshal(offered.Claims)
+		if err != nil {
+			return Redeemed{}, fmt.Errorf("eudiholder: stub payload: %w", err)
+		}
+		vct, payload = offered.VCT, encoded
+		if offered.IssuerName != "" {
+			issuer = offered.IssuerName
+		}
+	}
 	cred := Credential{
-		VCT:              stubReceivedVCT,
-		IssuerURL:        offerURI,
-		CredentialIssuer: offerURI,
+		VCT:              vct,
+		IssuerURL:        issuer,
+		CredentialIssuer: issuer,
 		Hash:             offerURI,
-		ProcessedPayload: []byte(stubReceivedPayload),
+		ProcessedPayload: payload,
 		IssuedAt:         issuedAt,
 		ExpiresAt:        &expiresAt,
 	}
 	ref, err := h.Store(ctx, orgID, cred)
 	if err != nil {
 		return Redeemed{}, err
+	}
+	if ok {
+		h.mu.Lock()
+		if h.displays[orgID] == nil {
+			h.displays[orgID] = make(map[string]HeldDisplay)
+		}
+		h.displays[orgID][ref] = HeldDisplay{DisplayName: offered.DisplayName, IssuerName: offered.IssuerName}
+		h.mu.Unlock()
 	}
 	return Redeemed{Ref: ref, VCT: cred.VCT, Issuer: cred.CredentialIssuer}, nil
 }
@@ -99,10 +136,10 @@ func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct, _ stri
 	found, ok := h.creds[orgID][ref]
 	if !ok && vct != "" {
 		matches := 0
-		for _, cred := range h.creds[orgID] {
+		for r, cred := range h.creds[orgID] {
 			if cred.VCT == vct {
 				matches++
-				found = cred
+				found, ref = cred, r
 			}
 		}
 		ok = matches == 1
@@ -114,21 +151,23 @@ func (h *StubHolder) Claims(_ context.Context, orgID uuid.UUID, ref, vct, _ stri
 	if err != nil {
 		return HeldCredential{}, err
 	}
-	// The stub records no issuer display metadata, so IssuerName is left empty and
-	// the caller falls back to the issuer identifier.
-	return HeldCredential{Attributes: attributes}, nil
+	// Only a stub offer's display is recorded; for anything else the names stay
+	// empty and the caller falls back to the VCT and the issuer identifier.
+	display := h.displays[orgID][ref]
+	return HeldCredential{Attributes: attributes, DisplayName: display.DisplayName, IssuerName: display.IssuerName}, nil
 }
 
-// Displays returns an entry per held vct with empty display metadata: the stub
-// records no credential-level type-metadata, so every held-list row falls back to
-// its VCT-derived name and shows no logo (matches the engine contract shape).
+// Displays returns an entry per held vct. The stub has no type metadata: a
+// credential redeemed from a stub offer gets the display name and issuer that
+// offer carried, anything else empty display metadata, so its row falls back to
+// its VCT-derived name; no row has a logo (matches the engine contract shape).
 func (h *StubHolder) Displays(_ context.Context, orgID uuid.UUID, _ string) (map[string]HeldDisplay, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	displays := make(map[string]HeldDisplay)
-	for _, cred := range h.creds[orgID] {
+	for ref, cred := range h.creds[orgID] {
 		if cred.VCT != "" {
-			displays[cred.VCT] = HeldDisplay{}
+			displays[cred.VCT] = h.displays[orgID][ref]
 		}
 	}
 	return displays, nil
@@ -169,6 +208,7 @@ func (h *StubHolder) Delete(_ context.Context, orgID uuid.UUID, ref string) erro
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.creds[orgID], ref)
+	delete(h.displays[orgID], ref)
 	return nil
 }
 

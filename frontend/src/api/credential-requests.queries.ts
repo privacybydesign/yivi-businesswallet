@@ -2,15 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
+  CreateRequestTemplate,
   IncomingRequest,
   OutboundRequest,
+  RequestTemplate,
   SendCredentialRequest,
 } from "./credential-requests";
 import {
   approveIncomingRequest,
+  createRequestTemplate,
   declineIncomingRequest,
+  deleteRequestTemplate,
   getIncomingRequests,
   getOutboundRequests,
+  getRequestTemplates,
   sendCredentialRequest,
 } from "./credential-requests";
 import { toast } from "../lib/toast";
@@ -21,6 +26,56 @@ export function outboundRequestsQueryKey(slug: string): readonly string[] {
 
 export function incomingRequestsQueryKey(slug: string): readonly string[] {
   return ["organizations", "detail", slug, "credential-requests", "incoming"];
+}
+
+export function requestTemplatesQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "credential-requests", "templates"];
+}
+
+export function useRequestTemplatesQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<RequestTemplate[], Error> {
+  return useQuery({
+    queryKey: requestTemplatesQueryKey(slug),
+    queryFn: ({ signal }) => getRequestTemplates(slug, signal),
+    enabled: enabled && slug !== "",
+  });
+}
+
+export function useCreateRequestTemplateMutation(
+  slug: string,
+): UseMutationResult<RequestTemplate, Error, CreateRequestTemplate> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (body: CreateRequestTemplate) =>
+      createRequestTemplate(slug, body),
+    // The form shows a taken name inline and toasts anything else itself.
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.requestTemplateSaved"));
+      void queryClient.invalidateQueries({
+        queryKey: requestTemplatesQueryKey(slug),
+      });
+    },
+  });
+}
+
+export function useDeleteRequestTemplateMutation(
+  slug: string,
+): UseMutationResult<void, Error, { id: string }> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: ({ id }) => deleteRequestTemplate(slug, id),
+    onSuccess: () => {
+      toast.success(t("toasts.requestTemplateDeleted"));
+      void queryClient.invalidateQueries({
+        queryKey: requestTemplatesQueryKey(slug),
+      });
+    },
+  });
 }
 
 export function useOutboundRequestsQuery(

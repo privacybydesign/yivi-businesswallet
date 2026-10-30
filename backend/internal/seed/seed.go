@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -191,6 +193,16 @@ var demoOrganizations = []demoOrganization{
 	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NL.KVK.90000120", addressLocal: "unibet"},
 	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NL.KVK.90000130", addressLocal: "cm"},
 	{name: "odixus (Demo)", slug: odixusSlug, kvkNumber: "90000140", euid: "NL.KVK.90000140", addressLocal: "odixus"},
+	// The beschermingsbewind demo (bewind.go): a fictional office, whose
+	// bestuurder is the root of its mandate chain, and the court that appoints it.
+	bewindOfficeOrg,
+	{name: "Rechtbank Gelderland (Demo)", slug: bewindCourtSlug, kvkNumber: "90000160", euid: "NL.KVK.90000160", addressLocal: bewindCourtSlug},
+}
+
+// bewindOfficeOrg is the bewindvoeringskantoor of the beschermingsbewind demo.
+var bewindOfficeOrg = demoOrganization{
+	name: "Waalstad Bewindvoering B.V. (Demo)", slug: bewindOfficeSlug, kvkNumber: "90000150", euid: "NL.KVK.90000150",
+	addressLocal: bewindOfficeSlug, repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14",
 }
 
 var demoUsers = []demoUser{
@@ -405,7 +417,7 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedAttestations(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
-	if err := seedEmailSettings(ctx, pool, demoOrg.ID); err != nil {
+	if err := seedEmailSettings(ctx, pool, demoOrg.ID, "Yivi B.V.", "noreply@yivi.app"); err != nil {
 		return err
 	}
 	if err := seedIssuerSettings(ctx, pool, demoOrg.ID, "yivi", "Yivi B.V."); err != nil {
@@ -428,6 +440,22 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		return err
 	}
 	if err := seedIssuerSettings(ctx, pool, nijmegenOrg.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
+		return err
+	}
+	if err := ensureDemoTheme(ctx, themesettings.NewStore(pool, audit.NewDBRecorder()), nijmegenOrg.ID, nijmegenSlug, nijmegenTheme); err != nil {
+		return err
+	}
+	if err := seedBewindDemo(ctx, pool, users, orgs, orgsBySlug); err != nil {
+		return err
+	}
+	// The demo's presenter acts for Gemeente Nijmegen too: locally, its register
+	// entry already names them, so they claim it and administer the tenant. Not
+	// in EnsureBewindDemo: on staging Nijmegen is a partner's own tenant.
+	if err := ensureBewindPresenter(ctx, users, orgs, pool, orgsBySlug[nijmegenSlug].ID); err != nil {
+		return err
+	}
+	// The office e-mails its employee credential; locally that lands in Mailpit.
+	if err := seedEmailSettings(ctx, pool, orgsBySlug[bewindOfficeSlug].ID, bewindOfficeOrg.name, "noreply@waalstad-bewind.example"); err != nil {
 		return err
 	}
 
@@ -947,14 +975,15 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 	return nil
 }
 
-// seedEmailSettings points the demo org's SMTP at the dev Mailpit service (no
-// auth), so person-facing credential-offer e-mails are captured and viewable at
-// http://localhost:8025 out of the box. Idempotent.
-func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+// seedEmailSettings points an org's SMTP at the dev Mailpit service (no auth),
+// so person-facing credential-offer e-mails are captured and viewable at
+// http://localhost:8025 out of the box. Dev seed only: staging has no Mailpit.
+// Idempotent.
+func seedEmailSettings(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, fromName, fromAddress string) error {
 	const insert = `INSERT INTO org_email_settings (organization_id, host, port, from_name, from_address, enabled)
-		VALUES ($1, 'mailpit', 1025, 'Yivi B.V.', 'noreply@yivi.app', true)
+		VALUES ($1, 'mailpit', 1025, $2, $3, true)
 		ON CONFLICT (organization_id) DO NOTHING`
-	if _, err := pool.Exec(ctx, insert, orgID); err != nil {
+	if _, err := pool.Exec(ctx, insert, orgID, fromName, fromAddress); err != nil {
 		return fmt.Errorf("seed: email settings: %w", err)
 	}
 	return nil
@@ -1076,33 +1105,36 @@ var nijmegenApvSchema = attestation.Schema{
 	},
 }
 
+// nijmegenLogoPNG is Gemeente Nijmegen's mark (assets/README.md).
+//
+//go:embed assets/nijmegen-logo.png
+var nijmegenLogoPNG []byte
+
+// nijmegenTheme is nijmegen.nl's red (the web manifest's theme colour, and the
+// site's darker shade for the chrome), so the dev demo's municipality is told
+// apart from the court and the office at a glance, logo in the org switcher
+// included. Dev seed only: on staging the partner sets its own theme.
+var nijmegenTheme = &demoTheme{
+	settings: themesettings.SettingsInput{
+		PrimaryColor: "#A80A2D", AccentColor: "#830823", TextColor: "#2B1A1E", SurfaceColor: "#FBF6F7",
+		BorderColor: "#E8D5DA", LinkColor: "#A80A2D", SidebarColor: "#830823", TopbarColor: "#A80A2D",
+		FontFamily: fontSystemUI,
+	},
+	logo: nijmegenLogoPNG,
+}
+
 // nijmegenApvTemplateName names the template over nijmegenApvSchema, matching
 // the template name issue #245's scenario runs the issue wizard with.
 const nijmegenApvTemplateName = "APV standplaatsvergunning"
 
 // seedNijmegenAttestation gives the Gemeente Nijmegen tenant the APV
 // standplaatsvergunning schema + template (issue #245). Idempotent: skips when
-// the org already has schemas.
+// the org already has that schema. The guard is per VCT because the bewind
+// demo adds a schema of its own to the same tenant, in either order.
 func seedNijmegenAttestation(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
 	store := attestation.NewStore(pool, audit.NewDBRecorder())
-
-	existing, err := store.ListSchemas(ctx, orgID)
-	if err != nil {
-		return fmt.Errorf("seed: list nijmegen attestation schemas: %w", err)
-	}
-	if len(existing) > 0 {
-		return nil
-	}
-
-	schema, err := store.CreateSchema(ctx, orgID, nijmegenApvSchema)
-	if err != nil {
-		return fmt.Errorf("seed: create nijmegen apv schema: %w", err)
-	}
-	if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{
-		SchemaID: schema.ID,
-		Name:     nijmegenApvTemplateName,
-	}); err != nil {
-		return fmt.Errorf("seed: create nijmegen apv template: %w", err)
+	if err := ensureSchemaTemplate(ctx, store, orgID, nijmegenApvSchema, attestation.Template{Name: nijmegenApvTemplateName}); err != nil {
+		return err
 	}
 
 	slog.Info("seeded Nijmegen APV standplaatsvergunning schema + template")

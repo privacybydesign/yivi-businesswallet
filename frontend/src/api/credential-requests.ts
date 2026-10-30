@@ -77,6 +77,61 @@ export function sendCredentialRequest(
   });
 }
 
+// A saved credential request: what to ask for, without a recipient.
+export const requestTemplateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  credentials: z.array(
+    z.object({ vct: z.string(), claims: z.array(z.string()) }),
+  ),
+  createdAt: z.string(),
+});
+export type RequestTemplate = z.infer<typeof requestTemplateSchema>;
+
+export interface CreateRequestTemplate {
+  name: string;
+  credentials: { vct: string; claims: string[] }[];
+}
+
+function templatesPath(slug: string): string {
+  return `/api/v1/orgs/${encodeURIComponent(slug)}/openid4vp/templates`;
+}
+
+export function getRequestTemplates(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<RequestTemplate[]> {
+  return request(templatesPath(slug), {
+    schema: z.array(requestTemplateSchema),
+    signal,
+  });
+}
+
+export function createRequestTemplate(
+  slug: string,
+  body: CreateRequestTemplate,
+  signal?: AbortSignal,
+): Promise<RequestTemplate> {
+  return request(templatesPath(slug), {
+    schema: requestTemplateSchema,
+    method: "POST",
+    body,
+    signal,
+  });
+}
+
+export function deleteRequestTemplate(
+  slug: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request(`${templatesPath(slug)}/${encodeURIComponent(id)}`, {
+    schema: z.void(),
+    method: "DELETE",
+    signal,
+  });
+}
+
 export const incomingRequestSchema = z.object({
   id: z.string(),
   verifier: z.string(),
