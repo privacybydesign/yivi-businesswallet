@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -12,6 +13,8 @@ import type { TFunction } from "i18next";
 import * as React from "react";
 import {
   useNewClaimLinkMutation,
+  useFinishDocumentScanMutation,
+  useStartDocumentScanMutation,
   useProofingAppQuery,
   useProofingProgressQuery,
   useYiviDisclosureQuery,
@@ -35,6 +38,7 @@ import type {
   HostedDiploma,
   HostedLegalRetention,
   ProofingApp,
+  ProofingAppMethod,
   ProofingMethod,
   ProofingProgress,
   ProofingYiviStart,
@@ -46,6 +50,8 @@ import {
   ATTRIBUTE_DOCUMENT,
   addressLookup,
   diplomaRejectionReason,
+  documentScanMessage,
+  isProofingLive,
   diplomaStepDone,
   employmentOwed,
   employmentRejectionReason,
@@ -133,12 +139,12 @@ const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   biometrics: "valid",
 };
 
-const METHOD_ICONS: Record<ProofingMethod, IconName> = {
+const METHOD_ICONS: Record<ProofingAppMethod, IconName> = {
   yivi_app: "scan_qrcode",
   idem_app: "phone",
 };
 
-const METHOD_KEYS: Record<ProofingMethod, "yivi" | "idem"> = {
+const METHOD_KEYS: Record<ProofingAppMethod, "yivi" | "idem"> = {
   yivi_app: "yivi",
   idem_app: "idem",
 };
@@ -161,18 +167,23 @@ function StepHeading({
 }
 
 // What is collected. Continue only moves on to the app step: nothing starts
-// until the person taps an app there.
+// until the person taps an app there. A flow with no app (browserOnly) has no
+// such step, so Continue starts its session, starting while it is created.
 export function Overview({
   org,
   flow,
   onContinue,
   cancel,
+  starting = false,
+  error,
 }: Readonly<{
   org: VerifyOrg;
   flow: VerifyFlowInfo;
   onContinue: () => void;
   // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
+  starting?: boolean;
+  error?: string;
 }>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const name = org.branding.displayName || org.name;
@@ -268,9 +279,14 @@ export function Overview({
           )}
         </div>
       )}
+      {error && (
+        <p role="alert" className={ERROR}>
+          {error}
+        </p>
+      )}
       <div className="flex flex-wrap justify-end gap-2.5">
         {cancel}
-        <Button size="lg" onClick={onContinue}>
+        <Button size="lg" loading={starting} onClick={onContinue}>
           {t("identityProofing.onScreen.overview.continue")}
         </Button>
       </div>
@@ -288,10 +304,10 @@ export function MethodChoice({
   starting,
   error,
 }: Readonly<{
-  methods: ProofingMethod[];
+  methods: ProofingAppMethod[];
   // The app last tapped: it shows as starting while the session is created.
   picked: ProofingMethod;
-  onChoose: (method: ProofingMethod) => void;
+  onChoose: (method: ProofingAppMethod) => void;
   onBack: () => void;
   starting: boolean;
   error?: string;
@@ -617,6 +633,23 @@ export function Session({
     );
   }
 
+  // The document photo comes first, in the browser: the app's part follows
+  // once it is in.
+  if (current.documentScan === "pending" && isProofingLive(current.status)) {
+    return (
+      <DocumentScanStep target={target} sessionSecondsLeft={secondsLeft} />
+    );
+  }
+
+  // With no app, the photo decides the session: its outcome is on its way.
+  if (method === "browser") {
+    return (
+      <p className={`${HINT} text-center`}>
+        {t("identityProofing.onScreen.documentScan.finishing")}
+      </p>
+    );
+  }
+
   // The page's own link, which lasts the session: the hosted page's view,
   // and the on-screen one's when where the phone is cannot be read.
   const manualIdem = link ? (
@@ -670,6 +703,170 @@ export function Session({
             {t("identityProofing.onScreen.scan.inProgress")}
           </p>
         )}
+    </div>
+  );
+}
+
+// The ID scan's frame: CM.com's page needs at least this width, and this
+// height fits its steps. On a narrower screen it takes the full width.
+const DOCUMENT_SCAN_FRAME_MIN_WIDTH = 650;
+const DOCUMENT_SCAN_FRAME_HEIGHT = 600;
+
+// Widens a verify page while the ID scan's frame shows: the frame's 650 px
+// plus the card's and the page's padding.
+export const DOCUMENT_SCAN_WIDE_PAGE =
+  "has-[[data-document-scan]]:max-w-[730px]";
+
+// The document photo, taken in the browser on CM.com's ID scan page, embedded
+// here: the page posts this one its transaction and result when done
+// (documentScanMessage), and the result is handed to the backend once.
+function DocumentScanStep({
+  target,
+  sessionSecondsLeft,
+}: Readonly<{
+  target: VerifyTarget;
+  sessionSecondsLeft: number;
+}>): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const start = useStartDocumentScanMutation(target);
+  const finish = useFinishDocumentScanMutation(target);
+  const { mutate: finishScan } = finish;
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [unfinished, setUnfinished] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  // The start's own outcome, not the mutation's state (see YiviSession): a
+  // start made as the step mounts is lost to the mutation's state when
+  // StrictMode remounts it.
+  const [scan, setScan] = useState<{ url?: string; error?: Error }>({});
+  const [starting, setStarting] = useState(true);
+  const scanUrl = scan.url;
+  const showsFrame = scanUrl !== undefined && !unfinished && finish.isIdle;
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const { mutateAsync: startScan } = start;
+  const begin = useCallback((): void => {
+    setStarting(true);
+    setScan({});
+    setUnfinished(false);
+    setLoaded(false);
+    startScan({ locale })
+      .then(
+        ({ url }) => setScan({ url }),
+        (error: unknown) =>
+          setScan({
+            error: error instanceof Error ? error : new Error(String(error)),
+          }),
+      )
+      .finally(() => setStarting(false));
+  }, [startScan, locale]);
+  // Started as the step shows, so CM's page loads while the person reads
+  // what to do; once only, as each start is a new transaction.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    begin();
+  }, [begin]);
+  useEffect(() => {
+    if (!showsFrame) return;
+    function onMessage(event: MessageEvent): void {
+      const scan = documentScanMessage(
+        event,
+        scanUrl!,
+        frame.current?.contentWindow ?? null,
+      );
+      if (scan?.kind === "finished") {
+        finishScan({
+          transactionId: scan.transactionId,
+          resultId: scan.resultId,
+        });
+      } else if (scan) {
+        setUnfinished(true);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [showsFrame, scanUrl, finishScan]);
+
+  if (finish.isPending || finish.isSuccess) {
+    return (
+      <output className={`${HINT} block text-center`}>
+        {t("identityProofing.onScreen.documentScan.finishing")}
+      </output>
+    );
+  }
+  function retry(): void {
+    finish.reset();
+    begin();
+  }
+  let problem: string | undefined;
+  if (scan.error) {
+    problem = verifyErrorMessage(target, scan.error, t);
+  } else if (finish.isError) {
+    problem = verifyErrorMessage(target, finish.error, t);
+  } else if (unfinished) {
+    problem = t("identityProofing.onScreen.documentScan.cancelled");
+  }
+  return (
+    <div className="flex flex-col items-center gap-4 text-center">
+      <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
+        <Icon name="personal" size={24} />
+      </span>
+      <StepHeading>
+        {t("identityProofing.onScreen.documentScan.heading")}
+      </StepHeading>
+      <p className={HINT}>{t("identityProofing.onScreen.documentScan.hint")}</p>
+      <p className={HINT}>
+        {t("identityProofing.onScreen.documentScan.passportHint")}
+      </p>
+      {starting || showsFrame ? (
+        <div
+          className="relative w-full"
+          style={{
+            minWidth: `min(${DOCUMENT_SCAN_FRAME_MIN_WIDTH}px, 100%)`,
+            height: DOCUMENT_SCAN_FRAME_HEIGHT,
+          }}
+        >
+          {showsFrame && (
+            <iframe
+              ref={frame}
+              src={scanUrl}
+              title={t("identityProofing.onScreen.documentScan.frameTitle")}
+              allow="camera"
+              data-document-scan=""
+              onLoad={() => setLoaded(true)}
+              className="rounded-yivi border-line h-full w-full border"
+            />
+          )}
+          {/* Until CM's page has loaded, so the step never looks stuck. */}
+          {!loaded && (
+            <output className="rounded-yivi border-line bg-surface absolute inset-0 flex flex-col items-center justify-center gap-3 border">
+              <span
+                aria-hidden="true"
+                className="text-ink h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent"
+              />
+              <span className={HINT}>
+                {t("identityProofing.onScreen.documentScan.loading")}
+              </span>
+            </output>
+          )}
+        </div>
+      ) : (
+        <>
+          {problem && (
+            <p role="alert" className={ERROR}>
+              {problem}
+            </p>
+          )}
+          <Button size="lg" loading={starting} onClick={retry}>
+            {t(
+              problem
+                ? "identityProofing.onScreen.documentScan.retry"
+                : "identityProofing.onScreen.documentScan.start",
+            )}
+          </Button>
+        </>
+      )}
+      <Countdown seconds={sessionSecondsLeft} />
     </div>
   );
 }

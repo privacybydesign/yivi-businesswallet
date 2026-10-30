@@ -42,6 +42,7 @@ import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
   CheckEnded,
+  DOCUMENT_SCAN_WIDE_PAGE,
   MethodChoice,
   Overview,
   Session,
@@ -71,7 +72,9 @@ export default function Proof(): React.JSX.Element {
     // The card sits at the top, 80 px down, on every step, as VF1 to VF5
     // draw it; "Powered by Yivi" follows it.
     <div className="bg-surface-2 flex min-h-screen flex-col items-center px-4 pt-20 pb-10">
-      <div className="flex w-full max-w-[560px] flex-col gap-5">
+      <div
+        className={`flex w-full max-w-[560px] flex-col gap-5 ${DOCUMENT_SCAN_WIDE_PAGE}`}
+      >
         {/* Data first: a background refetch that fails (the tab regaining
             focus on return from the Idem app) keeps the page it already has
             rather than replacing the session with an error card. */}
@@ -120,6 +123,7 @@ function HostedFlow({
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const stages = verifyStages({
+    app: !flow.browserOnly,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
@@ -254,8 +258,13 @@ function HostedFlow({
               org={organization}
               flow={flow}
               // Opening the link or pressing Continue uses nothing up: the
-              // link starts when the person taps an app (#304).
-              onContinue={() => setStep("method")}
+              // link starts when the person taps an app (#304), or, with no
+              // app to tap, when Continue is pressed.
+              onContinue={() =>
+                flow.browserOnly ? begin("browser") : setStep("method")
+              }
+              starting={flow.browserOnly && start.isPending}
+              error={flow.browserOnly ? actionError : undefined}
               cancel={
                 <Button
                   variant="secondary"

@@ -34,6 +34,7 @@ import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
   CheckEnded,
+  DOCUMENT_SCAN_WIDE_PAGE,
   MethodChoice,
   Overview,
   Session,
@@ -139,7 +140,11 @@ export default function ProofingVerify(): React.JSX.Element {
   return (
     <>
       <TopBar title={t("identityProofing.onScreen.title")} />
-      <div className="mx-auto w-full max-w-xl px-4 py-6">{body}</div>
+      <div
+        className={`mx-auto w-full max-w-xl px-4 py-6 ${DOCUMENT_SCAN_WIDE_PAGE}`}
+      >
+        {body}
+      </div>
     </>
   );
 }
@@ -163,7 +168,10 @@ function VerifyFlow({
   // A flow the Yivi app cannot run leaves the Idem app only, still tapped on
   // the app step as on a hosted link.
   const methods = methodChoices(yiviAppAvailable(flow));
+  // A flow the browser runs alone has no app step: Continue starts it.
+  const app = !flow.browserOnly;
   const stages = verifyStages({
+    app,
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
@@ -197,7 +205,7 @@ function VerifyFlow({
   function restart(): void {
     setSent(undefined);
     create.reset();
-    setStep("method");
+    setStep(app ? "method" : "overview");
   }
 
   return (
@@ -219,7 +227,13 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onContinue={() => setStep("method")}
+          onContinue={() => (app ? setStep("method") : start("browser"))}
+          starting={create.isPending}
+          error={
+            !app && create.isError
+              ? proofingErrorMessage(create.error, t)
+              : undefined
+          }
           cancel={
             <Link
               to=".."

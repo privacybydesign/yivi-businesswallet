@@ -577,6 +577,17 @@ export const en = {
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
         "This address is not in the Dutch address register. Check the postal code, house number and street.",
+      documentScanNeedsPage:
+        "This flow photographs the document, which is done on the page that runs the check. Show it on this screen or send a hosted link.",
+      documentScanFailed:
+        "The photos of the document could not be used. Try again.",
+      documentScanMismatch:
+        "These photos belong to another check. Photograph the document again.",
+      documentScanDone: "The document is already photographed.",
+      documentScanPending:
+        "Photograph the document first, then share your data from the Yivi app.",
+      noDocumentScanner:
+        "This server photographs no documents. Ask your administrator to set ID_SCAN_KEY_ID and ID_SCAN_SECRET.",
       employmentNeedsPage:
         "This flow asks for the UWV Verzekeringsbericht, which is uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       employmentClosed:
@@ -847,6 +858,18 @@ export const en = {
         },
         back: "Back",
       },
+      documentScan: {
+        heading: "Photograph your ID",
+        hint: "Take a photo of the front and back of your ID card or driving licence, or of the photo page of your passport, in CM.com's secure scan below.",
+        passportHint:
+          "For a passport, open it like a book and turn it sideways, so the open passport fits the frame.",
+        frameTitle: "CM.com ID scan",
+        start: "Photograph the document",
+        finishing: "Adding the photos…",
+        loading: "Loading the secure scan from CM.com…",
+        cancelled: "The photos were not taken. Try again.",
+        retry: "Try again",
+      },
       scan: {
         yiviHeading: "Scan with the Yivi app",
         yiviHint:
@@ -960,6 +983,14 @@ export const en = {
         passiveAuth: "Chip authenticity",
         faceMatch: "Face match",
         liveness: "Liveness",
+        documentCheck: "Document check",
+        documentVerdicts: {
+          authentic: "Genuine",
+          doubtful: "Doubtful",
+          fake: "Not genuine",
+        },
+        documentFields: "Printed data",
+        documentZones: "MRZ matches printed text",
         checks: {
           valid: "Valid",
           invalid: "Invalid",
@@ -1720,7 +1751,7 @@ export const en = {
         addressHint:
           "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
         photoHint:
-          "The front and back of an ID card or driving licence, or the photo page of a passport.",
+          "The front and back of an ID card or driving licence, or the photo page of a passport, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
         faceHint:
           "A selfie, checked to be a live person and compared with the photo on the chip.",
         diplomaHint:
@@ -1793,7 +1824,7 @@ export const en = {
         retentionSeconds_other: "{{count}} seconds",
         bsn: "BSN",
         bsnHint: "Keep the full BSN only if the law allows you to process it.",
-        blackOutBsn: "Black out the BSN on document photos",
+        blackOutBsn: "Black out the BSN and signature on document photos",
         keepFacePhotos: "Keep face photos after the match",
         keepFacePhotosHint:
           "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
