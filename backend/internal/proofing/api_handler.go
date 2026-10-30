@@ -515,6 +515,20 @@ type apiEvidenceEntry struct {
 	ActiveAuth   string   `json:"activeAuth"`
 	FaceMatch    *float64 `json:"faceMatch,omitempty"`
 	Liveness     string   `json:"liveness,omitempty"`
+	// DocumentCheck is the document scan's result on a photographed
+	// document; absent without one.
+	DocumentCheck *apiDocumentCheck `json:"documentCheck,omitempty"`
+}
+
+// apiDocumentCheck is a document scan's result: its verdict (authentic,
+// doubtful or fake) and score, and whether the fields it validated were
+// valid and its zones (MRZ, printed text) read the same (valid, invalid or
+// not_performed).
+type apiDocumentCheck struct {
+	Verdict string   `json:"verdict"`
+	Score   *float64 `json:"score,omitempty"`
+	Fields  string   `json:"fields"`
+	Zones   string   `json:"zones"`
 }
 
 func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error {
@@ -637,10 +651,14 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		out.Identity = newAPIIdentity(identity)
 	}
 	if ev := identity.Evidence; ev != nil {
-		out.Evidence = append(out.Evidence, apiEvidenceEntry{
+		entry := apiEvidenceEntry{
 			Type: ev.Type, DocumentType: ev.DocumentType, DocumentKind: ev.DocumentKind, IssuingState: ev.IssuingState, ExpiryDate: ev.ExpiryDate,
 			PassiveAuth: ev.PassiveAuth, ActiveAuth: ev.ActiveAuth, FaceMatch: ev.FaceMatch, Liveness: ev.Liveness,
-		})
+		}
+		if ev.DocumentVerdict != "" {
+			entry.DocumentCheck = &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones}
+		}
+		out.Evidence = append(out.Evidence, entry)
 	}
 	return out
 }

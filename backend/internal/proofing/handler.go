@@ -132,6 +132,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/claim-link", member(respond.HandlerFunc(h.claimLink)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/app", member(respond.HandlerFunc(h.app)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/start", member(respond.HandlerFunc(h.startDocumentScan)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/finish", member(respond.HandlerFunc(h.finishDocumentScan)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
@@ -397,6 +399,9 @@ type requestResponse struct {
 	// data" request's data downloads.
 	FlowKind        FlowKind   `json:"flowKind"`
 	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
+	// DocumentScan is the document photo the on-screen page takes in the
+	// browser: pending or done; absent when the flow takes none.
+	DocumentScan string `json:"documentScan,omitempty"`
 }
 
 // withDiplomas adds the extracts a request holds to its response.
@@ -417,7 +422,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject,
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
 		ReviewReason: req.ReviewReason,
 		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
@@ -1002,6 +1007,13 @@ var errorResponses = []struct {
 	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
 	{diploma.ErrTrustUnavailable, sealCheckUnavailable},
 	{diploma.ErrRevocationUnavailable, sealCheckUnavailable},
+	{ErrDocumentScanNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "document_scan_needs_page", Message: "this flow photographs the document, which is done on a page: show the session on screen or send a hosted link"}},
+	{ErrNoDocumentScanner, respond.APIError{Status: http.StatusConflict, Code: "no_document_scanner", Message: "this deployment takes no document photo; set ID_SCAN_KEY_ID and ID_SCAN_SECRET on the server"}},
+	{ErrDocumentScanNotAsked, respond.APIError{Status: http.StatusConflict, Code: "document_scan_not_asked", Message: "this session takes no document photo"}},
+	{ErrDocumentScanDone, respond.APIError{Status: http.StatusConflict, Code: "document_scan_done", Message: "the document photo is in already"}},
+	{ErrDocumentScanMismatch, respond.APIError{Status: http.StatusConflict, Code: "document_scan_mismatch", Message: "this is not the document scan the session started last"}},
+	{ErrDocumentScanFailed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "document_scan_failed", Message: "the document scan did not finish: start another"}},
+	{ErrDocumentScanPending, respond.APIError{Status: http.StatusConflict, Code: "document_scan_pending", Message: "the document photo is not in yet: scan the document first"}},
 	{ErrEmploymentNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "employment_needs_page", Message: "this flow asks for the Verzekeringsbericht, which is uploaded on a page: show the session on screen or send a hosted link"}},
 	{ErrHostedDisabled, respond.APIError{Status: http.StatusConflict, Code: "hosted_disabled", Message: "this flow's hosted page is switched off"}},
 	{ErrProofingPaused, respond.APIError{Status: http.StatusForbidden, Code: "proofing_paused", Message: "identity proofing is paused for this organisation"}},
