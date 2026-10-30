@@ -1084,7 +1084,6 @@ const REJECTION_REASON_KEYS = {
   DOC_EXPIRED: "docExpired",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
-  ADDRESS_MISMATCH: "addressMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
   REVIEW_NOT_HOLDER: "reviewNotHolder",
   REVIEW_ALTERED: "reviewAltered",
@@ -2201,6 +2200,39 @@ export function sessionEventDetail(
       t("identityProofingFlows.versionShort", { version: fields.flowVersion }),
     );
   }
+  return [...parts, ...decisionEventDetail(fields, t)];
+}
+
+// What a review or address event adds: that an entered address goes to a
+// reviewer, what a reviewer decided, and why. The backend leaves the reason
+// out for a reader who may not see it.
+function decisionEventDetail(
+  fields: Record<string, unknown>,
+  t: TFunction,
+): string[] {
+  const parts: string[] = [];
+  if (
+    typeof fields.verification === "string" &&
+    fields.verification !== "registered"
+  ) {
+    parts.push(t("identityProofing.sessions.address.toReview"));
+  }
+  if (fields.decision === "approved" || fields.decision === "rejected") {
+    parts.push(t(`identityProofing.reviews.outcome.${fields.decision}`));
+  }
+  if (
+    fields.addressReview === "confirmed" ||
+    fields.addressReview === "rejected"
+  ) {
+    parts.push(
+      t(`identityProofing.sessions.address.tag.${fields.addressReview}`),
+    );
+  }
+  if (typeof fields.reason === "string" && fields.reason !== "") {
+    parts.push(
+      t("identityProofing.reviews.decided.reason", { reason: fields.reason }),
+    );
+  }
   return parts;
 }
 
@@ -2303,4 +2335,37 @@ export function timelineActor(
   const label = auditActorLabel(event.actorLabel, t);
   if (label) return label;
   return detail.length > 0 ? null : t("auditLog.system");
+}
+
+// The last decision on a session's address in its timeline: who decided, when
+// and why (absent for a reader the backend leaves the reason out for).
+export interface AddressDecision {
+  by: string | null;
+  at: string;
+  reason?: string;
+}
+
+export function latestAddressDecision(
+  events: readonly AuditEvent[],
+): AddressDecision | undefined {
+  const event = events.findLast(
+    (e) => e.action === "identity_proofing.address_reviewed",
+  );
+  if (event === undefined) {
+    return undefined;
+  }
+  const after = event.metadata.after;
+  const reason =
+    typeof after === "object" &&
+    after !== null &&
+    "reason" in after &&
+    typeof after.reason === "string" &&
+    after.reason !== ""
+      ? after.reason
+      : undefined;
+  return {
+    by: event.actor ? fullName(event.actor) : null,
+    at: event.occurredAt,
+    reason,
+  };
 }

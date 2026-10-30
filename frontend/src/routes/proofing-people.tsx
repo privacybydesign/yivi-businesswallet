@@ -11,6 +11,7 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
+  AddressReviewState,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
@@ -40,6 +41,7 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
+  latestAddressDecision,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -73,6 +75,13 @@ const LABEL = "text-ink text-[13px] font-semibold";
 const BASE_COLUMNS = 5;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
+// How an address's review reads beside the session's status: waiting is not
+// done yet.
+const ADDRESS_REVIEW_TONES = {
+  pending: "amber",
+  confirmed: "green",
+  rejected: "red",
+} as const satisfies Record<AddressReviewState, string>;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
@@ -574,6 +583,18 @@ function AddressNote({
       </div>
     );
   }
+  // The identity's status says nothing of the address: until a reviewer
+  // decides it, the session is not done.
+  const review = request.addressReview;
+  if (review !== undefined) {
+    return (
+      <div className="text-[12px]">
+        <StatusText tone={ADDRESS_REVIEW_TONES[review]}>
+          {t(`identityProofing.sessions.address.tag.${review}`)}
+        </StatusText>
+      </div>
+    );
+  }
   return null;
 }
 
@@ -616,13 +637,7 @@ function SessionAddress({
   );
 }
 
-const ADDRESS_REVIEW_KEYS = {
-  pending: "reviewPending",
-  confirmed: "reviewConfirmed",
-  rejected: "reviewRejected",
-} as const;
-
-// Where a self-declared address stands with a reviewer. It is decided on the
+// Where an address waiting for a reviewer stands. It is decided on the
 // Reviews page, which an admin opens from here while it waits.
 function AddressReviewNote({
   slug,
@@ -639,20 +654,64 @@ function AddressReviewNote({
     return null;
   }
   return (
-    <p className={HINT}>
-      {t(`identityProofing.sessions.address.${ADDRESS_REVIEW_KEYS[review]}`)}
-      {isAdmin && review === "pending" && (
-        <>
-          {" "}
-          <Link
-            to={reviewPath(slug, request.id)}
-            className="text-link underline"
-          >
-            {t("identityProofing.sessions.address.openReview")}
-          </Link>
-        </>
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>
+        {t(`identityProofing.sessions.address.review.${review}`)}
+        {isAdmin && review === "pending" && (
+          <>
+            {" "}
+            <Link
+              to={reviewPath(slug, request.id)}
+              className="text-link underline"
+            >
+              {t("identityProofing.sessions.address.openReview")}
+            </Link>
+          </>
+        )}
+      </p>
+      {review !== "pending" && (
+        <AddressDecisionNote slug={slug} request={request} />
       )}
-    </p>
+    </div>
+  );
+}
+
+// Who decided the address, when and why, from the session's timeline, which
+// the open row reads anyway.
+function AddressDecisionNote({
+  slug,
+  request,
+}: Readonly<{
+  slug: string;
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const events = useProofingRequestEventsQuery(slug, request);
+  const decision = latestAddressDecision(events.data ?? []);
+  if (decision === undefined) {
+    return null;
+  }
+  return (
+    <>
+      <p className={HINT}>
+        {decision.by
+          ? t("identityProofing.reviews.decided.by", {
+              name: decision.by,
+              when: formatWhen(decision.at),
+            })
+          : t("identityProofing.reviews.decided.at", {
+              when: formatWhen(decision.at),
+            })}
+      </p>
+      {decision.reason && (
+        <p className="text-ink text-[13px]">
+          {t("identityProofing.reviews.decided.reason", {
+            reason: decision.reason,
+          })}
+        </p>
+      )}
+    </>
   );
 }
 

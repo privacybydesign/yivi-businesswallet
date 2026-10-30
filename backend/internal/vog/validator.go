@@ -169,9 +169,10 @@ func (c *HTTPClient) post(ctx context.Context, pdf []byte) (ResponseCode, error)
 	return ResponseCode(out.ResponseCode), nil
 }
 
-// StubValidator is the dev/CI default: no outbound call, a canned answer set by
-// whoever constructs it (seed data, tests). Code defaults to ResponseAuthentic
-// (the zero value), so a bare StubValidator{} accepts every upload.
+// StubValidator is for dev and CI (VOG_VALIDATOR_PROVIDER=stub, only with
+// DEV_MODE): no outbound call, a canned answer set by whoever constructs it
+// (seed data, tests). Code defaults to ResponseAuthentic (the zero value), so a
+// bare StubValidator{} accepts every upload.
 type StubValidator struct {
 	Code ResponseCode
 	Err  error

@@ -4,6 +4,8 @@ import (
 	"maps"
 	"strings"
 	"testing"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 )
 
 // loadWith sets the given environment for one Load call, plus the DATABASE_URL
@@ -393,6 +395,20 @@ func TestLoadEmploymentDefaultUWV(t *testing.T) {
 	}
 }
 
+// The real validatie.nl check is the default, as the DUO and UWV ones are.
+func TestLoadVogDefaultValidatieNL(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.VogValidatorProvider != ProviderValidatieNL {
+		t.Errorf("vog validator = %q, want %q", cfg.VogValidatorProvider, ProviderValidatieNL)
+	}
+	if _, err := loadWith(t, map[string]string{envVogValidatorProvider: "duo"}); err == nil {
+		t.Error("an unknown vog validator loaded, want an error")
+	}
+}
+
 // The pinned roots hold no root UWV's seal chains to, so pinning them under
 // the real UWV check would reject every statement: it fails the boot instead.
 func TestLoadRefusesPinnedForUWV(t *testing.T) {
@@ -426,6 +442,28 @@ func TestLoadDiplomaOCSPIsDefault(t *testing.T) {
 	}
 }
 
+// The ID Scan key id and secret go together, and the API defaults to CM.com's.
+func TestLoadIDScan(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"key id alone": {envIDScanKeyID: "key"},
+		"secret alone": {envIDScanSecret: "secret"},
+		"no api url":   {envIDScanAPIURL: "api.cm.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadWith(t, env); err == nil {
+				t.Errorf("%v loaded, want an error", env)
+			}
+		})
+	}
+	c, err := loadWith(t, map[string]string{envIDScanKeyID: "key", envIDScanSecret: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.IDScanKeyID != "key" || c.IDScanSecret != "secret" || c.IDScanAPIURL != idscan.DefaultBaseURL {
+		t.Errorf("ID Scan = %q, %q, %q", c.IDScanKeyID, c.IDScanSecret, c.IDScanAPIURL)
+	}
+}
+
 // DEV_MODE needs APP_BASE_URL set: its default is localhost, so a deployment
 // that left it out would otherwise pass the localhost check.
 func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
@@ -434,17 +472,17 @@ func TestLoadDevModeNeedsAnExplicitAppBaseURL(t *testing.T) {
 	}
 }
 
-// The URLs the Idem app sends chip data and selfies to are https, or plain
-// http to this machine, outside a local stack; a local stack may use a LAN
-// address for the phone.
-func TestLoadPhoneURLsNeedHTTPS(t *testing.T) {
+// The URLs the Idem app sends chip data and selfies to, and the one a VOG PDF
+// goes to, are https, or plain http to this machine, outside a local stack; a
+// local stack may use a LAN address for the phone.
+func TestLoadSensitiveURLsNeedHTTPS(t *testing.T) {
 	for raw, ok := range map[string]bool{
 		"https://proofing.example.org": true,
 		"http://localhost:8080":        true,
 		"http://proofing.example.org":  false,
 		"http://192.168.1.20:8080":     false,
 	} {
-		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL} {
+		for _, key := range []string{envIdentityProofingPublicURL, envRegulaFaceAPIPublicURL, envVogValidatorURL, envIDScanAPIURL} {
 			t.Run(key+"="+raw, func(t *testing.T) {
 				if _, err := loadWith(t, map[string]string{key: raw}); (err == nil) != ok {
 					t.Errorf("%s=%s: %v, want ok %v", key, raw, err, ok)
@@ -512,6 +550,7 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 		},
 		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
 		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
+		envVogValidatorProvider:        {envVogValidatorProvider: ProviderStub},
 	} {
 		t.Run(name+" without", func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {

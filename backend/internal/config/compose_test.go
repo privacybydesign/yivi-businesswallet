@@ -168,6 +168,20 @@ func TestComposePassesTrustedProxiesToBackend(t *testing.T) {
 	}
 }
 
+// Same passthrough rule: without it VOG_VALIDATOR_PROVIDER=validatie_nl set in
+// .env never reaches the container, and the dev stack keeps the stub.
+func TestComposePassesVogValidatorToBackend(t *testing.T) {
+	backendEnvironment := backendComposeEnvironment(t)
+
+	value, ok := backendEnvironment[envVogValidatorProvider]
+	if !ok {
+		t.Fatalf("backend service does not pass %s through; setting it in .env would do nothing", envVogValidatorProvider)
+	}
+	if want := "${" + envVogValidatorProvider + ":-}"; value != want {
+		t.Errorf("backend %s = %q, want %q", envVogValidatorProvider, value, want)
+	}
+}
+
 // Same passthrough rule: a certificate set in .env that never reaches the
 // container fails the boot probe while looking configured.
 func TestComposePassesEudiVerifierConfigToBackend(t *testing.T) {

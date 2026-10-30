@@ -343,7 +343,7 @@ type attestationIssuer interface {
 func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 	switch cfg.AttestationIssuer {
 	case config.IssuerStub:
-		return openid4vciissuer.NewStubIssuer(), nil
+		return openid4vciissuer.NewStubIssuerWithClaimDelay(cfg.AttestationStubClaimDelay), nil
 	case config.IssuerVeramo:
 		return openid4vciissuer.NewVeramoIssuer(
 			cfg.AttestationIssuerURL,
@@ -616,6 +616,8 @@ type wiring struct {
 	qerdsStore         *qerds.Store
 	qerdsService       *qerds.Service
 	proofingEngine     *proofingengine.Engine
+	proofingReviews    *proofing.ReviewFeed
+	selfReview         auth.SelfReview
 
 	authHandler           *auth.Handler
 	orgHandler            *organization.Handler
@@ -627,6 +629,7 @@ type wiring struct {
 	themeSettingsHandler  *themesettings.Handler
 	presenterHandler      *openid4vppresenter.Handler
 	requesterHandler      *openid4vprequester.Handler
+	requestTemplates      *openid4vprequester.TemplateHandler
 	attestationHandler    *attestation.Handler
 	wscaWalletHandler     *wscawallet.Handler
 	notificationsHandler  *notifications.Handler
@@ -708,6 +711,10 @@ func (w *wiring) buildAuth(ctx context.Context) error {
 		slog.WarnContext(ctx, "DEV_MODE is on: stub providers may run, and the first unknown Yivi login becomes the platform admin")
 	}
 	w.authHandler = auth.NewHandler(w.authService, w.sessionStore, w.userStore, cookieCfg, w.platformAdmins)
+	// On a dev stack a platform admin may decide their own checks, to test a
+	// review alone; a deployment never allows it.
+	w.selfReview = auth.NewSelfReview(cfg.DevMode, w.platformAdmins)
+	w.authHandler.SetSelfReview(w.selfReview)
 
 	startPruner(ctx, "sessions", cfg.SessionPruneEvery, w.sessionStore.DeleteExpired)
 	startPruner(ctx, "presentation_sessions", cfg.SessionPruneEvery, presentationStore.DeleteExpired)
@@ -903,12 +910,14 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", "ATTESTATION_HOLDER_TRUST_CHAIN", err)
 	}
+	requesterStore := openid4vprequester.NewStore(w.pool, w.recorder)
 	w.requesterHandler = openid4vprequester.NewHandler(
 		openid4vprequester.NewService(
-			openid4vprequester.NewStore(w.pool, w.recorder), w.qerdsService, requesterCA,
+			requesterStore, w.qerdsService, requesterCA,
 			relyingparty.NewTokenVerifier(requesterIssuerTrust),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
 		attestation.NewStore(w.pool, w.recorder), w.requireUser, w.orgHandler.Authorize)
+	w.requestTemplates = openid4vprequester.NewTemplateHandler(requesterStore, w.requireUser, w.orgHandler.Authorize)
 
 	attestationStore := attestation.NewStore(w.pool, w.recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
@@ -1174,7 +1183,12 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
 	w.proofingHandler.SetIdempotencyStore(proofingIdempotency)
 	w.proofingHandler.SetPlatformAdmins(w.platformAdmins)
+	w.proofingHandler.SetSelfReview(w.selfReview)
 	w.proofingHandler.SetAppBranding(brandingResolver)
+	// A reviewer's open pages follow the org's reviews as they change.
+	w.proofingReviews = proofing.NewReviewFeed()
+	go w.proofingReviews.Run(proofingJobs, w.pool)
+	w.proofingHandler.SetReviewFeed(w.proofingReviews)
 	startPruner(proofingJobs, "identity_proofing_idempotency_keys", cfg.SessionPruneEvery, proofingIdempotency.Prune)
 	startPruner(proofingJobs, "identity_proofing_webhook_deliveries", cfg.SessionPruneEvery, proofingWebhooks.PruneDeliveries)
 	return nil
@@ -1224,6 +1238,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.cfg.StaticDir,
 		w.presenterHandler,
 		w.requesterHandler,
+		w.requestTemplates,
 		w.authHandler,
 		w.orgHandler,
 		w.qerdsHandler,
@@ -1258,6 +1273,10 @@ func (w *wiring) httpServer() *http.Server {
 	// the drain past shutdownTimeout.
 	if w.proofingEngine != nil {
 		httpServer.RegisterOnShutdown(w.proofingEngine.StopWaiting)
+	}
+	// An open review stream ends at once too; the page reconnects elsewhere.
+	if w.proofingReviews != nil {
+		httpServer.RegisterOnShutdown(w.proofingReviews.Stop)
 	}
 	return httpServer
 }

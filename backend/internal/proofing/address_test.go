@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,9 @@ func (f *fakeAddressLookup) Find(_ context.Context, postalCode string, houseNumb
 }
 
 var registerAddress = addresslookup.Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen"}
+
+// testReason is a reviewer's reason for an address decision.
+const testReason = "Matches the rental contract"
 
 func TestAddAddressVerification(t *testing.T) {
 	abroad := Address{Street: "Rue de la Loi", HouseNumber: "16", PostalCode: "1000", City: "Bruxelles", Country: "België"}
@@ -319,21 +323,20 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 		registered map[string]string
 		address    Address
 		want       Address
-		wantStatus Status
-		wantCode   string
+		wantReview AddressReview
 	}{
 		{
 			"same, the register written its way", &fakeAddressLookup{found: []addresslookup.Address{registerAddress}},
 			withClaim(openid4vpverifier.ClaimAddressStreet, "Kerkstr"),
 			Address{Street: "kerkstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nijmegen", Country: "NL"},
 			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered},
-			StatusApproved, "",
+			"",
 		},
 		{
 			"same, unchecked, made-up street", nil, brpClaims,
 			Address{Street: "Nepstraat", HouseNumber: "12a", PostalCode: "6511 ab", City: "Nergenshuizen", Country: "NL"},
 			Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered},
-			StatusApproved, "",
+			"",
 		},
 		{
 			"another address", nil, brpClaims, other,
@@ -341,7 +344,7 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 				Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL",
 				Verification: AddressRegisteredMismatch, Registered: &registered,
 			},
-			StatusRejected, errorAddressMismatch,
+			AddressReviewPending,
 		},
 		{
 			"addition taken for the number", nil, withClaim(openid4vpverifier.ClaimAddressHouseNumber, "12-1"),
@@ -351,17 +354,30 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 				Verification: AddressRegisteredMismatch,
 				Registered:   &Address{Street: "Kerkstraat", HouseNumber: "12-1", PostalCode: "6511AB", City: "Nijmegen", Country: "Nederland"},
 			},
-			StatusRejected, errorAddressMismatch,
+			AddressReviewPending,
+		},
+		{
+			"letter missing on the card", &fakeAddressLookup{found: []addresslookup.Address{registerAddress}},
+			withClaim(openid4vpverifier.ClaimAddressHouseNumber, "12"),
+			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
+			Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: registerCountry, Verification: AddressVerified},
+			AddressReviewPending,
+		},
+		{
+			"number written otherwise, unchecked", nil, brpClaims,
+			Address{Street: "Kerkstraat", HouseNumber: "0012a", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"},
+			Address{Street: "Kerkstraat", HouseNumber: "0012a", PostalCode: "6511AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
+			AddressReviewPending,
 		},
 		{
 			"no house number on the card", nil, withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""), other,
 			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
-			StatusApproved, "",
+			AddressReviewPending,
 		},
 		{
 			"not disclosed", nil, nil, other,
 			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
-			StatusApproved, "",
+			AddressReviewPending,
 		},
 	}
 	for _, tc := range cases {
@@ -377,8 +393,8 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 			if !reflect.DeepEqual(*got.SubjectAddress, tc.want) {
 				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
 			}
-			if got.Status != tc.wantStatus || got.ErrorCode != tc.wantCode {
-				t.Errorf("status = %s %q, want %s %q", got.Status, got.ErrorCode, tc.wantStatus, tc.wantCode)
+			if got.Status != StatusApproved || got.ErrorCode != "" || got.AddressReview != tc.wantReview {
+				t.Errorf("status = %s %q, address review %q; want approved, %q", got.Status, got.ErrorCode, got.AddressReview, tc.wantReview)
 			}
 			if f.requests.registeredAddress != nil {
 				t.Error("registered address kept after the address was added")
@@ -399,14 +415,15 @@ func TestSelfDeclaredAddressReviewed(t *testing.T) {
 		t.Fatalf("after AddAddress = %s, %s; want approved, address pending", got.Status, got.AddressReview)
 	}
 
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, alex.UserID, ReviewScopeReviews, true, false); !errors.Is(err, ErrOwnReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: false}); !errors.Is(err, ErrOwnReview) {
 		t.Errorf("subject deciding = %v; want ErrOwnReview", err)
 	}
-	decided, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, uuid.New(), ReviewScopeReviews, false, false)
+	// The subject may when SelfReview allows it (a platform admin on a dev stack).
+	decided, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: false, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: true})
 	if err != nil || decided.AddressReview != AddressReviewRejected || decided.Status != StatusApproved {
 		t.Fatalf("DecideAddressReview = %s, %s, %v; want approved, address rejected", decided.Status, decided.AddressReview, err)
 	}
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, uuid.New(), ReviewScopeAll, true, false); !errors.Is(err, ErrAddressNotUnderReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("deciding again = %v; want ErrAddressNotUnderReview", err)
 	}
 }
@@ -419,20 +436,41 @@ func TestRegisteredAddressNotReviewed(t *testing.T) {
 	if err != nil || got.AddressReview != "" {
 		t.Fatalf("AddAddress = %q, %v; want no review", got.AddressReview, err)
 	}
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, uuid.New(), ReviewScopeAll, true, false); !errors.Is(err, ErrAddressNotUnderReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("DecideAddressReview = %v; want ErrAddressNotUnderReview", err)
 	}
 }
 
-func TestPlatformAdminReviewsOwnAddress(t *testing.T) {
+func TestAddressReviewNeedsReason(t *testing.T) {
 	ctx := context.Background()
 	f := newAddressFixture(AddressRequired)
 	req := sendApprovedAddress(t, f, time.Minute)
 	if _, err := f.svc.AddAddress(ctx, testOrg.ID, req.ID, nil, testAddress); err != nil {
 		t.Fatalf("AddAddress: %v", err)
 	}
-	got, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, alex.UserID, ReviewScopeAll, true, true)
-	if err != nil || got.AddressReview != AddressReviewConfirmed {
-		t.Errorf("platform admin deciding their own = %q, %v; want confirmed", got.AddressReview, err)
+	for _, reason := range []string{"", "  ", strings.Repeat("x", maxReviewReasonLength+1)} {
+		if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: reason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("reason %q: DecideAddressReview = %v; want ErrInvalidInput", reason, err)
+		}
+	}
+}
+
+func TestYiviDisclosureWithoutCardClearsRegistered(t *testing.T) {
+	ctx := context.Background()
+	f := newAddressFixture(AddressRequired)
+	sent := f.sendYivi(t)
+	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("StartYivi: %v", err)
+	}
+	earlier := registeredAddress(brpClaims)
+	f.requests.registeredAddress = &earlier
+	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
+		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"},
+	}}
+	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("YiviDisclosure: %v", err)
+	}
+	if f.requests.registeredAddress != nil {
+		t.Errorf("registered address = %+v; want the earlier attempt's cleared", *f.requests.registeredAddress)
 	}
 }

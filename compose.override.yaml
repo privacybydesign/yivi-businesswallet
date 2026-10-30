@@ -35,12 +35,17 @@ services:
       # Verzekeringsbericht uploads likewise: dev accepts any statement's seal.
       # Set EMPLOYMENT_VALIDATOR_PROVIDER=uwv in .env to check for real.
       EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-stub}
+      # VOG uploads likewise: dev accepts any VOG. Set
+      # VOG_VALIDATOR_PROVIDER=validatie_nl in .env to check for real.
+      VOG_VALIDATOR_PROVIDER: ${VOG_VALIDATOR_PROVIDER:-stub}
       # The EU Trusted Lists cache, on the diploma-trust-cache volume so a
       # restart does not fetch them again.
       DIPLOMA_TRUST_CACHE_DIR: ${DIPLOMA_TRUST_CACHE_DIR:-/var/cache/diploma-trust}
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
       # in .env to issue against the hosted Veramo staging issuer.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
+      # Hold a stub offer pending this long (e.g. 60s) so its QR stays on screen.
+      ATTESTATION_STUB_CLAIM_DELAY: ${ATTESTATION_STUB_CLAIM_DELAY:-0s}
       ATTESTATION_ISSUER_URL: ${ATTESTATION_ISSUER_URL:-https://veramo-issuer.openid4vc.staging.yivi.app}
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-test-issuer}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}

@@ -86,7 +86,7 @@ const (
 	// register addresses are checked against.
 	AddressUnsupported AddressVerification = "unsupported"
 	// AddressRegistered is the registered (BRP) address the subject's Yivi app
-	// disclosed: same postal code and house number.
+	// disclosed: same postal code and house number (with any letter or addition).
 	AddressRegistered AddressVerification = "registered"
 	// AddressRegisteredMismatch differs from the registered address the Yivi
 	// app disclosed, which the address carries as Registered.
@@ -119,8 +119,15 @@ type Address struct {
 	// ignored. An address kept before it was checked has none.
 	Verification AddressVerification `json:"verification,omitempty"`
 	// Registered is the registered address an AddressRegisteredMismatch
-	// differs from.
+	// differs from, for the reviewer: never sent to the integrator.
 	Registered *Address `json:"registered,omitempty"`
+}
+
+// forIntegrator is a without the registered address: its verification says
+// it differs.
+func (a Address) forIntegrator() Address {
+	a.Registered = nil
+	return a
 }
 
 // normalized trims every field and refuses an address with one empty or too
@@ -238,9 +245,8 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 }
 
 // AddAddress seals addr on req, audited identity_proofing.address_added
-// (with its verification, without the address), and sends session.address_added. An
-// AddressRegisteredMismatch also rejects the approved request with
-// errorAddressMismatch, and a self-declared one waits for a reviewer
+// (with its verification, without the address), and sends session.address_added.
+// One the registered address did not confirm waits for a reviewer
 // (AddressReviewPending). It is false, and changes nothing, when the request
 // holds an address already or was erased.
 func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address) (bool, error) {
@@ -278,14 +284,8 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 		}
 
 		data := sessionEventData(req, req.Status)
-		data[webhookAddressKey] = addr
-		if err := enqueueRequestWebhook(ctx, q, req, EventSessionAddressAdded, data); err != nil {
-			return err
-		}
-		if addr.Verification != AddressRegisteredMismatch {
-			return nil
-		}
-		return rejectAddressMismatch(ctx, q, s.audit, req)
+		data[webhookAddressKey] = addr.forIntegrator()
+		return enqueueRequestWebhook(ctx, q, req, EventSessionAddressAdded, data)
 	})
 	if err != nil {
 		return false, err
@@ -293,49 +293,22 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	return added, nil
 }
 
-// rejectAddressMismatch rejects req, approved or in review, with
-// errorAddressMismatch on q: audited identity_proofing.rejected and sent as
-// session.failed. A review is not waited for: a mismatched address fails the
-// check whatever the reviewer decides.
-func rejectAddressMismatch(ctx context.Context, q database.Querier, recorder audit.Recorder, req Request) error {
-	tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-		SET status = $2, error_code = $3, updated_at = now()
-		WHERE id = $1 AND status IN ($4, $5)`, req.ID, string(StatusRejected), errorAddressMismatch,
-		string(StatusApproved), string(StatusNeedsReview))
-	if err != nil {
-		return fmt.Errorf("proofing: reject address mismatch request %s: %w", req.ID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil
-	}
-	if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
-		return err
-	}
-	if err := recorder.Record(ctx, q, outcomeActions[StatusRejected],
-		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-		audit.Updated(req.auditFields(map[string]any{"status": string(req.Status)}),
-			req.auditFields(map[string]any{"status": string(StatusRejected), "errorCode": errorAddressMismatch}))); err != nil {
-		return err
-	}
-	rejected := req
-	rejected.Status, rejected.ErrorCode = StatusRejected, errorAddressMismatch
-	return enqueueRequestWebhook(ctx, q, rejected, EventSessionFailed, sessionEventData(rejected, StatusRejected))
-}
-
 // SetRegisteredAddress seals the registered address a Yivi disclosure carried
-// on req, until AddAddress compares the entered one with it. It changes
-// nothing once an address was entered or the request was erased.
-func (s *RequestStore) SetRegisteredAddress(ctx context.Context, req Request, addr Address) error {
-	if s.cipher == nil {
-		return ErrNoEncryptionKey
-	}
-	plain, err := json.Marshal(addr)
-	if err != nil {
-		return fmt.Errorf("proofing: marshal registered address request %s: %w", req.ID, err)
-	}
-	sealed, err := s.cipher.Encrypt(plain)
-	if err != nil {
-		return fmt.Errorf("proofing: encrypt registered address request %s: %w", req.ID, err)
+// on req, until AddAddress compares the entered one with it; nil clears it. It
+// changes nothing once an address was entered or the request was erased.
+func (s *RequestStore) SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error {
+	var sealed []byte
+	if addr != nil {
+		if s.cipher == nil {
+			return ErrNoEncryptionKey
+		}
+		plain, err := json.Marshal(addr)
+		if err != nil {
+			return fmt.Errorf("proofing: marshal registered address request %s: %w", req.ID, err)
+		}
+		if sealed, err = s.cipher.Encrypt(plain); err != nil {
+			return fmt.Errorf("proofing: encrypt registered address request %s: %w", req.ID, err)
+		}
 	}
 	if _, err := s.db.Exec(ctx, `UPDATE identity_proofing_requests
 		SET registered_address_ciphertext = $2, updated_at = now()
@@ -488,9 +461,6 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 
 	now := s.now()
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
-	if addr.Verification == AddressRegisteredMismatch {
-		req.Status, req.ErrorCode = StatusRejected, errorAddressMismatch
-	}
 	if review := addressReviewOf(addr); review != nil {
 		req.AddressReview = *review
 	}
@@ -555,9 +525,11 @@ func registeredAddress(claims map[string]string) Address {
 // registered address the subject's Yivi app disclosed, by postal code and
 // house number, which name one Dutch address. Street and city are left out:
 // the BRP may shorten a name the BAG writes in full. A match the BAG did not
-// check is kept as the registered address, so a made-up street is not. A
-// registered address without both (the card's house number is optional)
-// leaves addr as it is.
+// check is kept as the registered address, so a made-up street is not. One
+// that differs only in its letter or addition, or in how the number is
+// written, is left as it is: how the card writes those is not certain, so it
+// is self-declared rather than a mismatch. A registered address without both
+// (the card's house number is optional) leaves addr as it is too.
 func compareRegistered(addr, registered Address) Address {
 	brp, ok := addresslookup.PostalCode(registered.PostalCode)
 	brpNumber, numbered := addresslookup.HouseNumber(registered.HouseNumber)
@@ -567,14 +539,17 @@ func compareRegistered(addr, registered Address) Address {
 	entered, _ := addresslookup.PostalCode(addr.PostalCode)
 	// The number apart, so 12-1 is not 121.
 	enteredNumber, _ := addresslookup.HouseNumber(addr.HouseNumber)
-	if entered == brp && enteredNumber == brpNumber && addressKey(addr.HouseNumber) == addressKey(registered.HouseNumber) {
-		if addr.Verification != AddressVerified {
-			addr = registered
-		}
-		addr.Verification = AddressRegistered
+	if entered != brp || enteredNumber != brpNumber {
+		addr.Verification, addr.Registered = AddressRegisteredMismatch, &registered
 		return addr
 	}
-	addr.Verification, addr.Registered = AddressRegisteredMismatch, &registered
+	if addressKey(addr.HouseNumber) != addressKey(registered.HouseNumber) {
+		return addr
+	}
+	if addr.Verification != AddressVerified {
+		addr = registered
+	}
+	addr.Verification = AddressRegistered
 	return addr
 }
 

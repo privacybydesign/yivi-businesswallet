@@ -113,7 +113,7 @@ tags:
       ### Outcomes
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH`, `ADDRESS_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`,
+      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`,
       `ORG_PAUSED`, `LEGAL_RETENTION` and `EMPLOYMENT_NOT_PROVIDED`; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
       (it looks altered), `EVIDENCE_NOT_AS_REQUESTED` (it is not what was asked for) or
       `MANUAL_REVIEW_REJECTED` (something else); the session itself is rejected for `FACE_NO_MATCH`,
@@ -3599,6 +3599,110 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/openid4vp/templates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [openid4vp]
+      summary: List the organisation's credential request templates
+      description: By name. Requires an administrator role.
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialRequestTemplate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [openid4vp]
+      summary: Save a credential request as a template
+      description: >-
+        Saves a named set of credential types and claim names to ask other
+        organisations for, without a recipient. The credentials are checked
+        with the same rules as a sent request. Requires an administrator role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, credentials]
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                credentials:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [vct]
+                    properties:
+                      vct:
+                        type: string
+                      claims:
+                        type: array
+                        maxItems: 50
+                        items:
+                          type: string
+      responses:
+        '201':
+          description: The template was saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialRequestTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The organisation already has a template with this name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/templates/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    delete:
+      tags: [openid4vp]
+      summary: Delete a credential request template
+      description: Requires an administrator role.
+      responses:
+        '204':
+          description: The template was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/openid4vp/outbound/{id}/request-object:
     parameters:
       - name: id
@@ -5646,12 +5750,14 @@ paths:
             enum: [pending, confirmed, rejected]
           description: >-
             Only the requests whose self-declared address stands so with a reviewer. A member with
-            the reviewer right lists `pending` for the whole organisation.
+            the reviewer right lists each of them for the whole organisation, without
+            `proofedName`, `employment` and diplomas.
       responses:
         '200':
           description: >-
             The requests, newest first; for `status=needs_review` the longest in review first, for
-            `addressReview=pending` the longest waiting first.
+            `addressReview=pending` the longest waiting first, for `confirmed` and `rejected` the
+            latest decided first.
           content:
             application/json:
               schema:
@@ -5852,7 +5958,9 @@ paths:
         Requires organisation membership. The request, re-checked with the engine
         (at most every 10 seconds) while it is live: what an on-screen session's page
         polls. An administrator sees any request, a member only one they sent, and a member
-        with the reviewer right also one waiting for review and a data request in any status.
+        with the reviewer right also one waiting for review, a data request in any status, and
+        a check whose address is reviewed, waiting or decided (without `proofedName`,
+        `employment` and diplomas).
       responses:
         '200':
           description: The request.
@@ -6899,13 +7007,15 @@ paths:
         (`unchecked`). Any other address is kept as entered (`unsupported`). On a Yivi app
         request whose disclosure carried the registered (BRP) address, the address is then
         compared with it instead: the same postal code and house number (with any letter or
-        addition) is `registered`, anything else `registered_mismatch`, carrying the registered address as
-        `registered`, and rejects the approved session with `ADDRESS_MISMATCH`. Only
-        `registered` confirms where the person lives; every other address is self-declared,
-        `verified` included, and waits for a reviewer (`addressReview: pending`, see
-        `.../address/review`). The address is kept sealed and shown with the request; audited
+        addition) is `registered`; another postal code or house number is
+        `registered_mismatch`, carrying the registered address as `registered` for the reviewer.
+        One that differs only in its letter or addition is kept as the register checked it
+        (`verified` or `unchecked`). Only `registered` confirms where the person lives; every
+        other address, `registered_mismatch` and `verified` included, waits for a reviewer
+        (`addressReview: pending`, see `.../address/review`), and the session keeps its outcome.
+        The address is kept sealed and shown with the request; audited
         `identity_proofing.address_added` with its `verification` but without the address (webhook
-        `session.address_added`, which carries it).
+        `session.address_added`, which carries it without `registered`).
       requestBody:
         required: true
         content:
@@ -7024,33 +7134,40 @@ paths:
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
       tags: [identity-proofing]
-      summary: Confirm or reject a self-declared address
+      summary: Confirm or reject an address waiting for review
       description: >-
         Requires an administrator role in the organisation, or the reviewer right. An address
-        nothing confirmed as where the person lives (any `verification` but `registered` and
-        `registered_mismatch`, so every Idem app address) waits for a reviewer as
-        `addressReview: pending`. `decision` is `confirm` or `reject`. Only the address is
-        decided: the session keeps its outcome. Audited `identity_proofing.address_reviewed`, sent
-        as webhook `session.address_reviewed`. The answer is the request. An address that waits
-        for no review, decided already or erased, is 409 `address_not_under_review`; one on a
-        request the caller sent, or about the caller, is 403 `own_review`, except for a platform
-        admin.
+        the registered (BRP) address did not confirm (any `verification` but `registered`, so
+        every Idem app address and a `registered_mismatch`) waits for a reviewer as
+        `addressReview: pending`. `decision` is `confirm` or `reject`, with a required `reason`
+        (at most 500 characters; 400 `invalid_input` otherwise). Only the address is decided: the
+        session keeps its outcome. Audited `identity_proofing.address_reviewed` with the reason,
+        sent as webhook `session.address_reviewed`. The answer is the request; to a reviewer who
+        is not an administrator, without `proofedName`, `employment` and diplomas. To an administrator, an
+        address that waits for no review, decided already or erased, is 409
+        `address_not_under_review`; a reviewer who is not an administrator no longer reaches
+        that request, so it is 404 `session_not_found`. One on a request the caller sent, or
+        about the caller, is 403 `own_review`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [decision]
+              required: [decision, reason]
               properties:
                 decision:
                   type: string
                   enum: [confirm, reject]
+                reason:
+                  type: string
+                  maxLength: 500
             examples:
               confirm:
                 summary: Confirm
                 value:
                   decision: confirm
+                  reason: Matches the rental contract
       responses:
         '200':
           description: The request after the decision.
@@ -7339,6 +7456,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/reviews/events:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: Follow the organisation's reviews
+      description: >-
+        Requires the reviewer right (an administrator has it). A Server-Sent Events stream that
+        sends a `reviews` event, with no data, each time a request of the organisation goes into
+        or out of review, its address review moves, or it is purged, so a page re-reads its
+        lists then. A comment line keeps the stream open. It carries nothing about a request:
+        the lists apply the reader's own scope. A member without the right gets 403.
+      responses:
+        '200':
+          description: The event stream, open until the page leaves or the server shuts down.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                changed:
+                  summary: The reviews changed
+                  value: "event: reviews\ndata: \n\n"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/events:
     parameters:
       - name: slug
@@ -7836,13 +7985,16 @@ paths:
         Requires an administrator role in the organisation. `url` (absolute https; it
         must resolve to a public address when an event is sent) and `events`, at least one
         of `session.created`, `session.started`, `session.handover`, `session.verified`, `session.failed`,
-        `session.review_opened`, `session.expired`, `session.cancelled`, `session.purged` and
-        `session.diploma_added`. A
+        `session.review_opened`, `session.expired`, `session.cancelled`, `session.purged`,
+        `session.diploma_added`, `session.address_added` and `session.address_reviewed`. An
+        endpoint is sent only the events it was saved with: save it again to add a new one. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
         readable. Each event is a POST of `{id, type, createdAt, data}`; `data` holds
         `sessionId` (`ps_…`), `status`, `flowId`, and when known `method`,
         `assuranceLevel`, `eidasLevel`, `errorCode` (such as `IDENTITY_MISMATCH`) and
-        `expectedSubject: true`; never the person's name, address or photo. It is signed in the
+        `expectedSubject: true`; never the person's name or photo. Only `session.address_added`
+        carries a person's data: the address they entered (`address`), never the registered (BRP)
+        one. `session.address_reviewed` carries the decision as `addressReview`. It is signed in the
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
         `Yivi-Event` and `Yivi-Delivery`; for 24 hours after a secret rotation it carries a
         second `v1` under the previous secret. An organisation without an endpoint is sent no
@@ -9010,9 +9162,7 @@ paths:
         read off the document (`proofedName`) until the organisation's data retention clears
         it. `expectedSubject: true` is a session created for one person (`name` with
         `birthDate`). Rejection codes the wallet itself sets: `IDENTITY_MISMATCH` (the
-        document is another person's), `ADDRESS_MISMATCH` (the address entered after approval
-        is not the registered (BRP) address the Yivi app disclosed: the approved session is
-        then rejected), `ASSURANCE_NOT_MET` (the checks fell short of the
+        document is another person's), `ASSURANCE_NOT_MET` (the checks fell short of the
         flow's required level), `REVIEW_LAPSED` (a review nobody decided in time: a data request
         a calendar month after the person was proven, an identity check within the data
         retention), `LEGAL_RETENTION` (an
@@ -11095,6 +11245,30 @@ components:
       in: cookie
       name: ybw_session
   schemas:
+    CredentialRequestTemplate:
+      type: object
+      required: [id, name, credentials, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        credentials:
+          type: array
+          items:
+            type: object
+            required: [vct, claims]
+            properties:
+              vct:
+                type: string
+              claims:
+                type: array
+                items:
+                  type: string
+        createdAt:
+          type: string
+          format: date-time
     OutboundPresentationRequest:
       type: object
       properties:
@@ -11333,6 +11507,13 @@ components:
           type: string
           format: date-time
           description: Until when an approved `data_access` session's data downloads.
+        addressReview:
+          type: string
+          enum: [pending, confirmed, rejected]
+          description: >-
+            The review of an address the registered (BRP) address did not confirm: `pending`
+            until a reviewer confirms or rejects it. Absent on a registered address and without
+            an address.
       required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, expectedSubject]
     ProofingApiCreatedSession:
       allOf:
@@ -11456,9 +11637,18 @@ components:
           items:
             $ref: '#/components/schemas/ProofingDiploma'
         address:
-          $ref: '#/components/schemas/ProofingAddress'
+          description: The address the person entered, without `registered`.
+          allOf:
+            - $ref: '#/components/schemas/ProofingAddress'
         employment:
           $ref: '#/components/schemas/ProofingEmployment'
+        addressReview:
+          type: string
+          enum: [pending, confirmed, rejected]
+          description: >-
+            The review of an address the registered (BRP) address did not confirm: `pending`
+            until a reviewer confirms or rejects it. Absent on a registered address and without
+            an address.
       required: [id, status, evidence, diplomas]
     ProofingApiMethodStart:
       type: object
@@ -11516,8 +11706,8 @@ components:
         data:
           type: object
           description: >-
-            Never the person's name, address or photo. A `test` event's data is only
-            `message`.
+            Never the person's name or photo. Only `session.address_added` carries a person's
+            data, the address they entered. A `test` event's data is only `message`.
           properties:
             sessionId:
               type: string
@@ -11540,9 +11730,17 @@ components:
               type: boolean
               description: Only present, as true, on a session created for one person.
             address:
-              $ref: '#/components/schemas/ProofingAddress'
+              description: >-
+                Only on `session.address_added`: the address the person entered, without
+                `registered`.
+              allOf:
+                - $ref: '#/components/schemas/ProofingAddress'
             employment:
               $ref: '#/components/schemas/ProofingEmployment'
+            addressReview:
+              type: string
+              enum: [confirmed, rejected]
+              description: Only on `session.address_reviewed`, the reviewer's decision.
             diploma:
               type: object
               description: Only on `session.diploma_added`.
@@ -12161,7 +12359,8 @@ components:
           readOnly: true
           description: >-
             The registered (BRP) address a `registered_mismatch` differs from, as the Yivi
-            app disclosed it. Ignored in a request body.
+            app disclosed it, for the reviewer. Never sent to the integrator: absent in the API
+            result and webhooks. Ignored in a request body.
           allOf:
             - $ref: '#/components/schemas/ProofingAddress'
       required: [street, houseNumber, postalCode, city, country]
@@ -12288,8 +12487,43 @@ components:
           readOnly: true
           enum: [pending, confirmed, rejected]
           description: >-
-            A self-declared address's review: `pending` until a reviewer confirms or rejects it.
-            Absent on a registered (BRP) address, and without an address.
+            The review of an address the registered (BRP) address did not confirm: `pending`
+            until a reviewer confirms or rejects it. Absent on a registered address, without an
+            address, and once a pending one was erased.
+        addressReviewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When a reviewer confirmed or rejected the address; absent while it waits.
+        decisions:
+          type: array
+          readOnly: true
+          description: >-
+            What reviewers decided, oldest first: the session's review (`kind: review`, outcome
+            `approved` or `rejected`) and its address (`kind: address`, outcome `confirmed` or
+            `rejected`), each with its reason, reviewer and time, read from the request's audit
+            events. Only on `GET .../requests/{requestID}`, and only for an administrator or a
+            member with the reviewer right; one who reaches the check only for its address gets
+            the address decisions alone. A purge erases the reasons.
+          items:
+            type: object
+            required: [kind, outcome, decidedAt]
+            properties:
+              kind:
+                type: string
+                enum: [review, address]
+              outcome:
+                type: string
+              reason:
+                type: string
+              errorCode:
+                type: string
+              decidedBy:
+                type: string
+                description: The reviewer's name; absent when the wallet decided on its own.
+              decidedAt:
+                type: string
+                format: date-time
         employmentMode:
           type: string
           enum: ['off', required]

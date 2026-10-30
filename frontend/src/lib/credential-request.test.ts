@@ -1,17 +1,22 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { CredentialType } from "../api/credential-requests";
 import type { CredentialRow } from "./credential-request";
 import {
   buildSendPayload,
+  buildTemplatePayload,
   catalogKey,
   claimValueText,
   EMPTY_ROW,
   hasErrors,
   MAX_CLAIMS,
+  MAX_TEMPLATE_NAME,
   OTHER_TYPE,
   parseClaimList,
   rowCredential,
+  rowsFromTemplate,
   validateCredentialRequest,
+  validateTemplateName,
 } from "./credential-request";
 
 const membership: CredentialType = {
@@ -150,5 +155,90 @@ describe("claimValueText", () => {
     expect(claimValueText(42)).toBe("42");
     expect(claimValueText({ city: "Nijmegen" })).toBe('{"city":"Nijmegen"}');
     expect(claimValueText(null)).toBe("");
+  });
+});
+
+describe("request templates", () => {
+  const template = {
+    id: "t1",
+    name: "Beschikking beschermingsbewind",
+    credentials: [
+      {
+        vct: "nl.rechtspraak.beschermingsbewind",
+        claims: ["zaaknummer", "omvang"],
+      },
+    ],
+    createdAt: "2026-10-28T12:00:00Z",
+  };
+
+  const designed: CredentialType = {
+    vct: "nl.rechtspraak.beschermingsbewind",
+    name: "Beschikking beschermingsbewind",
+    issuer: "Rechtspraak",
+    attributes: [
+      { key: "omvang", label: "Omvang" },
+      { key: "zaaknummer", label: "Zaaknummer" },
+    ],
+  };
+
+  it("fills a catalogue row when the catalogue offers the type and every claim", () => {
+    expect(rowsFromTemplate(template, [designed])).toEqual([
+      {
+        ...EMPTY_ROW,
+        typeKey: catalogKey(designed),
+        picked: ["zaaknummer", "omvang"],
+      },
+    ]);
+  });
+
+  it("keeps a type outside the catalogue as typed", () => {
+    expect(rowsFromTemplate(template, [])).toEqual([
+      other("nl.rechtspraak.beschermingsbewind", "zaaknummer, omvang"),
+    ]);
+  });
+
+  it("keeps a credential typed when the catalogue lacks one of its claims", () => {
+    const narrowed = { ...designed, attributes: [designed.attributes[0]] };
+    expect(rowsFromTemplate(template, [narrowed])).toEqual([
+      other("nl.rechtspraak.beschermingsbewind", "zaaknummer, omvang"),
+    ]);
+  });
+
+  it("saves the rows as a send would carry them", () => {
+    expect(
+      buildTemplatePayload(
+        "  Beschikking  ",
+        rowsFromTemplate(template, [designed]),
+        [designed],
+      ),
+    ).toEqual({
+      name: "Beschikking",
+      credentials: [
+        {
+          vct: "nl.rechtspraak.beschermingsbewind",
+          claims: ["omvang", "zaaknummer"],
+        },
+      ],
+    });
+  });
+
+  it("needs a name of at most the backend's length", () => {
+    expect(validateTemplateName(" ")).toBe("templateNameRequired");
+    expect(validateTemplateName("x".repeat(MAX_TEMPLATE_NAME + 1))).toBe(
+      "templateNameTooLong",
+    );
+    expect(validateTemplateName("Beschikking")).toBeUndefined();
+  });
+
+  it("mirrors openid4vprequester.maxTemplateName", () => {
+    const source = readFileSync(
+      new URL(
+        "../../../backend/internal/openid4vprequester/template.go",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const match = /maxTemplateName = (\d+)/.exec(source);
+    expect(Number(match?.[1])).toBe(MAX_TEMPLATE_NAME);
   });
 });

@@ -68,6 +68,12 @@ var DemoRegistrations = []Registration{
 		},
 	},
 	{
+		KVKNumber: "90000150", LegalName: "Waalstad Bewindvoering B.V. (Demo)", EUID: "NL.KVK.90000150",
+		Representatives: []Representative{
+			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
+		},
+	},
+	{
 		// Register-only: validatable but not seeded as an org, so a validated
 		// requester can actually open its wallet (see the type comment above).
 		KVKNumber: OpenableKVKNumber, LegalName: "Zonnedael B.V.", EUID: "NL.KVK." + OpenableKVKNumber,

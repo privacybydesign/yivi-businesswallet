@@ -4,9 +4,12 @@ import type { IconName } from "./icon";
 import type { Me } from "../api/auth";
 import type { Organization } from "../api/organization";
 import { useOrganizationQuery } from "../api/organization.queries";
-import { useWaitingReviewsQuery } from "../api/identity-proofing.queries";
+import {
+  useReviewEvents,
+  useWaitingReviewsQuery,
+} from "../api/identity-proofing.queries";
 import { waitingOldestFirst } from "../lib/proofing-reviews";
-import { listedCount, requestListCapped } from "../lib/identity-proofing";
+import { listedCount } from "../lib/identity-proofing";
 import { useSigningAvailabilityQuery } from "../api/signing.queries";
 import { personInitials, fullName } from "../lib/name";
 import { Icon } from "./icon";
@@ -225,13 +228,14 @@ export function Sidebar({
   const waiting = useWaitingReviewsQuery(activeSlug ?? "", {
     enabled: activeSlug !== undefined && canReview,
   });
+  useReviewEvents(activeSlug ?? "", activeSlug !== undefined && canReview);
   const navItems = activeSlug
     ? orgNavItems(activeSlug, {
         signing: showSigning,
         admin: isOrgAdmin,
         reviewer: canReview,
-        waitingReviews: waitingOldestFirst(waiting.data ?? []).length,
-        waitingReviewsCapped: requestListCapped(waiting.data ?? []),
+        waitingReviews: waitingOldestFirst(waiting.data?.requests ?? []).length,
+        waitingReviewsCapped: waiting.data?.capped === true,
       })
     : me.isPlatformAdmin
       ? ADMIN_NAV_ITEMS

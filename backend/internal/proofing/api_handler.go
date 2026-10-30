@@ -269,6 +269,9 @@ type apiSessionResponse struct {
 	// downloads (GET .../data-export).
 	FlowKind        FlowKind   `json:"flowKind"`
 	DataExportUntil *time.Time `json:"dataExportUntil,omitempty"`
+	// AddressReview is where an address the registered address did not
+	// confirm stands with a reviewer.
+	AddressReview AddressReview `json:"addressReview,omitempty"`
 }
 
 func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
@@ -279,6 +282,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt,
 		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		AddressReview: req.AddressReview,
 	}
 }
 
@@ -480,6 +484,9 @@ type apiResultResponse struct {
 	// after their identity was approved, checked against UWV's seal and the
 	// proofed identity.
 	Employment *Employment `json:"employment,omitempty"`
+	// AddressReview is where an address the registered address did not
+	// confirm stands with a reviewer.
+	AddressReview AddressReview `json:"addressReview,omitempty"`
 }
 
 type apiIdentity struct {
@@ -618,8 +625,12 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
 		ReviewReason: req.ReviewReason,
-		Evidence:     []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, Address: req.SubjectAddress,
+		Evidence:     []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, AddressReview: req.AddressReview,
 		Employment: req.SubjectEmployment,
+	}
+	if req.SubjectAddress != nil {
+		addr := req.SubjectAddress.forIntegrator()
+		out.Address = &addr
 	}
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt

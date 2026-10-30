@@ -1,6 +1,8 @@
 import type {
+  CreateRequestTemplate,
   CredentialType,
   OutboundStatus,
+  RequestTemplate,
   SendCredentialRequest,
 } from "../api/credential-requests";
 
@@ -8,6 +10,8 @@ import type {
 // server re-enforces them, these are for immediate feedback.
 export const MAX_CREDENTIALS = 10;
 export const MAX_CLAIMS = 50;
+// Mirrors openid4vprequester.maxTemplateName.
+export const MAX_TEMPLATE_NAME = 120;
 
 // Plausible address check only; the QERDS provider is the authority.
 const ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -72,6 +76,11 @@ export type CredentialRequestError =
   | "claimInvalid"
   | "tooManyClaims";
 
+export type TemplateNameError =
+  | "templateNameRequired"
+  | "templateNameTooLong"
+  | "templateNameTaken";
+
 export interface CredentialRequestErrors {
   recipient?: CredentialRequestError;
   // Per row, by index; absent when the row is fine.
@@ -133,6 +142,53 @@ export function buildSendPayload(
       const credential = rowCredential(row, catalog);
       return credential ? [credential] : [];
     }),
+  };
+}
+
+// The form rows a picked template fills in. A credential the catalogue offers,
+// with every claim one of its attributes, becomes a catalogue row; any other
+// stays as typed, so no claim is lost.
+export function rowsFromTemplate(
+  template: RequestTemplate,
+  catalog: CredentialType[],
+): CredentialRow[] {
+  return template.credentials.map((credential) => {
+    const type = catalog.find((entry) => entry.vct === credential.vct);
+    const keys = type?.attributes.map((a) => a.key) ?? [];
+    if (type && credential.claims.every((claim) => keys.includes(claim))) {
+      return {
+        ...EMPTY_ROW,
+        typeKey: catalogKey(type),
+        picked: credential.claims,
+      };
+    }
+    return {
+      ...EMPTY_ROW,
+      typeKey: OTHER_TYPE,
+      vct: credential.vct,
+      claims: credential.claims.join(", "),
+    };
+  });
+}
+
+export function validateTemplateName(
+  name: string,
+): TemplateNameError | undefined {
+  const trimmed = name.trim();
+  if (trimmed === "") return "templateNameRequired";
+  if (trimmed.length > MAX_TEMPLATE_NAME) return "templateNameTooLong";
+  return undefined;
+}
+
+// A template saves what the rows ask for, the same way a send carries it.
+export function buildTemplatePayload(
+  name: string,
+  rows: CredentialRow[],
+  catalog: CredentialType[],
+): CreateRequestTemplate {
+  return {
+    name: name.trim(),
+    credentials: buildSendPayload("", "", rows, catalog).credentials,
   };
 }
 

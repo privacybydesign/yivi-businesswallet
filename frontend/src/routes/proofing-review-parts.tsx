@@ -1,7 +1,11 @@
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
-import type { ProofingRequest } from "../api/identity-proofing";
+import type {
+  ProofingDecision,
+  ProofingRequest,
+} from "../api/identity-proofing";
+import { useWhenFormatter } from "../lib/format-when";
 import { Card } from "../ui";
 
 // A link that looks like Button's primary/md and secondary/md: Button renders
@@ -76,7 +80,51 @@ export function ClosedNote({
   return (
     <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
       {t(`identityProofing.reviews.notWaiting.${key}`)}
+      <DecisionReasons request={request} kind="review" />
     </output>
+  );
+}
+
+// Who decided the request's session review or its address, when, and why.
+// Nothing for a reader the backend sends no decisions (a member who only sent
+// it) or for a request no reviewer decided.
+export function DecisionReasons({
+  request,
+  kind,
+}: Readonly<{
+  request: ProofingRequest;
+  kind: ProofingDecision["kind"];
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const formatWhen = useWhenFormatter();
+  const decisions = (request.decisions ?? []).filter((d) => d.kind === kind);
+  if (decisions.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="mt-2 flex flex-col gap-2">
+      {decisions.map((d) => (
+        <li key={`${d.kind}-${d.decidedAt}`}>
+          <span className="text-ink-soft block text-[12.5px]">
+            {d.decidedBy
+              ? t("identityProofing.reviews.decided.by", {
+                  name: d.decidedBy,
+                  when: formatWhen(d.decidedAt),
+                })
+              : t("identityProofing.reviews.decided.at", {
+                  when: formatWhen(d.decidedAt),
+                })}
+          </span>
+          {d.reason && (
+            <span className="block">
+              {t("identityProofing.reviews.decided.reason", {
+                reason: d.reason,
+              })}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

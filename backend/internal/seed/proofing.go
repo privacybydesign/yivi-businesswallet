@@ -380,7 +380,7 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o
 	if err != nil {
 		return err
 	}
-	if err := ensureDemoTheme(ctx, themesettings.NewStore(pool, recorder), orgID, o); err != nil {
+	if err := ensureDemoTheme(ctx, themesettings.NewStore(pool, recorder), orgID, o.slug, o.theme); err != nil {
 		return err
 	}
 	selections := proofing.NewSettingsStore(pool, recorder)
@@ -397,27 +397,27 @@ func seedProofingOrg(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, o
 	return nil
 }
 
-// ensureDemoTheme gives orgID o's theme unless the org already has one, so a
-// theme changed since is kept.
-func ensureDemoTheme(ctx context.Context, themes *themesettings.Store, orgID uuid.UUID, o demoProofingOrg) error {
-	if o.theme == nil {
+// ensureDemoTheme gives orgID (slug) theme unless the org already has one, so
+// a theme changed since is kept.
+func ensureDemoTheme(ctx context.Context, themes *themesettings.Store, orgID uuid.UUID, slug string, theme *demoTheme) error {
+	if theme == nil {
 		return nil
 	}
 	current, err := themes.GetSettings(ctx, orgID)
 	if err != nil {
-		return fmt.Errorf("seed: theme %s: %w", o.slug, err)
+		return fmt.Errorf("seed: theme %s: %w", slug, err)
 	}
 	if current.Configured {
 		return nil
 	}
-	contentType, ok := themesettings.DetectLogoType(o.theme.logo)
+	contentType, ok := themesettings.DetectLogoType(theme.logo)
 	if !ok {
-		return fmt.Errorf("seed: theme %s: logo is not an image", o.slug)
+		return fmt.Errorf("seed: theme %s: logo is not an image", slug)
 	}
-	_, err = themes.Save(ctx, orgID, o.theme.settings,
-		themesettings.LogoUpdate{Replace: true, Logo: themesettings.Logo{Bytes: o.theme.logo, ContentType: contentType}})
+	_, err = themes.Save(ctx, orgID, theme.settings,
+		themesettings.LogoUpdate{Replace: true, Logo: themesettings.Logo{Bytes: theme.logo, ContentType: contentType}})
 	if err != nil {
-		return fmt.Errorf("seed: theme %s: %w", o.slug, err)
+		return fmt.Errorf("seed: theme %s: %w", slug, err)
 	}
 	return nil
 }

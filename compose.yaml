@@ -121,6 +121,9 @@ services:
       REGULA_FACE_API_URL: ${REGULA_FACE_API_URL:-}
       REGULA_FACE_API_PUBLIC_URL: ${REGULA_FACE_API_PUBLIC_URL:-}
       REGULA_FACE_MATCH_THRESHOLD: ${REGULA_FACE_MATCH_THRESHOLD:-}
+      ID_SCAN_KEY_ID: ${ID_SCAN_KEY_ID:-}
+      ID_SCAN_SECRET: ${ID_SCAN_SECRET:-}
+      ID_SCAN_API_URL: ${ID_SCAN_API_URL:-}
       # Comma-separated eDL CSCA files (from the ops repo); empty trusts no licence.
       IDENTITY_PROOFING_EDL_CSCA_PATHS: ${IDENTITY_PROOFING_EDL_CSCA_PATHS:-}
       # Diploma verification: the validator (`stub` or the real PDF check) and
@@ -134,6 +137,9 @@ services:
       # Verzekeringsbericht verification: the validator (`stub` or the real UWV
       # seal check, on the diploma trust anchors); empty keeps the config default.
       EMPLOYMENT_VALIDATOR_PROVIDER: ${EMPLOYMENT_VALIDATOR_PROVIDER:-}
+      # VOG verification: the validator (`stub` or validatie.nl); empty keeps
+      # the config default.
+      VOG_VALIDATOR_PROVIDER: ${VOG_VALIDATOR_PROVIDER:-}
     depends_on:
       db:
         condition: service_healthy

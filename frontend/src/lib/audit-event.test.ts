@@ -6,6 +6,7 @@ import i18n from "../i18n";
 import {
   auditActionLabel,
   auditActorLabel,
+  auditDetailFields,
   auditSubject,
   auditTargetLabel,
 } from "./audit-event";
@@ -206,5 +207,114 @@ describe("auditActorLabel", () => {
     );
     expect(auditActorLabel(null, t)).toBeNull();
     expect(auditActorLabel(undefined, t)).toBeNull();
+  });
+});
+
+describe("auditDetailFields", () => {
+  const dateFormatter = new Intl.DateTimeFormat("en", { timeZone: "UTC" });
+
+  function event(metadata: Record<string, unknown>): AuditEvent {
+    return {
+      id: "1",
+      occurredAt: "2026-07-22T10:00:00Z",
+      action: "identity_proofing.rejected",
+      targetType: "identity_proofing_request",
+      targetId: "req-1",
+      metadata,
+      actor: null,
+    };
+  }
+
+  // An update lists every field: the unchanged ones by their value, the
+  // changed ones before and after, and none empty on both sides.
+  it("shows an update's changed fields before and after", () => {
+    expect(
+      auditDetailFields(
+        event({
+          before: {
+            subjectName: "Anna Jansen",
+            status: "in_progress",
+            errorCode: "",
+          },
+          after: {
+            subjectName: "Anna Jansen",
+            status: "rejected",
+            errorCode: "",
+          },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      { key: "subjectName", label: "subjectName", value: "Anna Jansen" },
+      {
+        key: "status",
+        label: "status",
+        value: "rejected",
+        before: "in_progress",
+      },
+    ]);
+  });
+
+  // A value empty on one side reads as none, never as a label's copy for an
+  // unknown value (an error code's "the check did not pass ()").
+  it("shows an empty side of a change as none", () => {
+    expect(
+      auditDetailFields(
+        event({
+          before: { errorCode: "", note: "" },
+          after: { errorCode: "DOC_EXPIRED", note: "late" },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      {
+        key: "errorCode",
+        label: t("auditLog.fields.errorCode"),
+        value: t("identityProofing.rejectionReasons.docExpired"),
+        before: "—",
+      },
+      { key: "note", label: "note", value: "late", before: "—" },
+    ]);
+  });
+
+  // A known field reads by its label and value, an unknown one by its key; a
+  // nested value is compact and a timestamp formatted.
+  it("labels known fields and formats nested values and dates", () => {
+    const fields = auditDetailFields(
+      event({
+        after: {
+          method: "idem_app",
+          roles: ["admin", "member"],
+          sentAt: "2026-07-22T10:00:00Z",
+          note: null,
+        },
+      }),
+      dateFormatter,
+      t,
+    );
+    expect(fields.map((f) => [f.label, f.value])).toEqual([
+      [t("auditLog.fields.method"), t("identityProofing.methods.idemApp")],
+      ["roles", '["admin","member"]'],
+      ["sentAt", dateFormatter.format(new Date("2026-07-22T10:00:00Z"))],
+    ]);
+  });
+
+  it("adds metadata outside the snapshot", () => {
+    expect(
+      auditDetailFields(
+        event({ before: { name: "Sales" }, via: "api" }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      { key: "name", label: "name", value: "Sales" },
+      { key: "via", label: "via", value: "api" },
+    ]);
+  });
+
+  it("is empty without metadata", () => {
+    expect(auditDetailFields(event({}), dateFormatter, t)).toEqual([]);
   });
 });

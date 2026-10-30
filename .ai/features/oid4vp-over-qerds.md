@@ -127,6 +127,34 @@ Routes of the sender slice:
 - The response goes straight over HTTPS, not QERDS: QERDS proves A *sent* the
   request, not what B disclosed.
 
+## 4a. Request templates
+
+A request an organization makes again and again (Gemeente Nijmegen asking every
+bewind office for the same five fields of the beschikking) is saved as a
+**template**: a name and the credential rows, never the recipient, since the same
+request goes to many parties. Table `credential_request_templates`, one name per
+organization (`credential_request_templates_name_key`, mapped to
+`template_name_taken`, 409).
+
+- **Pure CRUD in the requester slice** (`openid4vprequester/template.go`): the
+  `TemplateHandler` calls the `Store` directly, admin-gated like the send routes —
+  `GET`/`POST /orgs/{slug}/openid4vp/templates`, `DELETE …/templates/{id}`. No
+  edit route: delete and save again.
+- **Checked as a send would be.** `CreateTemplate` runs the same
+  `normalizeCredentials` a send does, so a picked template never fails as a
+  request. The stored rows drop the DCQL query ids (`TemplateCredential` has only
+  `vct` + `claims`); a send assigns them.
+- **Audited in-tx** as `presentation.request_template_created` / `_deleted` on
+  target `presentation_request_template`, with the name and the types asked for —
+  like a sent request, never more.
+- **Form** (`routes/credential-requests.tsx`): a *Template* picker (shown once the
+  org has one) fills the rows, a credential the catalogue offers (every claim one
+  of its attributes) as a picked row and any other as a typed *Other* row;
+  *Save as template* names the current rows; a picked
+  template has a delete button. Enter in the name field saves the template and
+  must not send the request. A taken name is shown inline; the mutation opts out
+  of the global error toast for that reason.
+
 ## 5. Config
 
 | Variable | Default | Meaning |
@@ -151,8 +179,11 @@ Routes of the sender slice:
   handling, refused answers, second answer, expiry
   (`openid4vprequester/service_test.go`).
 - Integration (`openid4vprequester/store_integration_test.go`): per-org
-  scoping, single fetch, settle-once, expiry, audit trail.
-- Frontend: `lib/credential-request.test.ts` (form parsing/validation).
+  scoping, single fetch, settle-once, expiry, audit trail;
+  `template_integration_test.go`: trimming, a taken name per org, invalid
+  credentials refused, another org's id is not found, created/deleted audited.
+- Frontend: `lib/credential-request.test.ts` (form parsing/validation, template
+  rows and name, and that the name limit mirrors `maxTemplateName`).
 
 **Locally, by hand:** two orgs on the dev stack, `ATTESTATION_HOLDER=irmago` and
 a credential held by org B (see `openid4vp-inbound.md` §8 step 1). As an admin of

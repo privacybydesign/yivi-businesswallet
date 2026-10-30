@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/clientip"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 )
 
 const (
@@ -74,8 +75,7 @@ const (
 
 	// VOG screening (#242): validatie.nl real-time document check. The URL
 	// defaults to the production GAAV endpoint - there is no staging instance to
-	// point at instead, so a deployment that wants the real check opts in
-	// explicitly via VogValidatorProvider rather than by an environment default.
+	// point at instead.
 	envVogValidatorProvider = "VOG_VALIDATOR_PROVIDER"
 	envVogValidatorURL      = "VOG_VALIDATOR_URL"
 	// VogReferenceHashKey keys the HMAC that turns a VOG's kenmerk into a
@@ -127,6 +127,13 @@ const (
 	envRegulaFaceAPIURL         = "REGULA_FACE_API_URL"
 	envRegulaFaceAPIPublicURL   = "REGULA_FACE_API_PUBLIC_URL"
 	envRegulaFaceMatchThreshold = "REGULA_FACE_MATCH_THRESHOLD"
+	// CM.com's ID Scan: the document_photo step, taken in the browser on the
+	// on-screen and hosted pages. The key id and secret go together; unset
+	// leaves a flow with document_photo unsendable. ID_SCAN_API_URL defaults
+	// to CM.com's API.
+	envIDScanKeyID  = "ID_SCAN_KEY_ID"
+	envIDScanSecret = "ID_SCAN_SECRET"
+	envIDScanAPIURL = "ID_SCAN_API_URL"
 	// envIdentityProofingEDLCSCAPaths is a comma-separated list of the RDW's
 	// eDL CSCA certificate files (PEM or DER), mounted from the ops repo.
 	// Unset trusts no driving licence chip.
@@ -151,6 +158,9 @@ const (
 	envAttestationIssuerURL      = "ATTESTATION_ISSUER_URL"
 	envAttestationIssuerToken    = "ATTESTATION_ISSUER_ADMIN_TOKEN"
 	envAttestationIssuerInstance = "ATTESTATION_ISSUER_INSTANCE"
+	// envAttestationStubClaimDelay keeps a stub offer pending that long, so its
+	// QR stays on screen for a recording; zero claims at once.
+	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
@@ -296,7 +306,8 @@ const (
 	IssuerStub   = "stub"
 	IssuerVeramo = "veramo"
 
-	defaultAttestationIssuer = IssuerStub
+	defaultAttestationIssuer         = IssuerStub
+	defaultAttestationStubClaimDelay = "0s"
 
 	// HolderStub selects the in-process StubHolder (local dev / CI); HolderIrmago
 	// selects the irmago EUDI holder engine backed by Postgres.
@@ -315,11 +326,11 @@ const (
 	// The wallet-bootstrap registry (KVK) provider. Reuses ProviderStub ("stub").
 	defaultWalletRegistryProvider = ProviderStub
 
-	// ProviderValidatieNL selects the real validatie.nl HTTP client for VOG
-	// screening; ProviderStub (shared with every other provider) is the
-	// dev/CI default.
+	// ProviderValidatieNL checks a VOG for real with validatie.nl, and is the
+	// default; ProviderStub accepts every VOG and runs only when set explicitly
+	// (the dev stack sets it, as for diplomas).
 	ProviderValidatieNL         = "validatie_nl"
-	defaultVogValidatorProvider = ProviderStub
+	defaultVogValidatorProvider = ProviderValidatieNL
 	defaultVogValidatorURL      = "https://validatie.nl/api/valideer/"
 
 	// ProviderDUO checks a diploma extract's DUO signature for real, and is the
@@ -482,6 +493,11 @@ type Config struct {
 	RegulaFaceAPIURL         string
 	RegulaFaceAPIPublicURL   string
 	RegulaFaceMatchThreshold float64
+	// IDScanKeyID and IDScanSecret are the ID Scan API key, IDScanAPIURL its
+	// API. An empty key id disables ID Scan.
+	IDScanKeyID  string
+	IDScanSecret string
+	IDScanAPIURL string
 	// IdentityProofingEDLCSCAPaths are the driving-licence CSCA files the
 	// engine trusts; empty trusts no licence.
 	IdentityProofingEDLCSCAPaths []string
@@ -491,6 +507,9 @@ type Config struct {
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+	// AttestationStubClaimDelay is how long the stub issuer reports an offer
+	// pending; zero reports it issued at once.
+	AttestationStubClaimDelay time.Duration
 
 	AttestationHolder           string
 	AttestationHolderStorageDir string
@@ -706,6 +725,7 @@ func loadDurations(c *Config) error {
 		{&c.PresentationTTL, envPresentationTTL, defaultPresentationTTL},
 		{&c.OpenID4VPTransactionTTL, envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL},
 		{&c.OpenID4VPOrgRequestTTL, envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL},
+		{&c.AttestationStubClaimDelay, envAttestationStubClaimDelay, defaultAttestationStubClaimDelay},
 	} {
 		v, err := parseDuration(d.key, d.fallback)
 		if err != nil {
@@ -798,6 +818,9 @@ func loadIdentityProofing(c *Config) error {
 		return err
 	}
 	c.RegulaFaceMatchThreshold = threshold
+	if err := loadIDScan(c); err != nil {
+		return err
+	}
 	c.IdentityProofingStubOutcome = os.Getenv(envIdentityProofingStubOutcome)
 	switch c.IdentityProofingStubOutcome {
 	case "", "approved", "rejected", "needs_review":
@@ -808,6 +831,18 @@ func loadIdentityProofing(c *Config) error {
 		return fmt.Errorf("config: %s needs %s=%q", envIdentityProofingStubOutcome, envIdentityProofingProvider, ProviderStub)
 	}
 	return nil
+}
+
+// loadIDScan reads the ID Scan API key and API URL: the key id and secret
+// together or neither.
+func loadIDScan(c *Config) error {
+	c.IDScanKeyID = os.Getenv(envIDScanKeyID)
+	c.IDScanSecret = os.Getenv(envIDScanSecret)
+	if (c.IDScanKeyID == "") != (c.IDScanSecret == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envIDScanKeyID, envIDScanSecret)
+	}
+	c.IDScanAPIURL = envOrDefault(envIDScanAPIURL, idscan.DefaultBaseURL)
+	return requireAbsoluteHTTPURL(envIDScanAPIURL, c.IDScanAPIURL)
 }
 
 // parseFaceMatchThreshold reads the Regula face match threshold, 0 when unset.
@@ -902,14 +937,17 @@ func loadDevMode(c *Config) error {
 }
 
 // requireProductionSettings refuses, outside a local stack, plain http to
-// another machine for what the phone sends, and a stub in place of a real check.
+// another machine for what the phone or a VOG check sends, and a stub in place
+// of a real check.
 func requireProductionSettings(c *Config) error {
-	// The Idem app sends chip data, selfies and liveness frames to these:
-	// over the network only with https. Plain http to this machine never
-	// leaves it.
+	// The Idem app sends chip data, selfies and liveness frames to the first
+	// two, the backend a member's VOG PDF to the third and the ID Scan key to
+	// the last: over the network only with https. Plain http to this machine never leaves it.
 	for key, raw := range map[string]string{
 		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
 		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:           c.VogValidatorURL,
+		envIDScanAPIURL:              c.IDScanAPIURL,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
@@ -920,6 +958,7 @@ func requireProductionSettings(c *Config) error {
 		envIdentityProofingStubOutcome: c.IdentityProofingStubOutcome != "",
 		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
 		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
+		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
 	} {
 		if stubbed {
 			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)
