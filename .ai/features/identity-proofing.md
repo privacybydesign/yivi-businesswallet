@@ -1532,12 +1532,17 @@ under `IDENTITY_PROOFING_ENCRYPTION_KEY` in `proofed_name_ciphertext`, shown as
 `proofedName`, never audited. A member's request, a rejected one, or an
 identity check in review keeps no name.
 
-Under a flow's BlurBSN policy (or a mask or omit BSN policy) a document photo
-is released and stored only with the BSN region the app located filled solid;
-a photo that came without one is withheld from the result and dropped from
-storage (`coverBSN`), since the server never guesses where the BSN is. Only a
-Dutch document prints a BSN, so a photo of a document known not to be Dutch
-is released and stored as taken; one whose issuing state is not known is
+Only a flow's "Black out the BSN" (BlurBSN) covers the BSN on a document
+photo. The BSN policy (retrieve, mask, omit) is about the BSN as data and
+leaves the photo as taken. Under BlurBSN a document photo is released and
+stored only with its BSN covered:
+- The ID scan blacks it out itself (§18), and the photo is marked so.
+- Otherwise the BSN region that came with it is filled solid, and a photo
+  without one is withheld from the result and dropped from storage
+  (`coverBSN`), since the server never guesses where the BSN is.
+
+Only a Dutch document prints a BSN, so a photo of a document known not to be
+Dutch is released and stored as taken; one whose issuing state is not known is
 treated as Dutch (`coversDocumentBSN`).
 
 A session is purged by the `identity_proofing_purge` pruner

@@ -80,6 +80,9 @@ type Flow struct {
 	Version   int       `json:"version"`
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"createdAt"`
+	// BrowserOnly is the engine's answer to whether the browser runs every
+	// step of the flow, so no app is chosen or needed.
+	BrowserOnly bool `json:"browserOnly"`
 }
 
 // SessionInput starts a proofing session. ClientReference is echoed back by the engine
@@ -226,6 +229,75 @@ type Image struct {
 	Base64   string
 }
 
+// DocumentPhoto is the document_photo step's photos, taken in the browser by
+// a document scan service rather than by an app: the front and, for a
+// document that has one, the back. BSNRedacted is the scan service having
+// blacked out the printed BSN (its personal number) itself, so no BSN policy
+// needs a region to cover. Check is what the scan service found, which the
+// engine decides on and keeps in the session's result.
+type DocumentPhoto struct {
+	Front       Image
+	Back        *Image
+	BSNRedacted bool
+	Check       DocumentCheck
+}
+
+// DocumentCheck is a document scan service's result, in the engine's terms
+// rather than the service's.
+type DocumentCheck struct {
+	// Verdict is its judgement of whether the document is genuine, and Score
+	// the service's own score behind it (nil when it gave none).
+	Verdict DocumentVerdict
+	Score   *float64
+	// FieldsValid is whether every field it validated was valid, ZonesMatch
+	// whether every field it read from two zones (MRZ, printed text,
+	// barcode) read the same; nil when it validated or compared none.
+	FieldsValid *bool
+	ZonesMatch  *bool
+	// Document is what it read off the document.
+	Document ScannedDocument
+}
+
+// ScannedDocument is what a document scan service read off a document. Kind
+// is DocumentKindPassport, DocumentKindIdentityCard,
+// DocumentKindResidencePermit or DocumentKindDrivingLicence, empty when
+// unknown; dates are YYYY-MM-DD and states ICAO alpha-3 codes. A field it
+// did not read is empty, and PersonalNumber is only set for a flow that keeps
+// the BSN.
+type ScannedDocument struct {
+	Kind           string
+	IssuingState   string
+	Nationality    string
+	Number         string
+	Surname        string
+	GivenNames     string
+	DateOfBirth    string
+	DateOfExpiry   string
+	Sex            string
+	PersonalNumber string
+}
+
+// The kinds of document a ScannedDocument can be, as the engine's flows
+// accept them.
+const (
+	DocumentKindPassport        = "passport"
+	DocumentKindIdentityCard    = "identity_card"
+	DocumentKindResidencePermit = "residence_permit"
+	DocumentKindDrivingLicence  = "drivers_license"
+)
+
+// DocumentVerdict is a document scan service's judgement of whether a
+// document is genuine, in the engine's terms rather than the service's.
+type DocumentVerdict string
+
+const (
+	DocumentAuthentic DocumentVerdict = "authentic"
+	// DocumentDoubtful is a document the service could not call either way:
+	// a person decides.
+	DocumentDoubtful DocumentVerdict = "doubtful"
+	DocumentFake     DocumentVerdict = "fake"
+)
+
 // Evidence is the checks behind an Identity. Type is EvidenceEMRTD (the chip,
 // read by the Idem app), EvidenceYivi (a Yivi disclosure) or
 // EvidenceReferencePhoto (a live face against the relying party's photo). PassiveAuth and
@@ -243,6 +315,14 @@ type Evidence struct {
 	FaceMatch    *float64
 	// Liveness is passed, failed or not_performed.
 	Liveness string
+	// DocumentVerdict is the document scan service's judgement of the
+	// photographed document (authentic, doubtful or fake) and DocumentScore
+	// its score; DocumentFields and DocumentZones are CheckValid, CheckInvalid
+	// or CheckNotPerformed (DocumentCheck). Empty without a scanned document.
+	DocumentVerdict string
+	DocumentScore   *float64
+	DocumentFields  string
+	DocumentZones   string
 }
 
 const (
@@ -322,6 +402,11 @@ type RejectedError struct {
 // CodeDeviceActive is the engine refusing a handover while the app holding the
 // session is still active: the subject carries on there.
 const CodeDeviceActive = "device_active"
+
+// CodeDocumentPhotoMissing is the engine refusing to decide a session whose
+// flow takes a document photo before the browser submitted it
+// (SubmitDocumentPhoto).
+const CodeDocumentPhotoMissing = "document_photo_missing"
 
 func (e *RejectedError) Error() string {
 	return fmt.Sprintf("proofingprovider: rejected (status %d): %s", e.Status, e.Message)

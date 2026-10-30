@@ -143,7 +143,7 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 
 	if attrRequested(sess, attrDocumentImage) {
 		docRedaction := redaction
-		docRedaction.BlurBSN = coversDocumentBSN(redaction, bsnPolicy, resultIssuingState(sess, req))
+		docRedaction.BlurBSN = coversDocumentBSN(redaction, resultIssuingState(sess, req))
 		if img := releasedDocumentImage(sess, req.DocumentImage, docRedaction); img != nil {
 			result["documentImage"] = img
 		}
@@ -168,7 +168,32 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	// Released whatever was requested, like device: how well the session was
 	// verified, not personal data.
 	result["assurance"] = computeAssurance(fd, req, verifiedChipChecks, faceMatchSourceOf(sess))
+	addDocumentCheck(result, sess)
 	return result
+}
+
+// documentCheckInfo is a document scan's result as a session's result carries
+// it: its verdict and checks, and the kind of document, never what it read.
+type documentCheckInfo struct {
+	Verdict      string   `json:"verdict,omitempty"`
+	Score        *float64 `json:"score,omitempty"`
+	FieldsValid  *bool    `json:"fieldsValid,omitempty"`
+	ZonesMatch   *bool    `json:"zonesMatch,omitempty"`
+	DocumentKind string   `json:"documentKind,omitempty"`
+}
+
+// addDocumentCheck adds sess's document scan result to result, released
+// whatever was requested, like assurance: how the document was checked, not
+// personal data.
+func addDocumentCheck(result map[string]any, sess session.Session) {
+	p := sess.Steps.DocumentPhoto
+	if p == nil || p.Check == nil {
+		return
+	}
+	c := p.Check
+	result["documentCheck"] = documentCheckInfo{
+		Verdict: c.Verdict, Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch, DocumentKind: c.Document.Kind,
+	}
 }
 
 // faceReferenceRelyingParty is a result's faceReference when the face was
@@ -184,7 +209,7 @@ func releasedDocumentImage(sess session.Session, docImage *documentImageInfo, re
 		return nil
 	}
 	out := *docImage
-	if redaction.BlurBSN {
+	if redaction.BlurBSN && !out.BSNRedacted {
 		blurred, mime, err := coverBSN(out.ImageBase64, out.MimeType, out.BSNRegion)
 		if err != nil {
 			slog.Warn("identity proofing: could not cover the BSN in a document image; withholding it", slog.String("session_id", sess.ID), slog.Any("error", err))
