@@ -256,6 +256,29 @@ describe("auditDetailFields", () => {
     ]);
   });
 
+  // A value empty on one side reads as none, never as a label's copy for an
+  // unknown value (an error code's "the check did not pass ()").
+  it("shows an empty side of a change as none", () => {
+    expect(
+      auditDetailFields(
+        event({
+          before: { errorCode: "", note: "" },
+          after: { errorCode: "DOC_EXPIRED", note: "late" },
+        }),
+        dateFormatter,
+        t,
+      ),
+    ).toEqual([
+      {
+        key: "errorCode",
+        label: t("auditLog.fields.errorCode"),
+        value: t("identityProofing.rejectionReasons.docExpired"),
+        before: "—",
+      },
+      { key: "note", label: "note", value: "late", before: "—" },
+    ]);
+  });
+
   // A known field reads by its label and value, an unknown one by its key; a
   // nested value is compact and a timestamp formatted.
   it("labels known fields and formats nested values and dates", () => {

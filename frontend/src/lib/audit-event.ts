@@ -766,28 +766,46 @@ export function auditDetailFields(
     before?: Snapshot;
     after?: Snapshot;
   } & Record<string, unknown>;
+  // An empty value reads as none, never through a label's copy for an
+  // unknown value.
+  const show = (key: string, value: unknown): string =>
+    labelledValue(key, isEmpty(value) ? null : value, dateFormatter, t);
   const field = (key: string, value: unknown): AuditDetailField => ({
     key,
     label: knownFieldLabel(key, t) ?? key,
-    value: labelledValue(key, value, dateFormatter, t),
+    value: show(key, value),
   });
+  const snapshot =
+    before && after
+      ? changedFields(before, after, field, show)
+      : filledFields(after ?? before ?? {}, field);
+  return [...snapshot, ...filledFields(rest, field)];
+}
 
-  const fields: AuditDetailField[] = [];
-  if (before && after) {
-    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
-    for (const key of keys) {
-      if (isEmpty(before[key]) && isEmpty(after[key])) continue;
+// An update's fields, each with its value after and, when that differs, its
+// value before; fields empty on both sides are left out.
+function changedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  field: (key: string, value: unknown) => AuditDetailField,
+  show: (key: string, value: unknown) => string,
+): AuditDetailField[] {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+  return keys
+    .filter((key) => !(isEmpty(before[key]) && isEmpty(after[key])))
+    .map((key) => {
       const row = field(key, after[key]);
-      const was = labelledValue(key, before[key], dateFormatter, t);
-      fields.push(was === row.value ? row : { ...row, before: was });
-    }
-  } else {
-    for (const [key, value] of Object.entries(after ?? before ?? {})) {
-      if (!isEmpty(value)) fields.push(field(key, value));
-    }
-  }
-  for (const [key, value] of Object.entries(rest)) {
-    if (!isEmpty(value)) fields.push(field(key, value));
-  }
-  return fields;
+      const was = show(key, before[key]);
+      return was === row.value ? row : { ...row, before: was };
+    });
+}
+
+// The fields of values that are not empty.
+function filledFields(
+  values: Record<string, unknown>,
+  field: (key: string, value: unknown) => AuditDetailField,
+): AuditDetailField[] {
+  return Object.entries(values)
+    .filter(([, value]) => !isEmpty(value))
+    .map(([key, value]) => field(key, value));
 }
