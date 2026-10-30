@@ -3554,6 +3554,110 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/openid4vp/templates:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [openid4vp]
+      summary: List the organisation's credential request templates
+      description: By name. Requires an administrator role.
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialRequestTemplate'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [openid4vp]
+      summary: Save a credential request as a template
+      description: >-
+        Saves a named set of credential types and claim names to ask other
+        organisations for, without a recipient. The credentials are checked
+        with the same rules as a sent request. Requires an administrator role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, credentials]
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+                credentials:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [vct]
+                    properties:
+                      vct:
+                        type: string
+                      claims:
+                        type: array
+                        maxItems: 50
+                        items:
+                          type: string
+      responses:
+        '201':
+          description: The template was saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialRequestTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The organisation already has a template with this name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/openid4vp/templates/{id}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Resource identifier.
+    delete:
+      tags: [openid4vp]
+      summary: Delete a credential request template
+      description: Requires an administrator role.
+      responses:
+        '204':
+          description: The template was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/openid4vp/outbound/{id}/request-object:
     parameters:
       - name: id
@@ -11096,6 +11200,30 @@ components:
       in: cookie
       name: ybw_session
   schemas:
+    CredentialRequestTemplate:
+      type: object
+      required: [id, name, credentials, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        credentials:
+          type: array
+          items:
+            type: object
+            required: [vct, claims]
+            properties:
+              vct:
+                type: string
+              claims:
+                type: array
+                items:
+                  type: string
+        createdAt:
+          type: string
+          format: date-time
     OutboundPresentationRequest:
       type: object
       properties:

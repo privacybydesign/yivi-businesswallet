@@ -150,6 +150,9 @@ const (
 	envAttestationIssuerURL      = "ATTESTATION_ISSUER_URL"
 	envAttestationIssuerToken    = "ATTESTATION_ISSUER_ADMIN_TOKEN"
 	envAttestationIssuerInstance = "ATTESTATION_ISSUER_INSTANCE"
+	// envAttestationStubClaimDelay keeps a stub offer pending that long, so its
+	// QR stays on screen for a recording; zero claims at once.
+	envAttestationStubClaimDelay = "ATTESTATION_STUB_CLAIM_DELAY"
 	envAttestationPingCredential = "ATTESTATION_ISSUER_PING_CREDENTIAL"
 
 	// Attestation holder (the "store, select" side). The irmago EUDI holder engine
@@ -295,7 +298,8 @@ const (
 	IssuerStub   = "stub"
 	IssuerVeramo = "veramo"
 
-	defaultAttestationIssuer = IssuerStub
+	defaultAttestationIssuer         = IssuerStub
+	defaultAttestationStubClaimDelay = "0s"
 
 	// HolderStub selects the in-process StubHolder (local dev / CI); HolderIrmago
 	// selects the irmago EUDI holder engine backed by Postgres.
@@ -490,6 +494,9 @@ type Config struct {
 	AttestationIssuerToken    string
 	AttestationIssuerInstance string
 	AttestationPingCredential string
+	// AttestationStubClaimDelay is how long the stub issuer reports an offer
+	// pending; zero reports it issued at once.
+	AttestationStubClaimDelay time.Duration
 
 	AttestationHolder           string
 	AttestationHolderStorageDir string
@@ -705,6 +712,7 @@ func loadDurations(c *Config) error {
 		{&c.PresentationTTL, envPresentationTTL, defaultPresentationTTL},
 		{&c.OpenID4VPTransactionTTL, envOpenID4VPTransactionTTL, defaultOpenID4VPTransactionTTL},
 		{&c.OpenID4VPOrgRequestTTL, envOpenID4VPOrgRequestTTL, defaultOpenID4VPOrgRequestTTL},
+		{&c.AttestationStubClaimDelay, envAttestationStubClaimDelay, defaultAttestationStubClaimDelay},
 	} {
 		v, err := parseDuration(d.key, d.fallback)
 		if err != nil {

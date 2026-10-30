@@ -194,6 +194,9 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	offer, err := s.issuer.CreateOffer(ctx, openid4vciissuer.OfferRequest{
 		Instance:           s.instanceFor(ctx, orgID),
 		CredentialConfigID: detail.CredentialConfigID,
+		VCT:                detail.SchemaVCT,
+		DisplayName:        detail.Name,
+		IssuerName:         orgName,
 		Claims:             toClaims(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
 		// tx_code is a second factor only for the external-email path (a person

@@ -44,6 +44,8 @@ services:
       # Attestation issuer: stub by default. Set ATTESTATION_ISSUER=veramo (+ token)
       # in .env to issue against the hosted Veramo staging issuer.
       ATTESTATION_ISSUER: ${ATTESTATION_ISSUER:-stub}
+      # Hold a stub offer pending this long (e.g. 60s) so its QR stays on screen.
+      ATTESTATION_STUB_CLAIM_DELAY: ${ATTESTATION_STUB_CLAIM_DELAY:-0s}
       ATTESTATION_ISSUER_URL: ${ATTESTATION_ISSUER_URL:-https://veramo-issuer.openid4vc.staging.yivi.app}
       ATTESTATION_ISSUER_INSTANCE: ${ATTESTATION_ISSUER_INSTANCE:-test-issuer}
       ATTESTATION_ISSUER_ADMIN_TOKEN: ${ATTESTATION_ISSUER_ADMIN_TOKEN:-}

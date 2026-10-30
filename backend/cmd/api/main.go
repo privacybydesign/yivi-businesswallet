@@ -343,7 +343,7 @@ type attestationIssuer interface {
 func newAttestationIssuer(cfg config.Config) (attestationIssuer, error) {
 	switch cfg.AttestationIssuer {
 	case config.IssuerStub:
-		return openid4vciissuer.NewStubIssuer(), nil
+		return openid4vciissuer.NewStubIssuerWithClaimDelay(cfg.AttestationStubClaimDelay), nil
 	case config.IssuerVeramo:
 		return openid4vciissuer.NewVeramoIssuer(
 			cfg.AttestationIssuerURL,
@@ -629,6 +629,7 @@ type wiring struct {
 	themeSettingsHandler  *themesettings.Handler
 	presenterHandler      *openid4vppresenter.Handler
 	requesterHandler      *openid4vprequester.Handler
+	requestTemplates      *openid4vprequester.TemplateHandler
 	attestationHandler    *attestation.Handler
 	wscaWalletHandler     *wscawallet.Handler
 	notificationsHandler  *notifications.Handler
@@ -909,12 +910,14 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", "ATTESTATION_HOLDER_TRUST_CHAIN", err)
 	}
+	requesterStore := openid4vprequester.NewStore(w.pool, w.recorder)
 	w.requesterHandler = openid4vprequester.NewHandler(
 		openid4vprequester.NewService(
-			openid4vprequester.NewStore(w.pool, w.recorder), w.qerdsService, requesterCA,
+			requesterStore, w.qerdsService, requesterCA,
 			relyingparty.NewTokenVerifier(requesterIssuerTrust),
 			cfg.OpenID4VPRequesterPublicURL, cfg.OpenID4VPOrgRequestTTL),
 		w.requireUser, w.orgHandler.Authorize)
+	w.requestTemplates = openid4vprequester.NewTemplateHandler(requesterStore, w.requireUser, w.orgHandler.Authorize)
 
 	attestationStore := attestation.NewStore(w.pool, w.recorder)
 	// The QERDS message screen renders a credential-offer body as a parsed
@@ -1235,6 +1238,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.cfg.StaticDir,
 		w.presenterHandler,
 		w.requesterHandler,
+		w.requestTemplates,
 		w.authHandler,
 		w.orgHandler,
 		w.qerdsHandler,
