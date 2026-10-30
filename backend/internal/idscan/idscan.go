@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -293,10 +294,8 @@ func (c *Client) download(ctx context.Context, f file) (Image, error) {
 		return Image{}, fmt.Errorf("idscan: download file: over %d bytes", maxImageBytes)
 	}
 	mime := http.DetectContentType(data)
-	for _, t := range imageTypes {
-		if mime == t {
-			return Image{MimeType: mime, Data: data}, nil
-		}
+	if slices.Contains(imageTypes, mime) {
+		return Image{MimeType: mime, Data: data}, nil
 	}
 	return Image{}, fmt.Errorf("idscan: download file: %s is not a photo", mime)
 }
