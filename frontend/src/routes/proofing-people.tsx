@@ -34,6 +34,8 @@ import {
 import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
+  isDocumentVerdict,
+  documentKindOf,
   addressVerificationNote,
   assuranceLevelLabel,
   flowPurgeDays,
@@ -907,6 +909,54 @@ export function SessionEmployment({
   );
 }
 
+// A document as the session log names it: its MRZ code, else its kind.
+function documentLabel(
+  evidence: { documentType?: string; documentKind?: string },
+  t: TFunction,
+): string | undefined {
+  if (evidence.documentType) {
+    return evidence.documentType;
+  }
+  const kind = evidence.documentKind && documentKindOf(evidence.documentKind);
+  return kind ? t(`identityProofingFlows.editor.documents.${kind}`) : undefined;
+}
+
+// What the document scan found: its verdict and score, whether the printed
+// data was valid, and whether the MRZ read the same as the printed text.
+function DocumentCheckRows({
+  check,
+  outcome,
+}: Readonly<{
+  check: NonNullable<ProofingResult["evidence"][number]["documentCheck"]>;
+  // A check's outcome in words (IdentityRows).
+  outcome: (value: string | undefined) => string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const verdict = isDocumentVerdict(check.verdict)
+    ? t(`identityProofing.sessions.identity.documentVerdicts.${check.verdict}`)
+    : check.verdict;
+  const score =
+    check.score === undefined || check.score < 0
+      ? ""
+      : ` (${Math.round(check.score * PERCENT)}%)`;
+  return (
+    <>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentCheck")}
+      </dt>
+      <dd>{verdict + score}</dd>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentFields")}
+      </dt>
+      <dd>{outcome(check.fields)}</dd>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentZones")}
+      </dt>
+      <dd>{outcome(check.zones)}</dd>
+    </>
+  );
+}
+
 // The checks the engine reports, in words; an unknown value shows as it is.
 // A settled session's verified identity, as rows of its detail list: read
 // from the engine when an admin opens the row, audited each time.
@@ -985,10 +1035,13 @@ function IdentityRows({
           <dd>
             {evidence.type === "reference_photo"
               ? t("identityProofing.sessions.identity.noDocument")
-              : [evidence.documentType, evidence.issuingState]
+              : [documentLabel(evidence, t), evidence.issuingState]
                   .filter(Boolean)
                   .join(" · ") || evidence.type}
           </dd>
+          {evidence.documentCheck && (
+            <DocumentCheckRows check={evidence.documentCheck} outcome={check} />
+          )}
           <dt className="text-muted">
             {t("identityProofing.sessions.identity.passiveAuth")}
           </dt>

@@ -61,6 +61,7 @@ const hostedPage = {
     requestedAttributes: [],
     attributeReasons: {},
     yiviAvailable: true,
+    browserOnly: false,
     diplomaMode: "off",
     addressMode: "off",
     employmentMode: "off",
