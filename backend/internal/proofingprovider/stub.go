@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 )
 
 const (
@@ -101,9 +103,18 @@ func (s *Stub) CreateFlow(_ context.Context, t Tenant, in FlowSpec) (Flow, error
 	for _, f := range s.flows[t.ID] {
 		ids[f.ID] = true
 	}
-	f := Flow{FlowSpec: in, ID: "flow_" + strconv.Itoa(len(ids)+1), Version: 1, Active: true, CreatedAt: time.Now().UTC()}
+	f := Flow{FlowSpec: in, ID: "flow_" + strconv.Itoa(len(ids)+1), Version: 1, Active: true, CreatedAt: time.Now().UTC(), BrowserOnly: stubBrowserOnly(in)}
 	s.flows[t.ID] = append(s.flows[t.ID], f)
 	return f, nil
+}
+
+// stubBrowserOnly is the engine's flow.BrowserOnly for in.
+func stubBrowserOnly(in FlowSpec) bool {
+	fd := flow.FlowDefinition{SelfieLocation: flow.StepLocation(in.SelfieLocation)}
+	for _, step := range in.Steps {
+		fd.Steps = append(fd.Steps, flow.Step(step))
+	}
+	return fd.BrowserOnly()
 }
 
 func (s *Stub) CreateFlowVersion(_ context.Context, t Tenant, id string, in FlowSpec) (Flow, error) {
@@ -122,7 +133,7 @@ func (s *Stub) CreateFlowVersion(_ context.Context, t Tenant, id string, in Flow
 	if latest == 0 {
 		return Flow{}, ErrNotFound
 	}
-	f := Flow{FlowSpec: in, ID: id, Version: latest + 1, Active: true, CreatedAt: time.Now().UTC()}
+	f := Flow{FlowSpec: in, ID: id, Version: latest + 1, Active: true, CreatedAt: time.Now().UTC(), BrowserOnly: stubBrowserOnly(in)}
 	s.flows[t.ID] = append(s.flows[t.ID], f)
 	return f, nil
 }
@@ -360,6 +371,12 @@ func (s *Stub) SubmitReference(_ context.Context, t Tenant, sessionID, sessionTo
 		return YiviDisclosure{}, err
 	}
 	return YiviDisclosure{OK: true}, nil
+}
+
+// SubmitDocumentPhoto takes any photo of a session it knows.
+func (s *Stub) SubmitDocumentPhoto(_ context.Context, t Tenant, sessionID, sessionToken string, _ DocumentPhoto) error {
+	_, err := s.session(t, sessionID, sessionToken)
+	return err
 }
 
 // CancelSession ends a stub session that has not decided, as the engine does.

@@ -36,7 +36,7 @@ const (
 	StepDocumentCapture Step = "document_capture"
 	// StepNFCRead is the ICAO 9303 chip read in the Idem app.
 	StepNFCRead Step = "nfc_read"
-	// StepDocumentPhoto is a photo of the printed data page, taken in the Idem app
+	// StepDocumentPhoto is a photo of the printed data page, taken in the browser
 	// and released as documentImage. It stands on its own, with or without the
 	// chip read.
 	StepDocumentPhoto Step = "document_photo"
@@ -64,8 +64,7 @@ var validSteps = map[Step]bool{
 // ValidStep reports whether s is a known Step.
 func ValidStep(s Step) bool { return validSteps[s] }
 
-// StepLocation names who runs the face step: the browser or the Idem app.
-// The chip read is always the app's: Web NFC cannot talk to an ICAO chip.
+// StepLocation names who runs a step: the browser or an app (Location).
 type StepLocation string
 
 const (
@@ -91,6 +90,26 @@ func (fd FlowDefinition) EffectiveSelfieLocation() StepLocation {
 		return LocationBrowser
 	}
 	return fd.SelfieLocation
+}
+
+// Location is where fd runs step: the document scan and the chip read in the
+// app (Web NFC cannot talk to an ICAO chip), the face step where
+// SelfieLocation says, and the document photo in the browser, through the
+// document scan service.
+func (fd FlowDefinition) Location(step Step) StepLocation {
+	switch step {
+	case StepDocumentPhoto:
+		return LocationBrowser
+	case StepSelfie, StepLiveness, StepFaceMatch, StepFaceVerification:
+		return fd.EffectiveSelfieLocation()
+	}
+	return LocationNative
+}
+
+// BrowserOnly reports whether the browser runs every step of fd: no app is
+// chosen or needed.
+func (fd FlowDefinition) BrowserOnly() bool {
+	return !slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative })
 }
 
 // FaceProvider names what verifies the face step. Empty is the deployment's

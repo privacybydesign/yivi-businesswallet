@@ -114,20 +114,45 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		withholdDisclosedBirthDate(&info)
 	}
 
+	doc := documentFromDisclosure(info)
+	_, redaction := effectivePrivacyPolicy(fd)
+	docRedaction := redaction
+	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
+
 	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
-	if failed, errorCode := disclosureComplianceFailure(fd, documentFromDisclosure(info), time.Now()); failed {
+	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); failed {
 		details[detailReason] = disclosureCodeDocumentRefused
-		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
+		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
 	}
 	if asksAge(fd) && ageOver == nil {
 		details[detailReason] = disclosureCodeAgeNotDisclosed
-		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details)
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
+	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
+		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{
+			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
+			Message: "the document photo is taken in the browser and has not come in yet",
+		}
+	}
 
-	_, redaction := effectivePrivacyPolicy(fd)
+	// The scanned document must be the disclosed one.
+	scanCode, doubtful := documentPhotoOutcome(sess, doc.Number)
+	if scanCode != "" {
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, docRedaction.BlurBSN)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
+
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
+	addDocumentPhoto(result, sess, docRedaction)
+	addDocumentCheck(result, sess)
+	decided := session.StatusApproved
+	if doubtful {
+		decided = session.StatusNeedsReview
+		details[detailReason] = reasonDocumentDoubtful
+	}
 
 	if sess.Status == session.StatusCreated {
 		opened := sess
@@ -135,8 +160,8 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.auditProofing(opened, eventSessionOpened, nil)
 	}
 	s.auditProofing(sess, eventDisclosureReceived, map[string]any{"credential": info.Credential})
-	if _, ok := s.boundLoginFinish(sess, session.StatusApproved, "", result, details); !ok {
-		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not approved", sess.ID)
+	if _, ok := s.boundLoginFinish(sess, decided, "", result, details, docRedaction.BlurBSN); !ok {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not decided", sess.ID)
 	}
 	return proofingprovider.YiviDisclosure{OK: true}, nil
 }
@@ -224,9 +249,25 @@ func buildBoundLoginResult(sess session.Session, info disclosureInfo, photo *pho
 	return result
 }
 
+// addDocumentPhoto adds the browser's document photo to result as buildResult
+// releases it: only when asked, with the BSN covered under docRedaction.
+func addDocumentPhoto(result map[string]any, sess session.Session, docRedaction privacy.RedactionPolicy) {
+	p := sess.Steps.DocumentPhoto
+	if p == nil || !attrRequested(sess, attrDocumentImage) {
+		return
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(&p.Front), docRedaction); img != nil {
+		result["documentImage"] = img
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(p.Back), docRedaction); img != nil {
+		result["documentImageBack"] = img
+	}
+}
+
 // boundLoginFinish settles sess as to (stepping through opened and
-// in_progress), stores result and error code, and reports it.
-func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any) (session.Session, bool) {
+// in_progress), stores result and error code, and reports it. redactDocument
+// covers the BSN in the stored document photo in the same write.
+func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any, redactDocument bool) (session.Session, bool) {
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status.Terminal() {
 			return errSessionComplete
@@ -248,6 +289,9 @@ func (s *Server) boundLoginFinish(sess session.Session, to session.Status, error
 		sess.ErrorCode = errorCode
 		if result != nil {
 			sess.Result = result
+		}
+		if redactDocument {
+			redactStoredDocumentPhoto(sess)
 		}
 		return nil
 	})

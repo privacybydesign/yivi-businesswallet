@@ -32,8 +32,8 @@ type appSessionView struct {
 	// AgeOver is the age age_over answers for, so the app can name it; absent
 	// when the flow asks none.
 	AgeOver int `json:"ageOver,omitempty"`
-	// Steps is the flow's step order, which tells the app what to do; empty without
-	// a flow.
+	// Steps is the flow's step order, which tells the app what to do, without
+	// the browser's own (flow.Location); empty without a flow.
 	Steps []flow.Step `json:"steps,omitempty"`
 	// SelfieLocation says who runs the face step, the browser or the Idem app
 	// ("browser" without a flow). document_capture and nfc_read are always the
@@ -180,7 +180,7 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 	var steps []flow.Step
 	var ageOver int
 	if resolvedFlow != nil {
-		steps = resolvedFlow.Steps
+		steps = appSteps(resolvedFlow)
 		ageOver = resolvedFlow.AgeOver
 	}
 	selfieLocation := flow.LocationBrowser
@@ -361,7 +361,7 @@ func (s *Server) appSessionChangeKey(sess session.Session, now time.Time) string
 
 // nativeHandoffPending reports whether the browser should offer the Idem
 // app's QR: while nfc_read (and document_capture with it) has not landed, or a
-// native face step has not. Without a flow there is no step model, so it is
+// native face step has not; the document photo is the browser's own. Without a flow there is no step model, so it is
 // offered for an nfc_passport session and never for a bound login.
 func nativeHandoffPending(sess session.Session, fd *flow.FlowDefinition) bool {
 	if fd == nil {
@@ -370,12 +370,10 @@ func nativeHandoffPending(sess session.Session, fd *flow.FlowDefinition) bool {
 	steps := fd.Steps
 	selfieLocation := fd.EffectiveSelfieLocation()
 	hasNFC := slices.Contains(steps, flow.StepNFCRead)
-	hasDocumentPhoto := slices.Contains(steps, flow.StepDocumentPhoto)
 	hasSelfieCluster := hasFaceStep(fd)
 	selfieNative := hasSelfieCluster && selfieLocation == flow.LocationNative
 
-	return (hasNFC && sess.Steps.NFC == nil) || (hasDocumentPhoto && sess.Steps.DocumentPhoto == nil) ||
-		(selfieNative && sess.Steps.Selfie == nil)
+	return (hasNFC && sess.Steps.NFC == nil) || (selfieNative && sess.Steps.Selfie == nil)
 }
 
 // sessionByPathToken resolves the session of an app-facing route, where the

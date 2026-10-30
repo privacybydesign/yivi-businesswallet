@@ -658,7 +658,6 @@ func TestIdemAppRoutes(t *testing.T) {
 		{http.MethodGet, app + "/events?since=stale", nil, http.StatusOK},
 		{http.MethodPost, app + "/steps/document_capture/start", nil, http.StatusOK},
 		{http.MethodGet, app + "/steps/document_capture/result", nil, http.StatusOK},
-		{http.MethodPost, app + "/steps/document_photo", map[string]any{}, http.StatusBadRequest},
 		{http.MethodPost, app + "/device/state", map[string]any{"state": "inactive"}, http.StatusOK},
 		{http.MethodPost, app + "/handover", map[string]any{"role": "web"}, http.StatusOK},
 		{http.MethodPost, app + "/result", map[string]any{}, http.StatusConflict},

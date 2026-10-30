@@ -115,9 +115,15 @@ func (s *Server) resolveSessionFlow(ctx context.Context, sess session.Session) (
 // Rejection codes of a face step that did not verify the person
 // (faceStepFailure), an expired document or a missing face step
 // (flowComplianceFailure) and an achieved eIDAS level below the flow's
-// required one (sessionOutcome).
+// required one (sessionOutcome). A document scan (documentPhotoOutcome)
+// rejects with errCodeDocNotAuthentic for a document judged fake,
+// errCodeDocFieldsInvalid for a field that failed its check and
+// errCodeDocMismatch for a document other than the one the session read.
 const (
 	errCodeDocExpired          = "DOC_EXPIRED"
+	errCodeDocNotAuthentic     = "DOC_NOT_AUTHENTIC"
+	errCodeDocFieldsInvalid    = "DOC_FIELDS_INVALID"
+	errCodeDocMismatch         = "DOCUMENT_MISMATCH"
 	errCodeDocTypeRefused      = "DOCUMENT_TYPE_NOT_ACCEPTED"
 	errCodeCountryRefused      = "DOCUMENT_COUNTRY_NOT_ACCEPTED"
 	errCodeLivenessFailed      = "LIVENESS_FAILED"
@@ -263,6 +269,8 @@ type documentImageInfo struct {
 	ImageBase64 string       `json:"imageBase64,omitempty"`
 	MimeType    string       `json:"mimeType,omitempty"`
 	BSNRegion   *imageRegion `json:"bsnRegion,omitempty"`
+	// BSNRedacted is the scan service having blacked out the BSN itself.
+	BSNRedacted bool `json:"-"`
 }
 
 // biometricsInfo is the face check's outcome: the match score against the

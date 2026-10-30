@@ -166,39 +166,43 @@ func TestRedactStepsDropsRawDGs(t *testing.T) {
 	}
 }
 
-// A mask or omit BSN policy covers the BSN on a Dutch (or unknown) document's
-// photos as BlurBSN does: covered where the app located it, withheld where it
-// did not. Another country's document photo is left as it is.
-func TestBSNPolicyCoversDocumentPhoto(t *testing.T) {
+// Only the flow's "Black out the BSN" (BlurBSN) covers the BSN on a Dutch (or
+// unknown) document's photos: covered where it was located, withheld where it
+// was not. A mask or omit BSN policy is about the BSN as data and leaves the
+// photo as taken, as it does another country's document photo.
+func TestBlurBSNAloneCoversDocumentPhoto(t *testing.T) {
 	photo := checkerboardPNG(t)
 	region := &imageRegion{X: 0.1, Y: 0.1, W: 0.2, H: 0.05}
+	blur := privacy.RedactionPolicy{BlurBSN: true}
+	req := appResultRequest{
+		Document:          &documentInfo{IssuingState: dutchIssuingState},
+		DocumentImage:     &documentImageInfo{ImageBase64: photo, MimeType: "image/png", BSNRegion: region},
+		DocumentImageBack: &documentImageInfo{ImageBase64: photo, MimeType: "image/png"},
+	}
+	result := buildResult(session.Session{}, req, nil, nil, privacy.BSNPolicyOmit, blur)
+	if img, _ := result["documentImage"].(*documentImageInfo); img == nil || img.ImageBase64 == photo {
+		t.Error("a located BSN was not covered under BlurBSN")
+	}
+	if _, ok := result["documentImageBack"]; ok {
+		t.Error("released a photo whose BSN was not located under BlurBSN, want it withheld")
+	}
+
 	for _, policy := range []privacy.BSNPolicy{privacy.BSNPolicyMask, privacy.BSNPolicyOmit} {
-		t.Run(string(policy), func(t *testing.T) {
-			req := appResultRequest{
-				Document:          &documentInfo{IssuingState: dutchIssuingState},
-				DocumentImage:     &documentImageInfo{ImageBase64: photo, MimeType: "image/png", BSNRegion: region},
-				DocumentImageBack: &documentImageInfo{ImageBase64: photo, MimeType: "image/png"},
-			}
-			result := buildResult(session.Session{}, req, nil, nil, policy, privacy.RedactionPolicy{})
-			if img, _ := result["documentImage"].(*documentImageInfo); img == nil || img.ImageBase64 == photo {
-				t.Error("a located BSN was not covered")
-			}
-			if _, ok := result["documentImageBack"]; ok {
-				t.Error("released a photo whose BSN was not located, want it withheld")
-			}
+		if img, _ := buildResult(session.Session{}, req, nil, nil, policy, privacy.RedactionPolicy{})["documentImageBack"].(*documentImageInfo); img == nil || img.ImageBase64 != photo {
+			t.Errorf("BSN policy %s without BlurBSN changed the photo, want it as taken", policy)
+		}
+	}
 
-			req.Document.IssuingState = "D"
-			if img, _ := buildResult(session.Session{}, req, nil, nil, policy, privacy.RedactionPolicy{})["documentImageBack"].(*documentImageInfo); img == nil || img.ImageBase64 != photo {
-				t.Error("a German document photo was not released as taken")
-			}
+	req.Document.IssuingState = "D"
+	if img, _ := buildResult(session.Session{}, req, nil, nil, privacy.BSNPolicyOmit, blur)["documentImageBack"].(*documentImageInfo); img == nil || img.ImageBase64 != photo {
+		t.Error("a German document photo was not released as taken")
+	}
 
-			sess := session.Session{Steps: session.StepEvidence{DocumentPhoto: &session.DocumentPhotoStepEvidence{
-				Front: session.DocumentPhotoSide{Image: photo, MimeType: "image/png"},
-			}}}
-			redactStepsForStorage(&sess, policy, privacy.RedactionPolicy{})
-			if stored := sess.Steps.DocumentPhoto.Front.Image; stored != "" {
-				t.Error("stored a document photo whose BSN was not located, want it dropped")
-			}
-		})
+	sess := session.Session{Steps: session.StepEvidence{DocumentPhoto: &session.DocumentPhotoStepEvidence{
+		Front: session.DocumentPhotoSide{Image: photo, MimeType: "image/png"},
+	}}}
+	redactStepsForStorage(&sess, privacy.BSNPolicyOmit, blur)
+	if stored := sess.Steps.DocumentPhoto.Front.Image; stored != "" {
+		t.Error("stored a document photo whose BSN was not located under BlurBSN, want it dropped")
 	}
 }

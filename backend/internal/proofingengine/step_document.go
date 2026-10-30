@@ -1,8 +1,6 @@
 package proofingengine
 
 import (
-	"encoding/base64"
-	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -72,85 +70,6 @@ func (s *Server) handleSubmitDocumentStep(w http.ResponseWriter, r *http.Request
 	}
 	s.auditStepSubmitted(updated, resolvedFlow, string(flow.StepDocumentCapture), actorDetails(updated, caller.role))
 	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
-}
-
-// submitDocumentPhotoStepRequest is the document_photo step: the printed data
-// page's photo, and where its BSN is when the app found it.
-type submitDocumentPhotoStepRequest struct {
-	Front *documentPhotoSideRequest `json:"front"`
-	// Back is omitted for a document without one worth taking (a passport).
-	Back *documentPhotoSideRequest `json:"back,omitempty"`
-}
-
-type documentPhotoSideRequest struct {
-	Image     string       `json:"image"`
-	MimeType  string       `json:"mimeType,omitempty"`
-	BSNRegion *imageRegion `json:"bsnRegion,omitempty"`
-}
-
-// handleSubmitDocumentPhotoStep stores the document's front and optional back,
-// released as documentImage and documentImageBack with the BSN covered under a
-// BlurBSN, mask or omit policy, in the result and in storage.
-func (s *Server) handleSubmitDocumentPhotoStep(w http.ResponseWriter, r *http.Request) {
-	sess, resolvedFlow, caller, ok := s.stepSession(w, r, flow.StepDocumentPhoto)
-	if !ok {
-		return
-	}
-	var req submitDocumentPhotoStepRequest
-	if !s.decode(w, r, &req) {
-		return
-	}
-	if req.Front == nil {
-		writeError(w, http.StatusBadRequest, "front is required")
-		return
-	}
-	front, err := documentPhotoSide("front", *req.Front)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var back *session.DocumentPhotoSide
-	if req.Back != nil {
-		side, err := documentPhotoSide("back", *req.Back)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		back = &side
-	}
-
-	updated, err := s.writeStep(sess, caller, flow.StepDocumentPhoto, func(sess *session.Session, now time.Time) {
-		sess.Steps.DocumentPhoto = &session.DocumentPhotoStepEvidence{Front: front, Back: back, Timing: stepTiming(nil, now)}
-	})
-	if err != nil {
-		s.writeStepError(w, r, sess, resolvedFlow, caller, flow.StepDocumentPhoto, err)
-		return
-	}
-	s.auditStepSubmitted(updated, resolvedFlow, string(flow.StepDocumentPhoto), actorDetails(updated, caller.role))
-	writeJSON(w, http.StatusOK, s.stepResponseFor(updated, resolvedFlow))
-}
-
-func documentPhotoSide(name string, in documentPhotoSideRequest) (session.DocumentPhotoSide, error) {
-	if in.Image == "" {
-		return session.DocumentPhotoSide{}, fmt.Errorf("%s.image is required", name)
-	}
-	raw, mime, err := decodeImageBase64(in.Image, firstNonEmpty(in.MimeType, defaultImageMime))
-	if err != nil {
-		return session.DocumentPhotoSide{}, fmt.Errorf("invalid %s.image: %w", name, err)
-	}
-	side := session.DocumentPhotoSide{Image: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
-	if r := in.BSNRegion; r != nil {
-		if !validImageRegion(*r) {
-			return session.DocumentPhotoSide{}, fmt.Errorf("%s.bsnRegion must lie within the image (x, y, w, h in [0,1])", name)
-		}
-		side.BSNRegion = &session.ImageRegion{X: r.X, Y: r.Y, W: r.W, H: r.H}
-	}
-	return side, nil
-}
-
-// validImageRegion is whether r is a non-empty box within the image.
-func validImageRegion(r imageRegion) bool {
-	return r.X >= 0 && r.Y >= 0 && r.W > 0 && r.H > 0 && r.X+r.W <= 1 && r.Y+r.H <= 1
 }
 
 // errCodeDocumentUnsupported refuses a non-Dutch EU driving licence at

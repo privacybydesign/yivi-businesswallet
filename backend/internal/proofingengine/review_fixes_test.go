@@ -108,13 +108,11 @@ func TestFaceAttemptRefundedOnlyWhenNotTheSubjects(t *testing.T) {
 }
 
 // The engine refuses the Yivi method on a flow it cannot serve, whatever the
-// wallet offers: one requiring more than low, one matching a reference photo,
-// one taking a document photo.
+// wallet offers: one requiring more than low, one matching a reference photo.
 func TestYiviRefusedOnFlowsItCannotServe(t *testing.T) {
 	for name, fd := range map[string]flow.FlowDefinition{
 		"requires substantial": {Name: "Chip", Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}, RequiredAssuranceLevel: flow.AssuranceLevelSubstantial},
 		"reference photo":      {Name: "Face", Steps: []flow.Step{flow.StepFaceVerification}},
-		"document photo":       {Name: "Photo", Steps: []flow.Step{flow.StepDocumentPhoto}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := DefaultConfig()
@@ -147,7 +145,7 @@ func TestReferencePhotoMustDecode(t *testing.T) {
 	if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, 8, 8))); err != nil {
 		t.Fatal(err)
 	}
-	fd := flow.FlowDefinition{ID: "flow", Version: 1, Name: "Face", Steps: []flow.Step{flow.StepFaceVerification}}
+	fd := flow.FlowDefinition{ID: "flow", Version: 1, Name: "Face", Steps: []flow.Step{flow.StepFaceVerification}, SelfieLocation: flow.LocationNative}
 	for name, tc := range map[string]struct {
 		data string
 		ok   bool
