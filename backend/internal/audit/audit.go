@@ -176,6 +176,13 @@ const (
 	PresentationRequestTemplateCreated = "presentation.request_template_created"
 	PresentationRequestTemplateDeleted = "presentation.request_template_deleted"
 
+	// Verification (#245): an organisation asking another business wallet to
+	// present a credential and grading the disclosure against its own ledger.
+	VerificationTemplateCreated = "verification.template_created"
+	VerificationTemplateDeleted = "verification.template_deleted"
+	VerificationStarted         = "verification.started"
+	VerificationCompleted       = "verification.completed"
+
 	// identity proofing service
 	IdentityProofingFlowCreated     = "identity_proofing.flow_created"
 	IdentityProofingFlowsConfigured = "identity_proofing.flows_configured"
@@ -305,6 +312,9 @@ const (
 	TargetPresentationTransaction     = "presentation_transaction"
 	TargetOutboundPresentationRequest = "outbound_presentation_request"
 	TargetPresentationRequestTemplate = "presentation_request_template"
+
+	TargetVerificationTemplate = "verification_template"
+	TargetVerificationSession  = "verification_session"
 
 	TargetIdentityProofingSettings = "org_identity_proofing_settings"
 	TargetIdentityProofingFlow     = "identity_proofing_flow"

@@ -252,3 +252,29 @@ func (s *Store) getIssuedTx(ctx context.Context, q database.Querier, orgID, id u
 	}
 	return i, err
 }
+
+// FindIssuedByClaims resolves a disclosed credential back to this org's own
+// issuance ledger (issue #245): the newest row of the same credential type whose
+// attributes contain every disclosed claim, or ErrIssuedNotFound. With the
+// requester also being the issuer this stands in for a status list; the
+// disclosed values are the issuer's own, so an exact containment match is enough.
+func (s *Store) FindIssuedByClaims(ctx context.Context, orgID uuid.UUID, vct string, claims map[string]string) (Issued, error) {
+	if len(claims) == 0 {
+		return Issued{}, ErrIssuedNotFound
+	}
+	needle, err := marshalJSON(claims)
+	if err != nil {
+		return Issued{}, err
+	}
+	const query = `SELECT ` + issuedColumns + ` FROM issued_attestations
+		WHERE organization_id = $1 AND schema_vct = $2 AND attributes @> $3::jsonb
+		ORDER BY created_at DESC LIMIT 1`
+	i, err := scanIssued(s.db.QueryRow(ctx, query, orgID, vct, needle))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Issued{}, ErrIssuedNotFound
+	}
+	if err != nil {
+		return Issued{}, fmt.Errorf("attestation: find issued by claims org %s: %w", orgID, err)
+	}
+	return i, nil
+}

@@ -69,13 +69,27 @@ type startRequest struct {
 // aspect-flag claims are chosen per org - see queryFor); every other scope
 // ignores it.
 func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...string) (Session, error) {
+	return c.start(ctx, c.vcts.queryFor(scope, claims))
+}
+
+// StartQuery creates a presentation request for a runtime-built single-credential
+// query (an organisation's verification template, issue #245) instead of one of
+// the fixed scopes. The disclosure comes back under QueryCredentialID.
+func (c *Client) StartQuery(ctx context.Context, q Query) (Session, error) {
+	if q.VCT == "" || len(q.Claims) == 0 {
+		return Session{}, fmt.Errorf("openid4vpverifier: query needs a vct and at least one claim")
+	}
+	return c.start(ctx, customQuery(q))
+}
+
+func (c *Client) start(ctx context.Context, query dcqlQuery) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
 		Type:                    "vp_token",
-		DCQLQuery:               c.vcts.queryFor(scope, claims),
+		DCQLQuery:               query,
 		Nonce:                   nonce,
 		JARMode:                 "by_reference",
 		RequestURIMethod:        requestURIMethodGet,
@@ -151,6 +165,7 @@ func (c *Client) Result(ctx context.Context, id string) (Presentation, error) {
 		Claims:           parseDisclosures(vt.VPToken),
 		ByCredential:     parseDisclosuresByCredential(vt.VPToken),
 		IdentityIssuedAt: identityIssuedAt(vt.VPToken),
+		ExpiresAt:        expiresAtByCredential(vt.VPToken),
 		vcts:             c.vcts,
 	}, nil
 }

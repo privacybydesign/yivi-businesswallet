@@ -45,6 +45,7 @@ export const en = {
     developers: "Developers",
     qerds: "Secure delivery",
     attestations: "Attestations",
+    verifications: "Checks",
     postguard: "PostGuard files",
     signing: "Sign documents",
     credentialRequests: "Credential requests",
@@ -211,6 +212,84 @@ export const en = {
   },
   // Inbound OpenID4VP: an external verifier asking the business wallet, as the
   // holder, to present an organization's credentials.
+  verifications: {
+    title: "Checks",
+    subtitle:
+      "Ask a business wallet to present a credential and check it against your own records.",
+    loadError: "Could not load checks: {{message}}",
+    start: {
+      title: "Run a check",
+      template: "Template",
+      claims: "Claims",
+      purpose: "Purpose",
+      button: "Start check",
+      noTemplates: "No check templates yet. Ask an administrator to add one.",
+      noTemplatesAdmin:
+        "No check templates yet. Add one with the button above.",
+    },
+    session: {
+      scanHint:
+        "Let the holder scan this QR with their phone, or send them the link. It opens their business wallet, where they choose what to share.",
+      copyLink: "Copy link",
+      copyWalletLink: "Copy wallet link",
+      waiting: "Waiting for the holder…",
+      newCheck: "New check",
+      expiredHint:
+        "This request expired before the holder answered. Start a new check.",
+    },
+    status: {
+      pending: "Waiting",
+      completed: "Answered",
+      expired: "Expired",
+    },
+    result: {
+      valid: "Valid",
+      invalid: "Not valid",
+      checks: "Checks",
+      disclosed: "Shared data",
+      passed: "Passed",
+      failed: "Failed",
+    },
+    checks: {
+      verified: "Signature and issuer verified",
+      notExpired: "Not expired",
+      issuedHere: "Issued by this organization",
+      notRevoked: "Not revoked",
+    },
+    history: {
+      title: "History",
+      when: "When",
+      template: "Template",
+      status: "Status",
+      result: "Result",
+      actions: "Actions",
+      view: "View",
+      empty: "No checks yet.",
+    },
+    templates: {
+      title: "Check templates",
+      new: "New template",
+      empty: "No check templates yet.",
+      delete: "Delete template",
+      confirmDelete:
+        'Delete the template "{{name}}"? Checks already run from it keep their result.',
+    },
+    templateForm: {
+      title: "New check template",
+      name: "Name",
+      nameRequired: "A name is required.",
+      vct: "Credential type (vct)",
+      vctRequired: "A credential type is required.",
+      claims: "Claims to ask for",
+      claimsRequired: "Enter at least one claim.",
+      claimsHint:
+        "Claim names as declared by the credential's schema, separated by commas.",
+      schemaClaims: "This schema declares: {{claims}}",
+      useSchemaClaims: "Use all",
+      purpose: "Purpose shown to the holder",
+      create: "Create template",
+    },
+  },
   openid4vp: {
     title: "Share organization credentials",
     starting: "Preparing the request…",
@@ -2045,6 +2124,8 @@ export const en = {
     attestationTemplateCreated: "Template created",
     attestationTemplateUpdated: "Template updated",
     attestationTemplateDeleted: "Template deleted",
+    verificationTemplateCreated: "Check template created",
+    verificationTemplateDeleted: "Check template deleted",
     attestationKeyCreated: "Key added",
     attestationHeldDeleted: "Credential removed",
     attestationKeySuspended: "Key suspended",
@@ -2239,6 +2320,8 @@ export const en = {
       signingRequests: "Signing request",
       presentationTransaction: "Presentation request",
       outboundPresentationRequest: "Credential request",
+      verificationTemplate: "Check template",
+      verificationSession: "Check",
       presentationRequestTemplate: "Credential request template",
       orgIdentityProofingSettings: "Identity proofing settings",
       identityProofingFlow: "Identity proofing flow",
@@ -2355,6 +2438,10 @@ export const en = {
       presentationResponseReceived:
         "Received an answer to a credential request",
       presentationRequestFailed: "Credential request failed",
+      verificationTemplateCreated: "Created check template",
+      verificationTemplateDeleted: "Deleted check template",
+      verificationStarted: "Started a check",
+      verificationCompleted: "Completed a check",
       identityProofingFlowCreated: "Created identity proofing flow",
       identityProofingFlowsConfigured:
         "Changed the identity proofing flows available to members",

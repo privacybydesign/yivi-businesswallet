@@ -161,6 +161,7 @@ func TestEnsurePartnerOrganizationsSeedsNijmegenApvAttestation(t *testing.T) {
 
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_schemas WHERE organization_id = $1", nijmegenID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM attestation_templates WHERE organization_id = $1", nijmegenID)
+	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM verification_templates WHERE organization_id = $1", nijmegenID)
 	assertCount(t, ctx, pool, 1, "SELECT count(*) FROM org_issuer_settings WHERE organization_id = $1", nijmegenID)
 	var vct string
 	if err := pool.QueryRow(ctx, "SELECT vct FROM attestation_schemas WHERE organization_id = $1", nijmegenID).Scan(&vct); err != nil {
