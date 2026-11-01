@@ -132,9 +132,10 @@ function HostedFlow({
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
-  const [method, setMethod] = useState<ProofingMethod>(
-    page.method === "yivi_app" ? "yivi_app" : "idem_app",
-  );
+  const [method, setMethod] = useState<ProofingMethod>(() => {
+    if (flow.browserOnly) return "browser";
+    return page.method === "yivi_app" ? "yivi_app" : "idem_app";
+  });
   const [started, setStarted] = useState<HostedStart>();
   const [sessionEnded, setSessionEnded] = useState(false);
   const onEnded = useCallback(() => setSessionEnded(true), []);

@@ -227,7 +227,14 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onContinue={() => (app ? setStep("method") : start("browser"))}
+          onContinue={() => {
+            if (app) {
+              setStep("method");
+              return;
+            }
+            setMethod("browser");
+            start("browser");
+          }}
           starting={create.isPending}
           error={
             !app && create.isError

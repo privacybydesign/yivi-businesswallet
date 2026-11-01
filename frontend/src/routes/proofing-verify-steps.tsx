@@ -768,7 +768,9 @@ function DocumentScanStep({
   }, [begin]);
   useEffect(() => {
     if (!showsFrame) return;
+    const scanOrigin = new URL(scanUrl).origin;
     function onMessage(event: MessageEvent): void {
+      if (event.origin !== scanOrigin) return;
       const scan = documentScanMessage(
         event,
         scanUrl!,
