@@ -6169,9 +6169,9 @@ paths:
         ID Scan, where the person photographs both sides of the document in the browser, and
         answers its page's `url`, which the wallet's page embeds in an iframe. When done the
         embedded page posts its parent the transaction's id, state and result id; `locale` is
-        the page's language (`nl` or `en`). Under the flow's BlurBSN, or a BSN policy that
-        masks or omits it, ID Scan covers the printed BSN in the photos. The transaction id
-        stays on the server.
+        the page's language (`nl` or `en`). Only under the flow's BlurBSN does ID Scan cover the
+        printed BSN in the photos; a BSN policy (retrieve, mask, omit) leaves them as taken. The
+        transaction id stays on the server.
       requestBody:
         required: true
         content:

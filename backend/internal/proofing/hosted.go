@@ -243,6 +243,14 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if method, err = sessionMethod(flow, method); err != nil {
 		return Sent{}, err
 	}
+	// document_scan was fixed at the send: a flow that gained or lost the
+	// photo since has a page that would never ask for it, or never get it.
+	if takesDocumentPhoto(flow) != req.DocumentScan {
+		return Sent{}, ErrFlowNotCompletable
+	}
+	if takesDocumentPhoto(flow) && s.documentScanner == nil {
+		return Sent{}, ErrNoDocumentScanner
+	}
 	// The reference photo was held for this start; a flow that needs one
 	// it lacks (the flow changed since the send) cannot run.
 	var photo *proofingprovider.Image

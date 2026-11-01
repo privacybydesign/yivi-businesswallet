@@ -119,9 +119,25 @@ func TestDocumentScanOnScreen(t *testing.T) {
 	if len(f.ips.documentPhotos) != 1 {
 		t.Fatalf("document photos = %d, want 1", len(f.ips.documentPhotos))
 	}
-	// The whole scan reaches the engine, in its terms: the BSN left out (the
-	// flow does not keep it) and not blacked out (the flow does not say so).
-	photo := f.ips.documentPhotos[0]
+	checkScannedPhoto(t, f.ips.documentPhotos[0])
+	if documentScanState(*f.requests.stored) != documentScanDone {
+		t.Errorf("state = %q, want done", documentScanState(*f.requests.stored))
+	}
+
+	// A reload of the return page finishes it again: nothing changes.
+	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1"); err != nil || len(f.ips.documentPhotos) != 1 {
+		t.Errorf("finish again: %v, %d photos; want nothing new", err, len(f.ips.documentPhotos))
+	}
+	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "en"); !errors.Is(err, ErrDocumentScanDone) {
+		t.Errorf("a scan once the photos are in: %v, want ErrDocumentScanDone", err)
+	}
+}
+
+// checkScannedPhoto checks that the whole of scannedResult reached the
+// engine, in its terms: the BSN left out (the flow does not keep it) and not
+// blacked out (the flow does not say so).
+func checkScannedPhoto(t *testing.T, photo proofingprovider.DocumentPhoto) {
+	t.Helper()
 	if photo.Front.Base64 != base64.StdEncoding.EncodeToString([]byte("front")) || photo.Back == nil || photo.BSNRedacted {
 		t.Errorf("photo = %+v, want front and back, the BSN not blacked out", photo)
 	}
@@ -134,17 +150,6 @@ func TestDocumentScanOnScreen(t *testing.T) {
 	}
 	if !reflect.DeepEqual(photo.Check, want) {
 		t.Errorf("check = %+v, want %+v", photo.Check, want)
-	}
-	if documentScanState(*f.requests.stored) != documentScanDone {
-		t.Errorf("state = %q, want done", documentScanState(*f.requests.stored))
-	}
-
-	// A reload of the return page finishes it again: nothing changes.
-	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1"); err != nil || len(f.ips.documentPhotos) != 1 {
-		t.Errorf("finish again: %v, %d photos; want nothing new", err, len(f.ips.documentPhotos))
-	}
-	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "en"); !errors.Is(err, ErrDocumentScanDone) {
-		t.Errorf("a scan once the photos are in: %v, want ErrDocumentScanDone", err)
 	}
 }
 
@@ -325,5 +330,30 @@ func TestHostedDocumentScan(t *testing.T) {
 	}
 	if got := newHostedProgress(*f.requests.stored, time.Now()).DocumentScan; got != documentScanDone {
 		t.Errorf("progress documentScan = %q, want done", got)
+	}
+}
+
+// A hosted start runs the flow active now, but whether the page photographs
+// the document was fixed at the send: a flow that gained or lost the photo
+// since, or a server that lost its scan service, cannot run.
+func TestHostedStartFollowsTheSentDocumentScan(t *testing.T) {
+	for name, drift := range map[string]func(f fixture){
+		"photo added since the send":   func(f fixture) { f.requests.stored.DocumentScan = false },
+		"scan service gone since then": func(f fixture) { f.svc.SetDocumentScanner(nil) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := newScanFixture(t)
+			f.svc.SetHostedBaseURL(testHostedBase)
+			sent, err := f.svc.CreateRequest(context.Background(), testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
+				NewRequest{FlowID: photoFlow.ID, Channel: ChannelHosted})
+			if err != nil {
+				t.Fatalf("CreateRequest(hosted): %v", err)
+			}
+			drift(f)
+			token := strings.TrimPrefix(sent.HostedURL, testHostedBase)
+			if _, err := f.svc.StartHosted(context.Background(), token, proofingprovider.MethodIdem); err == nil {
+				t.Error("StartHosted ran a flow whose document photo the page cannot take")
+			}
+		})
 	}
 }
