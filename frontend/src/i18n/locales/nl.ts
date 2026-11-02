@@ -858,7 +858,7 @@ export const nl: Translation<typeof en> = {
         dg1WithoutBirthDate:
           "Je naam en nationaliteit, en het nummer en de vervaldatum van het document.",
         age_over:
-          "Alleen of je oud genoeg bent, bepaald uit de chip van je document: niet je geboortedatum.",
+          "Alleen of je oud genoeg bent, bepaald uit je document: niet je geboortedatum.",
         dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
         dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",

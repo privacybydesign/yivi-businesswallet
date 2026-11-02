@@ -680,8 +680,9 @@ func validate(fd FlowDefinition) error {
 	return validateAgeOver(fd, seenSteps)
 }
 
-// validateAgeOver refuses AttributeAgeOver without the chip read it is derived
-// from or an age to answer for, and an age without the attribute.
+// validateAgeOver refuses AttributeAgeOver without a step it is derived from
+// (the chip read, or the document photo's scan) or an age to answer for, and
+// an age without the attribute.
 func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	if !slices.Contains(fd.RequestedAttributes, AttributeAgeOver) {
 		if fd.AgeOver != 0 {
@@ -689,8 +690,8 @@ func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 		}
 		return nil
 	}
-	if !seenSteps[StepNFCRead] {
-		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
+	if !seenSteps[StepNFCRead] && !seenSteps[StepDocumentPhoto] {
+		return fmt.Errorf("flow: %q requires nfc_read or document_photo: the age is derived from the document's date of birth", AttributeAgeOver)
 	}
 	if fd.AgeOver < minAgeOver || fd.AgeOver > maxAgeOver {
 		return fmt.Errorf("flow: ageOver must be between %d and %d", minAgeOver, maxAgeOver)

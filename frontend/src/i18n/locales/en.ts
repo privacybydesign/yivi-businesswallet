@@ -835,7 +835,7 @@ export const en = {
         dg1WithoutBirthDate:
           "Your name and nationality, and the document's number and expiry date.",
         age_over:
-          "Only whether you are old enough, worked out from your document's chip: not your date of birth.",
+          "Only whether you are old enough, worked out from your document: not your date of birth.",
         dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
         dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",

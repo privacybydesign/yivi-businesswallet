@@ -36,10 +36,16 @@ func TestValidateAgeOver(t *testing.T) {
 	if err := Validate(withDocument); err != nil {
 		t.Fatalf("Validate(age_over with dg1) = %v, want nil", err)
 	}
+	photoOnly := ok
+	photoOnly.Steps = []Step{StepDocumentPhoto}
+	photoOnly.RequiredChecks = nil
+	if err := Validate(photoOnly); err != nil {
+		t.Fatalf("Validate(age_over on the document photo) = %v, want nil", err)
+	}
 
-	noChip := ok
-	noChip.Steps = []Step{StepDocumentPhoto}
-	noChip.RequiredChecks = nil
+	noDocument := ok
+	noDocument.Steps = []Step{StepSelfie}
+	noDocument.RequiredChecks = nil
 	noAge, tooOld, ageOnly := ok, ok, validFlow()
 	noAge.AgeOver = 0
 	tooOld.AgeOver = maxAgeOver + 1
@@ -49,7 +55,7 @@ func TestValidateAgeOver(t *testing.T) {
 		fd   FlowDefinition
 		want string
 	}{
-		"no chip read":          {noChip, "requires nfc_read"},
+		"no document read":      {noDocument, "requires nfc_read or document_photo"},
 		"no age":                {noAge, "ageOver must be between"},
 		"too old":               {tooOld, "ageOver must be between"},
 		"age without attribute": {ageOnly, "ageOver set without"},

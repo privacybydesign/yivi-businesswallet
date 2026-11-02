@@ -288,9 +288,10 @@ documented under the `idem-app` tag, though only the app calls them), and the de
       16, 18 (the default), 21 or 65, plus a saved flow's own age when it is
       another (`ageOverChoices`).
     - Derived by the engine (`ageOverOf`) at the chip read, from the date of
-      birth in the verified chip evidence, never the MRZ scan alone:
-      `flow.Validate` requires `nfc_read`, and `AgeOver` set exactly with the
-      attribute.
+      birth in the verified chip evidence, or at the document photo, from the
+      scan service's read of the data page; never the app's MRZ scan alone:
+      `flow.Validate` requires `nfc_read` or `document_photo`, and `AgeOver`
+      set exactly with the attribute.
     - The date of birth is never stored (`asksAge`); it exists only in memory
       during the scan and chip-read requests.
       - Document scan: the MRZ is stored without it, and without the chip
