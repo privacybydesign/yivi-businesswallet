@@ -268,11 +268,12 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     `face.match` (see the face match threshold below). "Reject expired
     documents" is a read-only row, always on: the engine refuses an expired
     document on every flow (`DOC_EXPIRED`).
-  - Requested data: `dg1` comes from the document scan; `dg11`, `dg2` and
+  - Requested data: `dg1` comes from the document scan or `document_photo`;
+    `age_over` from NFC or `document_photo`; `dg11`, `dg2` and
     `chip_checks` from NFC; `document_image` from `document_photo`; `selfie`
     and `biometrics` from face. The editor shows plain labels, never these
     codes, in the order of `REQUESTED_ATTRIBUTES`. Each item is available only
-    with its step and cleared otherwise;
+    with one of its steps and cleared otherwise;
     none is forced on, and a new flow starts with none ticked; a data request
     or required diplomas tick and lock `dg1` (`identityRequired`). With none
     ticked the editor saves `outcome_only`, which

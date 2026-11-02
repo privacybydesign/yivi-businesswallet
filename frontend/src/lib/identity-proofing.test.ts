@@ -607,6 +607,16 @@ describe("attributeAvailable", () => {
     expect(attributeAvailable(chipOnly, "document_image")).toBe(false);
     const withPhoto = draft({ documentPhoto: true });
     expect(attributeAvailable(withPhoto, "document_image")).toBe(true);
+    // The document photo alone reads the document and answers the age check.
+    const photoOnly = draft({
+      documentAndChip: false,
+      documentPhoto: true,
+      faceVerification: false,
+    });
+    expect(attributeAvailable(photoOnly, "dg1")).toBe(true);
+    expect(attributeAvailable(photoOnly, "age_over")).toBe(true);
+    expect(attributeAvailable(photoOnly, "chip_checks")).toBe(false);
+    expect(attributeAvailable(photoOnly, "dg2")).toBe(false);
     expect(draftSteps(withPhoto)).toEqual([
       "document_capture",
       "document_photo",

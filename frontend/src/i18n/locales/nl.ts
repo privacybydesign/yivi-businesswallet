@@ -1707,7 +1707,7 @@ export const nl: Translation<typeof en> = {
     attributeHints: {
       dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
       age_over:
-        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
+        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip of de documentfoto. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
       dg11: "Alleen als de chip ze bevat; veel chips niet.",
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",

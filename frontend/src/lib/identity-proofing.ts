@@ -175,18 +175,20 @@ export const FACE_MATCH_RECOMMENDED = 0.75;
 export const SUBSTANTIAL_FACE_MATCH_FLOOR = 0.75;
 
 // The requested data the service's admin page offers, in the order the editor
-// lists them, and the step that produces each: the document scan gives the
-// document and holder (dg1), the chip read the age check, its extras, photo and
-// check results, the face step its selfie and biometrics.
+// lists them, and the steps that produce each: the document scan or the
+// document photo gives the document and holder (dg1) and the age check, the
+// chip read the age check too, its extras, photo and check results, the face
+// step its selfie and biometrics. With no MRZ or chip read, the engine takes
+// the document photo's read fields as the document (finishSession).
 export const REQUESTED_ATTRIBUTES = [
-  { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
-  { value: "age_over", step: STEP_NFC_READ },
-  { value: "chip_checks", step: STEP_NFC_READ },
-  { value: "biometrics", step: STEP_FACE_VERIFICATION },
-  { value: "dg11", step: STEP_NFC_READ },
-  { value: "dg2", step: STEP_NFC_READ },
-  { value: "selfie", step: STEP_FACE_VERIFICATION },
-  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
+  { value: "dg1", steps: [STEP_DOCUMENT_CAPTURE, STEP_DOCUMENT_PHOTO] },
+  { value: "age_over", steps: [STEP_NFC_READ, STEP_DOCUMENT_PHOTO] },
+  { value: "chip_checks", steps: [STEP_NFC_READ] },
+  { value: "biometrics", steps: [STEP_FACE_VERIFICATION] },
+  { value: "dg11", steps: [STEP_NFC_READ] },
+  { value: "dg2", steps: [STEP_NFC_READ] },
+  { value: "selfie", steps: [STEP_FACE_VERIFICATION] },
+  { value: "document_image", steps: [STEP_DOCUMENT_PHOTO] },
 ] as const;
 
 // The requested data of a flow that releases nothing but the outcome
@@ -502,7 +504,11 @@ export function attributeAvailable(
   value: string,
 ): boolean {
   const attr = REQUESTED_ATTRIBUTES.find((a) => a.value === value);
-  return attr !== undefined && draftSteps(draft).includes(attr.step);
+  if (attr === undefined) {
+    return false;
+  }
+  const steps: readonly string[] = attr.steps;
+  return draftSteps(draft).some((step) => steps.includes(step));
 }
 
 // The requested data a draft collects: ticked, with its step in the draft.
