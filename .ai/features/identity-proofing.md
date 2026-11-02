@@ -2443,7 +2443,8 @@ step runs with the Idem app or the Yivi app alike.
   | field `validity` | any `invalid` rejects (`DOC_FIELDS_INVALID`) | "Printed data" |
   | field `comparison` (MRZ, printed text, barcode) | any `no_match` goes to review | "MRZ matches printed text" |
   | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy | name, date of birth, document |
-  | document number | must equal the MRZ's, or the number Yivi disclosed (`DOCUMENT_MISMATCH`) | |
+  | document number | must equal the MRZ's, when the app read one (`DOCUMENT_MISMATCH`) | |
+  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes | |
   | document type | the document kind (`documentKinds`) | "Document" |
 
   - The result carries `documentCheck` (verdict, score, fields, zones, kind:
