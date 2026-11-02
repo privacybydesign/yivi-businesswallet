@@ -192,6 +192,21 @@ function StepsSection({
         hint={t("identityProofingFlows.editor.steps.addressHint")}
         onChange={() => onAddress(addressMode === "off" ? "required" : "off")}
       />
+      {addressMode !== "off" && (
+        <div className="ml-7">
+          <OptionRow
+            id="flow-step-address-registered"
+            checked={addressMode === "registered"}
+            label={t("identityProofingFlows.editor.steps.addressRegistered")}
+            hint={t("identityProofingFlows.editor.steps.addressRegisteredHint")}
+            onChange={() =>
+              onAddress(
+                addressMode === "registered" ? "required" : "registered",
+              )
+            }
+          />
+        </div>
+      )}
       {addressError && (
         <p role="alert" className={ERROR}>
           {addressError}

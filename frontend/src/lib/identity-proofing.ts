@@ -1712,7 +1712,7 @@ export function flowStepLabels(
     isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
   );
   // The wallet's own steps, after the app's: given in the browser.
-  if (flow.addressMode === "required") {
+  if (flow.addressMode !== undefined && flow.addressMode !== "off") {
     labels.push(t("identityProofingFlows.steps.address"));
   }
   if (flow.diplomaMode === "required") {

@@ -296,7 +296,11 @@ func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
 	for _, tc := range []struct {
 		mode AddressMode
 		want openid4vpverifier.Scope
-	}{{AddressRequired, openid4vpverifier.ScopeProofingAddress}, {AddressOff, openid4vpverifier.ScopeProofing}} {
+	}{
+		{AddressRequired, openid4vpverifier.ScopeProofingAddress},
+		{AddressBRPRequired, openid4vpverifier.ScopeProofingRegisteredAddress},
+		{AddressOff, openid4vpverifier.ScopeProofing},
+	} {
 		f := discloseYiviAddress(t, tc.mode, brpClaims)
 		if got := f.verifier.scopes[0]; got != tc.want {
 			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
@@ -304,6 +308,25 @@ func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
 		if kept := f.requests.registeredAddress != nil; kept != tc.mode.asked() {
 			t.Errorf("address %s: registered address kept = %v", tc.mode, kept)
 		}
+	}
+}
+
+// A flow that requires the registered address refuses a disclosure without it.
+func TestYiviDisclosureWithoutRequiredRegisteredAddress(t *testing.T) {
+	f := newAddressFixture(AddressBRPRequired)
+	ctx := context.Background()
+	sent := f.sendYivi(t)
+	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("StartYivi: %v", err)
+	}
+	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
+		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"},
+	}}
+	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err == nil {
+		t.Fatal("YiviDisclosure accepted a disclosure without the required registered address")
+	}
+	if f.requests.registeredAddress != nil {
+		t.Error("a registered address was kept")
 	}
 }
 

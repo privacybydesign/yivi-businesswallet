@@ -2050,7 +2050,8 @@ declares, never read off a document; a Dutch one is checked against the BAG,
 and on a Yivi app request against the registered (BRP) address too.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
-  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
+  `PUT .../flows/{id}/address`, admin): `off` (the default), `required` or
+  `registered` (the Yivi woonadres mandatory, below),
   audited `flow_address_configured`.
   - The flow editor shows it as "Enter the address", before the diploma step;
     saved after the flow and before the diplomas' follow-up save.
@@ -2098,6 +2099,12 @@ and on a Yivi app request against the registered (BRP) address too.
     `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
     houseNumber, zipcode, city) as an optional credential set
     (`required: false`), so a holder without it still proves who they are.
+    - A flow set to `registered` (`AddressBRPRequired`, "Registered address
+      from Yivi is mandatory" under the address step in the flow editor) asks
+      it as a required set instead (`ScopeProofingRegisteredAddress`): a holder
+      without the card gets it in the Yivi app (issuance during disclosure)
+      before disclosing, and `yiviDisclosure` refuses a presentation without
+      it. Otherwise `registered` is `required`.
     - Issued by Gemeente Nijmegen after a DigiD login, for anyone in the
       Netherlands, as SD-JWT VC since 2026-06-01: a card loaded before then
       needs reloading.

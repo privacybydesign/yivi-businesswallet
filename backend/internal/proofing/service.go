@@ -2059,7 +2059,10 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 		return YiviStart{}, err
 	}
 	scope := openid4vpverifier.ScopeProofing
-	if req.Address.asked() {
+	switch {
+	case req.Address.registeredRequired():
+		scope = openid4vpverifier.ScopeProofingRegisteredAddress
+	case req.Address.asked():
 		scope = openid4vpverifier.ScopeProofingAddress
 	}
 	started, err := s.verifier.StartPresentation(ctx, scope, claims...)
@@ -2142,6 +2145,8 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 		if claims, ok := presentation.RegisteredAddress(); ok {
 			addr := registeredAddress(claims)
 			registered = &addr
+		} else if req.Address.registeredRequired() {
+			return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no registered address, which the flow requires")
 		}
 		if err := s.requests.SetRegisteredAddress(ctx, req, registered); err != nil {
 			return proofingprovider.YiviDisclosure{}, err
