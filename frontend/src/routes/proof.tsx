@@ -120,7 +120,7 @@ function HostedFlow({
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const stages = verifyStages({
-    address: flow.addressMode === "required",
+    address: flow.addressMode !== "off",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
   });

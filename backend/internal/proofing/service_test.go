@@ -654,7 +654,7 @@ type fakeVerifier struct {
 }
 
 func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
-	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress {
+	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress && scope != openid4vpverifier.ScopeProofingRegisteredAddress {
 		return openid4vpverifier.Session{}, errors.New("unexpected scope")
 	}
 	f.started++

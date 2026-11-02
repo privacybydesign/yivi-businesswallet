@@ -1760,6 +1760,9 @@ export const nl: Translation<typeof en> = {
           "De persoon scant de coderegels van het paspoort, de ID-kaart of het Nederlandse rijbewijs en houdt het document daarna tegen de telefoon zodat de chip wordt gelezen.",
         addressHint:
           "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
+        addressRegistered: "Woonadres uit Yivi verplicht",
+        addressRegisteredHint:
+          "Zonder dit mag de Yivi-app het woonadres (BRP) weglaten. Met dit moet de persoon het delen; heeft zijn Yivi-app het nog niet, dan vraagt die het eerst op te halen bij Gemeente Nijmegen.",
         photoHint:
           "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
         faceHint:

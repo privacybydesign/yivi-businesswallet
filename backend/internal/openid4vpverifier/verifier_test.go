@@ -232,6 +232,23 @@ func TestProofingAddressQueryAsksRegisteredAddressOptionally(t *testing.T) {
 	}
 }
 
+// A flow that requires the registered address asks it as a required set, so
+// the Yivi app has a holder without it get it before disclosing.
+func TestProofingRegisteredAddressQueryRequiresAddress(t *testing.T) {
+	q := stagingVCTs.queryFor(ScopeProofingRegisteredAddress, nil)
+	if len(q.Credentials) != 4 || len(q.CredentialSets) != 2 {
+		t.Fatalf("proofing registered address query = %+v, want the identity and the address", q)
+	}
+	for _, set := range q.CredentialSets {
+		if set.Required != nil {
+			t.Errorf("set %v required = %v, want it required", set.Options, *set.Required)
+		}
+	}
+	if !slices.Equal(q.CredentialSets[1].Options[0], []string{credIDAddress}) {
+		t.Errorf("second set = %+v, want the address", q.CredentialSets[1])
+	}
+}
+
 func TestRegisteredAddress(t *testing.T) {
 	if _, ok := (Presentation{}).RegisteredAddress(); ok {
 		t.Error("RegisteredAddress answered for a presentation without it")

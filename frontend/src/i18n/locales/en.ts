@@ -1716,6 +1716,9 @@ export const en = {
           "The person scans the code lines of their passport, ID card or Dutch driving licence, then holds it to the phone so the chip is read.",
         addressHint:
           "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
+        addressRegistered: "Registered address from Yivi is mandatory",
+        addressRegisteredHint:
+          "Without this, the Yivi app may leave out the registered address (BRP). With it, the person must share it; if their Yivi app does not have it yet, it asks them to get it from Gemeente Nijmegen first.",
         photoHint:
           "The front and back of an ID card or driving licence, or the photo page of a passport.",
         faceHint:

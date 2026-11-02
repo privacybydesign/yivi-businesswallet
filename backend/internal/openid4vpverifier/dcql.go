@@ -121,6 +121,10 @@ const (
 	// address (pbdf.gemeente.address), for a flow that asks the subject's
 	// postal address: what they enter is compared with it.
 	ScopeProofingAddress
+	// ScopeProofingRegisteredAddress is ScopeProofingAddress with the
+	// registered address required: a holder without it gets it in the Yivi app
+	// before disclosing.
+	ScopeProofingRegisteredAddress
 )
 
 func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
@@ -134,7 +138,9 @@ func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
 	case ScopeProofing:
 		return v.proofingQuery(claims)
 	case ScopeProofingAddress:
-		return v.proofingAddressQuery(claims)
+		return v.proofingAddressQuery(claims, false)
+	case ScopeProofingRegisteredAddress:
+		return v.proofingAddressQuery(claims, true)
 	default:
 		return v.loginQuery()
 	}
@@ -244,15 +250,20 @@ func (v vcts) proofingQuery(extra []string) dcqlQuery {
 	}
 }
 
-// proofingAddressQuery is proofingQuery plus the registered address as a set
-// the wallet may leave out: a holder without it still proves who they are.
-func (v vcts) proofingAddressQuery(extra []string) dcqlQuery {
+// proofingAddressQuery is proofingQuery plus the registered address as its
+// own set. Unless required, the wallet may leave it out: a holder without it
+// still proves who they are.
+func (v vcts) proofingAddressQuery(extra []string, required bool) dcqlQuery {
 	q := v.proofingQuery(extra)
-	optional := false
 	q.Credentials = append(q.Credentials, dcqlCredential{
 		ID: credIDAddress, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.registeredAddress}},
 		Claims: claimPaths(ClaimAddressStreet, ClaimAddressHouseNumber, ClaimAddressPostalCode, ClaimAddressCity),
 	})
-	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}, Required: &optional})
+	set := dcqlCredentialSet{Options: [][]string{{credIDAddress}}}
+	if !required {
+		optional := false
+		set.Required = &optional
+	}
+	q.CredentialSets = append(q.CredentialSets, set)
 	return q
 }
