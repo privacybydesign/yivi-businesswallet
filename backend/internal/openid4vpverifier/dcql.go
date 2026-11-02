@@ -117,14 +117,10 @@ const (
 	// identity proofing Yivi method (internal/proofing): its photo only when the
 	// flow keeps it.
 	ScopeProofing
-	// ScopeProofingAddress is ScopeProofing plus, optionally, the registered
-	// address (pbdf.gemeente.address), for a flow that asks the subject's
-	// postal address: what they enter is compared with it.
+	// ScopeProofingAddress is ScopeProofing plus the registered address
+	// (pbdf.gemeente.address), for a flow that asks the subject's postal
+	// address: what they enter is compared with it.
 	ScopeProofingAddress
-	// ScopeProofingRegisteredAddress is ScopeProofingAddress with the
-	// registered address required: a holder without it gets it in the Yivi app
-	// before disclosing.
-	ScopeProofingRegisteredAddress
 )
 
 func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
@@ -138,9 +134,7 @@ func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
 	case ScopeProofing:
 		return v.proofingQuery(claims)
 	case ScopeProofingAddress:
-		return v.proofingAddressQuery(claims, false)
-	case ScopeProofingRegisteredAddress:
-		return v.proofingAddressQuery(claims, true)
+		return v.proofingAddressQuery(claims)
 	default:
 		return v.loginQuery()
 	}
@@ -250,20 +244,15 @@ func (v vcts) proofingQuery(extra []string) dcqlQuery {
 	}
 }
 
-// proofingAddressQuery is proofingQuery plus the registered address as its
-// own set. Unless required, the wallet may leave it out: a holder without it
-// still proves who they are.
-func (v vcts) proofingAddressQuery(extra []string, required bool) dcqlQuery {
+// proofingAddressQuery is proofingQuery plus the registered address as a
+// required set: the Yivi app has a holder without it get it (issuance during
+// disclosure) before disclosing.
+func (v vcts) proofingAddressQuery(extra []string) dcqlQuery {
 	q := v.proofingQuery(extra)
 	q.Credentials = append(q.Credentials, dcqlCredential{
 		ID: credIDAddress, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.registeredAddress}},
 		Claims: claimPaths(ClaimAddressStreet, ClaimAddressHouseNumber, ClaimAddressPostalCode, ClaimAddressCity),
 	})
-	set := dcqlCredentialSet{Options: [][]string{{credIDAddress}}}
-	if !required {
-		optional := false
-		set.Required = &optional
-	}
-	q.CredentialSets = append(q.CredentialSets, set)
+	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}})
 	return q
 }

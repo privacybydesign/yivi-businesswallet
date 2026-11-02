@@ -164,7 +164,7 @@ function VerifyFlow({
   // the app step as on a hosted link.
   const methods = methodChoices(yiviAppAvailable(flow));
   const stages = verifyStages({
-    address: flow.addressMode !== "off",
+    address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
   });

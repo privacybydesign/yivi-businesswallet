@@ -570,7 +570,7 @@ function AddressNote({
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
   if (
-    request.addressMode !== "off" &&
+    request.addressMode === "required" &&
     request.status === "approved" &&
     request.address === undefined &&
     request.purgedAt === undefined

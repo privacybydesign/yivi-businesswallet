@@ -2050,8 +2050,7 @@ declares, never read off a document; a Dutch one is checked against the BAG,
 and on a Yivi app request against the registered (BRP) address too.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
-  `PUT .../flows/{id}/address`, admin): `off` (the default), `required` or
-  `registered` (the Yivi woonadres mandatory, below),
+  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
   audited `flow_address_configured`.
   - The flow editor shows it as "Enter the address", before the diploma step;
     saved after the flow and before the diplomas' follow-up save.
@@ -2097,14 +2096,9 @@ and on a Yivi app request against the registered (BRP) address too.
   has no way to the BRP yet.
   - A request that asks the address starts its disclosure as
     `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
-    houseNumber, zipcode, city) as an optional credential set
-    (`required: false`), so a holder without it still proves who they are.
-    - A flow set to `registered` (`AddressBRPRequired`, "Registered address
-      from Yivi is mandatory" under the address step in the flow editor) asks
-      it as a required set instead (`ScopeProofingRegisteredAddress`): a holder
-      without the card gets it in the Yivi app (issuance during disclosure)
-      before disclosing, and `yiviDisclosure` refuses a presentation without
-      it. Otherwise `registered` is `required`.
+    houseNumber, zipcode, city) as a required credential set: a holder
+    without the card gets it in the Yivi app (issuance during disclosure)
+    before disclosing.
     - Issued by Gemeente Nijmegen after a DigiD login, for anyone in the
       Netherlands, as SD-JWT VC since 2026-06-01: a card loaded before then
       needs reloading.
@@ -2128,9 +2122,8 @@ and on a Yivi app request against the registered (BRP) address too.
   - `registered` is for the wallet's pages only: the webhook and the API
     result send the address without it (`forIntegrator`). A data access
     export keeps it: it is the person's own data.
-  - A disclosure without the card clears what an earlier attempt kept
-    (`SetRegisteredAddress` with nil), so an address is never compared with
-    another wallet's card.
+  - A disclosure without the card is refused, so an address is only ever
+    compared with the card of the wallet that disclosed it.
   - Only `registered` confirms where the person lives. Every other result is
     self-declared, `verified` included (the address exists, nothing more); an
     Idem request is always self-declared. `address_added` audits the result
