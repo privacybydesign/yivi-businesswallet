@@ -2059,10 +2059,7 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 		return YiviStart{}, err
 	}
 	scope := openid4vpverifier.ScopeProofing
-	switch {
-	case req.Address.registeredRequired():
-		scope = openid4vpverifier.ScopeProofingRegisteredAddress
-	case req.Address.asked():
+	if req.Address.asked() {
 		scope = openid4vpverifier.ScopeProofingAddress
 	}
 	started, err := s.verifier.StartPresentation(ctx, scope, claims...)
@@ -2138,17 +2135,15 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
 	}
 	// Kept before the engine decides, so the page never enters an address
-	// before it is there to compare with.
-	// One without the card clears what an earlier attempt kept.
+	// before it is there to compare with. The request asks it as required, so
+	// a presentation without it is refused.
 	if req.Address.asked() {
-		var registered *Address
-		if claims, ok := presentation.RegisteredAddress(); ok {
-			addr := registeredAddress(claims)
-			registered = &addr
-		} else if req.Address.registeredRequired() {
-			return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no registered address, which the flow requires")
+		claims, ok := presentation.RegisteredAddress()
+		if !ok {
+			return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no registered address, which the request requires")
 		}
-		if err := s.requests.SetRegisteredAddress(ctx, req, registered); err != nil {
+		registered := registeredAddress(claims)
+		if err := s.requests.SetRegisteredAddress(ctx, req, &registered); err != nil {
 			return proofingprovider.YiviDisclosure{}, err
 		}
 	}

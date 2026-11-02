@@ -27,26 +27,16 @@ import (
 type AddressMode string
 
 const (
-	AddressOff AddressMode = "off"
-	// AddressRequired asks the address; the Yivi app may leave the registered
-	// (BRP) address out of its disclosure.
+	AddressOff      AddressMode = "off"
 	AddressRequired AddressMode = "required"
-	// AddressBRPRequired is AddressRequired with the registered (BRP) address
-	// required in the Yivi disclosure too: a holder without the card gets it
-	// in the Yivi app before disclosing.
-	AddressBRPRequired AddressMode = "registered"
 )
 
 func (m AddressMode) valid() bool {
-	return m == AddressOff || m == AddressRequired || m == AddressBRPRequired
+	return m == AddressOff || m == AddressRequired
 }
 
 // asked is the mode as read from a row; "" (a store-less service) is off.
-func (m AddressMode) asked() bool { return m == AddressRequired || m == AddressBRPRequired }
-
-// registeredRequired reports whether the Yivi disclosure must carry the
-// registered address.
-func (m AddressMode) registeredRequired() bool { return m == AddressBRPRequired }
+func (m AddressMode) asked() bool { return m == AddressRequired }
 
 const (
 	// AddressWindow is how long after the identity check finished the

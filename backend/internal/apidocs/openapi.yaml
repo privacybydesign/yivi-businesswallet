@@ -12043,7 +12043,7 @@ components:
               enum: ['off', required]
             addressMode:
               type: string
-              enum: ['off', required, registered]
+              enum: ['off', required]
             employmentMode:
               type: string
               enum: ['off', required]
@@ -12276,7 +12276,7 @@ components:
       properties:
         addressMode:
           type: string
-          enum: ['off', required, registered]
+          enum: ['off', required]
       required: [addressMode]
     ProofingAddress:
       type: object
@@ -12430,7 +12430,7 @@ components:
           description: When the person can last add a diploma extract; absent until the identity is approved.
         addressMode:
           type: string
-          enum: ['off', required, registered]
+          enum: ['off', required]
         address:
           $ref: '#/components/schemas/ProofingAddress'
         addressUntil:
@@ -13273,7 +13273,7 @@ components:
                   enum: ['off', required]
                 addressMode:
                   type: string
-                  enum: ['off', required, registered]
+                  enum: ['off', required]
                 employmentMode:
                   type: string
                   enum: ['off', required]
