@@ -50,11 +50,15 @@ const (
 	// never asked, and are skipped anyway, as they show the BSN.
 	fileCategoryDocument = "document"
 	fileTypeRaw          = "raw_document_image"
-	// fileSideB is how ID Scan names a document's second side ("Netherlands -
-	// Driving License (2022) Side B"); fileSideBack is kept for a name that
-	// says back.
-	fileSideB    = "side b"
-	fileSideBack = "back"
+	// fileSideB is how ID Scan names a card's second side ("Netherlands -
+	// Driving License (2022) Side B"), filePageB a passport's second page, the
+	// one holding the personal number ("Netherlands - ePassport (2014) Page B",
+	// of type fileTypePassportPage); fileSideBack is kept for a name that says
+	// back.
+	fileSideB            = "side b"
+	filePageB            = "page b"
+	fileSideBack         = "back"
+	fileTypePassportPage = "passport_page"
 
 	// The validity and comparison states of a result field.
 	validityValid      = "valid"
@@ -404,15 +408,15 @@ func isoDate(raw string) string {
 	return ""
 }
 
-// sides picks the front and back photo out of a result's document files: only
-// the one named as side B (or the back) is the back, as a passport photographed
-// open gives its facing page as a second file; the first other file is the
-// front.
+// sides picks the front and back photo out of a result's document files: the
+// back is a card's side B or a passport's page B (the page ID Scan asks for the
+// personal number on); the first other file is the front.
 func sides(files []file) (front, back *file) {
 	for _, f := range files {
 		name := strings.ToLower(f.Name)
 		switch {
-		case back == nil && (strings.Contains(name, fileSideB) || strings.Contains(name, fileSideBack)):
+		case back == nil && (f.Type == fileTypePassportPage || strings.Contains(name, fileSideB) ||
+			strings.Contains(name, filePageB) || strings.Contains(name, fileSideBack)):
 			back = &f
 		case front == nil:
 			front = &f

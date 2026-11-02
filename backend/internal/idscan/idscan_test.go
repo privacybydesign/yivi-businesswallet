@@ -181,19 +181,19 @@ func TestResult(t *testing.T) {
 	}
 }
 
-// A passport photographed open comes as its data page and the facing page:
-// the facing page is no back.
-func TestResultPassportFacingPageIsNoBack(t *testing.T) {
-	const spread = `{"state":"completed","tasks":[{"type":"document_scan","state":"completed","files":[
-		{"category":"document","type":"PASSPORT","name":"Netherlands - Passport (2021)","url":"{base}/downloads/front"},
-		{"category":"document","type":"PASSPORT","name":"Netherlands - Passport (2021)","url":"{base}/downloads/facing"}]}]}`
-	srv := resultServer(t, spread, pngBytes(t))
+// A passport's personal number page comes as its page B: that is its back.
+func TestResultPassportPageBIsBack(t *testing.T) {
+	const passport = `{"state":"completed","tasks":[{"type":"document_scan","state":"completed","files":[
+		{"category":"document","type":"passport","name":"Netherlands - ePassport (2014)","url":"{base}/downloads/front"},
+		{"category":"document","type":"passport_page","name":"Netherlands - ePassport (2014) Page B","url":"{base}/downloads/back"},
+		{"category":"image","type":"portrait","name":"","url":"{base}/downloads/portrait"}]}]}`
+	srv := resultServer(t, passport, pngBytes(t))
 	res, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasSuffix(res.Front.Data, []byte("front")) || res.Back != nil {
-		t.Errorf("front %q…, back %v; want the data page and no back", res.Front.Data[len(res.Front.Data)-5:], res.Back != nil)
+	if !bytes.HasSuffix(res.Front.Data, []byte("front")) || res.Back == nil || !bytes.HasSuffix(res.Back.Data, []byte("back")) {
+		t.Errorf("front %q…, back %v; want the data page and page B as the back", res.Front.Data[len(res.Front.Data)-5:], res.Back != nil)
 	}
 }
 

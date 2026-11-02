@@ -205,8 +205,8 @@ type Identity struct {
 	// matched against, for a flow without the chip read; nil otherwise.
 	ReferencePhoto *Image
 	// DocumentImage and DocumentImageBack are the photos of the document's
-	// front and back (the document_photo step; no back for a passport), the
-	// printed BSN blurred under the tenant's policy.
+	// front and back (the document_photo step; a passport's back is its
+	// personal number page), the printed BSN blurred under the tenant's policy.
 	DocumentImage     *Image
 	DocumentImageBack *Image
 }
