@@ -391,6 +391,34 @@ func TestBrowserMethodOnlyForBrowserOnlyFlows(t *testing.T) {
 	}
 }
 
+// A browser-only flow with a browser step after the document photo (the
+// face) takes the photo and waits for that step: the session stays
+// undecided, and the photo's submit is no failure.
+func TestDocumentPhotoBeforeAnotherBrowserStep(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	photoAndFace := flow.FlowDefinition{
+		ID: "flow", Version: 1, Name: "Photo and face",
+		Steps:          []flow.Step{flow.StepDocumentPhoto, flow.StepFaceVerification},
+		SelfieLocation: flow.LocationBrowser,
+	}
+	if !photoAndFace.BrowserOnly() {
+		t.Fatal("a flow of the photo and a browser face is not browser-only")
+	}
+	sess := inProgress("ps_1")
+	sess.Method = session.MethodBrowser
+	sess.Flow, sess.FlowVersion, sess.ExpiresAt = "flow", 1, time.Now().UTC().Add(time.Hour)
+	s, store := documentPhotoServer(sess, photoAndFace)
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(),
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v, want the photo taken", err)
+	}
+	stored, _ := store.Get("org", sess.ID)
+	if stored.Steps.DocumentPhoto == nil || stored.Status.Terminal() {
+		t.Errorf("photo %v, status %s; want the photo kept and the session undecided", stored.Steps.DocumentPhoto != nil, stored.Status)
+	}
+}
+
 // An age-check flow run in the browser answers the age from the date of
 // birth the scan read, and keeps the answer, never the date.
 func TestDocumentScanAnswersAgeCheck(t *testing.T) {

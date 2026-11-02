@@ -1016,12 +1016,14 @@ func documentCheckEvidence(c pp.DocumentCheck) *session.DocumentCheck {
 }
 
 // finishBrowserSession decides a session whose flow has no app steps, which
-// no app is there to submit: the browser's steps are all it takes.
+// no app is there to submit: the browser's steps are all it takes. A browser
+// step still to come (the face after the document photo) leaves it
+// undecided, which is no failure of the step just recorded.
 func (s *Server) finishBrowserSession(ctx context.Context, sess session.Session, fd *flow.FlowDefinition) error {
 	if sess.Method != session.MethodBrowser || sess.Status.Terminal() {
 		return nil
 	}
-	if _, err := s.finishSession(ctx, sess, fd, appCaller{}); err != nil && !errors.Is(err, errSessionComplete) {
+	if _, err := s.finishSession(ctx, sess, fd, appCaller{}); err != nil && !errors.Is(err, errSessionComplete) && !errors.Is(err, errStepsIncomplete) {
 		return fmt.Errorf("proofingengine: finish browser session: %w", err)
 	}
 	return nil
