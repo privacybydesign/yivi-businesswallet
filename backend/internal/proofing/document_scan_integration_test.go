@@ -37,6 +37,12 @@ func TestStoreDocumentScan(t *testing.T) {
 			t.Fatalf("SetDocumentScanTransaction(%s): %v", trx, err)
 		}
 	}
+	// The engine's notice can settle the request on these photos before the
+	// finish marks them.
+	if err := store.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
 	if err := store.MarkDocumentScanned(ctx, req, "s1", "trx-1"); !errors.Is(err, ErrSessionOver) {
 		t.Errorf("an earlier scan: %v, want ErrSessionOver", err)
 	}
@@ -51,10 +57,6 @@ func TestStoreDocumentScan(t *testing.T) {
 		t.Errorf("scanned = %q at %v; want trx-2, done", scanned.documentScanTransactionID, scanned.DocumentScannedAt)
 	}
 
-	if err := store.RecordOutcome(ctx, scanned, "s1", StatusApproved,
-		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna"}); err != nil {
-		t.Fatalf("RecordOutcome: %v", err)
-	}
 	if err := store.Purge(ctx, scanned, nil); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}

@@ -1025,12 +1025,13 @@ func (s *RequestStore) SetDocumentScanTransaction(ctx context.Context, req Reque
 }
 
 // MarkDocumentScanned records that the photos of transactionID reached the
-// engine for the request's session. ErrSessionOver once the request moved to
-// another session, settled, or started another scan meanwhile.
+// engine for the request's session. A settled request is marked too: the
+// engine decides a browser-only session on these photos, and its notice can
+// settle the request before this runs. ErrSessionOver once the request moved to
+// another session or started another scan meanwhile.
 func (s *RequestStore) MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error {
 	const update = `UPDATE identity_proofing_requests SET document_scanned_at = COALESCE(document_scanned_at, now()), updated_at = now()
-		WHERE id = $1 AND ips_session_id = $2 AND document_scan_transaction_id = $3
-			AND status IN ('pending', 'in_progress') AND purged_at IS NULL`
+		WHERE id = $1 AND ips_session_id = $2 AND document_scan_transaction_id = $3 AND purged_at IS NULL`
 	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, transactionID)
 	if err != nil {
 		return fmt.Errorf("proofing: mark document scanned request %s: %w", req.ID, err)
