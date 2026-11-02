@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
@@ -130,7 +131,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
-	decided, err := s.decideByDocumentPhoto(sess, fd, doc.Number, details, docRedaction.BlurBSN)
+	decided, err := s.decideByDocumentPhoto(sess, fd, doc, details, docRedaction.BlurBSN)
 	switch {
 	case err != nil:
 		return proofingprovider.YiviDisclosure{}, err
@@ -154,18 +155,29 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 	return proofingprovider.YiviDisclosure{OK: true}, nil
 }
 
-// decideByDocumentPhoto checks a disclosure of document number against the
+// decideByDocumentPhoto checks the disclosed document doc against the
 // browser's document photo: an error while the photo is not in yet, rejected
-// (sess is decided so) when the scanned document is refused or not the
-// disclosed one, needs_review when the scan was doubtful, else approved.
-func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, number string, details map[string]any, redactDocument bool) (session.Status, error) {
+// (sess is decided so) when the scanned document is refused or its holder is
+// not doc's (scannedHolderOf), needs_review when the scan was doubtful or read
+// no holder, else approved. The holder, not the document number, binds the
+// two: the disclosure carries no number, and a holder may photograph another
+// document of theirs than the one in the Yivi app.
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, doc documentInfo, details map[string]any, redactDocument bool) (session.Status, error) {
 	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
 		return "", &proofingprovider.RejectedError{
 			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
 			Message: "the document photo is taken in the browser and has not come in yet",
 		}
 	}
-	scanCode, doubtful := documentPhotoOutcome(sess, number)
+	scanCode, doubtful := documentPhotoOutcome(sess, "")
+	if p := sess.Steps.DocumentPhoto; scanCode == "" && p != nil && p.Check != nil {
+		switch scannedHolderOf(doc, p.Check.Document) {
+		case holderOther:
+			scanCode = errCodeDocMismatch
+		case holderUnknown:
+			doubtful = true
+		}
+	}
 	switch {
 	case scanCode != "":
 		details[detailReason] = disclosureCodeDocumentRefused
@@ -176,6 +188,41 @@ func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefini
 		return session.StatusNeedsReview, nil
 	}
 	return session.StatusApproved, nil
+}
+
+// scannedHolder is whether a document scan read the disclosed holder.
+type scannedHolder int
+
+const (
+	holderSame scannedHolder = iota
+	holderOther
+	holderUnknown
+)
+
+// scannedHolderOf compares the holder of the disclosed document doc with the
+// one the scan read: the same full name (diploma.SameName), and the same date
+// of birth when both carry one. An age check withholds the date on both
+// sides, so the name alone decides there. A scan that read no surname, or a
+// date that does not parse, cannot tell.
+func scannedHolderOf(doc documentInfo, scanned session.ScannedDocument) scannedHolder {
+	if strings.TrimSpace(scanned.Surname) == "" || strings.TrimSpace(doc.LastName) == "" {
+		return holderUnknown
+	}
+	if !diploma.SameName(doc.FirstName+" "+doc.LastName, scanned.GivenNames+" "+scanned.Surname) {
+		return holderOther
+	}
+	if doc.DateOfBirth == "" || scanned.DateOfBirth == "" {
+		return holderSame
+	}
+	disclosed, errDisclosed := diploma.ParseDate(doc.DateOfBirth)
+	read, errRead := diploma.ParseDate(scanned.DateOfBirth)
+	switch {
+	case errDisclosed != nil || errRead != nil:
+		return holderUnknown
+	case !disclosed.Equal(read):
+		return holderOther
+	}
+	return holderSame
 }
 
 // disclosedPhoto is the disclosed photo as the result releases it: only when

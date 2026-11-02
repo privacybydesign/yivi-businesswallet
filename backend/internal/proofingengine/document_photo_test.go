@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -277,27 +278,85 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 	}
 }
 
-// A Yivi disclosure of another document than the one scanned is refused.
-func TestYiviDisclosureOfAnotherDocumentRefused(t *testing.T) {
-	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
-	sess := session.Session{
-		ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
-		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
-	}
-	s, store := documentPhotoServer(sess, chipAndPhotoFlow)
-	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
-		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(),
-	}); err != nil {
-		t.Fatalf("SubmitDocumentPhoto = %v", err)
-	}
-	ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: map[string]string{
-		"firstName": "Anna", "lastName": "Jansen", "country": "NLD", "documentNumber": "NOT" + scannedNumber,
-	}}
-	if disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref); err != nil || disclosure.OK {
-		t.Fatalf("disclosure of another document = %+v, %v, want refused", disclosure, err)
-	}
-	if rejected, _ := store.Get("org", sess.ID); rejected.Status != session.StatusRejected || rejected.ErrorCode != errCodeDocMismatch {
-		t.Errorf("status %s, error %q; want rejected, %s", rejected.Status, rejected.ErrorCode, errCodeDocMismatch)
+// A Yivi disclosure binds to the scanned document by its holder, with the
+// claims the disclosure carries (no document number): another person's
+// document is refused, another document of the same person approved, and a
+// scan that read no holder goes to review. An age check withholds the date of
+// birth on both sides, so the name alone decides there.
+func TestYiviDisclosureBindsTheScannedHolder(t *testing.T) {
+	ageCheck := chipAndPhotoFlow
+	ageCheck.RequestedAttributes, ageCheck.AgeOver = []string{attrAgeOver}, 18
+	for name, tc := range map[string]struct {
+		fd        flow.FlowDefinition
+		claims    map[string]string
+		scan      func(*pp.DocumentCheck)
+		status    session.Status
+		errorCode string
+	}{
+		"same holder, MRZ spelling": {
+			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "ANNA", "lastName": "JANSEN", "dateOfBirth": "1990-03-10"},
+			status: session.StatusApproved,
+		},
+		"same holder, another document": {
+			fd:     chipAndPhotoFlow,
+			claims: map[string]string{"firstName": "Anna", "lastName": "Jansen", "dateOfBirth": "1990-03-10"},
+			scan: func(c *pp.DocumentCheck) {
+				c.Document.Kind, c.Document.Number = pp.DocumentKindIdentityCard, "IJ9876543"
+			},
+			status: session.StatusApproved,
+		},
+		"another name": {
+			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "Piet", "lastName": "Jansen", "dateOfBirth": "1990-03-10"},
+			status: session.StatusRejected, errorCode: errCodeDocMismatch,
+		},
+		"another date of birth": {
+			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "Anna", "lastName": "Jansen", "dateOfBirth": "1991-03-10"},
+			status: session.StatusRejected, errorCode: errCodeDocMismatch,
+		},
+		"a scan that read no holder": {
+			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "Anna", "lastName": "Jansen", "dateOfBirth": "1990-03-10"},
+			scan:   func(c *pp.DocumentCheck) { c.Document.Surname, c.Document.GivenNames = "", "" },
+			status: session.StatusNeedsReview,
+		},
+		"age check, same name": {
+			fd: ageCheck, claims: map[string]string{"firstName": "Anna", "lastName": "Jansen", "over18": "Yes"},
+			status: session.StatusApproved,
+		},
+		"age check, another name": {
+			fd: ageCheck, claims: map[string]string{"firstName": "Piet", "lastName": "Jansen", "over18": "Yes"},
+			status: session.StatusRejected, errorCode: errCodeDocMismatch,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+			sess := session.Session{
+				ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
+				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+			}
+			s, store := documentPhotoServer(sess, tc.fd)
+			scan := authenticScan()
+			if tc.scan != nil {
+				tc.scan(&scan)
+			}
+			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
+			}); err != nil {
+				t.Fatalf("SubmitDocumentPhoto = %v", err)
+			}
+			claims := map[string]string{"country": "NLD"}
+			maps.Copy(claims, tc.claims)
+			ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: claims}
+			disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref)
+			if err != nil {
+				t.Fatalf("SubmitReference = %v", err)
+			}
+			if disclosure.OK != (tc.status != session.StatusRejected) {
+				t.Errorf("disclosure OK = %v, want %v", disclosure.OK, tc.status != session.StatusRejected)
+			}
+			if decided, _ := store.Get("org", sess.ID); decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
+				t.Errorf("status %s, error %q; want %s, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
+			}
+		})
 	}
 }
 
