@@ -6797,8 +6797,8 @@ paths:
         review, `evidence`, and `diplomas` (the DUO extracts the subject added). For an approval,
         and for a check waiting for review, it also carries `photo` (the document's portrait),
         `selfie` (the live face matched against it), and `documentImage` and `documentImageBack`
-        (photos of the document's front and back; no back for a passport), each `{mimeType,
-        data}` with `data` base64, when the flow requested them; the API never does. A check
+        (photos of the document's front and back; a passport's back is its personal number
+        page), each `{mimeType, data}` with `data` base64, when the flow requested them; the API never does. A check
         waiting for review holds its face photos until it is decided, also on a flow that does
         not keep them after the match. Audited `identity_proofing.result_read`
         with the administrator as actor on every read. A member's request, one erased, or a
