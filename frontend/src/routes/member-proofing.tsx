@@ -8,6 +8,7 @@ import {
   useMemberRequestsQuery,
 } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
+import { blockingError } from "../lib/query-state";
 import {
   proofingErrorMessage,
   proofingStatusLabel,
@@ -49,8 +50,9 @@ export function MemberProofing({
   const latest = requests.data?.at(0);
   const selectId = `member-proofing-flow-${userId}`;
 
-  if (flows.isError) {
-    return <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>;
+  const flowsError = blockingError(flows);
+  if (flowsError !== null) {
+    return <p className={ERROR}>{proofingErrorMessage(flowsError, t)}</p>;
   }
 
   return (

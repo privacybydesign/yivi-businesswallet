@@ -212,9 +212,9 @@ func TestProofingQueryAsksAgeInsteadOfBirthDate(t *testing.T) {
 	}
 }
 
-// A flow asking the address adds the registered address as a set the wallet
-// may leave out, in the production scheme whatever the configured one.
-func TestProofingAddressQueryAsksRegisteredAddressOptionally(t *testing.T) {
+// A flow asking the address adds the registered address as a required set,
+// in the production scheme whatever the configured one.
+func TestProofingAddressQueryRequiresRegisteredAddress(t *testing.T) {
 	q := stagingVCTs.queryFor(ScopeProofingAddress, nil)
 	if len(q.Credentials) != 4 || len(q.CredentialSets) != 2 {
 		t.Fatalf("proofing address query = %+v, want the identity and the address", q)
@@ -223,12 +223,54 @@ func TestProofingAddressQueryAsksRegisteredAddressOptionally(t *testing.T) {
 	if identity.Required != nil {
 		t.Errorf("identity set required = %v, want it required", *identity.Required)
 	}
-	if address.Required == nil || *address.Required || !slices.Equal(address.Options[0], []string{credIDAddress}) {
-		t.Errorf("address set = %+v, want the address, not required", address)
+	if address.Required != nil || !slices.Equal(address.Options[0], []string{credIDAddress}) {
+		t.Errorf("address set = %+v, want the address, required", address)
 	}
 	c := q.Credentials[3]
 	if c.ID != credIDAddress || !slices.Equal(c.Meta.VctValues, []string{"pbdf.gemeente.address"}) || len(c.Claims) != 4 {
 		t.Errorf("address credential = %+v, want pbdf.gemeente.address with four claims", c)
+	}
+}
+
+// A proofing request offers exactly the sources the flow accepts, any one of
+// them; none is the passport, id-card or residence permit.
+func TestProofingRequestOffersTheAcceptedSources(t *testing.T) {
+	q := stagingVCTs.proofingRequestQuery(ProofingRequest{Sources: []string{SourceIdentityCard}})
+	if len(q.Credentials) != 1 || q.Credentials[0].ID != credIDIDCard || len(q.CredentialSets[0].Options) != 1 {
+		t.Errorf("id card only = %+v, want the id card alone", q)
+	}
+	q = stagingVCTs.proofingRequestQuery(ProofingRequest{Sources: []string{SourcePassport, SourceIdentityCard, SourcePersonalData}})
+	want := [][]string{{credIDPassport}, {credIDIDCard}, {credIDPersonalData}}
+	if len(q.CredentialSets) != 1 || !slices.EqualFunc(q.CredentialSets[0].Options, want, slices.Equal[[]string]) {
+		t.Errorf("options = %v, want any one of %v", q.CredentialSets, want)
+	}
+	if got := q.Credentials[2].Meta.VctValues; !slices.Equal(got, []string{"pbdf.gemeente.personalData"}) {
+		t.Errorf("personal data vct = %v", got)
+	}
+	q = stagingVCTs.proofingRequestQuery(ProofingRequest{})
+	if len(q.Credentials) != 3 || len(q.CredentialSets[0].Options) != 3 {
+		t.Errorf("no sources = %+v, want the passport, id card or residence permit", q)
+	}
+}
+
+// The personal data is asked its name and date of birth, never the photo, and
+// with the address the registered address is a second required set.
+func TestPersonalDataSource(t *testing.T) {
+	q := stagingVCTs.proofingRequestQuery(ProofingRequest{Sources: []string{SourcePersonalData}, Claims: []string{ClaimPhoto, "over18"}, Address: true})
+	var names []string
+	for _, c := range q.Credentials[0].Claims {
+		names = append(names, c.Path[0])
+	}
+	want := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth, "over18"}
+	if !slices.Equal(names, want) {
+		t.Errorf("claims = %v, want %v", names, want)
+	}
+	if len(q.CredentialSets) != 2 || q.Credentials[1].ID != credIDAddress {
+		t.Errorf("with the address = %+v", q)
+	}
+	p := Presentation{ByCredential: map[string]map[string]string{credIDPersonalData: {ClaimPersonalFamilyName: "Vries"}}}
+	if got, ok := p.PersonalData(); !ok || got.Claims[ClaimPersonalFamilyName] != "Vries" {
+		t.Errorf("PersonalData = %+v, %v", got, ok)
 	}
 }
 

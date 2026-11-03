@@ -36,7 +36,7 @@ const (
 	StepDocumentCapture Step = "document_capture"
 	// StepNFCRead is the ICAO 9303 chip read in the Idem app.
 	StepNFCRead Step = "nfc_read"
-	// StepDocumentPhoto is a photo of the printed data page, taken in the Idem app
+	// StepDocumentPhoto is a photo of the printed data page, taken in the browser
 	// and released as documentImage. It stands on its own, with or without the
 	// chip read.
 	StepDocumentPhoto Step = "document_photo"
@@ -64,8 +64,7 @@ var validSteps = map[Step]bool{
 // ValidStep reports whether s is a known Step.
 func ValidStep(s Step) bool { return validSteps[s] }
 
-// StepLocation names who runs the face step: the browser or the Idem app.
-// The chip read is always the app's: Web NFC cannot talk to an ICAO chip.
+// StepLocation names who runs a step: the browser or an app (Location).
 type StepLocation string
 
 const (
@@ -93,6 +92,60 @@ func (fd FlowDefinition) EffectiveSelfieLocation() StepLocation {
 	return fd.SelfieLocation
 }
 
+// Location is where fd runs step: the document scan and the chip read in the
+// app (Web NFC cannot talk to an ICAO chip), the face step where
+// SelfieLocation says, and the document photo in the browser, through the
+// document scan service.
+func (fd FlowDefinition) Location(step Step) StepLocation {
+	switch step {
+	case StepDocumentPhoto:
+		return LocationBrowser
+	case StepSelfie, StepLiveness, StepFaceMatch, StepFaceVerification:
+		return fd.EffectiveSelfieLocation()
+	}
+	return LocationNative
+}
+
+// BrowserOnly reports whether the browser runs every step of fd: no app is
+// chosen or needed. A flow locked to the Yivi app always needs it: its
+// disclosure follows the browser's steps.
+func (fd FlowDefinition) BrowserOnly() bool {
+	return !fd.YiviOnly() && !slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative })
+}
+
+// App is an app a subject proofs with (FlowDefinition.Apps).
+type App string
+
+const (
+	AppIdem App = "idem"
+	AppYivi App = "yivi"
+)
+
+// AllowsApp reports whether fd may run in app: every app when Apps is empty.
+func (fd FlowDefinition) AllowsApp(app App) bool {
+	return len(fd.Apps) == 0 || slices.Contains(fd.Apps, app)
+}
+
+// YiviOnly reports whether fd is locked to the Yivi app.
+func (fd FlowDefinition) YiviOnly() bool {
+	return len(fd.Apps) == 1 && fd.Apps[0] == AppYivi
+}
+
+// AcceptsPersonalData reports whether fd accepts the registered personal data
+// (DocumentKindPersonalData) as the person's identity, which only the Yivi
+// app shares: an Idem session reads one of the flow's documents instead.
+func (fd FlowDefinition) AcceptsPersonalData() bool {
+	return slices.ContainsFunc(fd.AcceptedDocumentTypes, isPersonalData)
+}
+
+// acceptedDocuments is AcceptedDocumentTypes without the personal data: the
+// documents accepted, any when empty.
+func (fd FlowDefinition) acceptedDocuments() []string {
+	return slices.DeleteFunc(slices.Clone(fd.AcceptedDocumentTypes), isPersonalData)
+}
+
+func isPersonalData(t string) bool { return strings.EqualFold(t, DocumentKindPersonalData) }
+
 // FaceProvider names what verifies the face step. Empty is the deployment's
 // default.
 type FaceProvider string
@@ -100,12 +153,16 @@ type FaceProvider string
 const (
 	FaceProviderRegula FaceProvider = "regula"
 	FaceProviderEngine FaceProvider = "engine"
+	// FaceProviderIDScan checks the face in the browser, on the document
+	// scan service's page right after the document photo: its liveness
+	// check, and its match against the photographed document's portrait.
+	FaceProviderIDScan FaceProvider = "idscan"
 )
 
 // ValidFaceProvider reports whether p is a known FaceProvider, including "".
 func ValidFaceProvider(p FaceProvider) bool {
 	switch p {
-	case "", FaceProviderRegula, FaceProviderEngine:
+	case "", FaceProviderRegula, FaceProviderEngine, FaceProviderIDScan:
 		return true
 	default:
 		return false
@@ -311,8 +368,10 @@ type FlowDefinition struct {
 	SelfieLocation StepLocation `json:"SelfieLocation"`
 	// FaceProvider is the face verifier; empty is the deployment default. Regula
 	// needs SelfieLocation native: only the Idem app runs a Regula liveness
-	// session.
+	// session. ID Scan needs the document photo and SelfieLocation browser.
 	FaceProvider FaceProvider `json:"FaceProvider"`
+	// Apps are the apps a session may run in; empty allows every app.
+	Apps []App `json:"Apps"`
 	// AcceptedDocumentTypes are the document codes ("P", ...) or kinds
 	// (DocumentKindPassport, ...) accepted; empty accepts any. A driving
 	// licence is DocumentTypeDrivingLicence; Validate refuses
@@ -453,7 +512,16 @@ const (
 	DocumentKindPassport        = "passport"
 	DocumentKindIdentityCard    = "identity_card"
 	DocumentKindResidencePermit = "residence_permit"
+	// DocumentKindPersonalData is no document: the registered personal data
+	// (BRP, loaded in the Yivi app with DigiD), accepted in AcceptedDocumentTypes
+	// as an identity the Yivi app may share instead of a document. A document
+	// photo is then tied to the person by name and date of birth.
+	DocumentKindPersonalData = "personal_data"
 )
+
+// documentKinds are the kinds of document a flow may accept; listing every
+// one accepts any document, as an empty list does.
+var documentKinds = []string{DocumentKindPassport, DocumentKindIdentityCard, DocumentKindResidencePermit, DocumentTypeDrivingLicence}
 
 // residencePermitCodes are the MRZ document codes issued residence permits
 // carry, as vcmrtd's td1DocumentType lists them.
@@ -493,8 +561,12 @@ func DrivingLicence(t string) bool {
 // accepts any. Case-insensitive: the flow editor uppercases every type,
 // drivers_license and residence_permit included.
 func (fd *FlowDefinition) AcceptsDocumentType(t, kind string) bool {
-	return len(fd.AcceptedDocumentTypes) == 0 ||
-		slices.ContainsFunc(fd.AcceptedDocumentTypes, func(a string) bool {
+	accepted := fd.acceptedDocuments()
+	everyKind := !slices.ContainsFunc(documentKinds, func(k string) bool {
+		return !slices.ContainsFunc(accepted, func(a string) bool { return strings.EqualFold(a, k) })
+	})
+	return len(accepted) == 0 || everyKind ||
+		slices.ContainsFunc(accepted, func(a string) bool {
 			return strings.EqualFold(a, t) || (kind != "" && strings.EqualFold(a, kind))
 		})
 }
@@ -558,6 +630,9 @@ func validate(fd FlowDefinition) error {
 	}
 	if fd.FaceProvider == FaceProviderRegula && fd.EffectiveSelfieLocation() != LocationNative {
 		return errors.New("flow: faceProvider regula requires selfieLocation native")
+	}
+	if fd.FaceProvider == FaceProviderIDScan && (!seenSteps[StepDocumentPhoto] || fd.EffectiveSelfieLocation() != LocationBrowser) {
+		return errors.New("flow: faceProvider idscan requires document_photo in steps and selfieLocation browser")
 	}
 
 	// A face match without the chip read is valid: it matches against the
@@ -658,11 +733,58 @@ func validate(fd FlowDefinition) error {
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {
 		return err
 	}
+	if err := validateApps(fd, seenSteps); err != nil {
+		return err
+	}
 	return validateAgeOver(fd, seenSteps)
 }
 
-// validateAgeOver refuses AttributeAgeOver without the chip read it is derived
-// from or an age to answer for, and an age without the attribute.
+// validateApps refuses an unknown or repeated app, personal data a flow's
+// apps cannot take (validatePersonalData), and a flow locked to the Idem app that leaves the app no
+// step.
+func validateApps(fd FlowDefinition, seenSteps map[Step]bool) error {
+	seen := map[App]bool{}
+	for _, app := range fd.Apps {
+		if app != AppIdem && app != AppYivi {
+			return fmt.Errorf("flow: unknown app %q", app)
+		}
+		if seen[app] {
+			return fmt.Errorf("flow: duplicate app %q", app)
+		}
+		seen[app] = true
+	}
+	if err := validatePersonalData(fd, seenSteps); err != nil {
+		return err
+	}
+	if len(fd.Apps) == 1 && fd.Apps[0] == AppIdem &&
+		!slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative }) {
+		return errors.New("flow: the Idem app runs no step of this flow, so it cannot be its only app")
+	}
+	return nil
+}
+
+// validatePersonalData refuses personal data on a flow the Yivi app does not
+// run, next to the Idem app with no document to read, or with an age check
+// on a document photo.
+func validatePersonalData(fd FlowDefinition, seenSteps map[Step]bool) error {
+	switch {
+	case !fd.AcceptsPersonalData():
+		return nil
+	case !fd.AllowsApp(AppYivi) || fd.BrowserOnly():
+		return errors.New("flow: personal_data is shared by the Yivi app alone: let the flow run in the Yivi app")
+	// The Idem app reads a document, and accepts any when none is listed.
+	case fd.AllowsApp(AppIdem) && len(fd.acceptedDocuments()) == 0:
+		return errors.New("flow: personal_data next to the Idem app needs a document type too: the Idem app reads a document and shares no personal data")
+	// The scan's date of birth ties it to the person, and an age check keeps none.
+	case seenSteps[StepDocumentPhoto] && fd.AgeOver != 0:
+		return errors.New("flow: personal_data with document_photo cannot check an age: the photographed document is tied to the person by its date of birth, which an age check does not keep")
+	}
+	return nil
+}
+
+// validateAgeOver refuses AttributeAgeOver without a step it is derived from
+// (the chip read, or the document photo's scan) or an age to answer for, and
+// an age without the attribute.
 func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 	if !slices.Contains(fd.RequestedAttributes, AttributeAgeOver) {
 		if fd.AgeOver != 0 {
@@ -670,8 +792,8 @@ func validateAgeOver(fd FlowDefinition, seenSteps map[Step]bool) error {
 		}
 		return nil
 	}
-	if !seenSteps[StepNFCRead] {
-		return fmt.Errorf("flow: %q requires nfc_read: the age is derived from the chip's date of birth", AttributeAgeOver)
+	if !seenSteps[StepNFCRead] && !seenSteps[StepDocumentPhoto] {
+		return fmt.Errorf("flow: %q requires nfc_read or document_photo: the age is derived from the document's date of birth", AttributeAgeOver)
 	}
 	if fd.AgeOver < minAgeOver || fd.AgeOver > maxAgeOver {
 		return fmt.Errorf("flow: ageOver must be between %d and %d", minAgeOver, maxAgeOver)

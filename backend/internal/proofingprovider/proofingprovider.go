@@ -41,9 +41,15 @@ type FlowSpec struct {
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`
-	// FaceProvider verifies the face step: "regula", "engine", or empty for
-	// the engine's default (Regula when configured).
-	FaceProvider             string             `json:"faceProvider,omitempty"`
+	// FaceProvider verifies the face step: "regula", "engine", "idscan" (in
+	// the browser, with the document photo), or empty for the engine's
+	// default (Regula when configured).
+	FaceProvider string `json:"faceProvider,omitempty"`
+	// Apps are the apps a session may run in ("idem", "yivi"); empty allows
+	// every app the flow suits.
+	Apps []string `json:"apps,omitempty"`
+	// AcceptedDocumentTypes may list "personal_data", the registered personal
+	// data the Yivi app shares in place of a document.
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
 	RequiredChecks           []string           `json:"requiredChecks,omitempty"`
@@ -80,6 +86,9 @@ type Flow struct {
 	Version   int       `json:"version"`
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"createdAt"`
+	// BrowserOnly is the engine's answer to whether the browser runs every
+	// step of the flow, so no app is chosen or needed.
+	BrowserOnly bool `json:"browserOnly"`
 }
 
 // SessionInput starts a proofing session. ClientReference is echoed back by the engine
@@ -161,6 +170,9 @@ type Result struct {
 	Name string
 	// App is where the Idem app's phone is; SessionStatus only.
 	App App
+	// AppDone is an Idem session whose app did every step it runs while a
+	// browser step (the document scan) is still to come; SessionStatus only.
+	AppDone bool
 	// ExpiresAt is when the session lapses as the engine holds it now:
 	// opening a session moves it later than the expiry it was created with.
 	// SessionStatus only; zero when the provider does not say.
@@ -205,8 +217,8 @@ type Identity struct {
 	// matched against, for a flow without the chip read; nil otherwise.
 	ReferencePhoto *Image
 	// DocumentImage and DocumentImageBack are the photos of the document's
-	// front and back (the document_photo step; no back for a passport), the
-	// printed BSN blurred under the tenant's policy.
+	// front and back (the document_photo step; a passport's back is its
+	// personal number page), the printed BSN blurred under the tenant's policy.
 	DocumentImage     *Image
 	DocumentImageBack *Image
 }
@@ -226,6 +238,103 @@ type Image struct {
 	Base64   string
 }
 
+// The scan service's tasks a DocumentScanFailure names.
+const (
+	DocumentScanTaskDocument     = "document_scan"
+	DocumentScanTaskFaceLiveness = "face_liveness"
+	DocumentScanTaskFaceMatch    = "face_match"
+)
+
+// DocumentScanFailure is a document scan that used up the scan service's own
+// attempts at Task (FailDocumentScan). Code is the service's code for the
+// document's last attempt, if any (such as expiration_criteria_not_met).
+type DocumentScanFailure struct {
+	Task     string
+	Code     string
+	Attempts int
+}
+
+// DocumentPhoto is the document_photo step's photos, taken in the browser by
+// a document scan service rather than by an app: the front and, for a
+// document that has one, the back. BSNRedacted is the scan service having
+// blacked out the printed BSN (its personal number) itself, so no BSN policy
+// needs a region to cover. Check is what the scan service found, which the
+// engine decides on and keeps in the session's result.
+type DocumentPhoto struct {
+	Front       Image
+	Back        *Image
+	BSNRedacted bool
+	Check       DocumentCheck
+	// Face is the scan service's face checks, for a flow whose face step it
+	// runs (FaceProvider idscan); nil otherwise.
+	Face *FaceCheck
+}
+
+// FaceCheck is a document scan service's face checks, in the engine's terms:
+// whether its liveness check passed, its score for the live face against the
+// document's portrait (nil when it gave none), and the live face.
+type FaceCheck struct {
+	LivenessPassed bool
+	MatchScore     *float64
+	Selfie         *Image
+}
+
+// DocumentCheck is a document scan service's result, in the engine's terms
+// rather than the service's.
+type DocumentCheck struct {
+	// Verdict is its judgement of whether the document is genuine, and Score
+	// the service's own score behind it (nil when it gave none).
+	Verdict DocumentVerdict
+	Score   *float64
+	// FieldsValid is whether every field it validated was valid, ZonesMatch
+	// whether every field it read from two zones (MRZ, printed text,
+	// barcode) read the same; nil when it validated or compared none.
+	FieldsValid *bool
+	ZonesMatch  *bool
+	// Document is what it read off the document.
+	Document ScannedDocument
+}
+
+// ScannedDocument is what a document scan service read off a document. Kind
+// is DocumentKindPassport, DocumentKindIdentityCard,
+// DocumentKindResidencePermit or DocumentKindDrivingLicence, empty when
+// unknown; dates are YYYY-MM-DD and states ICAO alpha-3 codes. A field it
+// did not read is empty, and PersonalNumber is only set for a flow that keeps
+// the BSN.
+type ScannedDocument struct {
+	Kind           string
+	IssuingState   string
+	Nationality    string
+	Number         string
+	Surname        string
+	GivenNames     string
+	DateOfBirth    string
+	DateOfExpiry   string
+	Sex            string
+	PersonalNumber string
+}
+
+// The kinds of document a ScannedDocument can be, as the engine's flows
+// accept them.
+const (
+	DocumentKindPassport        = "passport"
+	DocumentKindIdentityCard    = "identity_card"
+	DocumentKindResidencePermit = "residence_permit"
+	DocumentKindDrivingLicence  = "drivers_license"
+)
+
+// DocumentVerdict is a document scan service's judgement of whether a
+// document is genuine, in the engine's terms rather than the service's.
+type DocumentVerdict string
+
+const (
+	DocumentAuthentic DocumentVerdict = "authentic"
+	// DocumentDoubtful is a document the service could not call either way:
+	// a person decides.
+	DocumentDoubtful DocumentVerdict = "doubtful"
+	DocumentFake     DocumentVerdict = "fake"
+)
+
 // Evidence is the checks behind an Identity. Type is EvidenceEMRTD (the chip,
 // read by the Idem app), EvidenceYivi (a Yivi disclosure) or
 // EvidenceReferencePhoto (a live face against the relying party's photo). PassiveAuth and
@@ -243,6 +352,14 @@ type Evidence struct {
 	FaceMatch    *float64
 	// Liveness is passed, failed or not_performed.
 	Liveness string
+	// DocumentVerdict is the document scan service's judgement of the
+	// photographed document (authentic, doubtful or fake) and DocumentScore
+	// its score; DocumentFields and DocumentZones are CheckValid, CheckInvalid
+	// or CheckNotPerformed (DocumentCheck). Empty without a scanned document.
+	DocumentVerdict string
+	DocumentScore   *float64
+	DocumentFields  string
+	DocumentZones   string
 }
 
 const (
@@ -282,6 +399,9 @@ const (
 	MethodYivi Method = "yivi_app"
 	// MethodBrowser is the web device alone, with no app involved.
 	MethodBrowser Method = "browser"
+	// MethodPending starts a session with its flow, before the app is chosen:
+	// ChooseMethod sets the app and gives its QR code.
+	MethodPending Method = "pending"
 )
 
 // Reference is the subject's verified OpenID4VP disclosure, which decides a
@@ -295,7 +415,8 @@ type Reference struct {
 }
 
 // YiviDisclosure is the engine taking a Reference: OK approved the session,
-// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed).
+// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed,
+// face_not_verified).
 type YiviDisclosure struct {
 	OK   bool
 	Code string
@@ -322,6 +443,11 @@ type RejectedError struct {
 // CodeDeviceActive is the engine refusing a handover while the app holding the
 // session is still active: the subject carries on there.
 const CodeDeviceActive = "device_active"
+
+// CodeDocumentPhotoMissing is the engine refusing to decide a session whose
+// flow takes a document photo before the browser submitted it
+// (SubmitDocumentPhoto).
+const CodeDocumentPhotoMissing = "document_photo_missing"
 
 func (e *RejectedError) Error() string {
 	return fmt.Sprintf("proofingprovider: rejected (status %d): %s", e.Status, e.Message)

@@ -194,6 +194,13 @@ const (
 	IdentityProofingSessionCreated       = "identity_proofing.session_created"
 	IdentityProofingSessionStarted       = "identity_proofing.session_started"
 	IdentityProofingSessionHandover      = "identity_proofing.session_handover"
+	// IdentityProofingDocumentScanStarted is the browser starting the
+	// document scan service for the document photo; its result is in the
+	// session's own log.
+	IdentityProofingDocumentScanStarted = "identity_proofing.document_scan_started"
+	// IdentityProofingDocumentScanFailed is the scan using up the document
+	// scan service's own attempts at a task, which rejects the session.
+	IdentityProofingDocumentScanFailed = "identity_proofing.document_scan_failed"
 	// The device trail of a session, as the engine reports it: which device
 	// claimed it, took it over, was handed a code, failed a claim, or was
 	// refused.

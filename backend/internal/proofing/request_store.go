@@ -46,7 +46,8 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
 	COALESCE(r.address_review, ''), r.address_reviewed_at,
-	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''), ` + purgeAtColumn
+	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''),
+	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -241,7 +242,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
+		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -260,19 +262,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	if r.expectedBirthDate, err = s.openSealed(r.ID, "expected birth date", birthDateCT); err != nil {
 		return Request{}, err
 	}
-	if addressCT != nil {
-		addr, err := s.decryptAddress(r.ID, addressCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectAddress = addr
-	}
-	if employmentCT != nil {
-		emp, err := s.decryptEmployment(r.ID, employmentCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectEmployment = emp
+	if err := s.openSubjectDetails(&r, addressCT, employmentCT); err != nil {
+		return Request{}, err
 	}
 	if sessionID != nil {
 		if s.cipher == nil {
@@ -291,6 +282,26 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+// openSubjectDetails decrypts the subject's address and employment statement
+// into r, each where the request holds one.
+func (s *RequestStore) openSubjectDetails(r *Request, addressCT, employmentCT []byte) error {
+	if addressCT != nil {
+		addr, err := s.decryptAddress(r.ID, addressCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectAddress = addr
+	}
+	if employmentCT != nil {
+		emp, err := s.decryptEmployment(r.ID, employmentCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectEmployment = emp
+	}
+	return nil
 }
 
 // nameRetention is how long a request's proofed name is kept, and the flow's
@@ -410,17 +421,18 @@ func (s *RequestStore) Create(ctx context.Context, in NewStoredRequest) (Request
 			(id, organization_id, requested_by, subject_user_id, subject_kind, subject_name, subject_email,
 			 flow_id, flow_name, flow_version, link_expires_at, api_key_id, method, required_assurance_level,
 			 link_token_hash, redirect_url, language, diplomas, expects_subject, expected_birth_date_ciphertext,
-			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address, employment)
+			 reference_photo_ciphertext, reference_photo_mime, flow_kind, retention_override_seconds, address, employment,
+			 document_scan)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
 				$15, NULLIF($16, ''), NULLIF($17, ''), COALESCE(NULLIF($18, ''), 'off'),
 				$19, $20, $21, $22, COALESCE(NULLIF($23, ''), 'identity'), NULLIF($24, 0), COALESCE(NULLIF($25, ''), 'off'),
-				COALESCE(NULLIF($26, ''), 'off'))`
+				COALESCE(NULLIF($26, ''), 'off'), $27)`
 		if _, err := q.Exec(ctx, insert, in.ID, in.OrgID, in.RequestedBy, in.Subject.UserID, string(in.Subject.Kind),
 			in.Subject.Name, in.Subject.Email, in.Flow.ID, in.Flow.Name, in.Flow.Version, in.LinkExpiresAt,
 			in.APIKeyID, string(in.Method), in.Flow.RequiredAssuranceLevel, in.LinkTokenHash,
 			in.RedirectURL, string(in.Language), string(in.Diplomas), birthDateCT != nil, birthDateCT,
 			photoCT, photoMime, string(in.FlowKind), in.Flow.RetentionOverrideSeconds, string(in.Address),
-			string(in.Employment)); err != nil {
+			string(in.Employment), takesDocumentPhoto(in.Flow)); err != nil {
 			return fmt.Errorf("proofing: create request org %s: %w", in.OrgID, err)
 		}
 
@@ -472,6 +484,9 @@ func (in NewStoredRequest) auditFields() map[string]any {
 	}
 	if in.Employment.asked() {
 		fields["employment"] = string(in.Employment)
+	}
+	if takesDocumentPhoto(in.Flow) {
+		fields["documentScan"] = true
 	}
 	if in.Subject.BirthDate != "" {
 		fields["expectsSubject"] = true
@@ -886,19 +901,25 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
+	out, err := s.scanRequests(rows)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
+// scanRequests reads every row of rows, and closes them.
+func (s *RequestStore) scanRequests(rows pgx.Rows) ([]Request, error) {
 	defer rows.Close()
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
+			return nil, err
 		}
 		out = append(out, req)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ListExternalPage returns up to limit of the org's external requests, newest
@@ -916,16 +937,8 @@ func (s *RequestStore) ListExternalPage(ctx context.Context, orgID uuid.UUID, af
 	if err != nil {
 		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
-	defer rows.Close()
-	out := []Request{}
-	for rows.Next() {
-		req, err := s.scanRequest(rows)
-		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
-		}
-		out = append(out, req)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := s.scanRequests(rows)
+	if err != nil {
 		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	return out, nil
@@ -948,7 +961,7 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 		const update = `UPDATE identity_proofing_requests SET
 				ips_session_id = $2, ips_session_token_ciphertext = $3, ips_session_expires_at = $4,
 				ips_session_ttl_seconds = NULLIF($7, 0),
-				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = COALESCE(NULLIF($6, ''), method),
+				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = CASE WHEN $6 = '' THEN NULL ELSE $6 END,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, updated_at = now()
 			WHERE id = $1 AND ips_session_id IS NULL AND status = 'pending'
 				AND purged_at IS NULL AND cancelled_at IS NULL AND ips_session_ended_at IS NULL`
@@ -990,6 +1003,80 @@ func (s *RequestStore) SetYiviTransaction(ctx context.Context, req Request, sess
 	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, transactionID)
 	if err != nil {
 		return fmt.Errorf("proofing: set yivi transaction request %s: %w", req.ID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionOver
+	}
+	return nil
+}
+
+// SetDocumentScanTransaction keeps the document scan service's transaction
+// the page started for the request's session, replacing a previous one (a
+// retry). ErrSessionOver once the request moved to another session or
+// settled. Audited identity_proofing.document_scan_started.
+func (s *RequestStore) SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error {
+	const update = `UPDATE identity_proofing_requests SET document_scan_transaction_id = $3, updated_at = now()
+		WHERE id = $1 AND ips_session_id = $2 AND status IN ('pending', 'in_progress') AND purged_at IS NULL`
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		tag, err := q.Exec(ctx, update, req.ID, sessionID, transactionID)
+		if err != nil {
+			return fmt.Errorf("proofing: set document scan transaction request %s: %w", req.ID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrSessionOver
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingDocumentScanStarted,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(withMethod(map[string]any{"status": string(req.Status)}, req.Method))))
+	})
+}
+
+// RecordDocumentScanFailed audits the request's document scan using up the
+// scan service's own attempts at failure's task: which task, after how many
+// attempts, and the service's code. An erased request records nothing.
+func (s *RequestStore) RecordDocumentScanFailed(ctx context.Context, req Request, failure proofingprovider.DocumentScanFailure) error {
+	fields := map[string]any{"task": failure.Task, "attempts": failure.Attempts}
+	if failure.Code != "" {
+		fields["scanCode"] = failure.Code
+	}
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return err
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingDocumentScanFailed,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(withMethod(fields, req.Method))))
+	})
+}
+
+// SetMethod records the app the subject chose for the request's session, one
+// that started without (proofingprovider.MethodPending). ErrSessionOver once
+// the request moved to another session, settled, or has its app already.
+func (s *RequestStore) SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error {
+	const update = `UPDATE identity_proofing_requests SET method = $3, updated_at = now()
+		WHERE id = $1 AND ips_session_id = $2 AND method IS NULL
+			AND status IN ('pending', 'in_progress') AND purged_at IS NULL`
+	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, string(method))
+	if err != nil {
+		return fmt.Errorf("proofing: set method request %s: %w", req.ID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionOver
+	}
+	return nil
+}
+
+// MarkDocumentScanned records that the photos of transactionID reached the
+// engine for the request's session. A settled request is marked too: the
+// engine decides a browser-only session on these photos, and its notice can
+// settle the request before this runs. ErrSessionOver once the request moved to
+// another session or started another scan meanwhile.
+func (s *RequestStore) MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error {
+	const update = `UPDATE identity_proofing_requests SET document_scanned_at = COALESCE(document_scanned_at, now()), updated_at = now()
+		WHERE id = $1 AND ips_session_id = $2 AND document_scan_transaction_id = $3 AND purged_at IS NULL`
+	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, transactionID)
+	if err != nil {
+		return fmt.Errorf("proofing: mark document scanned request %s: %w", req.ID, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrSessionOver
@@ -1202,7 +1289,8 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 			SET purged_at = now(), subject_name = '', subject_email = '',
 				proofed_name_ciphertext = NULL, proofed_name_purge_after = NULL, expected_birth_date_ciphertext = NULL,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, data_export_until = NULL,
-				redirect_url = NULL, yivi_transaction_id = NULL, identity_match_key = NULL, address_ciphertext = NULL,
+				redirect_url = NULL, yivi_transaction_id = NULL, document_scan_transaction_id = NULL,
+				identity_match_key = NULL, address_ciphertext = NULL,
 				employment_ciphertext = NULL,
 				registered_address_ciphertext = NULL, address_review = NULLIF(address_review, 'pending'),
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()

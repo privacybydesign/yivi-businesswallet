@@ -16,6 +16,7 @@ import {
   isInvalidColor,
   proofingErrorMessage,
 } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { useLogoPreview } from "../lib/use-logo-preview";
 import { absoluteApiUrl } from "../api/http";
 import { Button, Card, Select } from "../ui";
@@ -83,15 +84,16 @@ export function BrandingPanel({
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
 
-  if (settings.isPending) {
-    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
-  }
-  if (settings.isError) {
+  const error = blockingError(settings);
+  if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(settings.error, t)}
+        {proofingErrorMessage(error, t)}
       </p>
     );
+  }
+  if (settings.data === undefined) {
+    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
   }
   return <BrandingTab slug={slug} orgName={orgName} settings={settings.data} />;
 }

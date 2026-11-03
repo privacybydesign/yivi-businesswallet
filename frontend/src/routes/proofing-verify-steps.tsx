@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -12,6 +13,9 @@ import type { TFunction } from "i18next";
 import * as React from "react";
 import {
   useNewClaimLinkMutation,
+  useChooseMethodMutation,
+  useFinishDocumentScanMutation,
+  useStartDocumentScanMutation,
   useProofingAppQuery,
   useProofingProgressQuery,
   useYiviDisclosureQuery,
@@ -35,6 +39,7 @@ import type {
   HostedDiploma,
   HostedLegalRetention,
   ProofingApp,
+  ProofingAppMethod,
   ProofingMethod,
   ProofingProgress,
   ProofingYiviStart,
@@ -46,6 +51,8 @@ import {
   ATTRIBUTE_DOCUMENT,
   addressLookup,
   diplomaRejectionReason,
+  documentScanMessage,
+  isProofingLive,
   diplomaStepDone,
   employmentOwed,
   employmentRejectionReason,
@@ -59,14 +66,23 @@ import {
   dataRequestRefusal,
   reasonIn,
   secondsUntil,
+  sessionStage,
   sessionView,
+  pollFailedForGood,
   verifyErrorMessage,
 } from "../lib/identity-proofing";
-import type { RequestedAttribute } from "../lib/identity-proofing";
+import type {
+  RequestedAttribute,
+  SessionStage,
+} from "../lib/identity-proofing";
 import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { legalReasonIn } from "../lib/legal-retention";
-import { yiviUniversalLink } from "../lib/yivi-universal-link";
+import {
+  YIVI_APP_STORE_URL,
+  YIVI_PLAY_STORE_URL,
+  yiviUniversalLink,
+} from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
@@ -133,12 +149,12 @@ const ATTRIBUTE_ICONS: Record<RequestedAttribute, IconName> = {
   biometrics: "valid",
 };
 
-const METHOD_ICONS: Record<ProofingMethod, IconName> = {
+const METHOD_ICONS: Record<ProofingAppMethod, IconName> = {
   yivi_app: "scan_qrcode",
   idem_app: "phone",
 };
 
-const METHOD_KEYS: Record<ProofingMethod, "yivi" | "idem"> = {
+const METHOD_KEYS: Record<ProofingAppMethod, "yivi" | "idem"> = {
   yivi_app: "yivi",
   idem_app: "idem",
 };
@@ -160,19 +176,27 @@ function StepHeading({
   );
 }
 
-// What is collected. Continue only moves on to the app step: nothing starts
-// until the person taps an app there.
+// What is collected. Continue starts the session, starting while it is
+// created; the app is chosen inside it.
 export function Overview({
   org,
   flow,
+  onlyApp,
   onContinue,
   cancel,
+  starting = false,
+  error,
 }: Readonly<{
   org: VerifyOrg;
   flow: VerifyFlowInfo;
+  // The one app the flow allows: the overview names it, as there is no app
+  // step to pick it.
+  onlyApp?: ProofingAppMethod;
   onContinue: () => void;
   // A way out beside Continue, e.g. back to the overview; none when absent.
   cancel?: React.ReactNode;
+  starting?: boolean;
+  error?: string;
 }>): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const name = org.branding.displayName || org.name;
@@ -232,6 +256,15 @@ export function Overview({
         <p className={HINT}>
           {t("identityProofing.onScreen.overview.intro", { name })}
         </p>
+        {onlyApp && (
+          <p className={HINT}>
+            {t("identityProofing.onScreen.method.only", {
+              app: t(
+                `identityProofing.onScreen.method.${METHOD_KEYS[onlyApp]}.title`,
+              ),
+            })}
+          </p>
+        )}
       </div>
       {items.length === 0 ? (
         <p className={HINT}>{t("identityProofing.onScreen.overview.noData")}</p>
@@ -268,9 +301,14 @@ export function Overview({
           )}
         </div>
       )}
+      {error && (
+        <p role="alert" className={ERROR}>
+          {error}
+        </p>
+      )}
       <div className="flex flex-wrap justify-end gap-2.5">
         {cancel}
-        <Button size="lg" onClick={onContinue}>
+        <Button size="lg" loading={starting} onClick={onContinue}>
           {t("identityProofing.onScreen.overview.continue")}
         </Button>
       </div>
@@ -278,21 +316,25 @@ export function Overview({
   );
 }
 
-// The app step: tapping an app starts the session in it. With one app
-// (methodChoices) the step still shows, with that app alone.
+// The app step: tapping an app starts the session in it. A flow with one app
+// has none (firstMethod).
 export function MethodChoice({
   methods,
+  yiviPersonalData = false,
   picked,
   onChoose,
   onBack,
   starting,
   error,
 }: Readonly<{
-  methods: ProofingMethod[];
+  methods: ProofingAppMethod[];
+  // The Yivi app shares the registered personal data, not a document.
+  yiviPersonalData?: boolean;
   // The app last tapped: it shows as starting while the session is created.
   picked: ProofingMethod;
-  onChoose: (method: ProofingMethod) => void;
-  onBack: () => void;
+  onChoose: (method: ProofingAppMethod) => void;
+  // Absent once the session runs: there is no going back to the overview.
+  onBack?: () => void;
   starting: boolean;
   error?: string;
 }>): React.JSX.Element {
@@ -326,9 +368,13 @@ export function MethodChoice({
                   )}
                 </span>
                 <span className="text-ink-soft text-[14px] leading-[21px]">
-                  {t(
-                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
-                  )}
+                  {value === "yivi_app" && yiviPersonalData
+                    ? t(
+                        "identityProofing.onScreen.method.yivi.detailPersonalData",
+                      )
+                    : t(
+                        `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
+                      )}
                 </span>
               </span>
               {busy ? (
@@ -352,19 +398,21 @@ export function MethodChoice({
           {error}
         </p>
       )}
-      <div>
-        {/* Not while a session is created: its success moves the page on
-            to that session, from whichever step is showing. */}
-        <Button
-          variant="secondary"
-          size="lg"
-          icon="arrow_back"
-          disabled={starting}
-          onClick={onBack}
-        >
-          {t("identityProofing.onScreen.method.back")}
-        </Button>
-      </div>
+      {onBack && (
+        <div>
+          {/* Not while a session is created: its success moves the page on
+              to that session, from whichever step is showing. */}
+          <Button
+            variant="secondary"
+            size="lg"
+            icon="arrow_back"
+            disabled={starting}
+            onClick={onBack}
+          >
+            {t("identityProofing.onScreen.method.back")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -437,6 +485,10 @@ export function Session({
   deepLink,
   deepLinkExpiresAt,
   method,
+  methods = [],
+  yiviPersonalData = false,
+  onStage,
+  onMethod,
   onRestart,
   outcomeActions,
   renderEnded,
@@ -456,6 +508,15 @@ export function Session({
   deepLink?: string;
   deepLinkExpiresAt?: string;
   method: ProofingMethod;
+  // The apps to choose from once the document photo is in, for a session
+  // started with the flow (method pending).
+  methods?: ProofingAppMethod[];
+  // The Yivi app shares the registered personal data (MethodChoice).
+  yiviPersonalData?: boolean;
+  // Told where the session stands, for the page's stepper.
+  onStage?: (stage: SessionStage) => void;
+  // Told the app picked in the session (method pending).
+  onMethod?: (method: ProofingAppMethod) => void;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
   renderEnded: (progress: ProofingProgress) => React.ReactNode;
@@ -539,6 +600,29 @@ export function Session({
     }
   }, [over, onEnded]);
   const [link, setLink] = useState(deepLink);
+  const [chosen, setChosen] = useState(method);
+  const [picked, setPicked] = useState<ProofingAppMethod>();
+  const [appLink, setAppLink] = useState({
+    deepLink,
+    expiresAt: deepLinkExpiresAt,
+  });
+  const choose = useChooseMethodMutation(target);
+  // The Yivi app is done and its disclosure waits for the ID scan.
+  const [yiviDone, setYiviDone] = useState(false);
+  // The ID scan comes after the app's part: once the Yivi app or the Idem
+  // app did its part, or at once with no app.
+  const scanning =
+    current.documentScan === "pending" &&
+    isProofingLive(current.status) &&
+    (chosen === "browser" || current.appDone === true || yiviDone);
+  const stage = sessionStage({
+    ended: showsOutcome || over,
+    method: chosen,
+    scanning,
+  });
+  useEffect(() => {
+    onStage?.(stage);
+  }, [stage, onStage]);
   const fresh = useNewClaimLinkMutation(target);
   const newCode = (
     <div className="flex flex-col items-center gap-1">
@@ -617,6 +701,53 @@ export function Session({
     );
   }
 
+  // The app is chosen first: it gives the QR code, and the ID scan follows.
+  if (chosen === "pending") {
+    return (
+      <MethodChoice
+        methods={methods}
+        yiviPersonalData={yiviPersonalData}
+        picked={picked ?? chosen}
+        onChoose={(app) => {
+          setPicked(app);
+          choose.mutate(app, {
+            onSuccess: (out) => {
+              setAppLink({
+                deepLink: out.deepLink,
+                expiresAt: out.deepLinkExpiresAt,
+              });
+              setLink(out.deepLink);
+              setChosen(app);
+              onMethod?.(app);
+            },
+          });
+        }}
+        starting={choose.isPending}
+        error={
+          choose.isError
+            ? verifyErrorMessage(target, choose.error, t)
+            : undefined
+        }
+      />
+    );
+  }
+
+  // The ID scan follows the app's part, in the browser.
+  if (scanning) {
+    return (
+      <DocumentScanStep target={target} sessionSecondsLeft={secondsLeft} />
+    );
+  }
+
+  // With no app, the photo decides the session: its outcome is on its way.
+  if (chosen === "browser") {
+    return (
+      <p className={`${HINT} text-center`}>
+        {t("identityProofing.onScreen.documentScan.finishing")}
+      </p>
+    );
+  }
+
   // The page's own link, which lasts the session: the hosted page's view,
   // and the on-screen one's when where the phone is cannot be read.
   const manualIdem = link ? (
@@ -646,30 +777,200 @@ export function Session({
 
   return (
     <div className="flex flex-col items-center gap-4">
-      {method === "yivi_app" && (
+      {chosen === "yivi_app" && (
         <YiviSession
           target={target}
           sessionSecondsLeft={secondsLeft}
           onRestart={onRestart}
+          onWaitsForDocumentScan={() => setYiviDone(true)}
         />
       )}
-      {method !== "yivi_app" && target.kind === "request" && (
+      {chosen !== "yivi_app" && target.kind === "request" && (
         <IdemOnScreen
           target={target}
-          deepLink={deepLink}
-          deepLinkExpiresAt={deepLinkExpiresAt}
+          deepLink={appLink.deepLink}
+          deepLinkExpiresAt={appLink.expiresAt}
           sessionSecondsLeft={secondsLeft}
           fallback={manualIdem}
         />
       )}
-      {method !== "yivi_app" && target.kind !== "request" && manualIdem}
+      {chosen !== "yivi_app" && target.kind !== "request" && manualIdem}
       {current.status === "in_progress" &&
-        method === "idem_app" &&
+        chosen === "idem_app" &&
         target.kind === "hosted" && (
           <p className="text-link text-[13px] font-semibold">
             {t("identityProofing.onScreen.scan.inProgress")}
           </p>
         )}
+    </div>
+  );
+}
+
+// The ID scan's frame: CM.com's page needs at least this width, and this
+// height fits its steps. On a narrower screen it takes the full width.
+const DOCUMENT_SCAN_FRAME_MIN_WIDTH = 650;
+const DOCUMENT_SCAN_FRAME_HEIGHT = 600;
+
+// Widens a verify page while the ID scan's frame shows: the frame's 650 px
+// plus the card's and the page's padding.
+export const DOCUMENT_SCAN_WIDE_PAGE =
+  "has-[[data-document-scan]]:max-w-[730px]";
+
+// The document photo, taken in the browser on CM.com's ID scan page, embedded
+// here: the page posts this one its transaction and result when done
+// (documentScanMessage), and the result is handed to the backend once.
+function DocumentScanStep({
+  target,
+  sessionSecondsLeft,
+}: Readonly<{
+  target: VerifyTarget;
+  sessionSecondsLeft: number;
+}>): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const start = useStartDocumentScanMutation(target);
+  const finish = useFinishDocumentScanMutation(target);
+  const { mutate: finishScan } = finish;
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [unfinished, setUnfinished] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  // The start's own outcome, not the mutation's state (see YiviSession): a
+  // start made as the step mounts is lost to the mutation's state when
+  // StrictMode remounts it.
+  const [scan, setScan] = useState<{ url?: string; error?: Error }>({});
+  const [starting, setStarting] = useState(true);
+  const scanUrl = scan.url;
+  const showsFrame = scanUrl !== undefined && !unfinished && finish.isIdle;
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const { mutateAsync: startScan } = start;
+  const begin = useCallback((): void => {
+    setStarting(true);
+    setScan({});
+    setUnfinished(false);
+    setLoaded(false);
+    startScan({ locale })
+      .then(
+        ({ url }) => setScan({ url }),
+        (error: unknown) =>
+          setScan({
+            error: error instanceof Error ? error : new Error(String(error)),
+          }),
+      )
+      .finally(() => setStarting(false));
+  }, [startScan, locale]);
+  // Started as the step shows, so CM's page loads while the person reads
+  // what to do; once only, as each start is a new transaction.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    begin();
+  }, [begin]);
+  useEffect(() => {
+    if (!showsFrame) return;
+    const scanOrigin = new URL(scanUrl).origin;
+    function onMessage(event: MessageEvent): void {
+      if (event.origin !== scanOrigin) return;
+      const scan = documentScanMessage(
+        event,
+        scanUrl!,
+        frame.current?.contentWindow ?? null,
+      );
+      if (scan?.kind === "finished") {
+        finishScan({
+          transactionId: scan.transactionId,
+          resultId: scan.resultId,
+        });
+      } else if (scan) {
+        setUnfinished(true);
+        finishScan({ transactionId: scan.transactionId });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [showsFrame, scanUrl, finishScan]);
+
+  if (finish.isPending || finish.isSuccess) {
+    return (
+      <output className={`${HINT} block text-center`}>
+        {t("identityProofing.onScreen.documentScan.finishing")}
+      </output>
+    );
+  }
+  function retry(): void {
+    finish.reset();
+    begin();
+  }
+  let problem: string | undefined;
+  if (scan.error) {
+    problem = verifyErrorMessage(target, scan.error, t);
+  } else if (unfinished) {
+    // Attempts left: the backend answers document_scan_failed, and a new
+    // scan gives the person another go.
+    problem = t("identityProofing.onScreen.documentScan.cancelled");
+  } else if (finish.isError) {
+    problem = verifyErrorMessage(target, finish.error, t);
+  }
+  return (
+    <div className="flex flex-col items-center gap-4 text-center">
+      <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
+        <Icon name="personal" size={24} />
+      </span>
+      <StepHeading>
+        {t("identityProofing.onScreen.documentScan.heading")}
+      </StepHeading>
+      <p className={HINT}>{t("identityProofing.onScreen.documentScan.hint")}</p>
+      <p className={HINT}>
+        {t("identityProofing.onScreen.documentScan.passportHint")}
+      </p>
+      {starting || showsFrame ? (
+        <div
+          className="relative w-full"
+          style={{
+            minWidth: `min(${DOCUMENT_SCAN_FRAME_MIN_WIDTH}px, 100%)`,
+            height: DOCUMENT_SCAN_FRAME_HEIGHT,
+          }}
+        >
+          {showsFrame && (
+            <iframe
+              ref={frame}
+              src={scanUrl}
+              title={t("identityProofing.onScreen.documentScan.frameTitle")}
+              allow="camera"
+              data-document-scan=""
+              onLoad={() => setLoaded(true)}
+              className="rounded-yivi border-line h-full w-full border"
+            />
+          )}
+          {/* Until CM's page has loaded, so the step never looks stuck. */}
+          {!loaded && (
+            <output className="rounded-yivi border-line bg-surface absolute inset-0 flex flex-col items-center justify-center gap-3 border">
+              <span
+                aria-hidden="true"
+                className="text-ink h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent"
+              />
+              <span className={HINT}>
+                {t("identityProofing.onScreen.documentScan.loading")}
+              </span>
+            </output>
+          )}
+        </div>
+      ) : (
+        <>
+          {problem && (
+            <p role="alert" className={ERROR}>
+              {problem}
+            </p>
+          )}
+          <Button size="lg" loading={starting} onClick={retry}>
+            {t(
+              problem
+                ? "identityProofing.onScreen.documentScan.retry"
+                : "identityProofing.onScreen.documentScan.start",
+            )}
+          </Button>
+        </>
+      )}
+      <Countdown seconds={sessionSecondsLeft} />
     </div>
   );
 }
@@ -1488,10 +1789,13 @@ function YiviSession({
   target,
   sessionSecondsLeft,
   onRestart,
+  onWaitsForDocumentScan,
 }: Readonly<{
   target: VerifyTarget;
   sessionSecondsLeft: number;
   onRestart?: () => void;
+  // Told once the person finished in the Yivi app and the ID scan is next.
+  onWaitsForDocumentScan?: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const { mutateAsync } = useStartProofingYiviMutation(target);
@@ -1524,6 +1828,12 @@ function YiviSession({
     target,
     start.data !== undefined && secondsLeft > 0,
   );
+  const waitsForScan = disclosure.data?.waitsForDocumentScan === true;
+  useEffect(() => {
+    if (waitsForScan) {
+      onWaitsForDocumentScan?.();
+    }
+  }, [waitsForScan, onWaitsForDocumentScan]);
 
   if (start.error) {
     return (
@@ -1533,7 +1843,7 @@ function YiviSession({
       />
     );
   }
-  if (disclosure.isError) {
+  if (pollFailedForGood(disclosure.error)) {
     return (
       <Failed
         message={verifyErrorMessage(target, disclosure.error, t)}
@@ -1586,6 +1896,26 @@ function YiviSession({
           {t("identityProofing.onScreen.scan.openYivi")}
         </a>
       )}
+      <p className={`${HINT} text-center`}>
+        {t("identityProofing.onScreen.scan.getYivi")}{" "}
+        <a
+          href={YIVI_APP_STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link font-semibold hover:underline"
+        >
+          {t("identityProofing.onScreen.scan.appStore")}
+        </a>
+        {" · "}
+        <a
+          href={YIVI_PLAY_STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link font-semibold hover:underline"
+        >
+          {t("identityProofing.onScreen.scan.playStore")}
+        </a>
+      </p>
       {start.data && <Countdown seconds={secondsLeft} />}
     </>
   );
@@ -1597,6 +1927,9 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
   }
   if (code === "age_not_disclosed") {
     return t("identityProofing.onScreen.yiviCodes.ageNotDisclosed");
+  }
+  if (code === "face_not_verified") {
+    return t("identityProofing.onScreen.yiviCodes.faceNotVerified");
   }
   return code ?? t("identityProofing.errors.generic");
 }

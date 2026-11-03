@@ -14,6 +14,7 @@ import type {
 } from "../api/identity-proofing";
 import { SUPPORTED_LANGUAGES } from "../i18n";
 import { errorCode } from "../lib/api-error";
+import { blockingError } from "../lib/query-state";
 import {
   effectiveBranding,
   hostedDraft,
@@ -52,11 +53,12 @@ export function FlowHostedSettings({
   const { t } = useTranslation();
   const settings = useProofingFlowHostedQuery(slug, flow.id);
 
-  if (settings.isPending) {
-    return <p className={HINT}>{t("common.loading")}</p>;
+  const error = blockingError(settings);
+  if (error !== null) {
+    return <p className={ERROR}>{proofingErrorMessage(error, t)}</p>;
   }
-  if (settings.isError) {
-    return <p className={ERROR}>{proofingErrorMessage(settings.error, t)}</p>;
+  if (settings.data === undefined) {
+    return <p className={HINT}>{t("common.loading")}</p>;
   }
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
@@ -318,14 +320,15 @@ function HostedPreview({
   const settings = useProofingSettingsQuery(slug);
   const own = useProofingFlowBrandingQuery(slug, flow.id);
 
-  if (org.isError || settings.isError || own.isError) {
-    return (
-      <p className={ERROR}>
-        {proofingErrorMessage(settings.error ?? org.error ?? own.error, t)}
-      </p>
-    );
+  const error = blockingError(settings, org, own);
+  if (error !== null) {
+    return <p className={ERROR}>{proofingErrorMessage(error, t)}</p>;
   }
-  if (org.isPending || settings.isPending || own.isPending) {
+  if (
+    org.data === undefined ||
+    settings.data === undefined ||
+    own.data === undefined
+  ) {
     return <p className={HINT}>{t("common.loading")}</p>;
   }
   const branding = effectiveBranding(settings.data.branding, own.data);

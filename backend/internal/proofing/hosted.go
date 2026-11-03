@@ -166,6 +166,9 @@ func (s *Service) HostedStatus(ctx context.Context, token string) (Request, erro
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Request{}, err
 	}
+	if req, err = s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req)); err != nil {
+		return Request{}, err
+	}
 	return s.withLegalNotice(ctx, req)
 }
 
@@ -229,9 +232,6 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		}
 		return Sent{}, ErrSessionOver
 	}
-	if method != proofingprovider.MethodIdem && method != proofingprovider.MethodYivi {
-		return Sent{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
-	}
 	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil {
 		return Sent{}, err
@@ -243,8 +243,16 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if !externalCompletable(flow) {
 		return Sent{}, ErrFlowNotCompletable
 	}
-	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+	if method, err = sessionMethod(flow, method); err != nil {
+		return Sent{}, err
+	}
+	// document_scan was fixed at the send: a flow that gained or lost the
+	// photo since has a page that would never ask for it, or never get it.
+	if takesDocumentPhoto(flow) != req.DocumentScan {
+		return Sent{}, ErrFlowNotCompletable
+	}
+	if takesDocumentPhoto(flow) && s.documentScanner == nil {
+		return Sent{}, ErrNoDocumentScanner
 	}
 	// The reference photo was held for this start; a flow that needs one
 	// it lacks (the flow changed since the send) cannot run.
@@ -272,7 +280,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		return Sent{}, s.discardSession(ctx, tenant, sess,
 			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID))
 	}
-	req.Method = method
+	req.Method = storedMethod(method)
 	attached, err := s.requests.AttachSession(ctx, req, sess)
 	if err != nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess, err)

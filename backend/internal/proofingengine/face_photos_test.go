@@ -74,7 +74,7 @@ func TestBoundLoginResultReleasesPhotoOnlyWhenKept(t *testing.T) {
 		"kept, not asked": {keepFaces, []string{attrDocument}, false},
 	} {
 		sess := session.Session{RequestedAttributes: tc.requested}
-		result := buildBoundLoginResult(sess, disclosureInfo{}, s.disclosedPhoto(sess, face.ImageBase64, tc.redaction), nil)
+		result := buildBoundLoginResult(sess, disclosureInfo{}, documentInfo{}, s.disclosedPhoto(sess, face.ImageBase64, tc.redaction), nil)
 		if _, got := result["photo"]; got != tc.kept {
 			t.Errorf("%s: photo released = %v, want %v", name, got, tc.kept)
 		}
@@ -87,37 +87,44 @@ func TestBoundLoginResultReleasesPhotoOnlyWhenKept(t *testing.T) {
 // A finished session's stored evidence keeps no face photo by default: the
 // selfie's picture and the chip photo go, the selfie's verdicts stay.
 func TestRedactStepsDropsFacePhotosByDefault(t *testing.T) {
+	for name, tc := range map[string]faceRedactionCase{"by default": {privacy.RedactionPolicy{}, false}, "kept": {keepFaces, true}} {
+		t.Run(name, func(t *testing.T) { checkFacePhotosRedacted(t, tc) })
+	}
+}
+
+type faceRedactionCase struct {
+	redaction privacy.RedactionPolicy
+	kept      bool
+}
+
+// checkFacePhotosRedacted stores a session's selfie and chip photo under tc's
+// redaction and checks which pictures stay.
+func checkFacePhotosRedacted(t *testing.T, tc faceRedactionCase) {
+	t.Helper()
 	face := testFace(t)
 	score := 0.9
-	for name, tc := range map[string]struct {
-		redaction privacy.RedactionPolicy
-		kept      bool
-	}{"by default": {privacy.RedactionPolicy{}, false}, "kept": {keepFaces, true}} {
-		t.Run(name, func(t *testing.T) {
-			raw, err := marshalToMap(submitNFCStepRequest{Photo: &face, MrtdEvidence: &mrtdEvidenceRequest{DataGroups: map[string]string{}}})
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			sess := session.Session{Steps: session.StepEvidence{
-				Selfie: &session.SelfieStepEvidence{Image: face.ImageBase64, MimeType: face.MimeType, LivenessPassed: true, FaceMatchScore: &score},
-				NFC:    &session.NFCStepEvidence{Raw: raw},
-			}}
-			redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, tc.redaction)
+	raw, err := marshalToMap(submitNFCStepRequest{Photo: &face, MrtdEvidence: &mrtdEvidenceRequest{DataGroups: map[string]string{}}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	sess := session.Session{Steps: session.StepEvidence{
+		Selfie: &session.SelfieStepEvidence{Image: face.ImageBase64, MimeType: face.MimeType, LivenessPassed: true, FaceMatchScore: &score},
+		NFC:    &session.NFCStepEvidence{Raw: raw},
+	}}
+	redactStepsForStorage(&sess, privacy.BSNPolicyRetrieve, tc.redaction)
 
-			if got := sess.Steps.Selfie.Image != ""; got != tc.kept {
-				t.Errorf("selfie picture kept = %v, want %v", got, tc.kept)
-			}
-			if !sess.Steps.Selfie.LivenessPassed || sess.Steps.Selfie.FaceMatchScore == nil {
-				t.Error("the selfie's verdicts went with its picture, want them kept")
-			}
-			stored, err := decodeNFCStepRequest(sess.Steps.NFC.Raw)
-			if err != nil {
-				t.Fatalf("decode stored: %v", err)
-			}
-			if got := stored.Photo != nil; got != tc.kept {
-				t.Errorf("chip photo kept = %v, want %v", got, tc.kept)
-			}
-		})
+	if got := sess.Steps.Selfie.Image != ""; got != tc.kept {
+		t.Errorf("selfie picture kept = %v, want %v", got, tc.kept)
+	}
+	if !sess.Steps.Selfie.LivenessPassed || sess.Steps.Selfie.FaceMatchScore == nil {
+		t.Error("the selfie's verdicts went with its picture, want them kept")
+	}
+	stored, err := decodeNFCStepRequest(sess.Steps.NFC.Raw)
+	if err != nil {
+		t.Fatalf("decode stored: %v", err)
+	}
+	if got := stored.Photo != nil; got != tc.kept {
+		t.Errorf("chip photo kept = %v, want %v", got, tc.kept)
 	}
 }
 

@@ -16,6 +16,7 @@ import {
   proofingErrorMessage,
   proofingStatsBy,
 } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Button, Card, Icon, StatusText, Table, TopBar } from "../ui";
 import { FlowEditor } from "./flow-editor";
 
@@ -34,7 +35,40 @@ export default function IdentityProofingFlows(): React.JSX.Element {
   const org = useOrganizationQuery(slug);
   const isAdmin = org.data?.role === "admin";
   const flows = useProofingFlowsQuery(slug, isAdmin);
+  const flowsError = blockingError(flows);
   const [creating, setCreating] = useState(false);
+
+  const loading = (
+    <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
+  );
+  let body: React.JSX.Element;
+  if (org.isPending) {
+    body = loading;
+  } else if (!isAdmin) {
+    body = (
+      <p className="text-ink-soft text-[14px]">
+        {t("identityProofingFlows.adminOnly")}
+      </p>
+    );
+  } else if (flowsError !== null) {
+    body = <p className={ERROR}>{proofingErrorMessage(flowsError, t)}</p>;
+  } else if (flows.data === undefined) {
+    body = loading;
+  } else {
+    body = (
+      <>
+        {creating && (
+          <FlowEditor
+            slug={slug}
+            mode={{ kind: "new" }}
+            onDone={() => setCreating(false)}
+          />
+        )}
+        <FlowsTable slug={slug} flows={flows.data} />
+        <DataRequestsNote slug={slug} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -50,31 +84,7 @@ export default function IdentityProofingFlows(): React.JSX.Element {
           )
         }
       />
-      <div className="flex flex-col gap-6 p-4 sm:p-8">
-        {org.isPending ? (
-          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-        ) : !isAdmin ? (
-          <p className="text-ink-soft text-[14px]">
-            {t("identityProofingFlows.adminOnly")}
-          </p>
-        ) : flows.isPending ? (
-          <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
-        ) : flows.isError ? (
-          <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
-        ) : (
-          <>
-            {creating && (
-              <FlowEditor
-                slug={slug}
-                mode={{ kind: "new" }}
-                onDone={() => setCreating(false)}
-              />
-            )}
-            <FlowsTable slug={slug} flows={flows.data} />
-            <DataRequestsNote slug={slug} />
-          </>
-        )}
-      </div>
+      <div className="flex flex-col gap-6 p-4 sm:p-8">{body}</div>
     </>
   );
 }

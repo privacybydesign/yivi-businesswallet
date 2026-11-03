@@ -82,6 +82,12 @@ func (c *Client) StartQuery(ctx context.Context, q Query) (Session, error) {
 	return c.start(ctx, customQuery(q))
 }
 
+// StartProofing creates an identity proofing presentation request: any one of
+// req's sources, as StartPresentation.
+func (c *Client) StartProofing(ctx context.Context, req ProofingRequest) (Session, error) {
+	return c.start(ctx, c.vcts.proofingRequestQuery(req))
+}
+
 func (c *Client) start(ctx context.Context, query dcqlQuery) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {

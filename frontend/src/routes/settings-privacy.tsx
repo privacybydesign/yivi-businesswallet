@@ -13,6 +13,7 @@ import {
 } from "../api/identity-proofing";
 import { originLines } from "../lib/hosted-completion";
 import { proofingErrorMessage } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import {
   LEGAL_RETENTION_UNITS,
   MAX_LEGAL_REASON_CHARS,
@@ -61,15 +62,16 @@ export function PrivacySettingsPanel({
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
 
-  if (settings.isPending) {
-    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
-  }
-  if (settings.isError) {
+  const error = blockingError(settings);
+  if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(settings.error, t)}
+        {proofingErrorMessage(error, t)}
       </p>
     );
+  }
+  if (settings.data === undefined) {
+    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
   }
   return (
     <div className="flex max-w-3xl flex-col gap-6">

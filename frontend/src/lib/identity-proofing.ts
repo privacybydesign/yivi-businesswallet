@@ -1,5 +1,9 @@
 import type { TFunction } from "i18next";
-import { ApiError } from "../api/http";
+import {
+  ApiError,
+  ApiValidationError,
+  SERVER_ERROR_MIN_STATUS,
+} from "../api/http";
 import {
   DATA_REQUEST_KINDS,
   EMPLOYMENT_KIND,
@@ -22,6 +26,7 @@ import type {
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
+  ProofingAppMethod,
   ProofingMethod,
   ProofingRequest,
   RegisterAddress,
@@ -104,6 +109,21 @@ export function reviewPollContinues(
   return !refusedForGood(error) && progress?.status === "needs_review";
 }
 
+// 4xx statuses that pass: a timeout, a rate limit (the hosted page's).
+const TRANSIENT_CLIENT_STATUSES: ReadonlySet<number> = new Set([408, 429]);
+
+// Whether a failed poll ends what it polls: a 4xx answer, or one the page
+// cannot read. A network error or 5xx leaves the next poll to try again.
+export function pollFailedForGood(error: Error | null): boolean {
+  if (error instanceof ApiError) {
+    return (
+      error.status < SERVER_ERROR_MIN_STATUS &&
+      !TRANSIENT_CLIENT_STATUSES.has(error.status)
+    );
+  }
+  return error instanceof ApiValidationError;
+}
+
 function refusedForGood(error: Error | null): boolean {
   return error instanceof ApiError && FINAL_POLL_STATUSES.has(error.status);
 }
@@ -139,10 +159,9 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //   - Steps: document_capture (the document scan: vcmrtd reads the MRZ with the
 //     camera to derive the chip access key) and nfc_read (the NFC chip read) are
 //     always submitted together, so they toggle as a pair; document_photo (a
-//     photo of the document's printed page) stands on its own and is listed
-//     right after document_capture, as the Idem app takes it: the MRZ scan
-//     photographs the side it reads; face_verification is one step covering
-//     selfie, liveness and face match.
+//     photo of the document's printed page) stands on its own and is taken in
+//     the browser, with the ID scan, before the app runs the rest;
+//     face_verification is one step covering selfie, liveness and face match.
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
@@ -176,18 +195,20 @@ export const FACE_MATCH_RECOMMENDED = 0.75;
 export const SUBSTANTIAL_FACE_MATCH_FLOOR = 0.75;
 
 // The requested data the service's admin page offers, in the order the editor
-// lists them, and the step that produces each: the document scan gives the
-// document and holder (dg1), the chip read the age check, its extras, photo and
-// check results, the face step its selfie and biometrics.
+// lists them, and the steps that produce each: the document scan or the
+// document photo gives the document and holder (dg1) and the age check, the
+// chip read the age check too, its extras, photo and check results, the face
+// step its selfie and biometrics. With no MRZ or chip read, the engine takes
+// the document photo's read fields as the document (finishSession).
 export const REQUESTED_ATTRIBUTES = [
-  { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
-  { value: "age_over", step: STEP_NFC_READ },
-  { value: "chip_checks", step: STEP_NFC_READ },
-  { value: "biometrics", step: STEP_FACE_VERIFICATION },
-  { value: "dg11", step: STEP_NFC_READ },
-  { value: "dg2", step: STEP_NFC_READ },
-  { value: "selfie", step: STEP_FACE_VERIFICATION },
-  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
+  { value: "dg1", steps: [STEP_DOCUMENT_CAPTURE, STEP_DOCUMENT_PHOTO] },
+  { value: "age_over", steps: [STEP_NFC_READ, STEP_DOCUMENT_PHOTO] },
+  { value: "chip_checks", steps: [STEP_NFC_READ] },
+  { value: "biometrics", steps: [STEP_FACE_VERIFICATION] },
+  { value: "dg11", steps: [STEP_NFC_READ] },
+  { value: "dg2", steps: [STEP_NFC_READ] },
+  { value: "selfie", steps: [STEP_FACE_VERIFICATION] },
+  { value: "document_image", steps: [STEP_DOCUMENT_PHOTO] },
 ] as const;
 
 // The requested data of a flow that releases nothing but the outcome
@@ -278,11 +299,23 @@ function storedDocumentKinds(
 
 type CountryScope = "any" | "only";
 
-// What verifies the face step; a new flow starts on the first, Regula. The
-// wallet runs no face engine of its own, so there is no "engine", and the
-// proofing engine verifies faces with Regula only, so Iris is not offered.
-export const FACE_PROVIDERS = ["regula"] as const;
+// What verifies the face step; a new flow starts on the first, Regula in the
+// Idem app. ID Scan checks the face in the browser, right after the document
+// photo. The wallet runs no face engine of its own, so there is no "engine",
+// and Iris is not offered.
+export const FACE_PROVIDERS = ["regula", "idscan"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
+export const FACE_PROVIDER_ID_SCAN: FaceProvider = "idscan";
+
+// Whether the draft checks the face in the document scan: ID Scan's liveness
+// check and match, which only run with the document photo.
+export function scansFace(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.faceVerification &&
+    draft.documentPhoto &&
+    draft.faceProvider === FACE_PROVIDER_ID_SCAN
+  );
+}
 
 // The service's steps that capture the face (proofing.faceSteps).
 const FACE_STEPS = new Set([
@@ -299,14 +332,17 @@ const SELFIE_LOCATION_BROWSER = "browser";
 const YIVI_EIDAS_LEVEL = "low";
 
 // Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
-// photographs the document, which only the Idem app does, matches the face
-// against the sender's reference photo (proofing.NeedsReferencePhoto: a face
-// step without the chip read, outside the browser), where the Yivi app
-// matches against its credential's photo instead, or requires a level above
-// what a Yivi session reaches, or checks an age the Yivi passport and id-card
-// carry no claim for (AGE_OVER_CHOICES).
+// matches the face against the sender's reference photo
+// (proofing.NeedsReferencePhoto: a face step without the chip read, outside
+// the browser), where the Yivi app matches against its credential's photo
+// instead, or requires a level above what a Yivi session reaches, or checks an
+// age the Yivi passport and id-card carry no claim for (AGE_OVER_CHOICES). A
+// document photo is taken in the browser, whichever app runs the session; a
+// flow the browser runs alone (browserOnly) needs no app at all.
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
+  browserOnly?: boolean;
+  apps?: readonly string[];
   selfieLocation?: string;
   requiredAssuranceLevel?: string;
   requestedAttributes?: readonly string[];
@@ -320,12 +356,86 @@ export function yiviAppAvailable(flow: {
     !flow.requiredAssuranceLevel ||
     flow.requiredAssuranceLevel === YIVI_EIDAS_LEVEL;
   return (
-    !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
+    !flow.browserOnly &&
+    allowsApp(flow, APP_YIVI) &&
     !needsReferencePhoto &&
     (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
       AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
     levelMet
   );
+}
+
+// The apps a flow may lock its sessions to (proofing.appIdem, appYivi).
+export const APP_IDEM = "idem";
+export const APP_YIVI = "yivi";
+
+// Whether a flow may run in app: every app when it names none.
+export function allowsApp(
+  flow: { apps?: readonly string[] },
+  app: string,
+): boolean {
+  return !flow.apps?.length || flow.apps.includes(app);
+}
+
+// Whether the Idem app can run a flow (proofing.idemAppAvailable): one with an
+// app step that the flow does not lock to the Yivi app.
+export function idemAppAvailable(flow: {
+  browserOnly?: boolean;
+  apps?: readonly string[];
+}): boolean {
+  return !flow.browserOnly && allowsApp(flow, APP_IDEM);
+}
+
+// The registered personal data (BRP, loaded in the Yivi app with DigiD),
+// accepted next to the documents (flow.DocumentKindPersonalData): the Yivi
+// app offers the person any one of what the flow accepts.
+export const PERSONAL_DATA = "personal_data";
+
+function isPersonalData(type: string): boolean {
+  return type.toLowerCase() === PERSONAL_DATA;
+}
+
+// Whether a draft may accept the personal data: only the Yivi app shares it,
+// so only a flow the Yivi app runs (flow.validateApps). An Idem session reads
+// one of the flow's documents instead.
+export function personalDataAllowed(draft: ProofingFlowDraft): boolean {
+  return draft.yiviApp;
+}
+
+// Whether a draft runs in neither app: the browser runs it alone.
+export function noApp(draft: ProofingFlowDraft): boolean {
+  return !draft.idemApp && !draft.yiviApp;
+}
+
+// draft with no app ticked, and without what only an app does: the chip read,
+// the personal data, and a face check outside the document scan, which moves
+// into the scan or, without the document photo, goes.
+export function withoutApps(draft: ProofingFlowDraft): ProofingFlowDraft {
+  const next = {
+    ...draft,
+    idemApp: false,
+    yiviApp: false,
+    personalData: false,
+    documentAndChip: false,
+  };
+  if (!next.faceVerification || scansFace(next)) return next;
+  return next.documentPhoto
+    ? { ...next, faceProvider: FACE_PROVIDER_ID_SCAN }
+    : { ...next, faceVerification: false };
+}
+
+// Whether a draft may run in the Idem app: not when the personal data is the
+// only document it accepts, as the Idem app shares none.
+export function idemAppAllowed(draft: ProofingFlowDraft): boolean {
+  return !draft.personalData || !listsNoDocument(draft);
+}
+
+// Whether a flow accepts the registered personal data, which the Yivi app
+// shares (proofing.acceptsPersonalData).
+export function acceptsPersonalData(flow: {
+  acceptedDocumentTypes?: readonly string[];
+}): boolean {
+  return (flow.acceptedDocumentTypes ?? []).some(isPersonalData);
 }
 
 // "" is no requirement.
@@ -343,6 +453,12 @@ export interface ProofingFlowDraft {
   chipAuthentication: boolean;
   liveness: boolean;
   faceProvider: FaceProvider;
+  // The apps a session may run in. Neither is a flow the browser runs alone;
+  // the Idem app's steps (the chip read, the face in the app) need it ticked.
+  idemApp: boolean;
+  yiviApp: boolean;
+  // The registered personal data is accepted, next to documentKinds.
+  personalData: boolean;
   // The face match threshold, 0..1; null sets none, so the deployment's applies.
   faceMatchThreshold: number | null;
   requestedAttributes: ReadonlySet<string>;
@@ -467,8 +583,12 @@ export function withAssuranceLevel(
   level: Inherit<AssuranceLevel>,
 ): ProofingFlowDraft {
   const { faceMatchThreshold } = draft;
+  // Every level needs the chip read, which an app runs.
+  const apps =
+    level !== "" && noApp(draft) ? { idemApp: true, yiviApp: true } : {};
   return {
     ...draft,
+    ...apps,
     ...levelRequirement(level),
     assuranceLevel: level,
     faceMatchThreshold:
@@ -501,7 +621,11 @@ export function attributeAvailable(
   value: string,
 ): boolean {
   const attr = REQUESTED_ATTRIBUTES.find((a) => a.value === value);
-  return attr !== undefined && draftSteps(draft).includes(attr.step);
+  if (attr === undefined) {
+    return false;
+  }
+  const steps: readonly string[] = attr.steps;
+  return draftSteps(draft).some((step) => steps.includes(step));
 }
 
 // The requested data a draft collects: ticked, with its step in the draft.
@@ -574,6 +698,9 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     chipAuthentication: false,
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
+    idemApp: true,
+    yiviApp: true,
+    personalData: false,
     faceMatchThreshold: null,
     requestedAttributes: new Set(),
     ageOver: String(DEFAULT_AGE_OVER),
@@ -608,7 +735,12 @@ export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 // its level needs ticked.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
-  const storedTypes = flow.acceptedDocumentTypes ?? [];
+  const storedPersonalData = (flow.acceptedDocumentTypes ?? []).some(
+    isPersonalData,
+  );
+  const storedTypes = (flow.acceptedDocumentTypes ?? []).filter(
+    (type) => !isPersonalData(type),
+  );
   const storedCountries = flow.acceptedIssuingCountries ?? [];
   const draft: ProofingFlowDraft = {
     name: flow.name,
@@ -620,11 +752,24 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
+    // A flow naming no app runs in either, or in none when the browser runs
+    // it alone.
+    idemApp: flow.apps?.length
+      ? flow.apps.includes(APP_IDEM)
+      : !flow.browserOnly,
+    yiviApp: flow.apps?.length
+      ? flow.apps.includes(APP_YIVI)
+      : !flow.browserOnly,
+    personalData: storedPersonalData,
     faceMatchThreshold: flow.checkThresholds?.[CHECK_FACE_MATCH] ?? null,
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
     attributeReasons: flow.attributeReasons ?? {},
-    documentKinds: storedDocumentKinds(storedTypes),
+    // Personal data alone accepts no document from the Yivi app.
+    documentKinds:
+      storedPersonalData && storedTypes.length === 0
+        ? new Set()
+        : storedDocumentKinds(storedTypes),
     otherDocumentTypes: storedTypes.filter(
       (type) => documentKindOf(type) === undefined,
     ),
@@ -657,6 +802,11 @@ export type FlowDraftError =
   | "issuingCountries"
   | "faceMatchThreshold"
   | "ageOver"
+  | "apps"
+  | "appsNeeded"
+  | "personalDataYivi"
+  | "personalDataDocument"
+  | "personalDataAge"
   | "reasons";
 
 // requiresIdentity is identityRequired for the flow's kind and diplomas.
@@ -680,30 +830,72 @@ export function flowDraftError(
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
   }
-  if (draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0) {
+  if (listsNoDocument(draft) && !draft.personalData) {
     return "documentTypes";
   }
   if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
     return "issuingCountries";
   }
-  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
-    const value = draft.faceMatchThreshold;
-    if (
-      !Number.isFinite(value) ||
-      value < faceMatchFloor(draft.assuranceLevel) ||
-      value > FACE_MATCH_MAX
-    ) {
-      return "faceMatchThreshold";
-    }
+  if (faceMatchThresholdInvalid(draft)) {
+    return "faceMatchThreshold";
   }
   if (ageOverInvalid(draft)) {
     return "ageOver";
+  }
+  const apps = appsDraftError(draft);
+  if (apps) {
+    return apps;
   }
 
   const unexplained = collectedAttributes(draft).some(
     (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
   );
   return unexplained ? "reasons" : null;
+}
+
+// Whether draft sets a face match threshold outside what its level allows.
+function faceMatchThresholdInvalid(draft: ProofingFlowDraft): boolean {
+  const value = draft.faceMatchThreshold;
+  return (
+    draft.faceVerification &&
+    value !== null &&
+    (!Number.isFinite(value) ||
+      value < faceMatchFloor(draft.assuranceLevel) ||
+      value > FACE_MATCH_MAX)
+  );
+}
+
+// What is wrong with draft's apps, or with the personal data they share.
+function appsDraftError(draft: ProofingFlowDraft): FlowDraftError | null {
+  if (draft.idemApp && !draftHasAppStep(draft)) {
+    return "apps";
+  }
+  if (!draft.idemApp && !draft.yiviApp && draftHasAppStep(draft)) {
+    return "appsNeeded";
+  }
+  if (!draft.personalData) {
+    return null;
+  }
+  if (!personalDataAllowed(draft)) {
+    return "personalDataYivi";
+  }
+  if (draft.idemApp && !idemAppAllowed(draft)) {
+    return "personalDataDocument";
+  }
+  return draft.documentPhoto && asksAge(draft) ? "personalDataAge" : null;
+}
+
+function listsNoDocument(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0
+  );
+}
+
+// Whether an app runs a step of draft: the chip read, or the face step
+// outside the document scan (flow.Location). The Idem app has nothing to do
+// without one; the Yivi app takes their place with its disclosure.
+function draftHasAppStep(draft: ProofingFlowDraft): boolean {
+  return draft.documentAndChip || (draft.faceVerification && !scansFace(draft));
 }
 
 // Whether draft's age check asks an age the service refuses
@@ -724,6 +916,22 @@ function ageOverInvalid(draft: ProofingFlowDraft): boolean {
 // one of them. The Yivi app's credentials always have a kind, so it accepts
 // either list.
 function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
+  const documents = acceptedDocuments(draft);
+  if (!draft.personalData) {
+    return documents;
+  }
+  // Next to the personal data, an empty list would ask the Yivi app for the
+  // personal data alone: every kind ticked is named, which the engine still
+  // reads as any document.
+  const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
+  const named =
+    documents.length === 0
+      ? [...ticked, ...draft.otherDocumentTypes]
+      : documents;
+  return [...named, PERSONAL_DATA];
+}
+
+function acceptedDocuments(draft: ProofingFlowDraft): string[] {
   const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
   const stored = draft.storedDocumentTypes;
   if (stored !== null) {
@@ -776,8 +984,15 @@ function applyDraftOverrides(
   requestedAttributes: readonly string[],
 ): void {
   if (draft.faceVerification) {
-    spec.faceProvider = draft.faceProvider;
+    spec.faceProvider = scansFace(draft)
+      ? FACE_PROVIDER_ID_SCAN
+      : FACE_PROVIDERS[0];
   }
+  // Both apps, or none for a flow the browser runs alone, name no app.
+  if (draft.idemApp !== draft.yiviApp) {
+    spec.apps = [draft.idemApp ? APP_IDEM : APP_YIVI];
+  }
+
   if (draft.faceVerification && draft.faceMatchThreshold !== null) {
     spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
   }
@@ -814,7 +1029,8 @@ function draftRequiredChecks(draft: ProofingFlowDraft): string[] {
   }
   if (draft.faceVerification) {
     requiredChecks.push(CHECK_FACE_MATCH);
-    if (draft.liveness) {
+    // ID Scan matches only a face its liveness check passed.
+    if (draft.liveness || scansFace(draft)) {
       requiredChecks.push(CHECK_LIVENESS);
     }
   }
@@ -1082,6 +1298,10 @@ const REJECTION_REASON_KEYS = {
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",
   DOC_EXPIRED: "docExpired",
+  DOC_NOT_AUTHENTIC: "docNotAuthentic",
+  DOC_FIELDS_INVALID: "docFieldsInvalid",
+  DOCUMENT_SCAN_FAILED: "docScanFailed",
+  DOCUMENT_MISMATCH: "documentMismatch",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
@@ -1128,11 +1348,12 @@ export function dataRequestRefusal(
     : DATA_REQUEST_REFUSALS[errorCode as ProofingRejectionCode];
 }
 
-// The stages a verify page's stepper shows: what is collected, the app, its
-// session, then the address, the diploma upload and the Verzekeringsbericht
-// (when the flow has those steps).
+// The stages a verify page's stepper shows: what is collected, the document
+// photo, the app, its session, then the address, the diploma upload and the
+// Verzekeringsbericht (when the flow has those steps).
 export type VerifyStage =
   | "overview"
+  | "document"
   | "method"
   | "session"
   | "address"
@@ -1140,18 +1361,25 @@ export type VerifyStage =
   | "employment";
 
 export function verifyStages({
+  app = true,
+  document = false,
   address = false,
   diplomas,
   employment = false,
 }: {
+  // False for a flow the browser runs alone: there is no app to choose.
+  app?: boolean;
+  // A flow that photographs the document, after the app's part.
+  document?: boolean;
   address?: boolean;
   diplomas: boolean;
   employment?: boolean;
 }): VerifyStage[] {
   return [
     "overview",
-    "method",
+    ...(app ? (["method"] as const) : []),
     "session",
+    ...(document ? (["document"] as const) : []),
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
     ...(employment ? (["employment"] as const) : []),
@@ -1159,11 +1387,36 @@ export function verifyStages({
 }
 
 // The apps a verify page's app step offers: both when the Yivi app can run
-// the flow, else the Idem app alone. Continue always leads to this step, even
-// with one app, because tapping an app is what starts the session: a person
-// (or an admin checking a link) who only reads the first step uses nothing up.
-export function methodChoices(yiviAvailable: boolean): ProofingMethod[] {
+// the flow, else the Idem app alone, or the Yivi app alone for a flow locked
+// to it. The step shows even with one app.
+export function methodChoices(
+  yiviAvailable: boolean,
+  idemAvailable = true,
+): ProofingAppMethod[] {
+  if (!idemAvailable) {
+    return yiviAvailable ? ["yivi_app"] : [];
+  }
   return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
+}
+
+// The method a verify page starts its session with: the browser for a flow
+// with no app, the one app a flow allows (no app step), else pending, the app
+// then picked in the session.
+export function firstMethod(
+  browserOnly: boolean,
+  methods: readonly ProofingAppMethod[],
+): ProofingMethod {
+  if (browserOnly) return "browser";
+  return methods.length === 1 ? methods[0] : "pending";
+}
+
+// Where a verify page's stepper stands: at stage, or past the last one once
+// the session's outcome shows ("done").
+export function stageIndex(
+  stages: VerifyStage[],
+  stage: VerifyStage | "done",
+): number {
+  return stage === "done" ? stages.length : stages.indexOf(stage);
 }
 
 // The stage a verify page is at: the address, diploma or employment step
@@ -1174,11 +1427,11 @@ export function currentStage({
   inDiplomas,
   inEmployment,
 }: {
-  step: "overview" | "method" | "session";
+  step: VerifyStage | "done";
   inAddress: boolean;
   inDiplomas: boolean;
   inEmployment: boolean;
-}): VerifyStage {
+}): VerifyStage | "done" {
   if (inAddress) {
     return "address";
   }
@@ -1249,13 +1502,78 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
+// Where a verify page's session stands, for its stepper: done once it shows
+// the outcome or ended, the app's choice while pending, the document while the
+// ID scan shows or with no app (browser), else the app's session.
+export type SessionStage = "document" | "method" | "session" | "done";
+
+export function sessionStage({
+  ended,
+  method,
+  scanning,
+}: {
+  ended: boolean;
+  method: ProofingMethod;
+  scanning: boolean;
+}): SessionStage {
+  if (ended) {
+    return "done";
+  }
+  if (method === "pending") {
+    return "method";
+  }
+  return scanning || method === "browser" ? "document" : "session";
+}
+
+// How CM.com's embedded ID scan page ended, as it posts its parent page
+// (DocumentScanStep): finished with a result to hand the backend, or left
+// without one (cancelled, failed), which the backend is told too: a scan out
+// of CM's own attempts fails the session.
+export type DocumentScanMessage =
+  | { kind: "finished"; transactionId: string; resultId: string }
+  | { kind: "unfinished"; transactionId: string };
+
+// The state the ID scan page posts once its tasks are done.
+const DOCUMENT_SCAN_COMPLETED = "completed";
+
+// What a window message says of the embedded ID scan, or undefined when it is
+// not the scan's: it must come from the frame showing scanUrl (source) and
+// from scanUrl's origin, and carry a transaction id.
+export function documentScanMessage(
+  event: { origin: string; source: unknown; data: unknown },
+  scanUrl: string,
+  frame: unknown,
+): DocumentScanMessage | undefined {
+  if (frame === null || event.source !== frame) return undefined;
+  if (event.origin !== new URL(scanUrl).origin) return undefined;
+  const data = event.data as
+    | { transactionId?: unknown; state?: unknown; resultId?: unknown }
+    | null
+    | undefined;
+  if (typeof data?.transactionId !== "string" || data.transactionId === "") {
+    return undefined;
+  }
+  return data.state === DOCUMENT_SCAN_COMPLETED &&
+    typeof data.resultId === "string" &&
+    data.resultId !== ""
+    ? {
+        kind: "finished",
+        transactionId: data.transactionId,
+        resultId: data.resultId,
+      }
+    : { kind: "unfinished", transactionId: data.transactionId };
+}
+
 // Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,
-// ErrAddressNeedsPage, ErrEmploymentNeedsPage): a flow that asks for
-// diplomas, the address or the Verzekeringsbericht has them given on the page
-// that runs the session. No flow picked yet is mailable.
+// ErrAddressNeedsPage, ErrEmploymentNeedsPage, ErrDocumentScanNeedsPage): a
+// flow that asks for diplomas, the address or the Verzekeringsbericht has them
+// given on the page that runs the session, and one that photographs the
+// document takes the photo there, with the ID scan. No flow picked yet is
+// mailable.
 export function sendableByMail(
   flow:
     | {
+        steps?: readonly string[];
         diplomaMode?: DiplomaMode;
         addressMode?: AddressMode;
         employmentMode?: EmploymentMode;
@@ -1263,6 +1581,7 @@ export function sendableByMail(
     | undefined,
 ): boolean {
   return (
+    !(flow?.steps ?? []).includes(STEP_DOCUMENT_PHOTO) &&
     (flow?.diplomaMode ?? "off") === "off" &&
     (flow?.addressMode ?? "off") === "off" &&
     (flow?.employmentMode ?? "off") === "off"
@@ -1531,6 +1850,12 @@ const PROOFING_ERROR_KEYS = {
   address_not_asked: "identityProofing.errors.addressNotAsked",
   address_not_found: "identityProofing.errors.addressNotFound",
   employment_needs_page: "identityProofing.errors.employmentNeedsPage",
+  document_scan_needs_page: "identityProofing.errors.documentScanNeedsPage",
+  document_scan_failed: "identityProofing.errors.documentScanFailed",
+  document_scan_mismatch: "identityProofing.errors.documentScanMismatch",
+  document_scan_done: "identityProofing.errors.documentScanDone",
+  document_scan_pending: "identityProofing.errors.documentScanPending",
+  no_document_scanner: "identityProofing.errors.noDocumentScanner",
   employment_closed: "identityProofing.errors.employmentClosed",
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
@@ -1578,6 +1903,10 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "device_active":
     case "diplomas_closed":
     case "employment_closed":
+    case "document_scan_failed":
+    case "document_scan_mismatch":
+    case "document_scan_done":
+    case "document_scan_pending":
     case "seal_check_unavailable":
     case "export_unavailable":
     case "too_large":
@@ -2296,6 +2625,15 @@ export function showsSessionIdentity(
 }
 
 // The outcomes a chip or face check reports.
+// A document scan's verdicts on a photographed document.
+export const DOCUMENT_VERDICTS = ["authentic", "doubtful", "fake"] as const;
+
+export function isDocumentVerdict(
+  value: string,
+): value is (typeof DOCUMENT_VERDICTS)[number] {
+  return (DOCUMENT_VERDICTS as readonly string[]).includes(value);
+}
+
 export const CHECK_OUTCOMES = [
   "valid",
   "invalid",

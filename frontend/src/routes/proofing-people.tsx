@@ -34,6 +34,8 @@ import {
 import { reviewPath } from "../lib/proofing-reviews";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
+  isDocumentVerdict,
+  documentKindOf,
   addressVerificationNote,
   assuranceLevelLabel,
   flowPurgeDays,
@@ -61,7 +63,15 @@ import {
   ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
-import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
+import { blockingError } from "../lib/query-state";
+import {
+  PAGE_SIZE,
+  clampPage,
+  pageCount,
+  pageOfIndex,
+  pageSlice,
+} from "../lib/paging";
+import { Card, Icon, Pager, Select, StatusText, Table, TopBar } from "../ui";
 import { PostalAddress, ResultText } from "./proofing-ui";
 import { DataRequestNote } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
@@ -168,11 +178,19 @@ export function PeopleList({
   const [searchParams] = useSearchParams();
   const [filter, setFilter] = useState<SessionFilter>("all");
   const [open, setOpen] = useState<string | null>(searchParams.get("session"));
+  // Unset until the reader pages: the page holding ?session= then.
+  const [pickedPage, setPickedPage] = useState<number | null>(null);
   const columns = BASE_COLUMNS + (scope === "all" ? 1 : 0) + (isAdmin ? 1 : 0);
   const onFlow = requests.data ?? [];
   const capped = requestListCapped(onFlow);
   const counts = sessionFilterCounts(onFlow);
   const shown = onFlow.filter((r) => matchesSessionFilter(r.status, filter));
+  const page = clampPage(
+    pickedPage ?? pageOfIndex(shown.findIndex((r) => r.id === open)),
+    shown.length,
+  );
+  const pageRows = pageSlice(shown, page);
+  const requestsError = blockingError(requests);
   const retentionOf = flow
     ? ({ kind: "flow", flow } as const)
     : peopleRetentionOf(flowFilter, flows.data);
@@ -189,7 +207,10 @@ export function PeopleList({
               <Select
                 id="people-flow-filter"
                 value={flowFilter}
-                onChange={(event) => setFlowFilter(event.target.value)}
+                onChange={(event) => {
+                  setFlowFilter(event.target.value);
+                  setPickedPage(0);
+                }}
                 className="min-w-0 flex-1 sm:w-64 sm:flex-none"
               >
                 <option value="">
@@ -210,12 +231,13 @@ export function PeopleList({
             <Select
               id="people-result-filter"
               value={filter}
-              onChange={(event) =>
+              onChange={(event) => {
                 setFilter(
                   SESSION_FILTERS.find((key) => key === event.target.value) ??
                     "all",
-                )
-              }
+                );
+                setPickedPage(0);
+              }}
               className="min-w-0 flex-1 sm:w-56 sm:flex-none"
             >
               {SESSION_FILTERS.map((key) => (
@@ -272,18 +294,18 @@ export function PeopleList({
             {requests.isPending && (
               <Table.State colSpan={columns}>{t("common.loading")}</Table.State>
             )}
-            {requests.isError && (
+            {requestsError !== null && (
               <Table.State colSpan={columns}>
-                {proofingErrorMessage(requests.error, t)}
+                {proofingErrorMessage(requestsError, t)}
               </Table.State>
             )}
-            {requests.isSuccess && shown.length === 0 && (
+            {requests.data !== undefined && shown.length === 0 && (
               <Table.State colSpan={columns}>
                 {t("identityProofing.requests.empty")}
               </Table.State>
             )}
-            {requests.isSuccess &&
-              shown.map((request) => (
+            {requests.data !== undefined &&
+              pageRows.map((request) => (
                 <SessionRow
                   key={request.id}
                   slug={slug}
@@ -292,16 +314,25 @@ export function PeopleList({
                   scope={scope}
                   columns={columns}
                   expanded={open === request.id}
-                  onToggle={() =>
+                  onToggle={() => {
+                    setPickedPage(page);
                     setOpen((current) =>
                       current === request.id ? null : request.id,
-                    )
-                  }
+                    );
+                  }}
                   formatWhen={formatWhen}
                 />
               ))}
           </Table.Body>
         </Table>
+        <Pager
+          page={page}
+          pages={pageCount(shown.length)}
+          from={page * PAGE_SIZE + 1}
+          to={page * PAGE_SIZE + pageRows.length}
+          total={listedCount(shown.length, capped, t)}
+          onPage={setPickedPage}
+        />
       </Card>
     </>
   );
@@ -907,6 +938,54 @@ export function SessionEmployment({
   );
 }
 
+// A document as the session log names it: its MRZ code, else its kind.
+function documentLabel(
+  evidence: { documentType?: string; documentKind?: string },
+  t: TFunction,
+): string | undefined {
+  if (evidence.documentType) {
+    return evidence.documentType;
+  }
+  const kind = evidence.documentKind && documentKindOf(evidence.documentKind);
+  return kind ? t(`identityProofingFlows.editor.documents.${kind}`) : undefined;
+}
+
+// What the document scan found: its verdict and score, whether the printed
+// data was valid, and whether the MRZ read the same as the printed text.
+function DocumentCheckRows({
+  check,
+  outcome,
+}: Readonly<{
+  check: NonNullable<ProofingResult["evidence"][number]["documentCheck"]>;
+  // A check's outcome in words (IdentityRows).
+  outcome: (value: string | undefined) => string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const verdict = isDocumentVerdict(check.verdict)
+    ? t(`identityProofing.sessions.identity.documentVerdicts.${check.verdict}`)
+    : check.verdict;
+  const score =
+    check.score === undefined || check.score < 0
+      ? ""
+      : ` (${Math.round(check.score * PERCENT)}%)`;
+  return (
+    <>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentCheck")}
+      </dt>
+      <dd>{verdict + score}</dd>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentFields")}
+      </dt>
+      <dd>{outcome(check.fields)}</dd>
+      <dt className="text-muted">
+        {t("identityProofing.sessions.identity.documentZones")}
+      </dt>
+      <dd>{outcome(check.zones)}</dd>
+    </>
+  );
+}
+
 // The checks the engine reports, in words; an unknown value shows as it is.
 // A settled session's verified identity, as rows of its detail list: read
 // from the engine when an admin opens the row, audited each time.
@@ -985,10 +1064,13 @@ function IdentityRows({
           <dd>
             {evidence.type === "reference_photo"
               ? t("identityProofing.sessions.identity.noDocument")
-              : [evidence.documentType, evidence.issuingState]
+              : [documentLabel(evidence, t), evidence.issuingState]
                   .filter(Boolean)
                   .join(" · ") || evidence.type}
           </dd>
+          {evidence.documentCheck && (
+            <DocumentCheckRows check={evidence.documentCheck} outcome={check} />
+          )}
           <dt className="text-muted">
             {t("identityProofing.sessions.identity.passiveAuth")}
           </dt>
@@ -1112,6 +1194,7 @@ function SessionTimeline({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
+  const eventsError = blockingError(events);
   const formatWhen = useWhenFormatter();
 
   return (
@@ -1125,15 +1208,15 @@ function SessionTimeline({
       {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
       )}
-      {events.isError && (
-        <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
+      {eventsError !== null && (
+        <p className={ERROR}>{proofingErrorMessage(eventsError, t)}</p>
       )}
-      {events.isSuccess && events.data.length === 0 && (
+      {events.data?.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("identityProofing.sessions.noEvents")}
         </p>
       )}
-      {events.isSuccess && events.data.length > 0 && (
+      {events.data !== undefined && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

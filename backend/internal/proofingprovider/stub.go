@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 )
 
 const (
@@ -101,9 +103,18 @@ func (s *Stub) CreateFlow(_ context.Context, t Tenant, in FlowSpec) (Flow, error
 	for _, f := range s.flows[t.ID] {
 		ids[f.ID] = true
 	}
-	f := Flow{FlowSpec: in, ID: "flow_" + strconv.Itoa(len(ids)+1), Version: 1, Active: true, CreatedAt: time.Now().UTC()}
+	f := Flow{FlowSpec: in, ID: "flow_" + strconv.Itoa(len(ids)+1), Version: 1, Active: true, CreatedAt: time.Now().UTC(), BrowserOnly: stubBrowserOnly(in)}
 	s.flows[t.ID] = append(s.flows[t.ID], f)
 	return f, nil
+}
+
+// stubBrowserOnly is the engine's flow.BrowserOnly for in.
+func stubBrowserOnly(in FlowSpec) bool {
+	fd := flow.FlowDefinition{SelfieLocation: flow.StepLocation(in.SelfieLocation)}
+	for _, step := range in.Steps {
+		fd.Steps = append(fd.Steps, flow.Step(step))
+	}
+	return fd.BrowserOnly()
 }
 
 func (s *Stub) CreateFlowVersion(_ context.Context, t Tenant, id string, in FlowSpec) (Flow, error) {
@@ -122,7 +133,7 @@ func (s *Stub) CreateFlowVersion(_ context.Context, t Tenant, id string, in Flow
 	if latest == 0 {
 		return Flow{}, ErrNotFound
 	}
-	f := Flow{FlowSpec: in, ID: id, Version: latest + 1, Active: true, CreatedAt: time.Now().UTC()}
+	f := Flow{FlowSpec: in, ID: id, Version: latest + 1, Active: true, CreatedAt: time.Now().UTC(), BrowserOnly: stubBrowserOnly(in)}
 	s.flows[t.ID] = append(s.flows[t.ID], f)
 	return f, nil
 }
@@ -182,7 +193,7 @@ func (s *Stub) CreateSession(_ context.Context, t Tenant, in SessionInput) (Sess
 	if version == 0 {
 		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "unknown flow"}
 	}
-	if in.Method != "" && in.Method != MethodIdem && in.Method != MethodYivi {
+	if in.Method != "" && in.Method != MethodIdem && in.Method != MethodYivi && in.Method != MethodPending {
 		return Session{}, fmt.Errorf("proofingprovider: no session can be started for method %q", in.Method)
 	}
 	ttl := stubSessionTTL
@@ -210,10 +221,34 @@ func (s *Stub) createLocked(t Tenant, flowID string, version int, ttl time.Durat
 		notify := s.onChange
 		time.AfterFunc(stubDecisionDelay, func() { notify(id) })
 	}
-	if method != MethodYivi {
+	if method != MethodYivi && method != MethodPending {
 		sess.Claim = stubClaim(id, now)
 	}
 	return sess, nil
+}
+
+// ChooseMethod sets the app of a session created without one; an Idem one
+// gets its claim link.
+func (s *Stub) ChooseMethod(_ context.Context, t Tenant, sessionID, sessionToken string, method Method) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok || sess.tenant != t.ID || sess.token != sessionToken {
+		return Session{}, ErrNotFound
+	}
+	if sess.method != MethodPending {
+		return Session{}, &RejectedError{Status: http.StatusConflict, Message: "the session's app is chosen already"}
+	}
+	if method != MethodIdem && method != MethodYivi {
+		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "choose the Idem or the Yivi app"}
+	}
+	sess.method = method
+	s.sessions[sessionID] = sess
+	out := Session{ID: sessionID, ExpiresAt: sess.expiresAt, FlowVersion: sess.flowVersion}
+	if method == MethodIdem {
+		out.Claim = stubClaim(sessionID, time.Now())
+	}
+	return out, nil
 }
 
 func (s *Stub) SessionResult(_ context.Context, t Tenant, sessionID, sessionToken string) (Result, error) {
@@ -360,6 +395,31 @@ func (s *Stub) SubmitReference(_ context.Context, t Tenant, sessionID, sessionTo
 		return YiviDisclosure{}, err
 	}
 	return YiviDisclosure{OK: true}, nil
+}
+
+// SubmitDocumentPhoto takes any photo of a session it knows.
+func (s *Stub) SubmitDocumentPhoto(_ context.Context, t Tenant, sessionID, sessionToken string, _ DocumentPhoto) error {
+	_, err := s.session(t, sessionID, sessionToken)
+	return err
+}
+
+// FailDocumentScan rejects a stub session that has not decided, as the engine
+// does, with LIVENESS_FAILED for any task.
+func (s *Stub) FailDocumentScan(ctx context.Context, t Tenant, sessionID, sessionToken string, _ DocumentScanFailure) error {
+	current, err := s.SessionResult(ctx, t, sessionID, sessionToken)
+	if err != nil {
+		return err
+	}
+	if current.Status == StatusApproved || current.Status == StatusRejected {
+		return &RejectedError{Status: http.StatusConflict, Message: "session already finished"}
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.sessions[sessionID]
+	sess.decided = &Result{Status: StatusRejected, ErrorCode: "LIVENESS_FAILED", CompletedAt: &now, Method: current.Method}
+	s.sessions[sessionID] = sess
+	return nil
 }
 
 // CancelSession ends a stub session that has not decided, as the engine does.

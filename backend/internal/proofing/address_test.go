@@ -293,17 +293,34 @@ func discloseYiviAddress(t *testing.T, mode AddressMode, registered map[string]s
 }
 
 func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
-	for _, tc := range []struct {
-		mode AddressMode
-		want openid4vpverifier.Scope
-	}{{AddressRequired, openid4vpverifier.ScopeProofingAddress}, {AddressOff, openid4vpverifier.ScopeProofing}} {
-		f := discloseYiviAddress(t, tc.mode, brpClaims)
-		if got := f.verifier.scopes[0]; got != tc.want {
-			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
+	for _, mode := range []AddressMode{AddressRequired, AddressOff} {
+		f := discloseYiviAddress(t, mode, brpClaims)
+		if got := f.verifier.requests[0].Address; got != mode.asked() {
+			t.Errorf("address %s: asks the registered address = %v", mode, got)
 		}
-		if kept := f.requests.registeredAddress != nil; kept != tc.mode.asked() {
-			t.Errorf("address %s: registered address kept = %v", tc.mode, kept)
+		if kept := f.requests.stored.SubjectAddress != nil; kept != mode.asked() {
+			t.Errorf("address %s: registered address kept as the address = %v", mode, kept)
 		}
+	}
+}
+
+// A request that asks the address requires the registered address in the
+// Yivi disclosure, and refuses one without it.
+func TestYiviDisclosureWithoutRegisteredAddressRefused(t *testing.T) {
+	f := newAddressFixture(AddressRequired)
+	ctx := context.Background()
+	sent := f.sendYivi(t)
+	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
+		t.Fatalf("StartYivi: %v", err)
+	}
+	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
+		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"},
+	}}
+	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err == nil {
+		t.Fatal("YiviDisclosure accepted a disclosure without the registered address")
+	}
+	if f.requests.registeredAddress != nil {
+		t.Error("a registered address was kept")
 	}
 }
 
@@ -374,30 +391,30 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
 			AddressReviewPending,
 		},
-		{
-			"not disclosed", nil, nil, other,
-			Address{Street: "Molenstraat", HouseNumber: "3", PostalCode: "6511 AB", City: "Nijmegen", Country: "NL", Verification: AddressUnchecked},
-			AddressReviewPending,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := discloseYiviAddress(t, AddressRequired, tc.registered)
+			f := newAddressFixture(AddressRequired)
 			if tc.lookup != nil {
 				f.svc.addressLookup = tc.lookup
 			}
-			got, err := f.svc.AddAddress(context.Background(), testOrg.ID, f.requests.stored.ID, nil, tc.address)
+			entered, err := tc.address.normalized()
 			if err != nil {
-				t.Fatalf("AddAddress: %v", err)
+				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(*got.SubjectAddress, tc.want) {
-				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
+			if entered, err = f.svc.verifyAddress(context.Background(), entered); err != nil {
+				t.Fatalf("verifyAddress: %v", err)
 			}
-			if got.Status != StatusApproved || got.ErrorCode != "" || got.AddressReview != tc.wantReview {
-				t.Errorf("status = %s %q, address review %q; want approved, %q", got.Status, got.ErrorCode, got.AddressReview, tc.wantReview)
+			got := compareRegistered(entered, registeredAddress(tc.registered))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("address = %+v, want %+v", got, tc.want)
 			}
-			if f.requests.registeredAddress != nil {
-				t.Error("registered address kept after the address was added")
+			var review AddressReview
+			if r := addressReviewOf(got); r != nil {
+				review = *r
+			}
+			if review != tc.wantReview {
+				t.Errorf("address review %q, want %q", review, tc.wantReview)
 			}
 		})
 	}
@@ -428,16 +445,35 @@ func TestSelfDeclaredAddressReviewed(t *testing.T) {
 	}
 }
 
-func TestRegisteredAddressNotReviewed(t *testing.T) {
+// The Yivi app's registered address is the person's address: the page asks
+// none, and no reviewer confirms it.
+func TestYiviRegisteredAddressKept(t *testing.T) {
 	ctx := context.Background()
 	f := discloseYiviAddress(t, AddressRequired, brpClaims)
-	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"}
-	got, err := f.svc.AddAddress(ctx, testOrg.ID, f.requests.stored.ID, nil, registered)
-	if err != nil || got.AddressReview != "" {
-		t.Fatalf("AddAddress = %q, %v; want no review", got.AddressReview, err)
+	want := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered}
+	got := f.requests.stored
+	if got.SubjectAddress == nil || !reflect.DeepEqual(*got.SubjectAddress, want) || got.AddressReview != "" {
+		t.Fatalf("address = %+v, review %q; want the registered one, no review", got.SubjectAddress, got.AddressReview)
+	}
+	if addressUntil(*got) != nil {
+		t.Error("the page still asks the address")
+	}
+	if _, err := f.svc.AddAddress(ctx, testOrg.ID, got.ID, nil, testAddress); !errors.Is(err, ErrAddressClosed) {
+		t.Errorf("AddAddress after = %v; want ErrAddressClosed", err)
 	}
 	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("DecideAddressReview = %v; want ErrAddressNotUnderReview", err)
+	}
+}
+
+// A card without a house number names no one address: the page asks it.
+func TestYiviRegisteredAddressWithoutNumberAsked(t *testing.T) {
+	f := discloseYiviAddress(t, AddressRequired, withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""))
+	if f.requests.stored.SubjectAddress != nil {
+		t.Fatalf("address kept = %+v; want none", f.requests.stored.SubjectAddress)
+	}
+	if addressUntil(*f.requests.stored) == nil {
+		t.Error("the page does not ask the address")
 	}
 }
 
@@ -452,25 +488,5 @@ func TestAddressReviewNeedsReason(t *testing.T) {
 		if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: reason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("reason %q: DecideAddressReview = %v; want ErrInvalidInput", reason, err)
 		}
-	}
-}
-
-func TestYiviDisclosureWithoutCardClearsRegistered(t *testing.T) {
-	ctx := context.Background()
-	f := newAddressFixture(AddressRequired)
-	sent := f.sendYivi(t)
-	if _, err := f.svc.StartYivi(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
-		t.Fatalf("StartYivi: %v", err)
-	}
-	earlier := registeredAddress(brpClaims)
-	f.requests.registeredAddress = &earlier
-	f.verifier.presentation = &openid4vpverifier.Presentation{ByCredential: map[string]map[string]string{
-		"idcard": {openid4vpverifier.ClaimGivenNames: "Anna"},
-	}}
-	if _, err := f.svc.YiviDisclosure(ctx, testOrg.ID, sent.Request.ID, nil); err != nil {
-		t.Fatalf("YiviDisclosure: %v", err)
-	}
-	if f.requests.registeredAddress != nil {
-		t.Errorf("registered address = %+v; want the earlier attempt's cleared", *f.requests.registeredAddress)
 	}
 }

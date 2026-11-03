@@ -7,3 +7,8 @@ export function yiviUniversalLink(walletLink: string): string {
   const query = walletLink.split("?")[1] ?? "";
   return `${UNIVERSAL_LINK_PREFIX}${query}`;
 }
+
+export const YIVI_APP_STORE_URL =
+  "https://apps.apple.com/app/yivi/id1294092994";
+export const YIVI_PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=org.irmacard.cardemu";

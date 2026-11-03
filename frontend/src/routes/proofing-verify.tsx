@@ -27,14 +27,20 @@ import {
   methodChoices,
   proofingErrorMessage,
   sendKindFlows,
+  stageIndex,
+  STEP_DOCUMENT_PHOTO,
   verifyStages,
+  firstMethod,
   yiviAppAvailable,
+  idemAppAvailable,
+  acceptsPersonalData,
 } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
   CheckEnded,
-  MethodChoice,
+  DOCUMENT_SCAN_WIDE_PAGE,
   Overview,
   Session,
 } from "./proofing-verify-steps";
@@ -43,7 +49,7 @@ import type { VerifyOrg } from "./proofing-verify-steps";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 
-type Step = "overview" | "method" | "session";
+type Step = "overview" | "session";
 
 // What the send form hands over: the subject as the sender typed it. Kept out
 // of the URL, and taken out of the history entry once read (the browser keeps
@@ -111,15 +117,16 @@ export default function ProofingVerify(): React.JSX.Element {
         }
       : found;
 
+  const error = blockingError(settings, flows, org);
   let body: React.JSX.Element;
-  if (settings.isPending || flows.isPending || org.isPending) {
+  if (error !== null) {
+    body = <p className={ERROR}>{proofingErrorMessage(error, t)}</p>;
+  } else if (
+    settings.data === undefined ||
+    flows.data === undefined ||
+    org.data === undefined
+  ) {
     body = <p className={HINT}>{t("common.loading")}</p>;
-  } else if (settings.isError || flows.isError || org.isError) {
-    body = (
-      <p className={ERROR}>
-        {proofingErrorMessage(settings.error ?? flows.error ?? org.error, t)}
-      </p>
-    );
   } else if (flow === undefined) {
     body = (
       <p className={ERROR}>{t("identityProofing.onScreen.missingFlow")}</p>
@@ -139,7 +146,11 @@ export default function ProofingVerify(): React.JSX.Element {
   return (
     <>
       <TopBar title={t("identityProofing.onScreen.title")} />
-      <div className="mx-auto w-full max-w-xl px-4 py-6">{body}</div>
+      <div
+        className={`mx-auto w-full max-w-xl px-4 py-6 ${DOCUMENT_SCAN_WIDE_PAGE}`}
+      >
+        {body}
+      </div>
     </>
   );
 }
@@ -159,15 +170,25 @@ function VerifyFlow({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
-  const [method, setMethod] = useState<ProofingMethod>("idem_app");
-  // A flow the Yivi app cannot run leaves the Idem app only, still tapped on
-  // the app step as on a hosted link.
-  const methods = methodChoices(yiviAppAvailable(flow));
+  const methods = methodChoices(yiviAppAvailable(flow), idemAppAvailable(flow));
+  const browserOnly = flow.browserOnly ?? false;
+  // The app Continue will start in, so the stepper is right before it.
+  const [method, setMethod] = useState<ProofingMethod>(() =>
+    firstMethod(browserOnly, methods),
+  );
+  // Only a choice of apps is a step: one app starts at once, none is the
+  // browser alone.
   const stages = verifyStages({
-    address: flow.addressMode === "required",
+    app: !browserOnly && methods.length > 1,
+    document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
+    // The Yivi app shares the registered address: the person enters none.
+    address: flow.addressMode === "required" && method !== "yivi_app",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
   });
+  const [sessionStage, setSessionStage] = useState<
+    "document" | "method" | "session" | "done"
+  >("session");
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
@@ -197,7 +218,7 @@ function VerifyFlow({
   function restart(): void {
     setSent(undefined);
     create.reset();
-    setStep("method");
+    setStep("overview");
   }
 
   return (
@@ -208,8 +229,14 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-        current={stages.indexOf(
-          currentStage({ step, inAddress, inDiplomas, inEmployment }),
+        current={stageIndex(
+          stages,
+          currentStage({
+            step: step === "session" ? sessionStage : step,
+            inAddress,
+            inDiplomas,
+            inEmployment,
+          }),
         )}
       />
       {step === "overview" && (
@@ -219,7 +246,20 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
-          onContinue={() => setStep("method")}
+          onlyApp={
+            !browserOnly && methods.length === 1 ? methods[0] : undefined
+          }
+          // Continue starts the session; with a choice of apps, the app is
+          // chosen in it.
+          onContinue={() => {
+            const first = firstMethod(browserOnly, methods);
+            setMethod(first);
+            start(first);
+          }}
+          starting={create.isPending}
+          error={
+            create.isError ? proofingErrorMessage(create.error, t) : undefined
+          }
           cancel={
             <Link
               to=".."
@@ -231,21 +271,6 @@ function VerifyFlow({
           }
         />
       )}
-      {step === "method" && (
-        <MethodChoice
-          methods={methods}
-          picked={method}
-          onChoose={(picked) => {
-            setMethod(picked);
-            start(picked);
-          }}
-          onBack={() => setStep("overview")}
-          starting={create.isPending}
-          error={
-            create.isError ? proofingErrorMessage(create.error, t) : undefined
-          }
-        />
-      )}
       {step === "session" && sent && (
         <Session
           target={{ kind: "request", slug, requestId: sent.id }}
@@ -253,6 +278,10 @@ function VerifyFlow({
           deepLink={sent.deepLink}
           deepLinkExpiresAt={sent.deepLinkExpiresAt}
           method={method}
+          methods={methods}
+          yiviPersonalData={acceptsPersonalData(flow)}
+          onStage={setSessionStage}
+          onMethod={setMethod}
           diplomaMode={sent.diplomaMode}
           diplomas={sent.diplomas}
           onDiplomaStep={setInDiplomas}

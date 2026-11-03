@@ -229,6 +229,9 @@ func sessionOpenForDevices(sess session.Session) error {
 type appCaller struct {
 	role        session.DeviceRole
 	deviceToken string
+	// system is the engine itself deciding a session once the browser's
+	// last step came in: no device writes.
+	system bool
 }
 
 // appSessionByPathToken is sessionByPathToken plus device authorization: the
@@ -257,7 +260,7 @@ func (s *Server) appSessionByPathToken(w http.ResponseWriter, r *http.Request) (
 // checkAppWrite runs inside every app write's Update: the caller still holds
 // its slot and the session can still take writes.
 func checkAppWrite(sess *session.Session, caller appCaller) error {
-	if caller.role != "" || sess.Access.Bound() {
+	if !caller.system && (caller.role != "" || sess.Access.Bound()) {
 		if err := sess.Access.AuthorizeAs(caller.deviceToken, caller.role); err != nil {
 			return err
 		}
@@ -748,17 +751,20 @@ func stepResults(sess session.Session, fd *flow.FlowDefinition) map[string]stepR
 	return out
 }
 
-// currentStep is the first step without a result, "" once the session is no
-// longer active. nil without a flow: "" would tell the Idem app there is
-// nothing left to do.
+// currentStep is the first app step (appSteps) without a result, "" once the
+// session is no longer active. nil without a flow: "" would tell the Idem app
+// there is nothing left to do.
 func currentStep(sess session.Session, fd *flow.FlowDefinition) *string {
 	if fd == nil {
 		return nil
 	}
 	step := ""
 	if sessionLifecycle(sess) == lifecycleActive {
-		if _, remaining := flowStepProgress(sess, fd); len(remaining) > 0 {
-			step = remaining[0]
+		for _, appStep := range appSteps(fd) {
+			if !stepHasEvidence(sess, appStep) {
+				step = string(appStep)
+				break
+			}
 		}
 	}
 	return &step

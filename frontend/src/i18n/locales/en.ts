@@ -1,6 +1,10 @@
 export const en = {
   common: {
     cancel: "Cancel",
+    pages: "Pages",
+    pageRange: "{{from}}–{{to}} of {{total}}",
+    previousPage: "Previous",
+    nextPage: "Next",
     canReview: "Can review",
     close: "Close",
     comingSoon: "Coming soon",
@@ -587,6 +591,11 @@ export const en = {
       docTampered: "document chip data was tampered with",
       chipCloneDetected: "cloned document chip detected",
       docExpired: "document expired",
+      docNotAuthentic: "the document photographed is not genuine",
+      docFieldsInvalid: "the document's printed data failed its check",
+      docScanFailed:
+        "the document photo did not succeed in any of its attempts",
+      documentMismatch: "the document photographed is not the one read",
       assuranceNotMet: "below the flow's required assurance level",
       manualReviewRejected: "refused by a reviewer",
       reviewNotHolder: "a reviewer found that what was sent is someone else's",
@@ -653,6 +662,17 @@ export const en = {
       addressNotAsked: "This check does not ask for an address.",
       addressNotFound:
         "This address is not in the Dutch address register. Check the postal code, house number and street.",
+      documentScanNeedsPage:
+        "This flow photographs the document, which is done on the page that runs the check. Show it on this screen or send a hosted link.",
+      documentScanFailed:
+        "The photos of the document could not be used. Try again.",
+      documentScanMismatch:
+        "These photos belong to another check. Photograph the document again.",
+      documentScanDone: "The document is already photographed.",
+      documentScanPending:
+        "Photograph the document first, then share your data from the Yivi app.",
+      noDocumentScanner:
+        "This server photographs no documents. Ask your administrator to set ID_SCAN_KEY_ID and ID_SCAN_SECRET.",
       employmentNeedsPage:
         "This flow asks for the UWV Verzekeringsbericht, which is uploaded on the page that runs the check. Show it on this screen or send a hosted link.",
       employmentClosed:
@@ -874,6 +894,7 @@ export const en = {
         "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
+        document: "Photograph your ID",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
@@ -900,7 +921,7 @@ export const en = {
         dg1WithoutBirthDate:
           "Your name and nationality, and the document's number and expiry date.",
         age_over:
-          "Only whether you are old enough, worked out from your document's chip: not your date of birth.",
+          "Only whether you are old enough, worked out from your document: not your date of birth.",
         dg11: "Your place of birth and personal number (BSN), if your document stores them on its chip.",
         dg2: "Your passport photo stored on the document's chip.",
         chip_checks: "Whether the chip is genuine and unaltered.",
@@ -911,10 +932,13 @@ export const en = {
       },
       method: {
         heading: "How do you want to verify?",
+        only: "You verify with the {{app}}: this check works with no other app. Make sure it is on your phone.",
         yivi: {
           title: "Yivi app",
           detail:
             "Share the passport, ID card or residence permit already in your Yivi app.",
+          detailPersonalData:
+            "Share a document or your personal data (loaded with DigiD) that this check accepts, from your Yivi app.",
         },
         idem: {
           title: "Idem app",
@@ -923,11 +947,26 @@ export const en = {
         },
         back: "Back",
       },
+      documentScan: {
+        heading: "Photograph your ID",
+        hint: "Take a photo of the front and back of your ID card or driving licence, or of the photo page of your passport, in CM.com's secure scan below.",
+        passportHint:
+          "For a passport, open it like a book and turn it sideways, so the open passport fits the frame.",
+        frameTitle: "CM.com ID scan",
+        start: "Photograph the document",
+        finishing: "Adding the photos…",
+        loading: "Loading the secure scan from CM.com…",
+        cancelled: "The photos were not taken. Try again.",
+        retry: "Try again",
+      },
       scan: {
         yiviHeading: "Scan with the Yivi app",
         yiviHint:
           "Open the Yivi app and scan this code, or tap the button if this page is on your phone.",
         openYivi: "Open in the Yivi app",
+        getYivi: "No Yivi app yet? Get it from the",
+        appStore: "App Store",
+        playStore: "Google Play",
         idemHeading: "Scan with the Idem app",
         idemHint: "Open the Idem app and scan this code from inside the app.",
         openIdem: "Open in the Idem app",
@@ -955,6 +994,7 @@ export const en = {
         documentNotAccepted: "this flow does not accept the shared document.",
         ageNotDisclosed:
           "the shared document did not say whether you are old enough.",
+        faceNotVerified: "the face check in the ID scan did not pass.",
       },
       ended: {
         title: "This check has ended",
@@ -1036,6 +1076,14 @@ export const en = {
         passiveAuth: "Chip authenticity",
         faceMatch: "Face match",
         liveness: "Liveness",
+        documentCheck: "Document check",
+        documentVerdicts: {
+          authentic: "Genuine",
+          doubtful: "Doubtful",
+          fake: "Not genuine",
+        },
+        documentFields: "Printed data",
+        documentZones: "MRZ matches printed text",
         checks: {
           valid: "Valid",
           invalid: "Invalid",
@@ -1710,7 +1758,7 @@ export const en = {
     attributeHints: {
       dg1: "Name, date of birth, nationality, and the document's type, number and expiry date.",
       age_over:
-        "Only whether the person is the minimum age or older, worked out from the chip's date of birth. Never the date itself: ticked with Name and document details, those come without the date of birth.",
+        "Only whether the person is the minimum age or older, worked out from the date of birth on the chip or the document photo. Never the date itself: ticked with Name and document details, those come without the date of birth.",
       dg11: "Only when the chip stores them; many do not.",
       dg2: "The holder's passport photo stored on the chip, shown next to the selfie.",
       chip_checks: "Whether the chip proved genuine and not copied.",
@@ -1747,6 +1795,15 @@ export const en = {
         faceMatchThreshold: "Pick a face match threshold the level allows.",
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
+        apps: "The Idem app has nothing to do in this flow: turn on Scan and read the document or the face check in the app, or untick the Idem app.",
+        appsNeeded:
+          "Scan and read the document and the face check in the app need an app: tick the Yivi app, the Idem app or both.",
+        personalDataYivi:
+          "Personal data come from the Yivi app alone: tick the Yivi app under Apps, or untick personal data.",
+        personalDataDocument:
+          "The Idem app shares no personal data but reads a document: tick a document type too, or untick the Idem app under Apps.",
+        personalDataAge:
+          "With personal data, the document photo is tied to the person by their date of birth, which an age check does not keep: turn off the age check.",
         identity:
           "A diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
       },
@@ -1796,15 +1853,36 @@ export const en = {
         addressHint:
           "After the identity check, in the browser rather than the Idem app: the person enters their postal address. A Dutch address is checked against the Dutch address register (BAG); any other is kept as they declare it. Such a flow is shown on screen or sent as a hosted link, never mailed.",
         photoHint:
-          "The front and back of an ID card or driving licence, or the photo page of a passport.",
+          "The front and back of an ID card or driving licence, or the photo page of a passport, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
         faceHint:
           "A selfie, checked to be a live person and compared with the photo on the chip.",
+        faceInScan: "Check the face in the ID scan",
+        faceInScanHint:
+          "Right after the document photo, in the browser: the ID scan checks the person is live and compares their face with the photo on the document. Not the chip photo, so it reaches no assurance level.",
         diplomaHint:
           "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
         employmentHint:
           "After the identity check, in the browser: the person uploads the Verzekeringsbericht from Mijn UWV, checked against UWV's seal and their name and date of birth. Only on screen or as a link, never by e-mail.",
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
+        apps: "Apps",
+        appsHint: "The apps the person can do this flow in.",
+        yiviApp: "Yivi app",
+        yiviAppHint:
+          "The person shares their data from the Yivi app, on this screen or a link.",
+        idemApp: "Idem app",
+        idemAppHint:
+          "The person scans their passport or ID card with the Idem app and reads its chip.",
+        needsApp: "Needs an app: tick the Yivi app or the Idem app under Apps.",
+        idemAppLock:
+          "Not while personal data is the only document type: the Idem app shares none. Tick a document type too.",
+        appsBoth:
+          "The person picks one of the two apps. What you receive depends on the app they pick.",
+        appsNone: "No app: the ID scan in the browser is the whole check.",
+        appsOnly: {
+          yivi: "This flow only works with the Yivi app: the person is told so and gets no choice.",
+          idem: "This flow only works with the Idem app: the person is told so and gets no choice.",
+        },
         lifetime: "QR code lifetime",
         lifetimeHint:
           "After this the session expires and a new request is needed.",
@@ -1820,6 +1898,10 @@ export const en = {
         identity_card: "Identity card",
         residence_permit: "Residence permit",
         drivers_license: "Dutch driving licence",
+        personal_data: "Personal data (BRP, with DigiD)",
+        personalDataHint:
+          "Works in the Yivi app only: name and date of birth from the BRP, loaded with DigiD. A document photo is checked against them. In the Idem app the person has one of the document types above read.",
+        personalDataLock: "Only when the Yivi app is ticked under Apps.",
         countries: "Issuing countries",
         any: "Any country",
         only: "Only these countries",
@@ -1869,7 +1951,7 @@ export const en = {
         retentionSeconds_other: "{{count}} seconds",
         bsn: "BSN",
         bsnHint: "Keep the full BSN only if the law allows you to process it.",
-        blackOutBsn: "Black out the BSN on document photos",
+        blackOutBsn: "Black out the BSN and signature on document photos",
         keepFacePhotos: "Keep face photos after the match",
         keepFacePhotosHint:
           "Off: the portrait, selfie and the sender's photo are dropped once the face match is done; its verdicts stay. Turn it on only for an organisation that must keep them.",
@@ -2270,8 +2352,11 @@ export const en = {
       action: "Action",
       target: "Target",
       subject: "Subject",
+      details: "Details",
     },
     noSubject: "—",
+    detailsToggle: "Details of {{action}} on {{when}}",
+    noDetails: "No further details were recorded.",
     fields: {
       method: "Method",
       assuranceLevel: "Assurance",
@@ -2450,6 +2535,8 @@ export const en = {
       identityProofingSessionCreated: "Created identity proofing session",
       identityProofingSessionStarted: "Started identity proofing",
       identityProofingSessionHandover: "Issued a new identity proofing code",
+      identityProofingDocumentScanStarted: "Started the document scan",
+      identityProofingDocumentScanFailed: "Document scan out of attempts",
       identityProofingSessionEnded:
         "Identity proofing session ended unfinished",
       identityProofingSessionCancelled: "Identity proofing session cancelled",

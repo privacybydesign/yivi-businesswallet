@@ -24,8 +24,10 @@ package proofing
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -442,6 +444,18 @@ type Request struct {
 	// latest OpenID4VP disclosure; empty before one is started. Server-side
 	// only: it reads the disclosed claims.
 	yiviTransactionID string
+	// DocumentScan is whether the request's flow photographs the document,
+	// in the browser (stepDocumentPhoto), when it was sent; DocumentScannedAt
+	// when the photos reached the engine, nil before.
+	DocumentScan      bool
+	DocumentScannedAt *time.Time
+	// documentScanTransactionID is the document scan service's transaction
+	// the page started last; empty before one. Server-side only: it reads the
+	// photos.
+	documentScanTransactionID string
+	// appDone is an Idem request whose app did its part while the document
+	// scan is still to come, read live from the engine (withAppDone).
+	appDone bool
 }
 
 type ipsSession struct {
@@ -770,23 +784,117 @@ const (
 	// faceProviderEngine names a built-in face engine, which this engine does not
 	// have: a flow cannot pick it.
 	faceProviderEngine = "engine"
+	// faceProviderIDScan checks the face in the browser, on the document scan
+	// page right after the document photo.
+	faceProviderIDScan = "idscan"
 )
 
 // faceProviders are the values the wallet sets on a flow's face provider. It
-// always names one, so a flow never depends on the engine's default; the
-// engine verifies faces with Regula only.
-var faceProviders = []string{faceProviderRegula}
+// always names one, so a flow never depends on the engine's default: Regula
+// in the Idem app, or ID Scan with the document photo.
+var faceProviders = []string{faceProviderRegula, faceProviderIDScan}
 
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
-// photographs the document, which only the Idem app does, matches the face
-// against the sender's reference photo (the Yivi app runs no face check),
-// checks an age the Yivi credentials carry no claim for
+// matches the face against the sender's reference photo (the Yivi app runs no
+// face check), checks an age the Yivi credentials carry no claim for
 // (openid4vpverifier.AgeClaim), or requires a level above what a Yivi session
 // reaches (yiviEIDASLevel), which enforceAssurance would only reject at the
-// end.
+// end. A flow the browser runs alone (BrowserOnly) needs no app at all.
 func yiviAppAvailable(f proofingprovider.Flow) bool {
-	return !slices.Contains(f.Steps, stepDocumentPhoto) && !flowNeedsReferencePhoto(f) &&
-		yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+	return !f.BrowserOnly && allowsApp(f, appYivi) && !flowNeedsReferencePhoto(f) && yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+}
+
+// idemAppAvailable reports whether flow f can run in the Idem app: a flow
+// with an app step that the flow does not lock to another app.
+func idemAppAvailable(f proofingprovider.Flow) bool {
+	return !f.BrowserOnly && allowsApp(f, appIdem)
+}
+
+// The apps a flow may lock its sessions to (proofingprovider.FlowSpec.Apps).
+const (
+	appIdem = "idem"
+	appYivi = "yivi"
+)
+
+// allowsApp reports whether f may run in app: every app when f names none.
+func allowsApp(f proofingprovider.Flow, app string) bool {
+	return len(f.Apps) == 0 || slices.Contains(f.Apps, app)
+}
+
+// acceptsPersonalData reports whether f accepts the registered personal data
+// (BRP), which the Yivi app shares in place of a document.
+func acceptsPersonalData(f proofingprovider.Flow) bool {
+	return slices.ContainsFunc(f.AcceptedDocumentTypes, func(t string) bool {
+		return strings.EqualFold(t, openid4vpverifier.SourcePersonalData)
+	})
+}
+
+// yiviSources are what f's Yivi disclosure offers the person, any one of:
+// the documents and personal data it accepts, or for a flow accepting any
+// document none, which asks the default documents. A document code the Yivi
+// credentials cannot be told by (P, ID) asks every document, the engine then
+// holding the disclosed one to the flow.
+func yiviSources(f proofingprovider.Flow) []string {
+	known := []string{
+		openid4vpverifier.SourcePassport, openid4vpverifier.SourceIdentityCard, openid4vpverifier.SourceResidencePermit,
+		openid4vpverifier.SourceDrivingLicence, openid4vpverifier.SourcePersonalData,
+	}
+	var sources []string
+	everyDocument := false
+	for _, t := range f.AcceptedDocumentTypes {
+		i := slices.IndexFunc(known, func(k string) bool { return strings.EqualFold(k, t) })
+		if i < 0 {
+			everyDocument = true
+			continue
+		}
+		if !slices.Contains(sources, known[i]) {
+			sources = append(sources, known[i])
+		}
+	}
+	if everyDocument {
+		for _, s := range []string{openid4vpverifier.SourcePassport, openid4vpverifier.SourceIdentityCard, openid4vpverifier.SourceResidencePermit} {
+			if !slices.Contains(sources, s) {
+				sources = append(sources, s)
+			}
+		}
+	}
+	return sources
+}
+
+// sessionMethods are the methods a request may ask for; "" leaves it to the
+// flow (sessionMethod).
+var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser, proofingprovider.MethodPending}
+
+// sessionMethod is how a session of f runs, given the method asked for ("" for
+// none): a flow the browser runs alone (BrowserOnly) in the browser, with no
+// app; any other in an app the flow allows, the Idem app unless the Yivi app
+// is asked for, or is the only one.
+func sessionMethod(f proofingprovider.Flow, asked proofingprovider.Method) (proofingprovider.Method, error) {
+	if f.BrowserOnly {
+		if asked != "" && asked != proofingprovider.MethodBrowser {
+			return "", fmt.Errorf("%w: this flow runs in the browser alone, with no app", ErrInvalidInput)
+		}
+		return proofingprovider.MethodBrowser, nil
+	}
+	if asked == "" && !allowsApp(f, appIdem) {
+		asked = proofingprovider.MethodYivi
+	}
+	switch asked {
+	case "", proofingprovider.MethodIdem:
+		if !idemAppAvailable(f) {
+			return "", fmt.Errorf("%w: this flow does not run in the Idem app", ErrInvalidInput)
+		}
+		return proofingprovider.MethodIdem, nil
+	case proofingprovider.MethodPending:
+		// The session starts with the flow; the app is chosen later (ChooseMethod).
+		return proofingprovider.MethodPending, nil
+	case proofingprovider.MethodYivi:
+		if !yiviAppAvailable(f) {
+			return "", fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+		}
+		return proofingprovider.MethodYivi, nil
+	}
+	return "", fmt.Errorf("%w: this flow has steps an app runs: choose the Idem app or the Yivi app", ErrInvalidInput)
 }
 
 // keepsFacePhoto reports whether f releases the holder's photo: it keeps the
@@ -884,14 +992,35 @@ const (
 const attributeAgeOver = "age_over"
 
 // stepDocumentPhoto is the photos of the document's front and back, taken in
-// the Idem app.
+// the browser through the document scan service (StartDocumentScan).
 const stepDocumentPhoto = "document_photo"
+
+// bsnPolicyRetrieve is the flow BSN policy that keeps the BSN; empty is omit.
+const bsnPolicyRetrieve = "retrieve"
+
+// takesDocumentPhoto reports whether flow f photographs the document.
+func takesDocumentPhoto(f proofingprovider.Flow) bool {
+	return slices.Contains(f.Steps, stepDocumentPhoto)
+}
+
+// scansFace reports whether f checks the face in the document scan.
+func scansFace(f proofingprovider.Flow) bool {
+	return f.FaceProvider == faceProviderIDScan && takesDocumentPhoto(f)
+}
+
+// redactsDocumentBSN reports whether f's document photo has its BSN covered:
+// only when the flow's "Black out the BSN" is on (BlurBSN), as the engine's
+// coversDocumentBSN. The scan service covers it on any document, Dutch or
+// not.
+func redactsDocumentBSN(f proofingprovider.Flow) bool {
+	return f.BlurBSN != nil && *f.BlurBSN
+}
 
 // flowCompletable reports whether a recipient can finish flow f with only the
 // vcmrtd app and the wallet's session: a face step must run in the app and
 // have the chip photo to compare against.
 func flowCompletable(f proofingprovider.Flow) bool {
-	if !hasFaceStep(f.Steps) {
+	if !hasFaceStep(f.Steps) || scansFace(f) {
 		return true
 	}
 	return f.SelfieLocation != selfieLocationBrowser && slices.Contains(f.Steps, stepNFCRead)

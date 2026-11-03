@@ -20,6 +20,7 @@ import {
   verifySearch,
 } from "../lib/identity-proofing";
 import type { SendKind } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Button, Input, Modal, Select } from "../ui";
 import { SecretReveal } from "./proofing-ui";
 
@@ -105,17 +106,18 @@ function SendModal({
   const { t } = useTranslation();
   const flows = useProofingFlowsQuery(slug);
 
-  if (flows.isPending || flows.isError) {
+  if (flows.data === undefined) {
+    const error = blockingError(flows);
     return (
       <Modal
         title={t("identityProofing.send.title")}
         closeLabel={t("common.close")}
         onClose={onClose}
       >
-        {flows.isPending ? (
+        {error === null ? (
           <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>
         ) : (
-          <p className={ERROR}>{proofingErrorMessage(flows.error, t)}</p>
+          <p className={ERROR}>{proofingErrorMessage(error, t)}</p>
         )}
       </Modal>
     );

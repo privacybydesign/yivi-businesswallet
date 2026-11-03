@@ -17,7 +17,6 @@ import {
   checkDecisionProblems,
   closedAt,
   closedRequests,
-  inReviewOldestFirst,
   isAddressReview,
   ownReview,
   personName,
@@ -418,12 +417,6 @@ describe("address reviews", () => {
     expect(
       waitingOldestFirst([address, decided, request()]).map((r) => r.id),
     ).toEqual(["r1", "address"]);
-  });
-
-  it("leaves the address out of what waits in review", () => {
-    expect(inReviewOldestFirst([address, request()]).map((r) => r.id)).toEqual([
-      "r1",
-    ]);
   });
 
   it("asks for a reason of at most the bound", () => {

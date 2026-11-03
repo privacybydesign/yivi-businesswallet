@@ -103,6 +103,10 @@ func (f *fakeVerifier) StartQuery(_ context.Context, q openid4vpverifier.Query) 
 	return openid4vpverifier.Session{TransactionID: "verifier-query-tx", WalletLink: "openid4vp://?client_id=x509_san_dns%3Averifier.test&request_uri=https%3A%2F%2Fverifier.test%2Freq"}, nil
 }
 
+func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
+	return f.StartPresentation(ctx, openid4vpverifier.ScopeProofing)
+}
+
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
 	if f.queryPending {
 		return openid4vpverifier.Presentation{}, openid4vpverifier.ErrPending

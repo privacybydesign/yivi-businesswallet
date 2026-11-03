@@ -595,40 +595,6 @@ paths:
           $ref: '#/components/responses/IdemDocumentUnsupported'
         '500':
           $ref: '#/components/responses/IdemInternalError'
-  /api/v1/app/{token}/steps/document_photo:
-    parameters:
-      - $ref: '#/components/parameters/IdemSessionToken'
-    post:
-      tags: [idem-app]
-      summary: Submit the document_photo step
-      description: >-
-        Photos of the document's data page and optional back, with the located BSN region of a Dutch document.
-      security: []
-      parameters:
-        - $ref: '#/components/parameters/IdemDeviceToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/IdemDocumentPhotoRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/IdemStepRecorded'
-        '400':
-          $ref: '#/components/responses/IdemBadRequest'
-        '401':
-          $ref: '#/components/responses/IdemDeviceUnauthorized'
-        '403':
-          $ref: '#/components/responses/IdemDeviceHandedOver'
-        '404':
-          $ref: '#/components/responses/IdemSessionNotFound'
-        '409':
-          $ref: '#/components/responses/IdemConflict'
-        '410':
-          $ref: '#/components/responses/IdemSessionExpired'
-        '500':
-          $ref: '#/components/responses/IdemInternalError'
   /api/v1/app/{token}/steps/nfc:
     parameters:
       - $ref: '#/components/parameters/IdemSessionToken'
@@ -5433,7 +5399,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. The flow configuration: `name`,
         `steps`, and optionally `faceProvider` (`regula`, the default for a flow with a face
-        step and the only provider; anything else is refused),
+        step, or `idscan`, which checks the face in the document scan and needs the
+        `document_photo` step; anything else is refused),
         `requestedAttributes`, `attributeReasons`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
         `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
@@ -5805,6 +5772,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/overview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: The identity proofing overview
+      description: >-
+        Requires organisation membership. The external requests the overview and the dashboard
+        list, in one read: an administrator's of the whole organisation, a member's of the
+        requests they sent. Statuses are read as `status` reads (a lapsed link is `expired`).
+        The counts are exact; each list holds at most its first 5 rows.
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unfinished, held, waiting, finished]
+                properties:
+                  unfinished:
+                    type: integer
+                    description: The requests the person has not finished (`pending`, `in_progress`).
+                  held:
+                    type: integer
+                    description: >-
+                      For a caller who cannot decide them, their requests in review; 0 for one who
+                      can, who finds them on the Reviews page.
+                  waiting:
+                    description: >-
+                      The requests `held` counts, the longest in review first, then the unfinished
+                      ones, the longest waiting first.
+                    allOf:
+                      - $ref: '#/components/schemas/ProofingRequestList'
+                  finished:
+                    description: >-
+                      The requests that ended in a result (`approved`, `rejected`, `expired`),
+                      the latest first.
+                    allOf:
+                      - $ref: '#/components/schemas/ProofingRequestList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key (`no_encryption_key`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/requests:
     parameters:
       - name: slug
@@ -5957,10 +5979,11 @@ paths:
         mails nothing and needs no `email` for an external person; an on-screen Idem request
         answers the Idem link as `deepLink` (scannable until `deepLinkExpiresAt`), and a Yivi
         one must be on-screen (an e-mailed one is 400), its disclosure started through
-        `yivi/start`. A Yivi request needs a flow that takes no document photos and is not matched
+        `yivi/start`. A Yivi request needs a flow that is not matched
         against a reference photo (else 400
-        `invalid_input`). A flow that asks for diplomas, the address or the Verzekeringsbericht cannot be
-        e-mailed (422 `diplomas_need_page`, `address_needs_page`, `employment_needs_page`), and a flow matched
+        `invalid_input`). A flow that asks for diplomas, the address or the Verzekeringsbericht, or
+        photographs the document, cannot be e-mailed (422 `diplomas_need_page`, `address_needs_page`,
+        `employment_needs_page`, `document_scan_needs_page`), and a flow matched
         against a reference photo cannot be sent from here, which takes no photo (422 `reference_photo_required`). A request for
         an external person with `birthDate` (a past date, YYYY-MM-DD, with `name`) is for that
         one person: an approval of anyone else is recorded as `rejected` with `errorCode`
@@ -6060,13 +6083,13 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
         '409':
-          description: The deployment has no identity proofing encryption key (`no_encryption_key`), a link is asked on a flow whose hosted page is off (`hosted_disabled`), or the flow requires the Verzekeringsbericht on a deployment that checks none (`no_employment_checker`), so its subject could never give it.
+          description: The deployment has no identity proofing encryption key (`no_encryption_key`), a link is asked on a flow whose hosted page is off (`hosted_disabled`), the flow requires the Verzekeringsbericht on a deployment that checks none (`no_employment_checker`), so its subject could never give it, or photographs the document on a deployment without ID Scan (`no_document_scanner`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person is not a member (`member_not_found`), the flow does not exist, cannot be completed in the app or is not available to the sender (`flow_not_found`, `flow_not_completable`, `flow_not_allowed`), no flow is named and the organisation has no default (`no_default_flow`), the flow asks for diplomas, the address or the Verzekeringsbericht on an e-mailed request (`diplomas_need_page`, `address_needs_page`, `employment_needs_page`), or it needs a reference photo (`reference_photo_required`).
+          description: The person is not a member (`member_not_found`), the flow does not exist, cannot be completed in the app or is not available to the sender (`flow_not_found`, `flow_not_completable`, `flow_not_allowed`), no flow is named and the organisation has no default (`no_default_flow`), the flow asks for diplomas, the address or the Verzekeringsbericht, or photographs the document, on an e-mailed request (`diplomas_need_page`, `address_needs_page`, `employment_needs_page`, `document_scan_needs_page`), or it needs a reference photo (`reference_photo_required`).
           content:
             application/json:
               schema:
@@ -6308,9 +6331,10 @@ paths:
         Requires organisation membership. `done` is false while the subject has not finished the
         OpenID4VP presentation in the Yivi app. Once done, the disclosure decides the session:
         `ok` true approved it, `ok` false rejected it and `code` says why
-        (document_not_accepted, or age_not_disclosed when an age check's claim did not come
-        back). No face check runs: the Yivi app vouches for its holder, and
-        the session reaches eIDAS low.
+        (document_not_accepted; age_not_disclosed when an age check's claim did not come
+        back; or face_not_verified when the face ID Scan checked with the document photo
+        did not verify the person). No other face check runs: the Yivi app vouches for its
+        holder, and the session reaches eIDAS low.
         The response returns no disclosed value; on approval the engine keeps the disclosed identity attributes (and the
         photo, when the flow requested it) as the session's result, readable through `result`,
         until its retention.
@@ -6332,6 +6356,12 @@ paths:
                   value:
                     done: true
                     ok: true
+                waitsForDocumentScan:
+                  summary: Done in the Yivi app; the document photo, after it, decides
+                  value:
+                    done: false
+                    ok: false
+                    waitsForDocumentScan: true
                 refused:
                   summary: The document is not one the flow accepts
                   value:
@@ -6347,13 +6377,169 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`).
+          description: The request does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/method:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of an on-screen request's session
+      description: >-
+        Requires organisation membership, and a request created on screen with method `pending`:
+        its session started with the flow, before the app was chosen. Sets the app (`idem_app`,
+        or `yivi_app` when the flow's `yiviAvailable`) before the document photo, which follows
+        the app's part, and answers the request, with an Idem session's `deepLink` as the QR code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingCreatedRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The app is chosen already (`link_started`), or the session has ended (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/start:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Start an on-screen request's document photo
+      description: >-
+        Requires organisation membership, and a request whose flow photographs the document
+        (`documentScan` is `pending`). Starts (or, after a failed one, restarts) a scan at CM.com
+        ID Scan, where the person photographs both sides of the document in the browser, and
+        answers its page's `url`, which the wallet's page embeds in an iframe. When done the
+        embedded page posts its parent the transaction's id, state and result id; `locale` is
+        the page's language (`nl` or `en`). Only under the flow's BlurBSN does ID Scan cover the
+        printed BSN in the photos; a BSN policy (retrieve, mask, omit) leaves them as taken. The
+        transaction id stays on the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentScanStartRequest'
+      responses:
+        '200':
+          description: The scan page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDocumentScanStart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The flow takes no document photo (`document_scan_not_asked`), the photos are in already (`document_scan_done`), the deployment has no ID Scan (`no_document_scanner`), or the session has ended (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/finish:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Finish an on-screen request's document photo
+      description: >-
+        Requires organisation membership. Hands the photos of the scan the page started last
+        to the session as its `document_photo` step: `transactionId` and `resultId` are what the
+        embedded ID Scan page posted its parent when done. Finishing it again changes nothing.
+        Without `resultId` it reports a scan that ended unfinished: one that used up ID Scan's own
+        attempts rejects the session (`LIVENESS_FAILED` or `FACE_NO_MATCH` for the face checks,
+        `DOC_EXPIRED` for an expired document, else `DOCUMENT_SCAN_FAILED`), as a new scan would
+        give the person new attempts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentScanFinishRequest'
+      responses:
+        '204':
+          description: The photos are in, or the session was rejected for a scan out of attempts.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Not the scan the page started last (`document_scan_mismatch`), the flow takes no document photo (`document_scan_not_asked`), the deployment has no ID Scan (`no_document_scanner`), or the session has ended (`session_over`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The person did not finish the scan with attempts left, or it gave no photo (`document_scan_failed`); start another.
           content:
             application/json:
               schema:
@@ -6976,8 +7162,8 @@ paths:
         review, `evidence`, and `diplomas` (the DUO extracts the subject added). For an approval,
         and for a check waiting for review, it also carries `photo` (the document's portrait),
         `selfie` (the live face matched against it), and `documentImage` and `documentImageBack`
-        (photos of the document's front and back; no back for a passport), each `{mimeType,
-        data}` with `data` base64, when the flow requested them; the API never does. A check
+        (photos of the document's front and back; a passport's back is its personal number
+        page), each `{mimeType, data}` with `data` base64, when the flow requested them; the API never does. A check
         waiting for review holds its face photos until it is decided, also on a flow that does
         not keep them after the match. Audited `identity_proofing.result_read`
         with the administrator as actor on every read. A member's request, one erased, or a
@@ -8420,6 +8606,9 @@ paths:
                           en: To check who you are and your date of birth.
                           nl: Om te controleren wie je bent en je geboortedatum.
                       yiviAvailable: true
+                      idemAvailable: true
+                      yiviPersonalData: false
+                      browserOnly: false
                       diplomaMode: "off"
                       addressMode: "off"
                       retentionDays: 31
@@ -8495,8 +8684,8 @@ paths:
       summary: Start a hosted proofing link
       security: []
       description: >-
-        Body `{method}`: `idem_app` or `yivi_app` (only when the flow's `yiviAvailable`;
-        otherwise, or for another method, 400 `invalid_input`). Creates the session once and
+        Body `{method}`: `idem_app` (only when the flow's `idemAvailable`) or `yivi_app` (only
+        when its `yiviAvailable`; otherwise, or for another method, 400 `invalid_input`). Creates the session once and
         answers 201 with the progress, plus the Idem `deepLink` for an Idem session.
       requestBody:
         required: true
@@ -8734,7 +8923,132 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link does not run in the Yivi app (`wrong_method`) or its session has ended (`session_over`).
+          description: The link does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/method:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of a hosted link's session
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link started with method `pending`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set; an Idem session's `deepLink` is the QR code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingHostedStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: As the org route of the same name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/document-scan/start:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Start the document photo of a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentScanStartRequest'
+      responses:
+        '200':
+          description: The scan page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDocumentScanStart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: As the org route of the same name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/document-scan/finish:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Finish the document photo of a hosted link
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentScanFinishRequest'
+      responses:
+        '204':
+          description: The photos are in, or the session was rejected for a scan out of attempts.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: As the org route of the same name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The person did not finish the scan with attempts left (`document_scan_failed`); start another.
           content:
             application/json:
               schema:
@@ -9252,7 +9566,8 @@ paths:
           description: >-
             The flow's hosted page is off (`hosted_disabled`),
             the deployment has no encryption key (`no_encryption_key`), the flow requires the
-            Verzekeringsbericht on a deployment that checks none (`no_employment_checker`), or a call with this
+            Verzekeringsbericht on a deployment that checks none (`no_employment_checker`), the flow
+            photographs the document on a deployment without ID Scan (`no_document_scanner`), or a call with this
             `Idempotency-Key` is still running or its outcome is unknown
             (`idempotency_in_flight`).
           content:
@@ -9269,8 +9584,9 @@ paths:
           description: >-
             The flow does not exist (`flow_not_found`), cannot be finished
             (`flow_not_completable`), needs a `referencePhoto` (`reference_photo_required`), or
-            asks for diplomas, the address or the Verzekeringsbericht and so needs `hosted: true`
-            (`diplomas_need_page`, `address_needs_page`, `employment_needs_page`); no flow is
+            asks for diplomas, the address or the Verzekeringsbericht, or photographs the document,
+            and so needs `hosted: true` (`diplomas_need_page`, `address_needs_page`,
+            `employment_needs_page`, `document_scan_needs_page`); no flow is
             named and the organisation has no default flow (`no_default_flow`); or the
             `Idempotency-Key` was used with another body (`idempotency_key_reused`).
           content:
@@ -9553,7 +9869,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser]
         description: The app the subject proofs with.
     post:
       tags: [identity-proofing-api]
@@ -9647,7 +9963,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser]
         description: The app the subject proofs with.
     get:
       tags: [identity-proofing-api]
@@ -11744,7 +12060,7 @@ components:
                 type: string
               documentKind:
                 type: string
-                enum: [passport, identity_card, residence_permit]
+                enum: [passport, identity_card, residence_permit, drivers_license]
                 description: >-
                   What the document is, which `documentType` (the MRZ code) alone does not say.
                   Absent when the document does not tell.
@@ -11764,6 +12080,28 @@ components:
               liveness:
                 type: string
                 enum: [passed, failed, not_performed]
+              documentCheck:
+                type: object
+                description: >-
+                  The document scan's result on a photographed document (`document_photo`);
+                  absent without one. A `fake` document, or `fields` `invalid`, rejected the
+                  session; `doubtful`, or `zones` `invalid`, sent it to review.
+                properties:
+                  verdict:
+                    type: string
+                    enum: [authentic, doubtful, fake]
+                  score:
+                    type: number
+                    description: The scan service's confidence the document is genuine, 0 to 1 (-1 when it could not tell).
+                  fields:
+                    type: string
+                    enum: [valid, invalid, not_performed]
+                    description: Whether every field the scan validated (number, names, dates) was valid.
+                  zones:
+                    type: string
+                    enum: [valid, invalid, not_performed]
+                    description: Whether every field read twice (MRZ and printed text) read the same.
+                required: [verdict, fields, zones]
             required: [type, passiveAuth, activeAuth]
         diplomas:
           type: array
@@ -11792,7 +12130,7 @@ components:
           pattern: '^ps_[a-z2-7]{26}$'
         method:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser]
         appLink:
           type: string
           description: The Idem app's link, for `idem_app`.
@@ -11811,7 +12149,7 @@ components:
           pattern: '^ps_[a-z2-7]{26}$'
         method:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser]
         status:
           type: string
           enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
@@ -12099,11 +12437,27 @@ components:
             `invalid_input`). A flow saved before reasons existed has none.
         selfieLocation:
           type: string
-          description: Ignored; the wallet always sets the face capture to the app.
+          description: >-
+            Ignored; the wallet sets the face capture to the app, or to the browser for
+            `faceProvider` `idscan`.
         faceProvider:
           type: string
-          enum: [regula]
-          description: What verifies the face step; absent is `regula`, the only one.
+          enum: [regula, idscan]
+          description: >-
+            What verifies the face step; absent is `regula` (in the Idem app). `idscan` checks
+            liveness and matches the face against the photographed document's portrait in the
+            browser, right after the document photo, and needs the `document_photo` step.
+        apps:
+          type: array
+          items:
+            type: string
+            enum: [idem, yivi]
+          description: >-
+            The apps a session may run in; absent allows both. A flow locked to `yivi` runs its
+            browser steps (the document photo, the face in the ID scan) and then the Yivi
+            disclosure, cannot be e-mailed, and refuses the Idem app; one locked to `idem` needs
+            a step the app runs. Asking a session in an app the flow locks out is 400
+            `invalid_input`.
         acceptedDocumentTypes:
           type: array
           items:
@@ -12113,6 +12467,15 @@ components:
             driving licence) or kinds (`passport`, `identity_card`, `residence_permit`); empty accepts any.
             `eu_driving_licence`, the chip evidence's type, is refused (422 `rejected_by_provider`). Only Dutch
             driving licences are verified: the engine holds the RDW's licence CSCAs and no other state's.
+            `personal_data` accepts the registered personal data (`pbdf.gemeente.personalData`, from
+            the BRP after a DigiD login), which only the Yivi app shares: only on a flow whose `apps`
+            is `yivi` alone. The Yivi app offers the
+            person any one of the accepted kinds and the personal data, and asks nothing else; a
+            document code other than a kind makes it offer every document. A photographed document
+            is tied to disclosed personal data by its date of birth (another is rejected,
+            `DOCUMENT_MISMATCH`) and surname (another sends the session to review), so such a flow
+            with `document_photo` checks no age. Personal data alone accepts any photographed
+            document.
         acceptedIssuingCountries:
           type: array
           items:
@@ -12205,6 +12568,11 @@ components:
             createdAt:
               type: string
               format: date-time
+            browserOnly:
+              type: boolean
+              description: >-
+                The page runs every step of the flow by itself, so no app is chosen: a flow of
+                only the document photo, say.
             completable:
               type: boolean
               description: False for a flow a recipient cannot finish with only the Idem app; it cannot be made available to members.
@@ -12671,6 +13039,10 @@ components:
           type: string
           enum: [no_current_employment, current_benefit, current_other_income]
           description: Why the wallet put the session in review after the identity was approved (no current job, a current UWV benefit, or other current income paid without hours worked, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
+        documentScan:
+          type: string
+          enum: [pending, done]
+          description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
         expectedSubject:
           type: boolean
         flowKind:
@@ -12717,8 +13089,12 @@ components:
             an identity check on `flowId`.
         method:
           type: string
-          enum: [idem_app, yivi_app]
-          default: idem_app
+          enum: [idem_app, yivi_app, browser, pending]
+          description: >-
+            Absent follows the flow: `browser` for a flow the page runs alone (`browserOnly`),
+            else `idem_app`. `browser` is taken only for such a flow, and the apps only for any
+            other. `pending`, on screen only, starts the session with the flow and leaves the app
+            to `/method`.
         channel:
           type: string
           enum: [email, on_screen, hosted]
@@ -12800,6 +13176,37 @@ components:
           type: string
           enum: [waiting, connected, away]
       required: [app]
+    ProofingChooseMethod:
+      type: object
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+      required: [method]
+    ProofingDocumentScanStartRequest:
+      type: object
+      properties:
+        locale:
+          type: string
+          description: The page's language; `nl` gets ID Scan's Dutch, anything else its English.
+    ProofingDocumentScanStart:
+      type: object
+      properties:
+        url:
+          type: string
+          description: The ID Scan page the person photographs the document on.
+      required: [url]
+    ProofingDocumentScanFinishRequest:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          description: The transaction id the embedded ID Scan page posted when done.
+        resultId:
+          type: string
+          description: The result id the embedded ID Scan page posted when done; absent for a scan that did not complete.
+      required: [transactionId]
     ProofingYiviStart:
       type: object
       properties:
@@ -12821,7 +13228,7 @@ components:
           description: The disclosure approved the session; false rejected it.
         code:
           type: string
-          enum: [document_not_accepted, age_not_disclosed]
+          enum: [document_not_accepted, age_not_disclosed, face_not_verified]
       required: [done, ok]
     ProofingRequestEvents:
       type: object
@@ -13323,7 +13730,7 @@ components:
           type: string
         method:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser]
         linkExpiresAt:
           type: string
           format: date-time
@@ -13356,6 +13763,10 @@ components:
         employmentGiven:
           type: boolean
           description: A Verzekeringsbericht of the subject was kept.
+        documentScan:
+          type: string
+          enum: [pending, done]
+          description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
         dataExportUntil:
           type: string
           format: date-time
@@ -13443,10 +13854,26 @@ components:
                 yiviAvailable:
                   type: boolean
                   description: >-
-                    Whether the Yivi app can run the flow: not when it photographs the document,
-                    matches the face against a reference photo, checks an age the Yivi passport
+                    Whether the Yivi app can run the flow: not when it needs no app
+                    (`browserOnly`), matches the face against a reference photo, checks an age the Yivi passport
                     and ID card carry no claim for (other than 12, 16, 18, 21 and 65), or requires
                     more than `low`, the level a Yivi session reaches.
+                idemAvailable:
+                  type: boolean
+                  description: >-
+                    Whether the Idem app can run the flow: not when it needs no app
+                    (`browserOnly`) or is locked to the Yivi app (`apps`).
+                yiviPersonalData:
+                  type: boolean
+                  description: >-
+                    The flow accepts the registered personal data (`acceptedDocumentTypes`
+                    `personal_data`), which the Yivi app may share: the page says so on its app
+                    choice.
+                browserOnly:
+                  type: boolean
+                  description: >-
+                    Whether the page runs every step of the flow by itself, so no app is chosen:
+                    a flow of only the document photo, say.
                 diplomaMode:
                   type: string
                   enum: ['off', required]
@@ -13465,7 +13892,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [requestedAttributes, attributeReasons, yiviAvailable, diplomaMode, addressMode, retentionDays]
+              required: [requestedAttributes, attributeReasons, yiviAvailable, idemAvailable, yiviPersonalData, browserOnly, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.
@@ -13509,7 +13936,8 @@ components:
       properties:
         method:
           type: string
-          enum: [idem_app, yivi_app]
+          enum: [idem_app, yivi_app, browser, pending]
+          description: '`pending` starts the session with the flow; the app is chosen after (`/method`).'
       required: [method]
     ProofingHostedStarted:
       allOf:
@@ -13911,14 +14339,6 @@ components:
         bsnRegion:
           $ref: '#/components/schemas/IdemImageRegion'
       required: [image]
-    IdemDocumentPhotoRequest:
-      type: object
-      properties:
-        front:
-          $ref: '#/components/schemas/IdemDocumentPhotoSide'
-        back:
-          $ref: '#/components/schemas/IdemDocumentPhotoSide'
-      required: [front]
     IdemPhoto:
       type: object
       properties:

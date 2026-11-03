@@ -11,6 +11,10 @@ type Translation<T> = {
 
 export const nl: Translation<typeof en> = {
   common: {
+    pages: "Pagina's",
+    pageRange: "{{from}}–{{to}} van {{total}}",
+    previousPage: "Vorige",
+    nextPage: "Volgende",
     cancel: "Annuleren",
     canReview: "Mag beoordelen",
     close: "Sluiten",
@@ -605,6 +609,12 @@ export const nl: Translation<typeof en> = {
       docTampered: "chipgegevens van het document zijn gemanipuleerd",
       chipCloneDetected: "gekloonde documentchip gedetecteerd",
       docExpired: "document verlopen",
+      docNotAuthentic: "het gefotografeerde document is niet echt",
+      docFieldsInvalid: "de gedrukte gegevens van het document zijn afgekeurd",
+      docScanFailed:
+        "de foto van het document is niet gelukt, ook niet na alle pogingen",
+      documentMismatch:
+        "het gefotografeerde document is niet het gelezen document",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",
       manualReviewRejected: "geweigerd door een beoordelaar",
       reviewNotHolder:
@@ -674,6 +684,17 @@ export const nl: Translation<typeof en> = {
       addressNotAsked: "Deze controle vraagt niet om een adres.",
       addressNotFound:
         "Dit adres staat niet in de Nederlandse adresregistratie. Controleer postcode, huisnummer en straat.",
+      documentScanNeedsPage:
+        "Deze flow fotografeert het document, wat gebeurt op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
+      documentScanFailed:
+        "De foto's van het document zijn niet bruikbaar. Probeer het opnieuw.",
+      documentScanMismatch:
+        "Deze foto's horen bij een andere controle. Fotografeer het document opnieuw.",
+      documentScanDone: "Het document is al gefotografeerd.",
+      documentScanPending:
+        "Fotografeer eerst het document en deel daarna je gegevens vanuit de Yivi-app.",
+      noDocumentScanner:
+        "Deze server fotografeert geen documenten. Vraag je beheerder ID_SCAN_KEY_ID en ID_SCAN_SECRET in te stellen.",
       employmentNeedsPage:
         "Deze flow vraagt om het Verzekeringsbericht van UWV, dat wordt geüpload op de pagina waar de controle loopt. Toon hem op dit scherm of stuur een gehoste link.",
       employmentClosed:
@@ -897,6 +918,7 @@ export const nl: Translation<typeof en> = {
         "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
       steps: {
         overview: "Wat er wordt verzameld",
+        document: "Je ID fotograferen",
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
@@ -923,7 +945,7 @@ export const nl: Translation<typeof en> = {
         dg1WithoutBirthDate:
           "Je naam en nationaliteit, en het nummer en de vervaldatum van het document.",
         age_over:
-          "Alleen of je oud genoeg bent, bepaald uit de chip van je document: niet je geboortedatum.",
+          "Alleen of je oud genoeg bent, bepaald uit je document: niet je geboortedatum.",
         dg11: "Je geboorteplaats en persoonsnummer (BSN), als je document die op de chip heeft staan.",
         dg2: "Je pasfoto op de chip van het document.",
         chip_checks: "Of de chip echt en onveranderd is.",
@@ -935,10 +957,13 @@ export const nl: Translation<typeof en> = {
       },
       method: {
         heading: "Hoe wil je je verifiëren?",
+        only: "Je verifieert met de {{app}}: deze controle werkt met geen andere app. Zorg dat die op je telefoon staat.",
         yivi: {
           title: "Yivi-app",
           detail:
             "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat.",
+          detailPersonalData:
+            "Deel een document of je persoonsgegevens (geladen met DigiD) die deze controle accepteert, uit je Yivi-app.",
         },
         idem: {
           title: "Idem-app",
@@ -947,11 +972,26 @@ export const nl: Translation<typeof en> = {
         },
         back: "Terug",
       },
+      documentScan: {
+        heading: "Fotografeer je identiteitsbewijs",
+        hint: "Maak hieronder in de beveiligde scan van CM.com een foto van de voor- en achterkant van je ID-kaart of rijbewijs, of van de fotopagina van je paspoort.",
+        passportHint:
+          "Voor een paspoort: sla het open als een boek en draai het een kwartslag, zodat het opengeslagen paspoort in het kader past.",
+        frameTitle: "ID-scan van CM.com",
+        start: "Document fotograferen",
+        finishing: "Foto's toevoegen…",
+        loading: "De beveiligde scan van CM.com wordt geladen…",
+        cancelled: "De foto's zijn niet gemaakt. Probeer het opnieuw.",
+        retry: "Opnieuw proberen",
+      },
       scan: {
         yiviHeading: "Scan met de Yivi-app",
         yiviHint:
           "Open de Yivi-app en scan deze code, of tik op de knop als deze pagina op je telefoon staat.",
         openYivi: "Openen in de Yivi-app",
+        getYivi: "Nog geen Yivi-app? Download hem via de",
+        appStore: "App Store",
+        playStore: "Google Play",
         idemHeading: "Scan met de Idem-app",
         idemHint: "Open de Idem-app en scan deze code vanuit de app.",
         openIdem: "Openen in de Idem-app",
@@ -979,6 +1019,7 @@ export const nl: Translation<typeof en> = {
         documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
         ageNotDisclosed:
           "het gedeelde document gaf niet aan of je oud genoeg bent.",
+        faceNotVerified: "de gezichtscontrole in de ID-scan is niet gelukt.",
       },
       ended: {
         title: "Deze controle is beëindigd",
@@ -1064,6 +1105,14 @@ export const nl: Translation<typeof en> = {
         passiveAuth: "Echtheid chip",
         faceMatch: "Gezichtsvergelijking",
         liveness: "Echtheid persoon",
+        documentCheck: "Documentcontrole",
+        documentVerdicts: {
+          authentic: "Echt",
+          doubtful: "Twijfelachtig",
+          fake: "Niet echt",
+        },
+        documentFields: "Gedrukte gegevens",
+        documentZones: "MRZ gelijk aan gedrukte tekst",
         checks: {
           valid: "Geldig",
           invalid: "Ongeldig",
@@ -1752,7 +1801,7 @@ export const nl: Translation<typeof en> = {
     attributeHints: {
       dg1: "Naam, geboortedatum, nationaliteit, en het type, nummer en de vervaldatum van het document.",
       age_over:
-        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
+        "Alleen of de persoon de minimumleeftijd of ouder is, bepaald uit de geboortedatum op de chip of de documentfoto. Nooit de datum zelf: aangevinkt met Naam en documentgegevens komen die zonder geboortedatum.",
       dg11: "Alleen als de chip ze bevat; veel chips niet.",
       dg2: "De pasfoto van de houder op de chip, getoond naast de selfie.",
       chip_checks: "Of de chip echt bleek en geen kopie.",
@@ -1792,6 +1841,15 @@ export const nl: Translation<typeof en> = {
           "Kies een drempel voor de gezichtsvergelijking die het niveau toestaat.",
         retentionSeconds: "Vul een heel aantal seconden in.",
         ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
+        apps: "De Idem-app heeft niets te doen in deze flow: zet het scannen en lezen van het document of de gezichtscontrole in de app aan, of vink de Idem-app uit.",
+        appsNeeded:
+          "Het scannen en lezen van het document en de gezichtscontrole in de app hebben een app nodig: vink de Yivi-app, de Idem-app of beide aan.",
+        personalDataYivi:
+          "Persoonsgegevens komen alleen uit de Yivi-app: vink onder Apps de Yivi-app aan, of vink persoonsgegevens uit.",
+        personalDataDocument:
+          "De Idem-app deelt geen persoonsgegevens maar leest een document: vink ook een documenttype aan, of vink onder Apps de Idem-app uit.",
+        personalDataAge:
+          "Met persoonsgegevens wordt de foto van het document aan de persoon gekoppeld via de geboortedatum, die een leeftijdscheck niet bewaart: zet de leeftijdscheck uit.",
         identity:
           "Een diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
       },
@@ -1841,9 +1899,12 @@ export const nl: Translation<typeof en> = {
         addressHint:
           "Na de identiteitscontrole, in de browser en niet in de Idem-app: de persoon vult zijn postadres in. Een Nederlands adres wordt gecontroleerd in de Nederlandse adresregistratie (BAG); elk ander adres wordt bewaard zoals hij het opgeeft. Zo'n flow wordt op het scherm getoond of als gehoste link verstuurd, nooit gemaild.",
         photoHint:
-          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort.",
+          "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
         faceHint:
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
+        faceInScan: "Het gezicht controleren in de ID-scan",
+        faceInScanHint:
+          "Direct na de foto van het document, in de browser: de ID-scan controleert of de persoon levend is en vergelijkt het gezicht met de foto op het document. Niet met de chipfoto, dus dit haalt geen betrouwbaarheidsniveau.",
         diplomaHint:
           "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
         employmentHint:
@@ -1853,6 +1914,25 @@ export const nl: Translation<typeof en> = {
         lifetime: "Geldigheid QR-code",
         lifetimeHint:
           "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+        apps: "Apps",
+        appsHint: "De apps waarin de persoon deze flow kan doen.",
+        yiviApp: "Yivi-app",
+        yiviAppHint:
+          "De persoon deelt zijn gegevens uit de Yivi-app, op dit scherm of via een link.",
+        idemApp: "Idem-app",
+        idemAppHint:
+          "De persoon scant zijn paspoort of ID-kaart met de Idem-app en leest de chip uit.",
+        needsApp:
+          "Heeft een app nodig: vink onder Apps de Yivi-app of de Idem-app aan.",
+        idemAppLock:
+          "Niet zolang persoonsgegevens het enige documenttype is: de Idem-app deelt die niet. Vink ook een documenttype aan.",
+        appsBoth:
+          "De persoon kiest een van de twee apps. Wat je ontvangt hangt af van de gekozen app.",
+        appsNone: "Geen app: de ID-scan in de browser is de hele controle.",
+        appsOnly: {
+          yivi: "Deze flow werkt alleen met de Yivi-app: de persoon krijgt dat te zien en geen keuze.",
+          idem: "Deze flow werkt alleen met de Idem-app: de persoon krijgt dat te zien en geen keuze.",
+        },
         lifetimeDefault: "Standaard van de organisatie ({{minutes}} minuten)",
         minutes_one: "{{count}} minuut",
         minutes_other: "{{count}} minuten",
@@ -1865,6 +1945,10 @@ export const nl: Translation<typeof en> = {
         identity_card: "Identiteitskaart",
         residence_permit: "Verblijfsvergunning",
         drivers_license: "Nederlands rijbewijs",
+        personal_data: "Persoonsgegevens (BRP, met DigiD)",
+        personalDataHint:
+          "Werkt alleen in de Yivi-app: naam en geboortedatum uit de BRP, geladen met DigiD. Een foto van het document wordt daarmee vergeleken. Met de Idem-app laat de persoon een van de documenttypes hierboven lezen.",
+        personalDataLock: "Alleen als onder Apps de Yivi-app is aangevinkt.",
         countries: "Landen van uitgifte",
         any: "Elk land",
         only: "Alleen deze landen",
@@ -1915,7 +1999,7 @@ export const nl: Translation<typeof en> = {
         bsn: "BSN",
         bsnHint:
           "Bewaar het volledige BSN alleen als de wet je toestaat het te verwerken.",
-        blackOutBsn: "Het BSN op documentfoto's zwart maken",
+        blackOutBsn: "Het BSN en de handtekening op documentfoto's zwart maken",
         keepFacePhotos: "Gezichtsfoto's bewaren na de vergelijking",
         keepFacePhotosHint:
           "Uit: het portret, de selfie en de foto van de afzender verdwijnen zodra de gezichtsvergelijking klaar is; de uitkomst blijft. Zet dit alleen aan voor een organisatie die ze moet bewaren.",
@@ -2319,8 +2403,11 @@ export const nl: Translation<typeof en> = {
       action: "Actie",
       target: "Doel",
       subject: "Onderwerp",
+      details: "Details",
     },
     noSubject: "—",
+    detailsToggle: "Details van {{action}} op {{when}}",
+    noDetails: "Er zijn geen verdere details vastgelegd.",
     fields: {
       method: "Methode",
       assuranceLevel: "Betrouwbaarheid",
@@ -2502,6 +2589,8 @@ export const nl: Translation<typeof en> = {
       identityProofingSessionStarted: "Identiteitsverificatie gestart",
       identityProofingSessionHandover:
         "Nieuwe code voor identiteitsverificatie uitgegeven",
+      identityProofingDocumentScanStarted: "Documentscan gestart",
+      identityProofingDocumentScanFailed: "Documentscan zonder pogingen over",
       identityProofingSessionEnded:
         "Identiteitsverificatiesessie onafgerond beëindigd",
       identityProofingSessionCancelled:

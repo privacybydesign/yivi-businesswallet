@@ -67,6 +67,8 @@ type fakeRequests struct {
 	methods  []proofingprovider.Method
 	// handovers counts the new codes recorded.
 	handovers int
+	// scanFailures are the document scans audited as out of attempts.
+	scanFailures []proofingprovider.DocumentScanFailure
 	// employmentRejections are the reasons of the statements refused.
 	employmentRejections []string
 	// actors is the audit actor label of each start and outcome recorded, ""
@@ -106,7 +108,7 @@ func (f *fakeRequests) Create(_ context.Context, in NewStoredRequest) (Request, 
 		RequiredAssuranceLevel: in.Flow.RequiredAssuranceLevel,
 		RedirectURL:            in.RedirectURL, Language: in.Language, Diplomas: in.Diplomas, Address: in.Address, Employment: in.Employment,
 		ExpectsSubject: in.Subject.BirthDate != "", expectedBirthDate: in.Subject.BirthDate,
-		FlowKind: in.FlowKind,
+		FlowKind: in.FlowKind, DocumentScan: takesDocumentPhoto(in.Flow),
 	}
 	f.stored = &req
 	f.linkHash = in.LinkTokenHash
@@ -120,9 +122,7 @@ func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofi
 	f.attached = append(f.attached, sess)
 	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	f.stored.FlowVersion = sess.FlowVersion
-	if req.Method != "" {
-		f.stored.Method = req.Method
-	}
+	f.stored.Method = req.Method
 	return true, nil
 }
 
@@ -155,6 +155,10 @@ func (f *fakeRequests) List(context.Context, uuid.UUID, RequestFilter) ([]Reques
 		return []Request{}, nil
 	}
 	return []Request{*f.stored}, nil
+}
+
+func (f *fakeRequests) Overview(context.Context, uuid.UUID, OverviewScope) (Overview, error) {
+	return Overview{}, nil
 }
 
 func (f *fakeRequests) ExtendSession(_ context.Context, _ Request, _ string, expiresAt time.Time) error {
@@ -407,6 +411,33 @@ func (f *fakeRequests) SetYiviTransaction(_ context.Context, _ Request, _, trans
 	return nil
 }
 
+func (f *fakeRequests) SetDocumentScanTransaction(_ context.Context, _ Request, _, transactionID string) error {
+	f.stored.documentScanTransactionID = transactionID
+	return nil
+}
+
+func (f *fakeRequests) MarkDocumentScanned(_ context.Context, _ Request, _, transactionID string) error {
+	if f.stored.documentScanTransactionID != transactionID {
+		return ErrSessionOver
+	}
+	at := time.Now()
+	f.stored.DocumentScannedAt = &at
+	return nil
+}
+
+func (f *fakeRequests) RecordDocumentScanFailed(_ context.Context, _ Request, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
+	return nil
+}
+
+func (f *fakeRequests) SetMethod(_ context.Context, _ Request, _ string, method proofingprovider.Method) error {
+	if f.stored.Method != "" {
+		return ErrSessionOver
+	}
+	f.stored.Method = method
+	return nil
+}
+
 func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) ([]StatsRow, error) {
 	return []StatsRow{}, nil
 }
@@ -522,6 +553,15 @@ type fakeIPS struct {
 	noClaim bool
 	// references are the Yivi disclosures handed to IPS as face references.
 	references []proofingprovider.Reference
+	// documentPhotos are the document photos handed to IPS; referenceErr and
+	// documentPhotoErr fail those calls.
+	documentPhotos   []proofingprovider.DocumentPhoto
+	referenceErr     error
+	documentPhotoErr error
+	// scanFailures are the scans FailDocumentScan failed the session on.
+	scanFailures []proofingprovider.DocumentScanFailure
+	// chosen are the apps ChooseMethod set.
+	chosen []proofingprovider.Method
 	// handovers counts fresh claim links asked for; handoverErr fails them.
 	// slotClaimed makes the link a handover from a phone that held the session.
 	handovers   int
@@ -581,6 +621,15 @@ func (f *fakeIPS) SessionHandover(_ context.Context, _ proofingprovider.Tenant, 
 	return proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=fresh-" + sessionID, ExpiresAt: time.Now().Add(time.Minute), Handover: f.slotClaimed}, nil
 }
 
+func (f *fakeIPS) ChooseMethod(_ context.Context, _ proofingprovider.Tenant, sessionID, _ string, method proofingprovider.Method) (proofingprovider.Session, error) {
+	f.chosen = append(f.chosen, method)
+	sess := proofingprovider.Session{ID: sessionID, ExpiresAt: f.sessionExpires}
+	if method == proofingprovider.MethodIdem {
+		sess.Claim = &proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=" + sessionID, ExpiresAt: time.Now().Add(time.Minute)}
+	}
+	return sess, nil
+}
+
 func (f *fakeIPS) ListFlows(context.Context, proofingprovider.Tenant) ([]proofingprovider.Flow, error) {
 	f.flowLists++
 	return f.flows, nil
@@ -638,8 +687,24 @@ func (f *fakeIPS) SessionResult(context.Context, proofingprovider.Tenant, string
 }
 
 func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, _, _ string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error) {
+	if f.referenceErr != nil {
+		return proofingprovider.YiviDisclosure{}, f.referenceErr
+	}
 	f.references = append(f.references, ref)
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+func (f *fakeIPS) FailDocumentScan(_ context.Context, _ proofingprovider.Tenant, _, _ string, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
+	return nil
+}
+
+func (f *fakeIPS) SubmitDocumentPhoto(_ context.Context, _ proofingprovider.Tenant, _, _ string, photo proofingprovider.DocumentPhoto) error {
+	if f.documentPhotoErr != nil {
+		return f.documentPhotoErr
+	}
+	f.documentPhotos = append(f.documentPhotos, photo)
+	return nil
 }
 
 // fakeVerifier is the OpenID4VP verifier: a presentation stays pending until
@@ -648,18 +713,15 @@ type fakeVerifier struct {
 	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
-	// claims are each start's extra claims, scopes each start's scope.
-	claims [][]string
-	scopes []openid4vpverifier.Scope
+	// claims are each start's extra claims, requests each start.
+	claims   [][]string
+	requests []openid4vpverifier.ProofingRequest
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
-	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress {
-		return openid4vpverifier.Session{}, errors.New("unexpected scope")
-	}
+func (f *fakeVerifier) StartProofing(_ context.Context, req openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
 	f.started++
-	f.claims = append(f.claims, claims)
-	f.scopes = append(f.scopes, scope)
+	f.claims = append(f.claims, req.Claims)
+	f.requests = append(f.requests, req)
 	return openid4vpverifier.Session{TransactionID: "tx-" + strconv.Itoa(f.started), WalletLink: "openid4vp://?request_uri=x"}, nil
 }
 

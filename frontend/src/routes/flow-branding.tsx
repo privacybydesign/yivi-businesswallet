@@ -25,6 +25,7 @@ import {
   readableTextOn,
 } from "../lib/identity-proofing";
 import type { AppLook } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { useLogoPreview } from "../lib/use-logo-preview";
 import { Button, Card, ConfirmDialog } from "../ui";
 import {
@@ -88,17 +89,20 @@ export function FlowBrandingSettings({
   const org = useOrganizationQuery(slug);
   const theme = useOrgThemeQuery(slug);
 
-  if (own.isError || settings.isError || org.isError || theme.isError) {
+  const error = blockingError(own, settings, org, theme);
+  if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(
-          own.error ?? settings.error ?? org.error ?? theme.error,
-          t,
-        )}
+        {proofingErrorMessage(error, t)}
       </p>
     );
   }
-  if (own.isPending || settings.isPending || org.isPending || theme.isPending) {
+  if (
+    own.data === undefined ||
+    settings.data === undefined ||
+    org.data === undefined ||
+    theme.data === undefined
+  ) {
     return <p className={HINT}>{t("common.loading")}</p>;
   }
   return (
