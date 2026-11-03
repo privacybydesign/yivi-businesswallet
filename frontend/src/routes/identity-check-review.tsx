@@ -19,6 +19,7 @@ import {
   REVIEW_REASON_MAX_CHARS,
 } from "../lib/identity-proofing";
 import { issuingCountryName } from "../lib/issuing-countries";
+import { blockingError } from "../lib/query-state";
 import { toast } from "../lib/toast";
 import {
   DEFAULT_REJECT_REASON,
@@ -164,10 +165,11 @@ function ResultState({
   if (result.isPending) {
     return <p className={REVIEW_HINT}>{t("common.loading")}</p>;
   }
-  if (result.isError) {
+  const error = blockingError(result);
+  if (error !== null) {
     return (
       <p role="alert" className={REVIEW_ERROR}>
-        {proofingErrorMessage(result.error, t)}
+        {proofingErrorMessage(error, t)}
       </p>
     );
   }

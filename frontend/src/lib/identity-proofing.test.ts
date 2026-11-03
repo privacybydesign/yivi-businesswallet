@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { AuditEvent } from "../api/organization";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "../api/http";
+import { ApiError, ApiValidationError } from "../api/http";
 import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
 import type {
   ProofingBranding,
@@ -28,6 +28,7 @@ import {
   PROOFING_REJECTION_CODES,
   addressLookup,
   addressVerificationNote,
+  pollFailedForGood,
   matchingAddress,
   ageOverChoices,
   ageOverFact,
@@ -2933,6 +2934,28 @@ describe("data request review", () => {
     const key = "identityProofing.reviews.dataRequest.decision.confirmTitle";
     expect(t(key, { count: 1 })).toBe("Delete 1 check?");
     expect(t(key, { count: 3 })).toBe("Delete 3 checks?");
+  });
+});
+
+describe("pollFailedForGood", () => {
+  it("ends on the backend's answer or one the page cannot read", () => {
+    expect(pollFailedForGood(new ApiError(422, "", "/api/v1/x", null))).toBe(
+      true,
+    );
+    expect(pollFailedForGood(new ApiValidationError("/api/v1/x", []))).toBe(
+      true,
+    );
+  });
+
+  it("polls on through a network error, a rate limit or a 5xx", () => {
+    expect(pollFailedForGood(new TypeError("Failed to fetch"))).toBe(false);
+    expect(pollFailedForGood(new ApiError(429, "", "/api/v1/x", null))).toBe(
+      false,
+    );
+    expect(pollFailedForGood(new ApiError(502, "", "/api/v1/x", null))).toBe(
+      false,
+    );
+    expect(pollFailedForGood(null)).toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@ import type { ProofingRequest } from "../api/identity-proofing";
 import { isDataRequest } from "../api/identity-proofing";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
+import { blockingError } from "../lib/query-state";
 import {
   listedCount,
   proofingErrorMessage,
@@ -56,15 +57,16 @@ function Rows({
   empty,
   rows,
 }: Readonly<{
-  query: { isError: boolean; isPending: boolean; error: Error | null };
+  query: { data: unknown; isPending: boolean; error: Error | null };
   empty: string;
   rows: React.ReactElement[];
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  if (query.isError) {
+  const error = blockingError(query);
+  if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(query.error, t)}
+        {proofingErrorMessage(error, t)}
       </p>
     );
   }
@@ -83,6 +85,7 @@ export default function IdentityProofingOverview(): React.JSX.Element {
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
+  const orgError = blockingError(org);
   const isAdmin = org.data?.role === "admin";
   const canReview = org.data?.canReview === true;
   const pause = useProofingPauseQuery(slug);
@@ -105,23 +108,23 @@ export default function IdentityProofingOverview(): React.JSX.Element {
       />
       <div className="flex max-w-240 flex-col gap-6 p-4 sm:p-8">
         {pause.data?.paused && <ProofingPausedNotice pause={pause.data} />}
-        {org.isError && (
+        {orgError !== null && (
           <Card className="p-6">
             <p role="alert" className="text-error text-[14px]">
-              {accessMessage(org.error, t)}
+              {accessMessage(orgError, t)}
             </p>
           </Card>
         )}
         {/* Which lists there are hangs on the reader's right to decide, so
             they wait for it. */}
-        {!org.isError && org.data !== undefined && (
+        {org.data !== undefined && (
           <OverviewLists
             slug={slug}
             isAdmin={isAdmin}
             canReview={shows.decisions}
           />
         )}
-        {!org.isError && org.data === undefined && (
+        {org.data === undefined && orgError === null && (
           <Card>
             <TaskEmpty>{t("common.loading")}</TaskEmpty>
           </Card>

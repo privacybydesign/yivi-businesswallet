@@ -37,6 +37,7 @@ import {
   provenWithParts,
   reviewPath,
 } from "../lib/proofing-reviews";
+import { blockingError } from "../lib/query-state";
 import { toast } from "../lib/toast";
 import { Button, ConfirmDialog, StatusText, TopBar } from "../ui";
 import {
@@ -234,6 +235,7 @@ function WhoAsks({
   const provenWith = [document, how.join(", ")].filter(Boolean).join(" · ");
   // An identity not read yet: a disabled read is not loading.
   const loading = result.isPending && result.fetchStatus !== "idle";
+  const error = blockingError(result);
 
   return (
     <ReviewSection
@@ -242,12 +244,12 @@ function WhoAsks({
       hint={t("identityProofing.sessions.identity.audited")}
     >
       {loading && <p className={REVIEW_HINT}>{t("common.loading")}</p>}
-      {result.isError && (
+      {error !== null && (
         <p role="alert" className={REVIEW_ERROR}>
-          {proofingErrorMessage(result.error, t)}
+          {proofingErrorMessage(error, t)}
         </p>
       )}
-      {!loading && !result.isError && (
+      {!loading && error === null && (
         <ReviewFacts
           rows={[
             {

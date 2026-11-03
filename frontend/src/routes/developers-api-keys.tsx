@@ -12,6 +12,7 @@ import type {
 } from "../api/identity-proofing";
 import { useDateFormatter, useWhenFormatter } from "../lib/format-when";
 import { proofingErrorMessage } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Button, Card, ConfirmDialog, Input, Modal, Table } from "../ui";
 import { SecretReveal } from "./proofing-ui";
 
@@ -39,6 +40,7 @@ export function ApiTokensSection({
   const [revoking, setRevoking] = useState<ProofingApiKey | null>(null);
   const revoke = useRevokeApiKeyMutation(slug);
   const active = keys.data?.filter((key) => !key.revokedAt);
+  const keysError = blockingError(keys);
 
   return (
     <>
@@ -77,43 +79,42 @@ export function ApiTokensSection({
                 {t("common.loading")}
               </Table.State>
             )}
-            {keys.isError && (
+            {keysError !== null && (
               <Table.State colSpan={KEY_COLUMNS}>
-                {proofingErrorMessage(keys.error, t)}
+                {proofingErrorMessage(keysError, t)}
               </Table.State>
             )}
-            {keys.isSuccess && !active?.length && (
+            {active?.length === 0 && (
               <Table.State colSpan={KEY_COLUMNS}>
                 {t("identityProofing.apiKeys.empty")}
               </Table.State>
             )}
-            {keys.isSuccess &&
-              active?.map((key) => (
-                <Table.Row key={key.id}>
-                  <Table.Cell className="font-semibold">{key.name}</Table.Cell>
-                  <Table.Cell>
-                    {formatDate(key.createdAt)}
-                    {key.createdByName && ` · ${key.createdByName}`}
-                  </Table.Cell>
-                  <Table.Cell className="text-ink-soft">
-                    {key.lastUsedAt
-                      ? formatWhen(key.lastUsedAt)
-                      : t("identityProofing.apiKeys.neverUsed")}
-                  </Table.Cell>
-                  <Table.Cell className="text-right">
-                    <button
-                      type="button"
-                      className="text-error text-[12.5px] font-semibold hover:underline"
-                      aria-label={t("identityProofing.apiKeys.revokeNamed", {
-                        name: key.name,
-                      })}
-                      onClick={() => setRevoking(key)}
-                    >
-                      {t("identityProofing.apiKeys.revoke")}
-                    </button>
-                  </Table.Cell>
-                </Table.Row>
-              ))}
+            {active?.map((key) => (
+              <Table.Row key={key.id}>
+                <Table.Cell className="font-semibold">{key.name}</Table.Cell>
+                <Table.Cell>
+                  {formatDate(key.createdAt)}
+                  {key.createdByName && ` · ${key.createdByName}`}
+                </Table.Cell>
+                <Table.Cell className="text-ink-soft">
+                  {key.lastUsedAt
+                    ? formatWhen(key.lastUsedAt)
+                    : t("identityProofing.apiKeys.neverUsed")}
+                </Table.Cell>
+                <Table.Cell className="text-right">
+                  <button
+                    type="button"
+                    className="text-error text-[12.5px] font-semibold hover:underline"
+                    aria-label={t("identityProofing.apiKeys.revokeNamed", {
+                      name: key.name,
+                    })}
+                    onClick={() => setRevoking(key)}
+                  >
+                    {t("identityProofing.apiKeys.revoke")}
+                  </button>
+                </Table.Cell>
+              </Table.Row>
+            ))}
           </Table.Body>
         </Table>
       </Card>

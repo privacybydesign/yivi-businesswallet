@@ -63,6 +63,7 @@ import {
   ageOverFact,
 } from "../lib/identity-proofing";
 import type { SessionFilter } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Card, Icon, Select, StatusText, Table, TopBar } from "../ui";
 import { PostalAddress, ResultText } from "./proofing-ui";
 import { DataRequestNote } from "./data-request-review";
@@ -175,6 +176,7 @@ export function PeopleList({
   const capped = requestListCapped(onFlow);
   const counts = sessionFilterCounts(onFlow);
   const shown = onFlow.filter((r) => matchesSessionFilter(r.status, filter));
+  const requestsError = blockingError(requests);
   const retentionOf = flow
     ? ({ kind: "flow", flow } as const)
     : peopleRetentionOf(flowFilter, flows.data);
@@ -274,17 +276,17 @@ export function PeopleList({
             {requests.isPending && (
               <Table.State colSpan={columns}>{t("common.loading")}</Table.State>
             )}
-            {requests.isError && (
+            {requestsError !== null && (
               <Table.State colSpan={columns}>
-                {proofingErrorMessage(requests.error, t)}
+                {proofingErrorMessage(requestsError, t)}
               </Table.State>
             )}
-            {requests.isSuccess && shown.length === 0 && (
+            {requests.data !== undefined && shown.length === 0 && (
               <Table.State colSpan={columns}>
                 {t("identityProofing.requests.empty")}
               </Table.State>
             )}
-            {requests.isSuccess &&
+            {requests.data !== undefined &&
               shown.map((request) => (
                 <SessionRow
                   key={request.id}
@@ -1165,6 +1167,7 @@ function SessionTimeline({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const events = useProofingRequestEventsQuery(slug, request);
+  const eventsError = blockingError(events);
   const formatWhen = useWhenFormatter();
 
   return (
@@ -1178,15 +1181,15 @@ function SessionTimeline({
       {events.isPending && (
         <p className="text-ink-soft text-[13px]">{t("common.loading")}</p>
       )}
-      {events.isError && (
-        <p className={ERROR}>{proofingErrorMessage(events.error, t)}</p>
+      {eventsError !== null && (
+        <p className={ERROR}>{proofingErrorMessage(eventsError, t)}</p>
       )}
-      {events.isSuccess && events.data.length === 0 && (
+      {events.data?.length === 0 && (
         <p className="text-ink-soft text-[13px]">
           {t("identityProofing.sessions.noEvents")}
         </p>
       )}
-      {events.isSuccess && events.data.length > 0 && (
+      {events.data !== undefined && events.data.length > 0 && (
         <ol className="relative flex flex-col gap-4">
           <span
             aria-hidden="true"

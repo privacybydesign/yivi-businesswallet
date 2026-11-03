@@ -15,7 +15,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 300;
 const RETRY_MAX_DELAY_MS = 3_000;
-const SERVER_ERROR_MIN_STATUS = 500;
+export const SERVER_ERROR_MIN_STATUS = 500;
 const NO_CONTENT_STATUS = 204;
 
 /** HTTP methods supported by the client. Only GET is retried (idempotent). */

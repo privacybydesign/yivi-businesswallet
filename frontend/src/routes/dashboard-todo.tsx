@@ -7,6 +7,7 @@ import {
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
+import { blockingError } from "../lib/query-state";
 import { listedCount, proofingErrorMessage } from "../lib/identity-proofing";
 import {
   notIdentifiedCount,
@@ -127,13 +128,15 @@ export function DashboardTodo({
 
   const loading =
     (isAdmin && insights.isPending) || (canReview && waiting.isPending);
+  const insightsError = blockingError(insights);
+  const waitingError = canReview ? blockingError(waiting) : null;
   let failure: string | undefined;
-  if (insights.isError) {
+  if (insightsError !== null) {
     failure = t("dashboard.todo.error", {
-      message: accessMessage(insights.error, t),
+      message: accessMessage(insightsError, t),
     });
-  } else if (canReview && waiting.isError) {
-    failure = proofingErrorMessage(waiting.error, t);
+  } else if (waitingError !== null) {
+    failure = proofingErrorMessage(waitingError, t);
   }
 
   return (
@@ -211,11 +214,12 @@ export function DashboardWaiting({
     });
   }
 
+  const requestsError = blockingError(requests);
   let body: React.JSX.Element;
-  if (requests.isError) {
+  if (requestsError !== null) {
     body = (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(requests.error, t)}
+        {proofingErrorMessage(requestsError, t)}
       </p>
     );
   } else if (items.length > 0) {

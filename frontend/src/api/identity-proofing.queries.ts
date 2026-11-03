@@ -116,6 +116,7 @@ import type { AddressLookup } from "../lib/identity-proofing";
 import {
   deliveriesPollInterval,
   isProofingLive,
+  pollFailedForGood,
   progressPollContinues,
   requestListCapped,
   reviewPollContinues,
@@ -1069,8 +1070,9 @@ export function useNewClaimLinkMutation(
   });
 }
 
-// Polled until the subject has finished in the Yivi app or a poll fails (the
-// page then shows the error); enabled only while the page shows the Yivi QR.
+// Polled until the subject has finished in the Yivi app or a poll fails for
+// good (the page then shows the error); enabled only while the page shows the
+// Yivi QR.
 export function useYiviDisclosureQuery(
   target: VerifyTarget,
   enabled: boolean,
@@ -1082,7 +1084,7 @@ export function useYiviDisclosureQuery(
     refetchInterval: (query) =>
       query.state.data?.done ||
       query.state.data?.waitsForDocumentScan ||
-      query.state.status === "error"
+      pollFailedForGood(query.state.error)
         ? false
         : ON_SCREEN_POLL_INTERVAL_MS,
   });
