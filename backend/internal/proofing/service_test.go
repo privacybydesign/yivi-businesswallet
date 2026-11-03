@@ -120,9 +120,7 @@ func (f *fakeRequests) AttachSession(_ context.Context, req Request, sess proofi
 	f.attached = append(f.attached, sess)
 	f.stored.session = &ipsSession{ID: sess.ID, Token: sess.Token, ExpiresAt: sess.ExpiresAt, TTL: sess.TTL}
 	f.stored.FlowVersion = sess.FlowVersion
-	if req.Method != "" {
-		f.stored.Method = req.Method
-	}
+	f.stored.Method = req.Method
 	return true, nil
 }
 
@@ -421,6 +419,14 @@ func (f *fakeRequests) MarkDocumentScanned(_ context.Context, _ Request, _, tran
 	return nil
 }
 
+func (f *fakeRequests) SetMethod(_ context.Context, _ Request, _ string, method proofingprovider.Method) error {
+	if f.stored.Method != "" {
+		return ErrSessionOver
+	}
+	f.stored.Method = method
+	return nil
+}
+
 func (f *fakeRequests) Stats(context.Context, uuid.UUID, *uuid.UUID, time.Time) ([]StatsRow, error) {
 	return []StatsRow{}, nil
 }
@@ -541,6 +547,8 @@ type fakeIPS struct {
 	documentPhotos   []proofingprovider.DocumentPhoto
 	referenceErr     error
 	documentPhotoErr error
+	// chosen are the apps ChooseMethod set.
+	chosen []proofingprovider.Method
 	// handovers counts fresh claim links asked for; handoverErr fails them.
 	// slotClaimed makes the link a handover from a phone that held the session.
 	handovers   int
@@ -598,6 +606,15 @@ func (f *fakeIPS) SessionHandover(_ context.Context, _ proofingprovider.Tenant, 
 		return proofingprovider.Claim{}, f.handoverErr
 	}
 	return proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=fresh-" + sessionID, ExpiresAt: time.Now().Add(time.Minute), Handover: f.slotClaimed}, nil
+}
+
+func (f *fakeIPS) ChooseMethod(_ context.Context, _ proofingprovider.Tenant, sessionID, _ string, method proofingprovider.Method) (proofingprovider.Session, error) {
+	f.chosen = append(f.chosen, method)
+	sess := proofingprovider.Session{ID: sessionID, ExpiresAt: f.sessionExpires}
+	if method == proofingprovider.MethodIdem {
+		sess.Claim = &proofingprovider.Claim{DeepLink: "vcmrtd://verify?handover=" + sessionID, ExpiresAt: time.Now().Add(time.Minute)}
+	}
+	return sess, nil
 }
 
 func (f *fakeIPS) ListFlows(context.Context, proofingprovider.Tenant) ([]proofingprovider.Flow, error) {
@@ -678,18 +695,15 @@ type fakeVerifier struct {
 	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
-	// claims are each start's extra claims, scopes each start's scope.
-	claims [][]string
-	scopes []openid4vpverifier.Scope
+	// claims are each start's extra claims, requests each start.
+	claims   [][]string
+	requests []openid4vpverifier.ProofingRequest
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
-	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress {
-		return openid4vpverifier.Session{}, errors.New("unexpected scope")
-	}
+func (f *fakeVerifier) StartProofing(_ context.Context, req openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
 	f.started++
-	f.claims = append(f.claims, claims)
-	f.scopes = append(f.scopes, scope)
+	f.claims = append(f.claims, req.Claims)
+	f.requests = append(f.requests, req)
 	return openid4vpverifier.Session{TransactionID: "tx-" + strconv.Itoa(f.started), WalletLink: "openid4vp://?request_uri=x"}, nil
 }
 

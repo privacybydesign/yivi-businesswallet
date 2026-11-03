@@ -134,6 +134,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/yivi/disclosure", member(respond.HandlerFunc(h.yiviDisclosure)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/start", member(respond.HandlerFunc(h.startDocumentScan)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/document-scan/finish", member(respond.HandlerFunc(h.finishDocumentScan)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/method", member(respond.HandlerFunc(h.chooseMethod)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
@@ -402,6 +403,9 @@ type requestResponse struct {
 	// DocumentScan is the document photo the on-screen page takes in the
 	// browser: pending or done; absent when the flow takes none.
 	DocumentScan string `json:"documentScan,omitempty"`
+	// AppDone is an Idem session whose app did its part: the page shows the
+	// document scan, which comes after it.
+	AppDone bool `json:"appDone,omitempty"`
 }
 
 // withDiplomas adds the extracts a request holds to its response.
@@ -423,6 +427,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
+		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason,
 		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
@@ -797,6 +802,9 @@ func (h *Handler) startYivi(w http.ResponseWriter, r *http.Request) error {
 type yiviDisclosureResponse struct {
 	// Done is false while the subject has not finished in the Yivi app.
 	Done bool `json:"done"`
+	// WaitsForDocumentScan: the subject finished in the Yivi app, and the
+	// document scan, which comes after it, decides the session.
+	WaitsForDocumentScan bool `json:"waitsForDocumentScan,omitempty"`
 	// OK is the disclosure approving the session; false rejected it, and Code
 	// says why.
 	OK   bool   `json:"ok"`
@@ -816,6 +824,10 @@ func (h *Handler) yiviDisclosure(w http.ResponseWriter, r *http.Request) error {
 func writeYiviDisclosure(w http.ResponseWriter, r *http.Request, disclosure proofingprovider.YiviDisclosure, err error) error {
 	if errors.Is(err, ErrDisclosurePending) {
 		respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{})
+		return nil
+	}
+	if errors.Is(err, ErrDocumentScanPending) {
+		respond.JSON(w, r, http.StatusOK, yiviDisclosureResponse{WaitsForDocumentScan: true})
 		return nil
 	}
 	if err != nil {

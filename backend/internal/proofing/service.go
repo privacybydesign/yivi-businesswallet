@@ -40,6 +40,7 @@ type Provider interface {
 	SubmitDocumentPhoto(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, photo proofingprovider.DocumentPhoto) error
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
+	ChooseMethod(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, method proofingprovider.Method) (proofingprovider.Session, error)
 	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
 	CancelSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
 	DeleteSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
@@ -51,7 +52,7 @@ type Provider interface {
 // verifier is the OpenID4VP verifier a Yivi request's disclosure runs at
 // (implemented by *openid4vpverifier.Client), the one auth uses.
 type verifier interface {
-	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error)
+	StartProofing(ctx context.Context, req openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error)
 	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
 }
 
@@ -78,6 +79,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
+	SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
@@ -786,7 +788,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: plan.method, Channel: in.Channel,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: storedMethod(plan.method), Channel: in.Channel,
 		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
 	})
 	if err != nil {
@@ -856,6 +858,9 @@ func (s *Service) planRequest(ctx context.Context, org Org, tenant proofingprovi
 	method, err := sessionMethod(flow, in.Method)
 	if err != nil {
 		return requestPlan{}, err
+	}
+	if method == proofingprovider.MethodYivi && in.Channel == ChannelEmail {
+		return requestPlan{}, fmt.Errorf("%w: this flow runs in the Yivi app only, on this screen or a link, and cannot be e-mailed", ErrInvalidInput)
 	}
 	if subject.BirthDate != "" && !readsIdentity(flow) {
 		return requestPlan{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
@@ -1003,6 +1008,8 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
 	case in.Channel != ChannelEmail && in.Channel != ChannelOnScreen && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail, show it on screen or as a link", ErrInvalidInput)
+	case in.Method == proofingprovider.MethodPending && in.Channel != ChannelOnScreen:
+		return NewRequest{}, fmt.Errorf("%w: only a session on this screen starts before its app is chosen", ErrInvalidInput)
 	case in.Method == proofingprovider.MethodYivi && in.Channel == ChannelEmail:
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
 	case in.Channel == ChannelHosted && !in.external():
@@ -1928,7 +1935,26 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	if err != nil {
 		return Request{}, err
 	}
-	return s.readReconciled(ctx, req)
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	return s.withAppDone(ctx, req)
+}
+
+// withAppDone reads from the engine whether an Idem request's app did its
+// part while its document scan is still to come, which the page then shows;
+// only then, so a poll reads the engine only in that stretch.
+func (s *Service) withAppDone(ctx context.Context, req Request) (Request, error) {
+	sess := req.liveSession(s.now())
+	if req.Method != proofingprovider.MethodIdem || !req.DocumentScan || req.DocumentScannedAt != nil || sess == nil || req.Status.Settled() {
+		return req, nil
+	}
+	res, err := s.ips.SessionStatus(ctx, requestTenant(req), sess.ID, sess.Token)
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: app of request %s: %w", req.ID, err)
+	}
+	req.appDone = res.AppDone
+	return req, nil
 }
 
 // RequestIf is Request for a caller whose scope the caller decides: allow sees the
@@ -2073,15 +2099,17 @@ func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedB
 }
 
 func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) (YiviStart, error) {
-	claims, err := s.yiviClaims(ctx, req)
+	f, err := s.sessionFlow(ctx, req)
 	if err != nil {
 		return YiviStart{}, err
 	}
-	scope := openid4vpverifier.ScopeProofing
-	if req.Address.asked() {
-		scope = openid4vpverifier.ScopeProofingAddress
+	claims, err := yiviClaims(f)
+	if err != nil {
+		return YiviStart{}, err
 	}
-	started, err := s.verifier.StartPresentation(ctx, scope, claims...)
+	started, err := s.verifier.StartProofing(ctx, openid4vpverifier.ProofingRequest{
+		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(),
+	})
 	if err != nil {
 		return YiviStart{}, err
 	}
@@ -2109,14 +2137,11 @@ func (s *Service) sessionFlow(ctx context.Context, req Request) (proofingprovide
 	return versions[i], nil
 }
 
-// yiviClaims are the claims req's Yivi disclosure asks for besides the
-// identity: the photo when the flow keeps it, and an age check's age claim in
+// yiviClaims are the claims flow f's Yivi disclosure asks for besides the
+// identity: the document's photo when the flow keeps it (personal data has
+// none, so its credential is not asked it), and an age check's age claim in
 // place of the date of birth.
-func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error) {
-	f, err := s.sessionFlow(ctx, req)
-	if err != nil {
-		return nil, err
-	}
+func yiviClaims(f proofingprovider.Flow) ([]string, error) {
 	var claims []string
 	if keepsFacePhoto(f) {
 		claims = append(claims, openid4vpverifier.ClaimPhoto)
@@ -2156,22 +2181,24 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, err
 	}
-	doc, ok := presentation.Document()
-	if !ok {
-		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
+	doc, err := disclosedIdentity(presentation)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
 	}
 	// Kept before the engine decides, so the page never enters an address
 	// before it is there to compare with. The request asks it as required, so
 	// a presentation without it is refused.
+	var registered *Address
 	if req.Address.asked() {
 		claims, ok := presentation.RegisteredAddress()
 		if !ok {
 			return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no registered address, which the request requires")
 		}
-		registered := registeredAddress(claims)
-		if err := s.requests.SetRegisteredAddress(ctx, req, &registered); err != nil {
+		disclosed := registeredAddress(claims)
+		if err := s.requests.SetRegisteredAddress(ctx, req, &disclosed); err != nil {
 			return proofingprovider.YiviDisclosure{}, err
 		}
+		registered = &disclosed
 	}
 	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)
@@ -2188,8 +2215,39 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, yiviStepError(err)
 	}
-	s.reconcile(ctx, tenant, req)
+	req = s.reconcile(ctx, tenant, req)
+	if disclosure.OK && registered != nil {
+		if err := s.keepRegisteredAddress(ctx, req, *registered); err != nil {
+			return proofingprovider.YiviDisclosure{}, err
+		}
+	}
 	return disclosure, nil
+}
+
+// disclosedIdentity is who the presentation discloses, as the engine reads a
+// document credential: the document the person picked, or the registered
+// personal data under the same claim names.
+func disclosedIdentity(p openid4vpverifier.Presentation) (openid4vpverifier.IdentityDocument, error) {
+	if doc, ok := p.Document(); ok {
+		return doc, nil
+	}
+	data, ok := p.PersonalData()
+	if !ok {
+		return data, errors.New("proofing: the presentation carries no identity document or registered personal data")
+	}
+	claims := map[string]string{}
+	for k, v := range data.Claims {
+		switch k {
+		case openid4vpverifier.ClaimPersonalFirstNames, openid4vpverifier.ClaimPersonalPrefix, openid4vpverifier.ClaimPersonalFamilyName:
+		case openid4vpverifier.ClaimPersonalDateOfBirth:
+			claims[openid4vpverifier.ClaimDateOfBirth] = v
+		default:
+			claims[k] = v
+		}
+	}
+	claims[openid4vpverifier.ClaimGivenNames] = data.Claims[openid4vpverifier.ClaimPersonalFirstNames]
+	claims[openid4vpverifier.ClaimFamilyName] = strings.TrimSpace(data.Claims[openid4vpverifier.ClaimPersonalPrefix] + " " + data.Claims[openid4vpverifier.ClaimPersonalFamilyName])
+	return openid4vpverifier.IdentityDocument{Credential: data.Credential, Claims: claims}, nil
 }
 
 // yiviStepError reads the engine no longer knowing the session (purged, or the stub

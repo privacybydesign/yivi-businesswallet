@@ -98,13 +98,13 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		withholdDisclosedBirthDate(&info)
 	}
 
-	doc := documentFromDisclosure(info)
-	_, redaction := effectivePrivacyPolicy(fd)
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
+	doc, checksDocument := disclosedDocument(sess, info, bsnPolicy, time.Now())
 	docRedaction := redaction
 	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
 
 	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
-	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); failed {
+	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); checksDocument && failed {
 		details[detailReason] = disclosureCodeDocumentRefused
 		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
@@ -114,7 +114,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
-	decided, err := s.decideByDocumentPhoto(sess, fd, doc, details, docRedaction)
+	decided, err := s.decideByDocumentPhoto(sess, fd, info, doc, details, docRedaction)
 	switch {
 	case err != nil:
 		return proofingprovider.YiviDisclosure{}, err
@@ -132,7 +132,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
 	}
 
-	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
+	result := buildBoundLoginResult(sess, info, doc, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 	addDocumentPhoto(result, sess, docRedaction)
 	addDocumentCheck(result, sess)
 	addSelfie(result, sess, selfie, redaction)
@@ -204,11 +204,12 @@ func scannedFaceFailure(fd *flow.FlowDefinition, biometrics *biometricsInfo) (bo
 // decideByDocumentPhoto checks the disclosed document doc against the
 // browser's document photo: an error while the photo is not in yet, rejected
 // (sess is decided so) when the scanned document is refused or its holder is
-// not doc's (scannedHolderOf), needs_review when the scan was doubtful or read
+// not doc's (scannedHolderOf) or, for personal data, not the registered
+// person (personalDataMatch), needs_review when the scan was doubtful or read
 // no holder, else approved. The holder, not the document number, binds the
 // two: the disclosure carries no number, and a holder may photograph another
 // document of theirs than the one in the Yivi app.
-func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, doc documentInfo, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Status, error) {
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, info disclosureInfo, doc documentInfo, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Status, error) {
 	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
 		return "", &proofingprovider.RejectedError{
 			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
@@ -216,7 +217,13 @@ func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefini
 		}
 	}
 	scanCode, doubtful := documentPhotoOutcome(sess, "")
-	if p := sess.Steps.DocumentPhoto; scanCode == "" && p != nil && p.Check != nil {
+	reviewReason := reasonDocumentDoubtful
+	if scanCode == "" && disclosesPersonalData(info) {
+		var mismatch bool
+		if scanCode, mismatch = personalDataMatch(sess, info); mismatch && !doubtful {
+			doubtful, reviewReason = true, reasonPersonalDataMismatch
+		}
+	} else if p := sess.Steps.DocumentPhoto; scanCode == "" && p != nil && p.Check != nil {
 		switch scannedHolderOf(doc, p.Check.Document) {
 		case holderOther:
 			scanCode = errCodeDocMismatch
@@ -230,7 +237,7 @@ func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefini
 		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, docRedaction)
 		return session.StatusRejected, nil
 	case doubtful:
-		details[detailReason] = reasonDocumentDoubtful
+		details[detailReason] = reviewReason
 		return session.StatusNeedsReview, nil
 	}
 	return session.StatusApproved, nil
@@ -334,12 +341,12 @@ func boundLoginAssurance() assuranceInfo {
 }
 
 // buildBoundLoginResult is the released result, gated by requestedAttributes:
-// the disclosed document and claims, the age answer, and photo when the flow
+// the session's document (disclosedDocument) and the disclosed claims, the age answer, and photo when the flow
 // keeps it (disclosedPhoto).
-func buildBoundLoginResult(sess session.Session, info disclosureInfo, photo *photoInfo, ageOver *ageOverInfo) map[string]any {
+func buildBoundLoginResult(sess session.Session, info disclosureInfo, doc documentInfo, photo *photoInfo, ageOver *ageOverInfo) map[string]any {
 	result := map[string]any{}
 	if attrRequested(sess, attrDisclosedAttributes, attrDocument) {
-		result["document"] = documentFromDisclosure(info)
+		result["document"] = doc
 	} else {
 		info.Attributes = nil
 	}
@@ -432,6 +439,7 @@ var yiviDocumentKinds = map[string]string{
 	"passport":        flow.DocumentKindPassport,
 	"idcard":          flow.DocumentKindIdentityCard,
 	"residencepermit": flow.DocumentKindResidencePermit,
+	"drivinglicence":  flow.DocumentTypeDrivingLicence,
 }
 
 // documentFromDisclosure maps the passport, idcard or residencepermit claims

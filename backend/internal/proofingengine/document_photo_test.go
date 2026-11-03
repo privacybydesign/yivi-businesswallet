@@ -115,23 +115,40 @@ func TestAppViewLeavesDocumentPhotoToBrowser(t *testing.T) {
 	}
 }
 
-// The app's submit before the browser's document photo came in is refused
-// with its own code, not decided.
-func TestSubmitWaitsForDocumentPhoto(t *testing.T) {
+// The app's part comes before the browser's document scan: its submit waits
+// (200, still active, nothing left for the app) and the status says the app
+// is done; the scan then decides the session.
+func TestAppSubmitWaitsForDocumentPhoto(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
 	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
 	sess.Steps.Document = &session.DocumentStepEvidence{}
 	sess.Steps.NFC = &session.NFCStepEvidence{}
-	s, _ := documentPhotoServer(sess, chipAndPhotoFlow)
+	s, store := documentPhotoServer(sess, chipAndPhotoFlow)
 	mux := http.NewServeMux()
 	s.Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, appRequest(http.MethodPost, "/app/"+sess.Token+"/submit", ""))
 	var body struct {
-		Code string `json:"code"`
+		Lifecycle     string `json:"lifecycle"`
+		ReadyToSubmit bool   `json:"readyToSubmit"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if rec.Code != http.StatusConflict || body.Code != pp.CodeDocumentPhotoMissing {
-		t.Errorf("submit = %d %s, want 409 %s", rec.Code, rec.Body.String(), pp.CodeDocumentPhotoMissing)
+	if rec.Code != http.StatusOK || body.Lifecycle != lifecycleActive || body.ReadyToSubmit {
+		t.Fatalf("submit = %d %s, want 200, still active", rec.Code, rec.Body.String())
+	}
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || !status.AppDone {
+		t.Fatalf("SessionStatus = %+v, %v; want the app done", status, err)
+	}
+
+	photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan()}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, photo); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	decided, _ := store.Get("org", sess.ID)
+	if !decided.Status.Terminal() && decided.Status != session.StatusNeedsReview {
+		t.Errorf("status %q after the scan, want the session decided", decided.Status)
 	}
 }
 
@@ -286,13 +303,7 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 func TestYiviDisclosureBindsTheScannedHolder(t *testing.T) {
 	ageCheck := chipAndPhotoFlow
 	ageCheck.RequestedAttributes, ageCheck.AgeOver = []string{attrAgeOver}, 18
-	for name, tc := range map[string]struct {
-		fd        flow.FlowDefinition
-		claims    map[string]string
-		scan      func(*pp.DocumentCheck)
-		status    session.Status
-		errorCode string
-	}{
+	for name, tc := range map[string]yiviHolderCase{
 		"same holder, MRZ spelling": {
 			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "ANNA", "lastName": "JANSEN", "dateOfBirth": "1990-03-10"},
 			status: session.StatusApproved,
@@ -327,36 +338,49 @@ func TestYiviDisclosureBindsTheScannedHolder(t *testing.T) {
 			status: session.StatusRejected, errorCode: errCodeDocMismatch,
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
-			sess := session.Session{
-				ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
-				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
-			}
-			s, store := documentPhotoServer(sess, tc.fd)
-			scan := authenticScan()
-			if tc.scan != nil {
-				tc.scan(&scan)
-			}
-			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
-				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
-			}); err != nil {
-				t.Fatalf("SubmitDocumentPhoto = %v", err)
-			}
-			claims := map[string]string{"country": "NLD"}
-			maps.Copy(claims, tc.claims)
-			ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: claims}
-			disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref)
-			if err != nil {
-				t.Fatalf("SubmitReference = %v", err)
-			}
-			if disclosure.OK != (tc.status != session.StatusRejected) {
-				t.Errorf("disclosure OK = %v, want %v", disclosure.OK, tc.status != session.StatusRejected)
-			}
-			if decided, _ := store.Get("org", sess.ID); decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
-				t.Errorf("status %s, error %q; want %s, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
-			}
-		})
+		t.Run(name, func(t *testing.T) { checkYiviHolder(t, tc) })
+	}
+}
+
+type yiviHolderCase struct {
+	fd        flow.FlowDefinition
+	claims    map[string]string
+	scan      func(*pp.DocumentCheck)
+	status    session.Status
+	errorCode string
+}
+
+// checkYiviHolder submits tc's scan, then its Yivi disclosure, and checks the
+// session's decision.
+func checkYiviHolder(t *testing.T, tc yiviHolderCase) {
+	t.Helper()
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := session.Session{
+		ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
+		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	s, store := documentPhotoServer(sess, tc.fd)
+	scan := authenticScan()
+	if tc.scan != nil {
+		tc.scan(&scan)
+	}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	claims := map[string]string{"country": "NLD"}
+	maps.Copy(claims, tc.claims)
+	ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: claims}
+	disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref)
+	if err != nil {
+		t.Fatalf("SubmitReference = %v", err)
+	}
+	if disclosure.OK != (tc.status != session.StatusRejected) {
+		t.Errorf("disclosure OK = %v, want %v", disclosure.OK, tc.status != session.StatusRejected)
+	}
+	if decided, _ := store.Get("org", sess.ID); decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
+		t.Errorf("status %s, error %q; want %s, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
 	}
 }
 

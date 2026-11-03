@@ -511,6 +511,25 @@ func (s *Service) verifyAddress(ctx context.Context, addr Address) (Address, err
 	return Address{}, ErrAddressNotFound
 }
 
+// keepRegisteredAddress keeps the registered address an approving Yivi
+// disclosure carried as req's address, confirmed (AddressRegistered), so the
+// person enters none: the card is where they live. A card without a postal
+// code and house number (its house number is optional) names no one address,
+// and leaves the address to the page.
+func (s *Service) keepRegisteredAddress(ctx context.Context, req Request, registered Address) error {
+	_, postalCode := addresslookup.PostalCode(registered.PostalCode)
+	_, numbered := addresslookup.HouseNumber(registered.HouseNumber)
+	if !postalCode || !numbered {
+		return nil
+	}
+	registered.Verification = AddressRegistered
+	// False when an address is kept already: a repeat of the disclosure.
+	if _, err := s.requests.AddAddress(ctx, req, registered); err != nil {
+		return err
+	}
+	return nil
+}
+
 // registeredAddress is the registered address a Yivi disclosure carried, as
 // claims of pbdf.gemeente.address.
 func registeredAddress(claims map[string]string) Address {

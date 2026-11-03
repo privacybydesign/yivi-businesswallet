@@ -177,7 +177,14 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	if err := s.requests.MarkDocumentScanned(ctx, req, sess.ID, transactionID); err != nil {
 		return err
 	}
-	// A flow of the photo alone is decided by it.
+	// The scan comes after the app's part. A Yivi disclosure that waited for
+	// it decides the session now; the engine decides any other itself, once
+	// the scan is in.
+	if req.Method == proofingprovider.MethodYivi && req.yiviTransactionID != "" {
+		if _, err := s.yiviDisclosure(ctx, req, sess); err != nil && !errors.Is(err, ErrDisclosurePending) {
+			return err
+		}
+	}
 	s.reconcile(ctx, requestTenant(req), req)
 	return nil
 }
@@ -261,4 +268,66 @@ func documentScanStepError(err error) error {
 		}
 	}
 	return yiviStepError(err)
+}
+
+// storedMethod is method as a request keeps it: none while the app is still
+// to be chosen (proofingprovider.MethodPending).
+func storedMethod(method proofingprovider.Method) proofingprovider.Method {
+	if method == proofingprovider.MethodPending {
+		return ""
+	}
+	return method
+}
+
+// ChooseMethod sets the app of an on-screen request whose session started
+// without one, once its document photo is in. It answers the request with an
+// Idem session's deep link.
+func (s *Service) ChooseMethod(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID, method proofingprovider.Method) (Sent, error) {
+	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
+	if err != nil {
+		return Sent{}, err
+	}
+	return s.chooseMethod(ctx, req, method)
+}
+
+// HostedChooseMethod is ChooseMethod for a hosted request.
+func (s *Service) HostedChooseMethod(ctx context.Context, token string, method proofingprovider.Method) (Sent, error) {
+	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return Sent{}, err
+	}
+	return s.chooseMethod(ctx, req, method)
+}
+
+func (s *Service) chooseMethod(ctx context.Context, req Request, method proofingprovider.Method) (Sent, error) {
+	sess := req.liveSession(s.now())
+	if sess == nil || req.Status.Settled() {
+		return Sent{}, ErrSessionOver
+	}
+	if req.Method != "" {
+		return Sent{}, ErrLinkStarted
+	}
+	f, err := s.sessionFlow(ctx, req)
+	if err != nil {
+		return Sent{}, err
+	}
+	if method != proofingprovider.MethodIdem && method != proofingprovider.MethodYivi {
+		return Sent{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
+	}
+	if method, err = sessionMethod(f, method); err != nil {
+		return Sent{}, err
+	}
+	chosen, err := s.ips.ChooseMethod(ctx, requestTenant(req), sess.ID, sess.Token, method)
+	if err != nil {
+		return Sent{}, documentScanStepError(err)
+	}
+	if err := s.requests.SetMethod(ctx, req, sess.ID, method); err != nil {
+		return Sent{}, err
+	}
+	req.Method = method
+	out := Sent{Request: req}
+	if chosen.Claim != nil {
+		out.DeepLink, out.DeepLinkExpiresAt = chosen.Claim.DeepLink, chosen.Claim.ExpiresAt
+	}
+	return out, nil
 }

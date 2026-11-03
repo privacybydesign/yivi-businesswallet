@@ -45,6 +45,9 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
 		AgeOver: in.AgeOver,
 	}
+	for _, app := range in.Apps {
+		fd.Apps = append(fd.Apps, flow.App(app))
+	}
 	for _, c := range in.RequiredChecks {
 		fd.RequiredChecks = append(fd.RequiredChecks, flow.Check(c))
 	}
@@ -79,6 +82,9 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
 		AgeOver: fd.AgeOver,
+	}
+	for _, app := range fd.Apps {
+		spec.Apps = append(spec.Apps, string(app))
 	}
 	for _, st := range fd.Steps {
 		spec.Steps = append(spec.Steps, string(st))
@@ -242,6 +248,8 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 		method, ttl = session.MethodBiometricBoundLogin, s.cfg.BoundLoginTTL
 	case pp.MethodBrowser:
 		method = session.MethodBrowser
+	case pp.MethodPending:
+		method = session.MethodPending
 	default:
 		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s, %s or %s", in.Method, pp.MethodIdem, pp.MethodYivi, pp.MethodBrowser))
 	}
@@ -270,17 +278,8 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	// Scan matches against the photographed document's portrait instead.
 	needsReference := needsReferencePhoto(resolvedFlow)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
-	if method == session.MethodBiometricBoundLogin {
-		// The Yivi method is the disclosure, with no face check and no chip read:
-		// it reaches eIDAS low and matches no reference photo. The wallet offers
-		// it only where that fits (yiviAppAvailable); the engine refuses the rest
-		// too.
-		switch {
-		case !flow.MeetsLevel(flow.AssuranceLevelLow, resolvedFlow.RequiredAssuranceLevel):
-			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
-		case needsReference:
-			return pp.Session{}, rejected(http.StatusBadRequest, "the Yivi method runs no face check, so it matches no reference photo")
-		}
+	if err := methodAllowed(resolvedFlow, method); err != nil {
+		return pp.Session{}, err
 	}
 	switch {
 	case needsReference && !hasReference:
@@ -434,6 +433,9 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	if res.App == "" {
 		res.App = pp.AppWaiting
 	}
+	if res.AppDone, err = s.idemAppDone(ctx, sess); err != nil {
+		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	}
 	res.Method = methodOf(roles)
 	if out.Disclosure {
 		res.Method = pp.MethodYivi
@@ -445,6 +447,19 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
 	}
 	return res, nil
+}
+
+// idemAppDone reports whether sess is a running Idem session whose app did
+// every step it runs, the document photo still to come (pp.Result.AppDone).
+func (s *Server) idemAppDone(ctx context.Context, sess session.Session) (bool, error) {
+	if sess.Method != session.MethodNFCPassport || sess.Status.Terminal() {
+		return false, nil
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return false, err
+	}
+	return fd != nil && documentPhotoMissing(sess, fd), nil
 }
 
 // methodOf is how the subject took part on a device: the slots of the
@@ -868,6 +883,94 @@ func needsReferencePhoto(fd *flow.FlowDefinition) bool {
 	return flowNeedsFaceMatch(fd) && !slices.Contains(fd.Steps, flow.StepNFCRead) && fd.FaceProvider != flow.FaceProviderIDScan
 }
 
+// yiviFits refuses the Yivi method on fd where it does not fit. The Yivi
+// method is the disclosure, with no face check and no chip read: it reaches
+// eIDAS low and matches no reference photo. The wallet offers it only where
+// that fits (yiviAppAvailable); the engine refuses the rest too.
+func yiviFits(fd *flow.FlowDefinition) error {
+	switch {
+	case !flow.MeetsLevel(flow.AssuranceLevelLow, fd.RequiredAssuranceLevel):
+		return rejected(http.StatusBadRequest, "the Yivi method reaches eIDAS low only, below the flow's required level")
+	case needsReferencePhoto(fd):
+		return rejected(http.StatusBadRequest, "the Yivi method runs no face check, so it matches no reference photo")
+	}
+	return nil
+}
+
+// methodAllowed refuses an app method fd does not allow (flow.AllowsApp), and
+// the Yivi method on a flow it cannot serve (yiviFits).
+func methodAllowed(fd *flow.FlowDefinition, method session.Method) error {
+	switch method {
+	case session.MethodNFCPassport:
+		if !fd.AllowsApp(flow.AppIdem) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Idem app")
+		}
+	case session.MethodBiometricBoundLogin:
+		if !fd.AllowsApp(flow.AppYivi) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Yivi app")
+		}
+		return yiviFits(fd)
+	}
+	return nil
+}
+
+var errMethodChosen = errors.New("the session's app is chosen already")
+
+// ChooseMethod sets the app of a session created without one (pp.MethodPending)
+// once the subject picked it. An Idem session answers its app link; a Yivi
+// one is started from the wallet's page.
+func (s *Server) ChooseMethod(ctx context.Context, t pp.Tenant, id, token string, method pp.Method) (pp.Session, error) {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return pp.Session{}, err
+	}
+	var chosen session.Method
+	switch method {
+	case pp.MethodIdem:
+		chosen = session.MethodNFCPassport
+	case pp.MethodYivi:
+		chosen = session.MethodBiometricBoundLogin
+	default:
+		return pp.Session{}, rejected(http.StatusBadRequest, fmt.Sprintf("method %q is not %s or %s", method, pp.MethodIdem, pp.MethodYivi))
+	}
+	fd, err := s.flows.Get(ctx, t.ID, sess.Flow, sess.FlowVersion)
+	if err != nil {
+		return pp.Session{}, fmt.Errorf("proofingengine: resolve flow: %w", err)
+	}
+	if err := methodAllowed(&fd, chosen); err != nil {
+		return pp.Session{}, err
+	}
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if sess.Method != session.MethodPending {
+			return errMethodChosen
+		}
+		sess.Method = chosen
+		return nil
+	})
+	switch {
+	case errors.Is(err, errSessionExpired):
+		return pp.Session{}, &pp.RejectedError{Status: http.StatusGone, Message: err.Error(), Code: errCodeSessionExpired}
+	case errors.Is(err, errSessionComplete):
+		return pp.Session{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: errCodeSessionComplete}
+	case errors.Is(err, errMethodChosen):
+		return pp.Session{}, rejected(http.StatusConflict, err.Error())
+	case err != nil:
+		return pp.Session{}, fmt.Errorf("proofingengine: choose method: %w", err)
+	}
+	out := pp.Session{ID: updated.ID, ExpiresAt: updated.ExpiresAt, FlowVersion: updated.FlowVersion}
+	if chosen == session.MethodNFCPassport {
+		claim, err := s.SessionHandover(ctx, t, id, token)
+		if err != nil {
+			return pp.Session{}, err
+		}
+		out.Claim = &claim
+	}
+	return out, nil
+}
+
 // CancelSession ends a session with no outcome yet; one that has an outcome
 // is refused (409), one already cancelled is left as it is.
 func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string) error {
@@ -1009,7 +1112,7 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 	default:
 		s.auditDocumentPhoto(updated, fd, p)
 	}
-	return s.finishBrowserSession(ctx, updated, fd)
+	return s.finishAfterBrowserStep(ctx, updated, fd)
 }
 
 // documentPhotoSides are p's front and, when it has one, back.
@@ -1075,16 +1178,24 @@ func documentCheckEvidence(c pp.DocumentCheck) *session.DocumentCheck {
 	}
 }
 
-// finishBrowserSession decides a session whose flow has no app steps, which
-// no app is there to submit: the browser's steps are all it takes. A browser
+// finishAfterBrowserStep decides a session once the browser's step came in
+// last: one whose flow has no app steps, which no app is there to submit, and
+// an Idem session whose app finished its part before the document scan. A
+// Yivi session is decided by its disclosure (SubmitReference). A browser
 // step still to come (the face after the document photo) leaves it
 // undecided, which is no failure of the step just recorded.
-func (s *Server) finishBrowserSession(ctx context.Context, sess session.Session, fd *flow.FlowDefinition) error {
-	if sess.Method != session.MethodBrowser || sess.Status.Terminal() {
+func (s *Server) finishAfterBrowserStep(ctx context.Context, sess session.Session, fd *flow.FlowDefinition) error {
+	if sess.Status.Terminal() || sess.Status == session.StatusNeedsReview {
 		return nil
 	}
-	if _, err := s.finishSession(ctx, sess, fd, appCaller{}); err != nil && !errors.Is(err, errSessionComplete) && !errors.Is(err, errStepsIncomplete) {
-		return fmt.Errorf("proofingengine: finish browser session: %w", err)
+	switch {
+	case sess.Method == session.MethodBrowser:
+	case sess.Method == session.MethodNFCPassport && requiredStepsComplete(sess, fd):
+	default:
+		return nil
+	}
+	if _, err := s.finishSession(ctx, sess, fd, appCaller{system: true}); err != nil && !errors.Is(err, errSessionComplete) && !errors.Is(err, errStepsIncomplete) {
+		return fmt.Errorf("proofingengine: finish after the browser's step: %w", err)
 	}
 	return nil
 }

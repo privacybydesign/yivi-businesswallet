@@ -60,10 +60,14 @@ import {
   readsIdentity,
   sendableByMail,
   documentScanMessage,
+  sessionStage,
   sessionView,
   sendRequestFields,
   verifyStages,
+  stageIndex,
   methodChoices,
+  firstMethod,
+  idemAppAvailable,
   currentStage,
   progressPollContinues,
   employmentOwed,
@@ -87,6 +91,7 @@ import {
   faceMatchFloor,
   faceMatchValue,
   flowDraftError,
+  personalDataAllowed,
   formatFaceMatch,
   reachesAssuranceLevel,
   flowSpecFromDraft,
@@ -157,6 +162,109 @@ const EVERY_ATTRIBUTE: ReadonlySet<string> = new Set(
 );
 
 describe("flowSpecFromDraft", () => {
+  it("sends one app only when one is ticked", () => {
+    expect(flowSpecFromDraft(draft()).apps).toBeUndefined();
+    expect(flowSpecFromDraft(draft({ idemApp: false })).apps).toEqual(["yivi"]);
+    expect(flowSpecFromDraft(draft({ yiviApp: false })).apps).toEqual(["idem"]);
+  });
+
+  // The Yivi app asks exactly what is ticked: personal data alone, or next
+  // to the documents, every kind then named so the list does not read as
+  // personal data alone.
+  it("sends personal data among the accepted documents", () => {
+    const yivi = { idemApp: false };
+    expect(
+      flowSpecFromDraft(
+        draft({ ...yivi, personalData: true, documentKinds: new Set() }),
+      ).acceptedDocumentTypes,
+    ).toEqual(["personal_data"]);
+    expect(
+      flowSpecFromDraft(
+        draft({
+          ...yivi,
+          personalData: true,
+          documentKinds: new Set(["identity_card"]),
+        }),
+      ).acceptedDocumentTypes,
+    ).toEqual(["identity_card", "personal_data"]);
+    expect(
+      flowSpecFromDraft(draft({ ...yivi, personalData: true }))
+        .acceptedDocumentTypes,
+    ).toEqual([...DOCUMENT_KINDS, "personal_data"]);
+  });
+
+  // Only the Yivi app shares the personal data, so a flow takes them only with
+  // the Yivi app ticked; with the Idem app too, it needs a document for that
+  // app to read.
+  it("takes personal data with the Yivi app, and a document next to the Idem app", () => {
+    const yiviOnly = { idemApp: false, personalData: true };
+    expect(flowDraftError(draft(yiviOnly))).toBeNull();
+    expect(flowDraftError(draft({ personalData: true }))).toBeNull();
+    expect(
+      flowDraftError(draft({ ...yiviOnly, yiviApp: false, idemApp: true })),
+    ).toBe("personalDataYivi");
+    const noDocument = {
+      documentKinds: new Set<(typeof DOCUMENT_KINDS)[number]>(),
+      personalData: true,
+    };
+    expect(flowDraftError(draft(noDocument))).toBe("personalDataDocument");
+    expect(flowDraftError(draft({ ...noDocument, idemApp: false }))).toBeNull();
+    expect(personalDataAllowed(draft({ idemApp: false }))).toBe(true);
+    expect(personalDataAllowed(draft())).toBe(true);
+    expect(personalDataAllowed(draft({ yiviApp: false }))).toBe(false);
+  });
+
+  it("refuses the Idem app ticked on a flow it has nothing to do in", () => {
+    expect(
+      flowDraftError(
+        draft({
+          documentAndChip: false,
+          documentPhoto: true,
+          faceVerification: false,
+        }),
+      ),
+    ).toBe("apps");
+  });
+
+  it("lets the Yivi app alone run a flow with app steps, but not no app", () => {
+    expect(flowDraftError(draft({ idemApp: false }))).toBeNull();
+    expect(flowDraftError(draft({ idemApp: false, yiviApp: false }))).toBe(
+      "appsNeeded",
+    );
+  });
+
+  it("reads a stored flow's apps", () => {
+    const base = {
+      id: "f",
+      version: 1,
+      active: true,
+      name: "F",
+      steps: ["document_photo"],
+      createdAt: "2026-11-02T00:00:00Z",
+      completable: true,
+    };
+    const stored = {
+      ...base,
+      apps: ["yivi"],
+      acceptedDocumentTypes: ["personal_data"],
+    };
+    const read = draftFromFlow(stored);
+    expect(read).toMatchObject({
+      idemApp: false,
+      yiviApp: true,
+      personalData: true,
+    });
+    expect(read.documentKinds.size).toBe(0);
+    expect(flowSpecFromDraft(read).acceptedDocumentTypes).toEqual([
+      "personal_data",
+    ]);
+    expect(draftFromFlow({ ...base, browserOnly: true })).toMatchObject({
+      idemApp: false,
+      yiviApp: false,
+      personalData: false,
+    });
+  });
+
   it("sends the age check with its age instead of the document data", () => {
     const spec = flowSpecFromDraft(
       draft({
@@ -2091,6 +2199,31 @@ describe("erasure handlings mirror backend/internal/proofing", () => {
   });
 });
 
+describe("sessionStage", () => {
+  const app = { ended: false, method: "idem_app" as const, scanning: false };
+
+  it("is done once the session ended, whatever the method", () => {
+    expect(sessionStage({ ...app, ended: true })).toBe("done");
+    expect(
+      sessionStage({ ended: true, method: "pending", scanning: false }),
+    ).toBe("done");
+  });
+
+  it("chooses the app while the method is pending", () => {
+    expect(sessionStage({ ...app, method: "pending" })).toBe("method");
+  });
+
+  it("takes the document while the ID scan shows, or with no app", () => {
+    expect(sessionStage({ ...app, scanning: true })).toBe("document");
+    expect(sessionStage({ ...app, method: "browser" })).toBe("document");
+  });
+
+  it("runs the app's session otherwise", () => {
+    expect(sessionStage(app)).toBe("session");
+    expect(sessionStage({ ...app, method: "yivi_app" })).toBe("session");
+  });
+});
+
 describe("sessionView", () => {
   const until = "2026-10-12T12:00:00Z";
   const running = {
@@ -2255,11 +2388,63 @@ describe("app step", () => {
     expect(methodChoices(true)).toEqual(["yivi_app", "idem_app"]);
   });
 
-  // Continue never starts a session (#304): a flow with one app still shows
-  // the app step, with that one app to tap.
+  // A flow with one app still shows the app step, with that one app to tap.
   it("offers the Idem app alone otherwise, still as a step of its own", () => {
     expect(methodChoices(false)).toEqual(["idem_app"]);
     expect(verifyStages({ diplomas: false })).toContain("method");
+  });
+
+  // One app has nothing to pick: the session starts in it, with no app step.
+  it("starts in the one app a flow allows, else pending or the browser", () => {
+    expect(firstMethod(false, ["yivi_app"])).toBe("yivi_app");
+    expect(firstMethod(false, ["yivi_app", "idem_app"])).toBe("pending");
+    expect(firstMethod(true, [])).toBe("browser");
+  });
+
+  it("offers the Yivi app alone for a flow locked to it", () => {
+    expect(methodChoices(true, false)).toEqual(["yivi_app"]);
+    expect(idemAppAvailable({ apps: ["yivi"] })).toBe(false);
+    expect(idemAppAvailable({})).toBe(true);
+    expect(yiviAppAvailable({ steps: ["nfc_read"], apps: ["idem"] })).toBe(
+      false,
+    );
+  });
+
+  it("puts the document photo after the app's part", () => {
+    expect(verifyStages({ document: true, diplomas: false })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "document",
+    ]);
+    expect(
+      verifyStages({ document: true, address: true, diplomas: true }),
+    ).toEqual([
+      "overview",
+      "method",
+      "session",
+      "document",
+      "address",
+      "diplomas",
+    ]);
+  });
+
+  it("places a done page past the last stage", () => {
+    const stages = verifyStages({ document: true, diplomas: false });
+    expect(stageIndex(stages, "method")).toBe(1);
+    expect(stageIndex(stages, "document")).toBe(3);
+    expect(stageIndex(stages, "done")).toBe(stages.length);
+  });
+
+  it("stays done once the session's outcome shows", () => {
+    expect(
+      currentStage({
+        step: "done",
+        inAddress: false,
+        inDiplomas: false,
+        inEmployment: false,
+      }),
+    ).toBe("done");
   });
 
   // A flow the browser runs alone has no app to choose.

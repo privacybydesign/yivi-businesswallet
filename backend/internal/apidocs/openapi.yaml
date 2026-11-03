@@ -6122,6 +6122,12 @@ paths:
                   value:
                     done: true
                     ok: true
+                waitsForDocumentScan:
+                  summary: Done in the Yivi app; the document photo, after it, decides
+                  value:
+                    done: false
+                    ok: false
+                    waitsForDocumentScan: true
                 refused:
                   summary: The document is not one the flow accepts
                   value:
@@ -6137,13 +6143,62 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the flow photographs the document and its photo is not in yet (`document_scan_pending`).
+          description: The request does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/method:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of an on-screen request's session
+      description: >-
+        Requires organisation membership, and a request created on screen with method `pending`:
+        its session started with the flow, before the app was chosen. Sets the app (`idem_app`,
+        or `yivi_app` when the flow's `yiviAvailable`) before the document photo, which follows
+        the app's part, and answers the request, with an Idem session's `deepLink` as the QR code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingCreatedRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The app is chosen already (`link_started`), or the session has ended (`session_over`).
           content:
             application/json:
               schema:
@@ -8313,6 +8368,8 @@ paths:
                           en: To check who you are and your date of birth.
                           nl: Om te controleren wie je bent en je geboortedatum.
                       yiviAvailable: true
+                      idemAvailable: true
+                      yiviPersonalData: false
                       browserOnly: false
                       diplomaMode: "off"
                       addressMode: "off"
@@ -8389,8 +8446,8 @@ paths:
       summary: Start a hosted proofing link
       security: []
       description: >-
-        Body `{method}`: `idem_app` or `yivi_app` (only when the flow's `yiviAvailable`;
-        otherwise, or for another method, 400 `invalid_input`). Creates the session once and
+        Body `{method}`: `idem_app` (only when the flow's `idemAvailable`) or `yivi_app` (only
+        when its `yiviAvailable`; otherwise, or for another method, 400 `invalid_input`). Creates the session once and
         answers 201 with the progress, plus the Idem `deepLink` for an Idem session.
       requestBody:
         required: true
@@ -8628,7 +8685,48 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the flow photographs the document and its photo is not in yet (`document_scan_pending`).
+          description: The link does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/method:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of a hosted link's session
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link started with method `pending`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set; an Idem session's `deepLink` is the QR code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingHostedStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: As the org route of the same name.
           content:
             application/json:
               schema:
@@ -12111,6 +12209,17 @@ components:
             What verifies the face step; absent is `regula` (in the Idem app). `idscan` checks
             liveness and matches the face against the photographed document's portrait in the
             browser, right after the document photo, and needs the `document_photo` step.
+        apps:
+          type: array
+          items:
+            type: string
+            enum: [idem, yivi]
+          description: >-
+            The apps a session may run in; absent allows both. A flow locked to `yivi` runs its
+            browser steps (the document photo, the face in the ID scan) and then the Yivi
+            disclosure, cannot be e-mailed, and refuses the Idem app; one locked to `idem` needs
+            a step the app runs. Asking a session in an app the flow locks out is 400
+            `invalid_input`.
         acceptedDocumentTypes:
           type: array
           items:
@@ -12120,6 +12229,15 @@ components:
             driving licence) or kinds (`passport`, `identity_card`, `residence_permit`); empty accepts any.
             `eu_driving_licence`, the chip evidence's type, is refused (422 `rejected_by_provider`). Only Dutch
             driving licences are verified: the engine holds the RDW's licence CSCAs and no other state's.
+            `personal_data` accepts the registered personal data (`pbdf.gemeente.personalData`, from
+            the BRP after a DigiD login), which only the Yivi app shares: only on a flow whose `apps`
+            is `yivi` alone. The Yivi app offers the
+            person any one of the accepted kinds and the personal data, and asks nothing else; a
+            document code other than a kind makes it offer every document. A photographed document
+            is tied to disclosed personal data by its date of birth (another is rejected,
+            `DOCUMENT_MISMATCH`) and surname (another sends the session to review), so such a flow
+            with `document_photo` checks no age. Personal data alone accepts any photographed
+            document.
         acceptedIssuingCountries:
           type: array
           items:
@@ -12733,11 +12851,12 @@ components:
             an identity check on `flowId`.
         method:
           type: string
-          enum: [idem_app, yivi_app, browser]
+          enum: [idem_app, yivi_app, browser, pending]
           description: >-
             Absent follows the flow: `browser` for a flow the page runs alone (`browserOnly`),
             else `idem_app`. `browser` is taken only for such a flow, and the apps only for any
-            other.
+            other. `pending`, on screen only, starts the session with the flow and leaves the app
+            to `/method`.
         channel:
           type: string
           enum: [email, on_screen, hosted]
@@ -12819,6 +12938,14 @@ components:
           type: string
           enum: [waiting, connected, away]
       required: [app]
+    ProofingChooseMethod:
+      type: object
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+      required: [method]
     ProofingDocumentScanStartRequest:
       type: object
       properties:
@@ -13493,6 +13620,17 @@ components:
                     (`browserOnly`), matches the face against a reference photo, checks an age the Yivi passport
                     and ID card carry no claim for (other than 12, 16, 18, 21 and 65), or requires
                     more than `low`, the level a Yivi session reaches.
+                idemAvailable:
+                  type: boolean
+                  description: >-
+                    Whether the Idem app can run the flow: not when it needs no app
+                    (`browserOnly`) or is locked to the Yivi app (`apps`).
+                yiviPersonalData:
+                  type: boolean
+                  description: >-
+                    The flow accepts the registered personal data (`acceptedDocumentTypes`
+                    `personal_data`), which the Yivi app may share: the page says so on its app
+                    choice.
                 browserOnly:
                   type: boolean
                   description: >-
@@ -13516,7 +13654,7 @@ components:
                     The most days the session's data is kept: the flow's retention when it set
                     one, else the organisation's `dataRetentionDays`, plus the day the proofing engine
                     keeps its copy longer, rounded up to whole days. What the page tells the subject.
-              required: [requestedAttributes, attributeReasons, yiviAvailable, browserOnly, diplomaMode, addressMode, retentionDays]
+              required: [requestedAttributes, attributeReasons, yiviAvailable, idemAvailable, yiviPersonalData, browserOnly, diplomaMode, addressMode, retentionDays]
             diplomas:
               type: array
               description: The extracts the subject added, as the page lists them.
@@ -13560,7 +13698,8 @@ components:
       properties:
         method:
           type: string
-          enum: [idem_app, yivi_app, browser]
+          enum: [idem_app, yivi_app, browser, pending]
+          description: '`pending` starts the session with the flow; the app is chosen after (`/method`).'
       required: [method]
     ProofingHostedStarted:
       allOf:

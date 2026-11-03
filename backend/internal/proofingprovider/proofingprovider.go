@@ -44,7 +44,12 @@ type FlowSpec struct {
 	// FaceProvider verifies the face step: "regula", "engine", "idscan" (in
 	// the browser, with the document photo), or empty for the engine's
 	// default (Regula when configured).
-	FaceProvider             string             `json:"faceProvider,omitempty"`
+	FaceProvider string `json:"faceProvider,omitempty"`
+	// Apps are the apps a session may run in ("idem", "yivi"); empty allows
+	// every app the flow suits.
+	Apps []string `json:"apps,omitempty"`
+	// AcceptedDocumentTypes may list "personal_data", the registered personal
+	// data the Yivi app shares in place of a document.
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
 	RequiredChecks           []string           `json:"requiredChecks,omitempty"`
@@ -165,6 +170,9 @@ type Result struct {
 	Name string
 	// App is where the Idem app's phone is; SessionStatus only.
 	App App
+	// AppDone is an Idem session whose app did every step it runs while a
+	// browser step (the document scan) is still to come; SessionStatus only.
+	AppDone bool
 	// ExpiresAt is when the session lapses as the engine holds it now:
 	// opening a session moves it later than the expiry it was created with.
 	// SessionStatus only; zero when the provider does not say.
@@ -375,6 +383,9 @@ const (
 	MethodYivi Method = "yivi_app"
 	// MethodBrowser is the web device alone, with no app involved.
 	MethodBrowser Method = "browser"
+	// MethodPending starts a session with its flow, before the app is chosen:
+	// ChooseMethod sets the app and gives its QR code.
+	MethodPending Method = "pending"
 )
 
 // Reference is the subject's verified OpenID4VP disclosure, which decides a

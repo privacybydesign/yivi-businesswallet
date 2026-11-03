@@ -954,7 +954,7 @@ func (s *RequestStore) AttachSession(ctx context.Context, req Request, sess proo
 		const update = `UPDATE identity_proofing_requests SET
 				ips_session_id = $2, ips_session_token_ciphertext = $3, ips_session_expires_at = $4,
 				ips_session_ttl_seconds = NULLIF($7, 0),
-				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = COALESCE(NULLIF($6, ''), method),
+				flow_version = COALESCE(NULLIF($5, 0), flow_version), method = CASE WHEN $6 = '' THEN NULL ELSE $6 END,
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL, updated_at = now()
 			WHERE id = $1 AND ips_session_id IS NULL AND status = 'pending'
 				AND purged_at IS NULL AND cancelled_at IS NULL AND ips_session_ended_at IS NULL`
@@ -1022,6 +1022,23 @@ func (s *RequestStore) SetDocumentScanTransaction(ctx context.Context, req Reque
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(withMethod(map[string]any{"status": string(req.Status)}, req.Method))))
 	})
+}
+
+// SetMethod records the app the subject chose for the request's session, one
+// that started without (proofingprovider.MethodPending). ErrSessionOver once
+// the request moved to another session, settled, or has its app already.
+func (s *RequestStore) SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error {
+	const update = `UPDATE identity_proofing_requests SET method = $3, updated_at = now()
+		WHERE id = $1 AND ips_session_id = $2 AND method IS NULL
+			AND status IN ('pending', 'in_progress') AND purged_at IS NULL`
+	tag, err := s.db.Exec(ctx, update, req.ID, sessionID, string(method))
+	if err != nil {
+		return fmt.Errorf("proofing: set method request %s: %w", req.ID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionOver
+	}
+	return nil
 }
 
 // MarkDocumentScanned records that the photos of transactionID reached the

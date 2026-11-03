@@ -107,10 +107,44 @@ func (fd FlowDefinition) Location(step Step) StepLocation {
 }
 
 // BrowserOnly reports whether the browser runs every step of fd: no app is
-// chosen or needed.
+// chosen or needed. A flow locked to the Yivi app always needs it: its
+// disclosure follows the browser's steps.
 func (fd FlowDefinition) BrowserOnly() bool {
-	return !slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative })
+	return !fd.YiviOnly() && !slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative })
 }
+
+// App is an app a subject proofs with (FlowDefinition.Apps).
+type App string
+
+const (
+	AppIdem App = "idem"
+	AppYivi App = "yivi"
+)
+
+// AllowsApp reports whether fd may run in app: every app when Apps is empty.
+func (fd FlowDefinition) AllowsApp(app App) bool {
+	return len(fd.Apps) == 0 || slices.Contains(fd.Apps, app)
+}
+
+// YiviOnly reports whether fd is locked to the Yivi app.
+func (fd FlowDefinition) YiviOnly() bool {
+	return len(fd.Apps) == 1 && fd.Apps[0] == AppYivi
+}
+
+// AcceptsPersonalData reports whether fd accepts the registered personal data
+// (DocumentKindPersonalData) as the person's identity, which only the Yivi
+// app shares: an Idem session reads one of the flow's documents instead.
+func (fd FlowDefinition) AcceptsPersonalData() bool {
+	return slices.ContainsFunc(fd.AcceptedDocumentTypes, isPersonalData)
+}
+
+// acceptedDocuments is AcceptedDocumentTypes without the personal data: the
+// documents accepted, any when empty.
+func (fd FlowDefinition) acceptedDocuments() []string {
+	return slices.DeleteFunc(slices.Clone(fd.AcceptedDocumentTypes), isPersonalData)
+}
+
+func isPersonalData(t string) bool { return strings.EqualFold(t, DocumentKindPersonalData) }
 
 // FaceProvider names what verifies the face step. Empty is the deployment's
 // default.
@@ -336,6 +370,8 @@ type FlowDefinition struct {
 	// needs SelfieLocation native: only the Idem app runs a Regula liveness
 	// session. ID Scan needs the document photo and SelfieLocation browser.
 	FaceProvider FaceProvider `json:"FaceProvider"`
+	// Apps are the apps a session may run in; empty allows every app.
+	Apps []App `json:"Apps"`
 	// AcceptedDocumentTypes are the document codes ("P", ...) or kinds
 	// (DocumentKindPassport, ...) accepted; empty accepts any. A driving
 	// licence is DocumentTypeDrivingLicence; Validate refuses
@@ -476,7 +512,16 @@ const (
 	DocumentKindPassport        = "passport"
 	DocumentKindIdentityCard    = "identity_card"
 	DocumentKindResidencePermit = "residence_permit"
+	// DocumentKindPersonalData is no document: the registered personal data
+	// (BRP, loaded in the Yivi app with DigiD), accepted in AcceptedDocumentTypes
+	// as an identity the Yivi app may share instead of a document. A document
+	// photo is then tied to the person by name and date of birth.
+	DocumentKindPersonalData = "personal_data"
 )
+
+// documentKinds are the kinds of document a flow may accept; listing every
+// one accepts any document, as an empty list does.
+var documentKinds = []string{DocumentKindPassport, DocumentKindIdentityCard, DocumentKindResidencePermit, DocumentTypeDrivingLicence}
 
 // residencePermitCodes are the MRZ document codes issued residence permits
 // carry, as vcmrtd's td1DocumentType lists them.
@@ -516,8 +561,12 @@ func DrivingLicence(t string) bool {
 // accepts any. Case-insensitive: the flow editor uppercases every type,
 // drivers_license and residence_permit included.
 func (fd *FlowDefinition) AcceptsDocumentType(t, kind string) bool {
-	return len(fd.AcceptedDocumentTypes) == 0 ||
-		slices.ContainsFunc(fd.AcceptedDocumentTypes, func(a string) bool {
+	accepted := fd.acceptedDocuments()
+	everyKind := !slices.ContainsFunc(documentKinds, func(k string) bool {
+		return !slices.ContainsFunc(accepted, func(a string) bool { return strings.EqualFold(a, k) })
+	})
+	return len(accepted) == 0 || everyKind ||
+		slices.ContainsFunc(accepted, func(a string) bool {
 			return strings.EqualFold(a, t) || (kind != "" && strings.EqualFold(a, kind))
 		})
 }
@@ -684,7 +733,53 @@ func validate(fd FlowDefinition) error {
 	if err := validateAssuranceTiers(fd.AssuranceTiers); err != nil {
 		return err
 	}
+	if err := validateApps(fd, seenSteps); err != nil {
+		return err
+	}
 	return validateAgeOver(fd, seenSteps)
+}
+
+// validateApps refuses an unknown or repeated app, personal data a flow's
+// apps cannot take (validatePersonalData), and a flow locked to the Idem app that leaves the app no
+// step.
+func validateApps(fd FlowDefinition, seenSteps map[Step]bool) error {
+	seen := map[App]bool{}
+	for _, app := range fd.Apps {
+		if app != AppIdem && app != AppYivi {
+			return fmt.Errorf("flow: unknown app %q", app)
+		}
+		if seen[app] {
+			return fmt.Errorf("flow: duplicate app %q", app)
+		}
+		seen[app] = true
+	}
+	if err := validatePersonalData(fd, seenSteps); err != nil {
+		return err
+	}
+	if len(fd.Apps) == 1 && fd.Apps[0] == AppIdem &&
+		!slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative }) {
+		return errors.New("flow: the Idem app runs no step of this flow, so it cannot be its only app")
+	}
+	return nil
+}
+
+// validatePersonalData refuses personal data on a flow the Yivi app does not
+// run, next to the Idem app with no document to read, or with an age check
+// on a document photo.
+func validatePersonalData(fd FlowDefinition, seenSteps map[Step]bool) error {
+	switch {
+	case !fd.AcceptsPersonalData():
+		return nil
+	case !fd.AllowsApp(AppYivi) || fd.BrowserOnly():
+		return errors.New("flow: personal_data is shared by the Yivi app alone: let the flow run in the Yivi app")
+	// The Idem app reads a document, and accepts any when none is listed.
+	case fd.AllowsApp(AppIdem) && len(fd.acceptedDocuments()) == 0:
+		return errors.New("flow: personal_data next to the Idem app needs a document type too: the Idem app reads a document and shares no personal data")
+	// The scan's date of birth ties it to the person, and an age check keeps none.
+	case seenSteps[StepDocumentPhoto] && fd.AgeOver != 0:
+		return errors.New("flow: personal_data with document_photo cannot check an age: the photographed document is tied to the person by its date of birth, which an age check does not keep")
+	}
+	return nil
 }
 
 // validateAgeOver refuses AttributeAgeOver without a step it is derived from

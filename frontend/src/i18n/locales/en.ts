@@ -809,6 +809,7 @@ export const en = {
         "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
+        document: "Photograph your ID",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
@@ -846,10 +847,13 @@ export const en = {
       },
       method: {
         heading: "How do you want to verify?",
+        only: "You verify with the {{app}}: this check works with no other app. Make sure it is on your phone.",
         yivi: {
           title: "Yivi app",
           detail:
             "Share the passport, ID card or residence permit already in your Yivi app.",
+          detailPersonalData:
+            "Share a document or your personal data (loaded with DigiD) that this check accepts, from your Yivi app.",
         },
         idem: {
           title: "Idem app",
@@ -1703,6 +1707,15 @@ export const en = {
         faceMatchThreshold: "Pick a face match threshold the level allows.",
         retentionSeconds: "Enter a whole number of seconds.",
         ageOver: "Enter a whole number of years from 1 to 120.",
+        apps: "The Idem app has nothing to do in this flow: turn on Scan and read the document or the face check in the app, or untick the Idem app.",
+        appsNeeded:
+          "Scan and read the document and the face check in the app need an app: tick the Yivi app, the Idem app or both.",
+        personalDataYivi:
+          "Personal data come from the Yivi app alone: tick the Yivi app under Apps, or untick personal data.",
+        personalDataDocument:
+          "The Idem app shares no personal data but reads a document: tick a document type too, or untick the Idem app under Apps.",
+        personalDataAge:
+          "With personal data, the document photo is tied to the person by their date of birth, which an age check does not keep: turn off the age check.",
         identity:
           "A diploma flow needs the name and date of birth: keep the document scan on and tick Name and document details under What you receive.",
       },
@@ -1764,6 +1777,20 @@ export const en = {
           "After the identity check, in the browser: the person uploads the Verzekeringsbericht from Mijn UWV, checked against UWV's seal and their name and date of birth. Only on screen or as a link, never by e-mail.",
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
+        apps: "Apps",
+        yiviApp: "Yivi app",
+        yiviAppHint:
+          "The person shares their data from the Yivi app, on this screen or a link.",
+        idemApp: "Idem app",
+        idemAppHint:
+          "The person scans their passport or ID card with the Idem app and reads its chip.",
+        appsBoth:
+          "The person picks one of the two apps. What you receive depends on the app they pick.",
+        appsNone: "No app: the ID scan in the browser is the whole check.",
+        appsOnly: {
+          yivi: "This flow only works with the Yivi app: the person is told so and gets no choice.",
+          idem: "This flow only works with the Idem app: the person is told so and gets no choice.",
+        },
         lifetime: "QR code lifetime",
         lifetimeHint:
           "After this the session expires and a new request is needed.",
@@ -1779,6 +1806,10 @@ export const en = {
         identity_card: "Identity card",
         residence_permit: "Residence permit",
         drivers_license: "Dutch driving licence",
+        personal_data: "Personal data (BRP, with DigiD)",
+        personalDataHint:
+          "Works in the Yivi app only: name and date of birth from the BRP, loaded with DigiD. A document photo is checked against them. In the Idem app the person has one of the document types above read.",
+        personalDataLock: "Only when the Yivi app is ticked under Apps.",
         countries: "Issuing countries",
         any: "Any country",
         only: "Only these countries",

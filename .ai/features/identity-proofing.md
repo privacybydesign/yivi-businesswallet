@@ -135,7 +135,8 @@ documented under the `idem-app` tag, though only the app calls them), and the de
   A method other than the Idem or the Yivi app is 400. The Yivi method is
   refused (400) on a flow it cannot serve: one requiring more than low,
   matching a reference photo, or photographing the document, whatever the
-  caller offers.
+  caller offers. An app the flow locks out (`Apps`, §19) is 400 too
+  (`methodAllowed`), at create and at `ChooseMethod`.
 
 - **Storage.** Flow versions in `identity_proofing_flow_versions` (definition as
   JSON, one active version per flow); sessions in `identity_proofing_sessions`,
@@ -2047,8 +2048,9 @@ hosted page.
 
 For onboarding that needs where the person lives. Wallet-side only, like the
 diplomas (§12): the engine knows nothing of it. The address is what the subject
-declares, never read off a document; a Dutch one is checked against the BAG,
-and on a Yivi app request against the registered (BRP) address too.
+declares, never read off a document, and a Dutch one is checked against the
+BAG; a Yivi app request takes the registered (BRP) address from the app
+instead, and asks none.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
   `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
@@ -2093,8 +2095,15 @@ and on a Yivi app request against the registered (BRP) address too.
   - Any other address: kept as entered, `unsupported`.
   - An address kept before this has no `verification`; the page shows it as
     declared.
-- **Compared with the registered address** (BRP), Yivi app only: the Idem app
-  has no way to the BRP yet.
+- **The registered address** (BRP), Yivi app only: the Idem app has no way
+  to the BRP yet.
+  - Kept as the address (`keepRegisteredAddress`, `registered`, no review)
+    when the disclosure approves, so `addressUntil` is absent and the page
+    shows no address form; the stepper drops its address stage once the Yivi
+    app is the app. A card without a postal code and house number (the
+    number is optional) names no one address: the page asks it, as for Idem.
+  - The comparison below (`compareRegistered`) is what an entered address
+    meets while a registered one is sealed.
   - A request that asks the address starts its disclosure as
     `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
     houseNumber, zipcode, city) as a required credential set: a holder
@@ -2399,10 +2408,21 @@ step runs with the Idem app or the Yivi app alike.
 - **A page, never a mail**: the scan runs from the on-screen page or the
   hosted page, so a flow with the step cannot be mailed or sent as a bare
   deep link (`document_scan_needs_page`, 422); `sendableByMail` checks it.
-- **Order**: the page shows the scan step (`DocumentScanStep` in
-  `routes/proofing-verify-steps.tsx`) while the progress says
-  `documentScan: "pending"` (absent when the flow takes no photo), before the
-  app's QR or the Yivi disclosure. The app's part shows once it is `done`.
+- **Order**: the app's part first, then the scan. The page shows the app
+  choice, then the Idem QR or the Yivi disclosure, and the scan step
+  (`DocumentScanStep` in `routes/proofing-verify-steps.tsx`) once the app did
+  its part, while the progress says `documentScan: "pending"` (absent when
+  the flow takes no photo).
+  - Idem: the app's submit before the scan answers 200, still active
+    (`handleSubmitSession`), and the status says `AppDone`
+    (`documentPhotoMissing`), which the progress reads live as `appDone`
+    (`withAppDone`) only in that stretch. The scan then decides the session
+    (`finishAfterBrowserStep`, as the engine itself: `appCaller.system`).
+  - Yivi: a disclosure before the scan is held back (the engine's
+    `document_photo_missing`); the poll answers `waitsForDocumentScan` and the
+    page shows the scan. Finishing the scan fetches the verifier's result
+    again and decides the session (`finishDocumentScan`).
+  - With no app the scan shows at once and decides the session.
 - **No app**: the engine says where each step runs (`flow.Location`: the
   photo in the browser, the face step where `selfieLocation` says, the scan
   and chip read in the app) and marks a flow with no app step
@@ -2521,3 +2541,77 @@ step runs with the Idem app or the Yivi app alike.
 - **Configuration**: `ID_SCAN_KEY_ID` and `ID_SCAN_SECRET` (an HS256 JWT per
   call, `kid` the key id), and `ID_SCAN_API_URL` (default
   `https://api.cm.com/id-scan/v1`).
+
+## 19. Apps per flow, and personal data from Yivi (DigiD onboarding)
+
+A flow can lock its sessions to one app, and the Yivi app asks only what the
+flow accepts, the registered personal data among it. Built for DigiD
+onboarding (Odixus): personal data and address through Yivi (loaded with
+DigiD), and the document photo and face through the ID scan (§18), with no
+other choice offered.
+
+- **`Apps`** on the flow definition (versioned, `apps` in the spec): `idem`,
+  `yivi`, or empty for both.
+- **The apps** (Steps section, `AppsChoice`, after what happens and above
+  the QR code lifetime): two boxes, Yivi app and Idem app. What happens is
+  the same rows for both apps: each does every step in its own way (the Yivi
+  disclosure takes the chip read's place), so no row depends on the apps.
+  - Both ticked: the person picks. One: `apps` names it, and the editor says
+    only that app works. Neither: the ID scan alone (`browserOnly`).
+  - Refused (`flowDraftError`): the Idem app ticked with no step it runs
+    (`apps`), and no app ticked with one (`appsNeeded`).
+- **The person's app step** (`MethodChoice`) shows only with a choice of
+  apps. With one app there is none (`firstMethod`): Continue starts the
+  session in that app, the stepper has no app step, and the overview says
+  which app the check uses. The Yivi option names the personal data when the
+  flow accepts it (the hosted page's `yiviPersonalData`).
+- **The Yivi app asks what the flow accepts** (`yiviSources`,
+  `openid4vpverifier.ProofingRequest`): "Which documents" decides it. Only
+  the ID card ticked asks the ID card alone; several ticked offer the person
+  any one of them, never all. A flow accepting any document asks the
+  passport, ID card or residence permit, as before; a stored MRZ code (`P`)
+  asks every document, the engine then holding the disclosed one to the
+  flow.
+  - The driving licence asks `<scheme>.pbdf.drivinglicence`, a vct not yet
+    confirmed against the scheme, with the passport's claim names.
+- **Persoonsgegevens** is one more box in "Which documents"
+  (`personal_data` in `acceptedDocumentTypes`, `flow.DocumentKindPersonalData`):
+  the registered personal data, which only the Yivi app shares.
+  - It asks `pbdf.gemeente.personalData` (`firstnames`, `prefix`,
+    `familyname`, `dateofbirth`, and an age claim when asked), never the
+    photo. Production `pbdf` scheme only, like the address card, and the
+    verifier must list it in `verifier_attestation_vcts`
+    (`openid4vc-poc-ops`). The claim names follow the IRMA attribute ids; not
+    yet confirmed against a live disclosure.
+  - Only on a flow the Yivi app runs (`validateApps`, `personalDataAllowed`):
+    the Yivi app alone or both apps. The editor locks the box without the Yivi
+    app, and unticking it clears the box. With both apps, an Idem session
+    reads one of the ticked documents instead, so the flow must tick a
+    document too (`personalDataDocument`): with none, the Idem app would
+    accept any. A flow the browser runs alone runs no app, so it is refused.
+  - The hosted verifier must accept `pbdf.gemeente.personalData`
+    (`verifier_attestation_vcts` in `openid4vc-poc-ops`); without it the
+    Yivi app shows an OpenID4VP error on sharing.
+  - It is no document: the photographed document must be among the ticked
+    documents, and personal data alone accepts any
+    (`AcceptsDocumentType`). Next to it, every kind ticked is sent by name,
+    which still reads as any document.
+  - The wallet hands it to the engine under the document credentials' claim
+    names (`disclosedIdentity`: `firstName`, `lastName` = prefix and family
+    name, `dateOfBirth`).
+  - **Tied to the photographed document** (`personalDataMatch`, chosen by the
+    disclosed credential, `disclosesPersonalData`), as a document number ties
+    a disclosed document (§18):
+    - another date of birth, or none disclosed: rejected
+      `DOCUMENT_MISMATCH`;
+    - a date the scan did not read, or the same date with another surname
+      (case, accents, spaces and punctuation aside, `sameSurname`): review,
+      reason `personal_data_mismatch` (a partner's name, a cut-off MRZ).
+    - So it cannot go with `document_photo` and an age check, which keeps no
+      date of birth (`personalDataAge`).
+  - The result's `document` is the photographed one (`disclosedDocument`,
+    BSN per the flow), held to the flow's document rules; the BRP data stays
+    in `disclosure.attributes`. Without a document photo there is no
+    document to check, and `document` holds the BRP name and date of birth.
+  - The session stays eIDAS low: neither the BRP data nor the ID scan's face
+    match against a photographed portrait reaches a higher level.

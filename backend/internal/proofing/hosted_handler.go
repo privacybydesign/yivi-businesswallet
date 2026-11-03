@@ -94,6 +94,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("GET /proof/{token}/yivi/disclosure", h.limitHosted(h.hostedYiviDisclosure))
 	mux.Handle("POST /proof/{token}/document-scan/start", h.limitHosted(h.hostedStartDocumentScan))
 	mux.Handle("POST /proof/{token}/document-scan/finish", h.limitHosted(h.hostedFinishDocumentScan))
+	mux.Handle("POST /proof/{token}/method", h.limitHosted(h.hostedChooseMethod))
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("POST /proof/{token}/employment", h.limitHosted(h.hostedAddEmployment))
@@ -170,6 +171,9 @@ type hostedProgressResponse struct {
 	// DocumentScan is the document photo the page takes in the browser:
 	// pending or done; absent when the flow takes none.
 	DocumentScan string `json:"documentScan,omitempty"`
+	// AppDone is an Idem session whose app did its part, before the
+	// document scan.
+	AppDone bool `json:"appDone,omitempty"`
 }
 
 // hostedLegalRetention is what the person is told about the data an erasure
@@ -210,7 +214,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
 		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
-		DocumentScan: documentScanState(req),
+		DocumentScan: documentScanState(req), AppDone: req.appDone,
 	}
 }
 
@@ -254,6 +258,11 @@ type hostedViewResponse struct {
 		// attribute and language; empty for a flow saved without reasons.
 		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
 		YiviAvailable    bool                         `json:"yiviAvailable"`
+		// IdemAvailable is false for a flow locked to the Yivi app.
+		IdemAvailable bool `json:"idemAvailable"`
+		// YiviPersonalData is a flow whose Yivi app shares the registered
+		// personal data, not a document.
+		YiviPersonalData bool `json:"yiviPersonalData"`
 		// BrowserOnly is a flow the browser runs alone: no app is chosen.
 		BrowserOnly bool `json:"browserOnly"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
@@ -381,6 +390,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
+	out.Flow.IdemAvailable = idemAppAvailable(f)
+	out.Flow.YiviPersonalData = acceptsPersonalData(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)

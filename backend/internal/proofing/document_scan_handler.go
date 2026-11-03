@@ -2,7 +2,9 @@ package proofing
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -103,3 +105,47 @@ const (
 	documentScanPending = "pending"
 	documentScanDone    = "done"
 )
+
+// chooseMethodRequest is the app the subject picked once the document photo
+// is in.
+type chooseMethodRequest struct {
+	Method proofingprovider.Method `json:"method"`
+}
+
+func (h *Handler) chooseMethod(w http.ResponseWriter, r *http.Request) error {
+	id, requestedBy, err := sentRequestTarget(r)
+	if err != nil {
+		return err
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+	var body chooseMethodRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	sent, err := h.service.ChooseMethod(r.Context(), orgFromRequest(r).ID, id, requestedBy, body.Method)
+	if err != nil {
+		return mapError(err)
+	}
+	out := createRequestResponse{requestResponse: newRequestResponse(sent.Request, time.Now())}
+	if sent.DeepLink != "" {
+		out.DeepLink, out.DeepLinkExpiresAt = sent.DeepLink, &sent.DeepLinkExpiresAt
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
+func (h *Handler) hostedChooseMethod(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
+	var body chooseMethodRequest
+	if err := decode(r, &body); err != nil {
+		return err
+	}
+	sent, err := h.service.HostedChooseMethod(r.Context(), r.PathValue("token"), body.Method)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, hostedStartResponse{
+		hostedProgressResponse: newHostedProgress(sent.Request, time.Now()), DeepLink: sent.DeepLink,
+	})
+	return nil
+}

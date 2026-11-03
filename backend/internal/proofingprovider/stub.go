@@ -193,7 +193,7 @@ func (s *Stub) CreateSession(_ context.Context, t Tenant, in SessionInput) (Sess
 	if version == 0 {
 		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "unknown flow"}
 	}
-	if in.Method != "" && in.Method != MethodIdem && in.Method != MethodYivi {
+	if in.Method != "" && in.Method != MethodIdem && in.Method != MethodYivi && in.Method != MethodPending {
 		return Session{}, fmt.Errorf("proofingprovider: no session can be started for method %q", in.Method)
 	}
 	ttl := stubSessionTTL
@@ -221,10 +221,34 @@ func (s *Stub) createLocked(t Tenant, flowID string, version int, ttl time.Durat
 		notify := s.onChange
 		time.AfterFunc(stubDecisionDelay, func() { notify(id) })
 	}
-	if method != MethodYivi {
+	if method != MethodYivi && method != MethodPending {
 		sess.Claim = stubClaim(id, now)
 	}
 	return sess, nil
+}
+
+// ChooseMethod sets the app of a session created without one; an Idem one
+// gets its claim link.
+func (s *Stub) ChooseMethod(_ context.Context, t Tenant, sessionID, sessionToken string, method Method) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok || sess.tenant != t.ID || sess.token != sessionToken {
+		return Session{}, ErrNotFound
+	}
+	if sess.method != MethodPending {
+		return Session{}, &RejectedError{Status: http.StatusConflict, Message: "the session's app is chosen already"}
+	}
+	if method != MethodIdem && method != MethodYivi {
+		return Session{}, &RejectedError{Status: http.StatusBadRequest, Message: "choose the Idem or the Yivi app"}
+	}
+	sess.method = method
+	s.sessions[sessionID] = sess
+	out := Session{ID: sessionID, ExpiresAt: sess.expiresAt, FlowVersion: sess.flowVersion}
+	if method == MethodIdem {
+		out.Claim = stubClaim(sessionID, time.Now())
+	}
+	return out, nil
 }
 
 func (s *Stub) SessionResult(_ context.Context, t Tenant, sessionID, sessionToken string) (Result, error) {

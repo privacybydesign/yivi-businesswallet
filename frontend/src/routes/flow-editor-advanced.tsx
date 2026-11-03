@@ -23,6 +23,7 @@ import {
   assuranceLevelLabel,
   attributeAvailable,
   missingReasonLocales,
+  personalDataAllowed,
   lockedByLevel,
   retentionChoices,
   scansFace,
@@ -244,6 +245,7 @@ function StepsSection({
           {employmentError}
         </p>
       )}
+      <AppsChoice draft={draft} update={update} error={error} />
       <div className="flex max-w-md flex-col gap-1.5">
         <label htmlFor="flow-lifetime" className={LABEL}>
           {t("identityProofingFlows.editor.steps.lifetime")}
@@ -316,6 +318,29 @@ function DocumentsSection({
             }
           />
         ))}
+        <OptionRow
+          id="flow-doc-personal-data"
+          checked={draft.personalData}
+          label={t("identityProofingFlows.editor.documents.personal_data")}
+          hint={t("identityProofingFlows.editor.documents.personalDataHint")}
+          lock={
+            personalDataAllowed(draft)
+              ? undefined
+              : {
+                  note: t(
+                    "identityProofingFlows.editor.documents.personalDataLock",
+                  ),
+                }
+          }
+          onChange={() => update({ personalData: !draft.personalData })}
+        />
+        {(error === "personalDataYivi" ||
+          error === "personalDataDocument" ||
+          error === "personalDataAge") && (
+          <p role="alert" className={ERROR}>
+            {t(`identityProofingFlows.new.errors.${error}`)}
+          </p>
+        )}
         {error === "documentTypes" && (
           <p role="alert" className={ERROR}>
             {t("identityProofingFlows.new.errors.documentTypes")}
@@ -535,6 +560,69 @@ function ReceiveSection({
         </p>
       )}
     </Section>
+  );
+}
+
+// The hint under the apps: both, one, or none ticked.
+function appsHintKey(draft: ProofingFlowDraft) {
+  if (draft.idemApp && draft.yiviApp) {
+    return "identityProofingFlows.editor.steps.appsBoth";
+  }
+  if (draft.idemApp) {
+    return "identityProofingFlows.editor.steps.appsOnly.idem";
+  }
+  if (draft.yiviApp) {
+    return "identityProofingFlows.editor.steps.appsOnly.yivi";
+  }
+  return "identityProofingFlows.editor.steps.appsNone";
+}
+
+// Which apps the flow's sessions run in, after what happens: both apps can
+// do every step, each in its own way.
+function AppsChoice({
+  draft,
+  update,
+  error,
+}: Readonly<{
+  draft: ProofingFlowDraft;
+  update: (patch: Partial<ProofingFlowDraft>) => void;
+  error: FlowDraftError | null;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <fieldset className="flex flex-col gap-4">
+      <legend className={`${LABEL} mb-1`}>
+        {t("identityProofingFlows.editor.steps.apps")}
+      </legend>
+      <OptionRow
+        id="flow-app-yivi"
+        checked={draft.yiviApp}
+        label={t("identityProofingFlows.editor.steps.yiviApp")}
+        hint={t("identityProofingFlows.editor.steps.yiviAppHint")}
+        // Only the Yivi app shares the personal data.
+        onChange={() =>
+          update(
+            draft.yiviApp
+              ? { yiviApp: false, personalData: false }
+              : { yiviApp: true },
+          )
+        }
+      />
+      <OptionRow
+        id="flow-app-idem"
+        checked={draft.idemApp}
+        label={t("identityProofingFlows.editor.steps.idemApp")}
+        hint={t("identityProofingFlows.editor.steps.idemAppHint")}
+        onChange={() => update({ idemApp: !draft.idemApp })}
+      />
+      <span className={HINT}>{t(appsHintKey(draft))}</span>
+      {(error === "apps" || error === "appsNeeded") && (
+        <p role="alert" className={ERROR}>
+          {t(`identityProofingFlows.new.errors.${error}`)}
+        </p>
+      )}
+    </fieldset>
   );
 }
 

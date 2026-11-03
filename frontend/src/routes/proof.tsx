@@ -35,15 +35,16 @@ import {
   hostedErrorMessage,
   isProofingLive,
   methodChoices,
+  stageIndex,
   supportContactLink,
   verifyStages,
+  firstMethod,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
   CheckEnded,
   DOCUMENT_SCAN_WIDE_PAGE,
-  MethodChoice,
   Overview,
   Session,
   StepRegion,
@@ -52,7 +53,7 @@ import {
 const HINT = "text-ink-soft text-[13px]";
 const NOT_FOUND = "session_not_found";
 
-type Step = "overview" | "method" | "session";
+type Step = "overview" | "session";
 
 // An external person on their own device, from a hosted link: what the org
 // collects (declining cancels the link), the app to use, then that app's
@@ -122,20 +123,33 @@ function HostedFlow({
   const { t } = useTranslation();
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
-  const stages = verifyStages({
-    app: !flow.browserOnly,
-    address: flow.addressMode === "required",
-    diplomas: flow.diplomaMode === "required",
-    employment: flow.employmentMode === "required",
-  });
+  const methods = methodChoices(flow.yiviAvailable, flow.idemAvailable);
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(() => {
     if (flow.browserOnly) return "browser";
-    return page.method === "yivi_app" ? "yivi_app" : "idem_app";
+    // A session started with the flow has no app until one is chosen in it.
+    if (page.started && page.method === undefined) return "pending";
+    if (page.method === "yivi_app" || page.method === "idem_app") {
+      return page.method;
+    }
+    // The app Continue will start in, so the stepper is right before it.
+    return firstMethod(flow.browserOnly, methods);
   });
+  // Only a choice of apps is a step: one app starts at once.
+  const stages = verifyStages({
+    app: !flow.browserOnly && methods.length > 1,
+    document: page.documentScan !== undefined,
+    // The Yivi app shares the registered address: the person enters none.
+    address: flow.addressMode === "required" && method !== "yivi_app",
+    diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
+  });
+  const [sessionStage, setSessionStage] = useState<
+    "document" | "method" | "session" | "done"
+  >("session");
   const [started, setStarted] = useState<HostedStart>();
   const [sessionEnded, setSessionEnded] = useState(false);
   const onEnded = useCallback(() => setSessionEnded(true), []);
@@ -197,6 +211,7 @@ function HostedFlow({
   );
 
   function begin(picked: ProofingMethod): void {
+    setMethod(picked);
     start.mutate(picked, {
       onSuccess: (next) => {
         setStarted(next);
@@ -208,7 +223,12 @@ function HostedFlow({
   const actionError = start.isError
     ? hostedErrorMessage(start.error, t)
     : undefined;
-  const stage = currentStage({ step, inAddress, inDiplomas, inEmployment });
+  const stage = currentStage({
+    step: step === "session" ? sessionStage : step,
+    inAddress,
+    inDiplomas,
+    inEmployment,
+  });
   const showsEnded =
     step === "session" && (sessionEnded || page.status === "expired");
   let outcomeActions: React.ReactNode;
@@ -250,7 +270,7 @@ function HostedFlow({
         {!showsEnded && (
           <Stepper
             steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-            current={stages.indexOf(stage)}
+            current={stageIndex(stages, stage)}
           />
         )}
         <StepRegion step={stage} headingLevel="h1">
@@ -258,14 +278,16 @@ function HostedFlow({
             <Overview
               org={organization}
               flow={flow}
-              // Opening the link or pressing Continue uses nothing up: the
-              // link starts when the person taps an app (#304), or, with no
-              // app to tap, when Continue is pressed.
-              onContinue={() =>
-                flow.browserOnly ? begin("browser") : setStep("method")
+              onlyApp={
+                !flow.browserOnly && methods.length === 1
+                  ? methods[0]
+                  : undefined
               }
-              starting={flow.browserOnly && start.isPending}
-              error={flow.browserOnly ? actionError : undefined}
+              // Continue starts the session; with a choice of apps, the app
+              // is chosen in it.
+              onContinue={() => begin(firstMethod(flow.browserOnly, methods))}
+              starting={start.isPending}
+              error={actionError}
               cancel={
                 <Button
                   variant="secondary"
@@ -289,25 +311,16 @@ function HostedFlow({
               }}
             />
           )}
-          {step === "method" && (
-            <MethodChoice
-              methods={methodChoices(flow.yiviAvailable)}
-              picked={method}
-              onChoose={(picked) => {
-                setMethod(picked);
-                begin(picked);
-              }}
-              onBack={() => setStep("overview")}
-              starting={start.isPending}
-              error={actionError}
-            />
-          )}
           {step === "session" && (
             <Session
               target={{ kind: "hosted", token }}
               initial={started ?? page}
               deepLink={started?.deepLink}
               method={method}
+              methods={methods}
+              yiviPersonalData={flow.yiviPersonalData}
+              onStage={setSessionStage}
+              onMethod={setMethod}
               diplomaMode={flow.diplomaMode}
               diplomas={page.diplomas}
               onDiplomaStep={setInDiplomas}

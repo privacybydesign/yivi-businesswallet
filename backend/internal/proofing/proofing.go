@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -452,6 +453,9 @@ type Request struct {
 	// the page started last; empty before one. Server-side only: it reads the
 	// photos.
 	documentScanTransactionID string
+	// appDone is an Idem request whose app did its part while the document
+	// scan is still to come, read live from the engine (withAppDone).
+	appDone bool
 }
 
 type ipsSession struct {
@@ -797,17 +801,74 @@ var faceProviders = []string{faceProviderRegula, faceProviderIDScan}
 // reaches (yiviEIDASLevel), which enforceAssurance would only reject at the
 // end. A flow the browser runs alone (BrowserOnly) needs no app at all.
 func yiviAppAvailable(f proofingprovider.Flow) bool {
-	return !f.BrowserOnly && !flowNeedsReferencePhoto(f) && yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+	return !f.BrowserOnly && allowsApp(f, appYivi) && !flowNeedsReferencePhoto(f) && yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+}
+
+// idemAppAvailable reports whether flow f can run in the Idem app: a flow
+// with an app step that the flow does not lock to another app.
+func idemAppAvailable(f proofingprovider.Flow) bool {
+	return !f.BrowserOnly && allowsApp(f, appIdem)
+}
+
+// The apps a flow may lock its sessions to (proofingprovider.FlowSpec.Apps).
+const (
+	appIdem = "idem"
+	appYivi = "yivi"
+)
+
+// allowsApp reports whether f may run in app: every app when f names none.
+func allowsApp(f proofingprovider.Flow, app string) bool {
+	return len(f.Apps) == 0 || slices.Contains(f.Apps, app)
+}
+
+// acceptsPersonalData reports whether f accepts the registered personal data
+// (BRP), which the Yivi app shares in place of a document.
+func acceptsPersonalData(f proofingprovider.Flow) bool {
+	return slices.ContainsFunc(f.AcceptedDocumentTypes, func(t string) bool {
+		return strings.EqualFold(t, openid4vpverifier.SourcePersonalData)
+	})
+}
+
+// yiviSources are what f's Yivi disclosure offers the person, any one of:
+// the documents and personal data it accepts, or for a flow accepting any
+// document none, which asks the default documents. A document code the Yivi
+// credentials cannot be told by (P, ID) asks every document, the engine then
+// holding the disclosed one to the flow.
+func yiviSources(f proofingprovider.Flow) []string {
+	known := []string{
+		openid4vpverifier.SourcePassport, openid4vpverifier.SourceIdentityCard, openid4vpverifier.SourceResidencePermit,
+		openid4vpverifier.SourceDrivingLicence, openid4vpverifier.SourcePersonalData,
+	}
+	var sources []string
+	everyDocument := false
+	for _, t := range f.AcceptedDocumentTypes {
+		i := slices.IndexFunc(known, func(k string) bool { return strings.EqualFold(k, t) })
+		if i < 0 {
+			everyDocument = true
+			continue
+		}
+		if !slices.Contains(sources, known[i]) {
+			sources = append(sources, known[i])
+		}
+	}
+	if everyDocument {
+		for _, s := range []string{openid4vpverifier.SourcePassport, openid4vpverifier.SourceIdentityCard, openid4vpverifier.SourceResidencePermit} {
+			if !slices.Contains(sources, s) {
+				sources = append(sources, s)
+			}
+		}
+	}
+	return sources
 }
 
 // sessionMethods are the methods a request may ask for; "" leaves it to the
 // flow (sessionMethod).
-var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser}
+var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser, proofingprovider.MethodPending}
 
 // sessionMethod is how a session of f runs, given the method asked for ("" for
 // none): a flow the browser runs alone (BrowserOnly) in the browser, with no
-// app; any other in an app, the Idem app unless the Yivi app is asked for and
-// can run it.
+// app; any other in an app the flow allows, the Idem app unless the Yivi app
+// is asked for, or is the only one.
 func sessionMethod(f proofingprovider.Flow, asked proofingprovider.Method) (proofingprovider.Method, error) {
 	if f.BrowserOnly {
 		if asked != "" && asked != proofingprovider.MethodBrowser {
@@ -815,9 +876,18 @@ func sessionMethod(f proofingprovider.Flow, asked proofingprovider.Method) (proo
 		}
 		return proofingprovider.MethodBrowser, nil
 	}
+	if asked == "" && !allowsApp(f, appIdem) {
+		asked = proofingprovider.MethodYivi
+	}
 	switch asked {
 	case "", proofingprovider.MethodIdem:
+		if !idemAppAvailable(f) {
+			return "", fmt.Errorf("%w: this flow does not run in the Idem app", ErrInvalidInput)
+		}
 		return proofingprovider.MethodIdem, nil
+	case proofingprovider.MethodPending:
+		// The session starts with the flow; the app is chosen later (ChooseMethod).
+		return proofingprovider.MethodPending, nil
 	case proofingprovider.MethodYivi:
 		if !yiviAppAvailable(f) {
 			return "", fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
