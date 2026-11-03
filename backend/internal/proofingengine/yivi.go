@@ -82,30 +82,12 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		return proofingprovider.YiviDisclosure{}, err
 	}
 
-	credential := strings.TrimSpace(ref.Credential)
-	if credential == "" || len(credential) > maxReferenceCredentialLen {
-		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "credential is required"}
-	}
-	if len(ref.Attributes) > maxReferenceAttributes {
-		return proofingprovider.YiviDisclosure{}, &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "too many attributes"}
+	credential, err := referenceCredential(ref)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
 	}
 
-	info := disclosureInfo{
-		Source: referenceSourceOpenID4VP, Credential: credential,
-		PhotoAttribute: credential + "." + yiviPhotoAttribute, Attributes: map[string]string{},
-	}
-	if parts := strings.Split(credential, "."); len(parts) == 3 {
-		info.Issuer = parts[0] + "." + parts[1]
-	}
-	for k, v := range ref.Attributes {
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		if k == "" || v == "" || k == yiviPhotoAttribute || len(k) > maxReferenceAttrKeyLen || len(v) > maxReferenceAttrValueLen {
-			continue
-		}
-		info.Attributes[k] = v
-		info.AttributeIDs = append(info.AttributeIDs, credential+"."+k)
-	}
-
+	info := referenceDisclosureInfo(credential, ref.Attributes)
 	fd, err := s.resolveSessionFlow(ctx, sess)
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: %w", err)
@@ -124,15 +106,15 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
 	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); failed {
 		details[detailReason] = disclosureCodeDocumentRefused
-		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction.BlurBSN)
+		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
 	}
 	if asksAge(fd) && ageOver == nil {
 		details[detailReason] = disclosureCodeAgeNotDisclosed
-		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction.BlurBSN)
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
-	decided, err := s.decideByDocumentPhoto(sess, fd, doc, details, docRedaction.BlurBSN)
+	decided, err := s.decideByDocumentPhoto(sess, fd, doc, details, docRedaction)
 	switch {
 	case err != nil:
 		return proofingprovider.YiviDisclosure{}, err
@@ -144,21 +126,17 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 	// must have verified the person, as on the other paths, and its selfie and
 	// verdicts go in the result.
 	selfie, biometrics := faceStepEvidence(sess.Steps.Selfie)
-	if biometrics != nil {
-		if failed, code := faceStepFailure(fd, appResultRequest{Biometrics: biometrics}, nil); failed {
-			details[detailReason] = disclosureCodeFaceNotVerified
-			s.boundLoginFinish(sess, session.StatusRejected, code, nil, details, docRedaction.BlurBSN)
-			return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
-		}
+	if failed, code := scannedFaceFailure(fd, biometrics); failed {
+		details[detailReason] = disclosureCodeFaceNotVerified
+		s.boundLoginFinish(sess, session.StatusRejected, code, nil, details, docRedaction)
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
 	}
 
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 	addDocumentPhoto(result, sess, docRedaction)
 	addDocumentCheck(result, sess)
 	addSelfie(result, sess, selfie, redaction)
-	if biometrics != nil && attrRequested(sess, attrBiometrics) {
-		result["biometrics"] = biometrics
-	}
+	addBiometrics(result, sess, biometrics)
 	addFaceCheck(result, sess)
 
 	if sess.Status == session.StatusCreated {
@@ -167,10 +145,60 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.auditProofing(opened, eventSessionOpened, nil)
 	}
 	s.auditProofing(sess, eventDisclosureReceived, map[string]any{"credential": info.Credential})
-	if _, ok := s.boundLoginFinish(sess, decided, "", result, details, docRedaction.BlurBSN); !ok {
+	if _, ok := s.boundLoginFinish(sess, decided, "", result, details, docRedaction); !ok {
 		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not decided", sess.ID)
 	}
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+// referenceCredential is ref's credential, trimmed; a blank or oversized one,
+// or too many attributes, is refused.
+func referenceCredential(ref proofingprovider.Reference) (string, error) {
+	credential := strings.TrimSpace(ref.Credential)
+	if credential == "" || len(credential) > maxReferenceCredentialLen {
+		return "", &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "credential is required"}
+	}
+	if len(ref.Attributes) > maxReferenceAttributes {
+		return "", &proofingprovider.RejectedError{Status: http.StatusBadRequest, Message: "too many attributes"}
+	}
+	return credential, nil
+}
+
+// addBiometrics releases the face step's biometrics in result, when asked.
+func addBiometrics(result map[string]any, sess session.Session, biometrics *biometricsInfo) {
+	if biometrics != nil && attrRequested(sess, attrBiometrics) {
+		result["biometrics"] = biometrics
+	}
+}
+
+// referenceDisclosureInfo is the disclosure of credential's attributes, minus
+// the photo and any blank or oversized one.
+func referenceDisclosureInfo(credential string, attributes map[string]string) disclosureInfo {
+	info := disclosureInfo{
+		Source: referenceSourceOpenID4VP, Credential: credential,
+		PhotoAttribute: credential + "." + yiviPhotoAttribute, Attributes: map[string]string{},
+	}
+	if parts := strings.Split(credential, "."); len(parts) == 3 {
+		info.Issuer = parts[0] + "." + parts[1]
+	}
+	for k, v := range attributes {
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k == "" || v == "" || k == yiviPhotoAttribute || len(k) > maxReferenceAttrKeyLen || len(v) > maxReferenceAttrValueLen {
+			continue
+		}
+		info.Attributes[k] = v
+		info.AttributeIDs = append(info.AttributeIDs, credential+"."+k)
+	}
+	return info
+}
+
+// scannedFaceFailure is faceStepFailure for the face the document scan
+// checked, with its biometrics; no failure when it checked none.
+func scannedFaceFailure(fd *flow.FlowDefinition, biometrics *biometricsInfo) (bool, string) {
+	if biometrics == nil {
+		return false, ""
+	}
+	return faceStepFailure(fd, appResultRequest{Biometrics: biometrics}, nil)
 }
 
 // decideByDocumentPhoto checks the disclosed document doc against the
@@ -180,7 +208,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 // no holder, else approved. The holder, not the document number, binds the
 // two: the disclosure carries no number, and a holder may photograph another
 // document of theirs than the one in the Yivi app.
-func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, doc documentInfo, details map[string]any, redactDocument bool) (session.Status, error) {
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, doc documentInfo, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Status, error) {
 	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
 		return "", &proofingprovider.RejectedError{
 			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
@@ -199,7 +227,7 @@ func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefini
 	switch {
 	case scanCode != "":
 		details[detailReason] = disclosureCodeDocumentRefused
-		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, redactDocument)
+		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, docRedaction)
 		return session.StatusRejected, nil
 	case doubtful:
 		details[detailReason] = reasonDocumentDoubtful
@@ -342,33 +370,24 @@ func addDocumentPhoto(result map[string]any, sess session.Session, docRedaction 
 }
 
 // boundLoginFinish settles sess as to (stepping through opened and
-// in_progress), stores result and error code, and reports it. redactDocument
-// covers the BSN in the stored document photo in the same write.
-func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any, redactDocument bool) (session.Session, bool) {
+// in_progress), stores result and error code, and reports it. The stored
+// evidence takes docRedaction (heldForReview) in the same write: the BSN
+// covered in the document photo, and the selfie dropped unless kept.
+func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any, docRedaction privacy.RedactionPolicy) (session.Session, bool) {
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
-		if sess.Status.Terminal() {
-			return errSessionComplete
-		}
-		now := time.Now().UTC()
-		if sess.Status == session.StatusCreated {
-			if err := sess.SetStatus(session.StatusOpened, now); err != nil {
-				return err
-			}
-		}
-		if sess.Status == session.StatusOpened && to != session.StatusCancelled && to != session.StatusExpired {
-			if err := sess.SetStatus(session.StatusInProgress, now); err != nil {
-				return err
-			}
-		}
-		if err := sess.SetStatus(to, now); err != nil {
+		if err := settleBoundLogin(sess, to, time.Now().UTC()); err != nil {
 			return err
 		}
 		sess.ErrorCode = errorCode
 		if result != nil {
 			sess.Result = result
 		}
-		if redactDocument {
+		redaction := heldForReview(to, docRedaction)
+		if redaction.BlurBSN {
 			redactStoredDocumentPhoto(sess)
+		}
+		if !redaction.KeepFacePhotos {
+			dropStoredSelfie(sess)
 		}
 		return nil
 	})
@@ -387,6 +406,24 @@ func (s *Server) boundLoginFinish(sess session.Session, to session.Status, error
 	}
 	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
 	return updated, true
+}
+
+// settleBoundLogin steps sess to status to, through opened and in_progress.
+func settleBoundLogin(sess *session.Session, to session.Status, now time.Time) error {
+	if sess.Status.Terminal() {
+		return errSessionComplete
+	}
+	if sess.Status == session.StatusCreated {
+		if err := sess.SetStatus(session.StatusOpened, now); err != nil {
+			return err
+		}
+	}
+	if sess.Status == session.StatusOpened && to != session.StatusCancelled && to != session.StatusExpired {
+		if err := sess.SetStatus(session.StatusInProgress, now); err != nil {
+			return err
+		}
+	}
+	return sess.SetStatus(to, now)
 }
 
 // yiviDocumentKinds are the kinds of the identity credentials, by the last

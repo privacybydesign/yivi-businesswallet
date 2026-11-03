@@ -22,12 +22,8 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	if coversDocumentBSN(redaction, storedState) {
 		redactStoredDocumentPhoto(sess)
 	}
-	if !redaction.KeepFacePhotos && sess.Steps.Selfie != nil && sess.Steps.Selfie.Image != "" {
-		// A copy, not a write through the pointer (see handleSubmitNFCStep). The
-		// verdicts stay; only the picture goes.
-		selfie := *sess.Steps.Selfie
-		selfie.Image, selfie.MimeType = "", ""
-		sess.Steps.Selfie = &selfie
+	if !redaction.KeepFacePhotos {
+		dropStoredSelfie(sess)
 	}
 	if sess.Steps.NFC == nil {
 		return
@@ -67,6 +63,18 @@ func redactStepsForStorage(sess *session.Session, bsnPolicy privacy.BSNPolicy, r
 	nfc := *sess.Steps.NFC
 	nfc.Raw = raw
 	sess.Steps.NFC = &nfc
+}
+
+// dropStoredSelfie drops the stored selfie's picture.
+func dropStoredSelfie(sess *session.Session) {
+	if sess.Steps.Selfie == nil || sess.Steps.Selfie.Image == "" {
+		return
+	}
+	// A copy, not a write through the pointer (see handleSubmitNFCStep). The
+	// verdicts stay; only the picture goes.
+	selfie := *sess.Steps.Selfie
+	selfie.Image, selfie.MimeType = "", ""
+	sess.Steps.Selfie = &selfie
 }
 
 // heldForReview is the redaction a session's result and stored evidence take

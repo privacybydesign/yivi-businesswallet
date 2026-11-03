@@ -43,12 +43,7 @@ func readFace(tasks []taskResult) (*Face, *file) {
 			if face == nil {
 				face = &Face{}
 			}
-			for _, f := range task.Files {
-				if f.Category == fileCategoryImage {
-					still = &f
-					break
-				}
-			}
+			still = livenessStill(task)
 		case taskFaceMatch:
 			if face == nil {
 				face = &Face{}
@@ -57,6 +52,16 @@ func readFace(tasks []taskResult) (*Face, *file) {
 		}
 	}
 	return face, still
+}
+
+// livenessStill is the liveness task's still file; nil when it holds none.
+func livenessStill(task taskResult) *file {
+	for _, f := range task.Files {
+		if f.Category == fileCategoryImage {
+			return &f
+		}
+	}
+	return nil
 }
 
 // downloadSelfie fetches the liveness check's still.

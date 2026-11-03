@@ -62,14 +62,10 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var ref *faceReference
-	if flowNeedsFaceMatch(resolvedFlow) {
-		refImage, refMime, ok := s.faceMatchReference(sess)
-		if !ok {
-			writeError(w, http.StatusConflict, "the reference photo for face_match is not available yet")
-			return
-		}
-		ref = &faceReference{ImageBase64: refImage, MimeType: refMime}
+	ref, ok := s.selfieReference(sess, resolvedFlow)
+	if !ok {
+		writeError(w, http.StatusConflict, "the reference photo for face_match is not available yet")
+		return
 	}
 
 	stage := faceStepName(resolvedFlow)
@@ -207,6 +203,19 @@ const (
 )
 
 var livenessResults = map[bool]string{true: livenessPassed, false: livenessFailed}
+
+// selfieReference is the face step's reference when fd matches the face, nil
+// when it does not; ok is false while the reference has not landed.
+func (s *Server) selfieReference(sess session.Session, fd *flow.FlowDefinition) (*faceReference, bool) {
+	if !flowNeedsFaceMatch(fd) {
+		return nil, true
+	}
+	refImage, refMime, ok := s.faceMatchReference(sess)
+	if !ok {
+		return nil, false
+	}
+	return &faceReference{ImageBase64: refImage, MimeType: refMime}, true
+}
 
 // faceMatchReference is what the face is matched against: the customer's
 // reference photo (a flow without nfc_read), or the chip's DG2 portrait. ok is
