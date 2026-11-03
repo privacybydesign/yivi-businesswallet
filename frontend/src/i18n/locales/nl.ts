@@ -903,6 +903,9 @@ export const nl: Translation<typeof en> = {
         yiviHint:
           "Open de Yivi-app en scan deze code, of tik op de knop als deze pagina op je telefoon staat.",
         openYivi: "Openen in de Yivi-app",
+        getYivi: "Nog geen Yivi-app? Download hem via de",
+        appStore: "App Store",
+        playStore: "Google Play",
         idemHeading: "Scan met de Idem-app",
         idemHint: "Open de Idem-app en scan deze code vanuit de app.",
         openIdem: "Openen in de Idem-app",

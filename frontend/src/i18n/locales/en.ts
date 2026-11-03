@@ -879,6 +879,9 @@ export const en = {
         yiviHint:
           "Open the Yivi app and scan this code, or tap the button if this page is on your phone.",
         openYivi: "Open in the Yivi app",
+        getYivi: "No Yivi app yet? Get it from the",
+        appStore: "App Store",
+        playStore: "Google Play",
         idemHeading: "Scan with the Idem app",
         idemHint: "Open the Idem app and scan this code from inside the app.",
         openIdem: "Open in the Idem app",

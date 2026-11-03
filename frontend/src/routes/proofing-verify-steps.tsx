@@ -77,7 +77,11 @@ import type {
 import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { legalReasonIn } from "../lib/legal-retention";
-import { yiviUniversalLink } from "../lib/yivi-universal-link";
+import {
+  YIVI_APP_STORE_URL,
+  YIVI_PLAY_STORE_URL,
+  yiviUniversalLink,
+} from "../lib/yivi-universal-link";
 import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
@@ -1888,6 +1892,26 @@ function YiviSession({
           {t("identityProofing.onScreen.scan.openYivi")}
         </a>
       )}
+      <p className={`${HINT} text-center`}>
+        {t("identityProofing.onScreen.scan.getYivi")}{" "}
+        <a
+          href={YIVI_APP_STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link font-semibold hover:underline"
+        >
+          {t("identityProofing.onScreen.scan.appStore")}
+        </a>
+        {" · "}
+        <a
+          href={YIVI_PLAY_STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link font-semibold hover:underline"
+        >
+          {t("identityProofing.onScreen.scan.playStore")}
+        </a>
+      </p>
       {start.data && <Countdown seconds={secondsLeft} />}
     </>
   );
