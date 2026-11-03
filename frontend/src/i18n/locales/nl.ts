@@ -1829,12 +1829,17 @@ export const nl: Translation<typeof en> = {
         lifetimeHint:
           "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
         apps: "Apps",
+        appsHint: "De apps waarin de persoon deze flow kan doen.",
         yiviApp: "Yivi-app",
         yiviAppHint:
           "De persoon deelt zijn gegevens uit de Yivi-app, op dit scherm of via een link.",
         idemApp: "Idem-app",
         idemAppHint:
           "De persoon scant zijn paspoort of ID-kaart met de Idem-app en leest de chip uit.",
+        needsApp:
+          "Heeft een app nodig: vink onder Apps de Yivi-app of de Idem-app aan.",
+        idemAppLock:
+          "Niet zolang persoonsgegevens het enige documenttype is: de Idem-app deelt die niet. Vink ook een documenttype aan.",
         appsBoth:
           "De persoon kiest een van de twee apps. Wat je ontvangt hangt af van de gekozen app.",
         appsNone: "Geen app: de ID-scan in de browser is de hele controle.",

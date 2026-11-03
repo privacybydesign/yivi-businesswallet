@@ -1781,12 +1781,16 @@ export const en = {
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
         apps: "Apps",
+        appsHint: "The apps the person can do this flow in.",
         yiviApp: "Yivi app",
         yiviAppHint:
           "The person shares their data from the Yivi app, on this screen or a link.",
         idemApp: "Idem app",
         idemAppHint:
           "The person scans their passport or ID card with the Idem app and reads its chip.",
+        needsApp: "Needs an app: tick the Yivi app or the Idem app under Apps.",
+        idemAppLock:
+          "Not while personal data is the only document type: the Idem app shares none. Tick a document type too.",
         appsBoth:
           "The person picks one of the two apps. What you receive depends on the app they pick.",
         appsNone: "No app: the ID scan in the browser is the whole check.",

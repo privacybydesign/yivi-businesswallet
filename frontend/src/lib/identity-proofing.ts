@@ -383,6 +383,34 @@ export function personalDataAllowed(draft: ProofingFlowDraft): boolean {
   return draft.yiviApp;
 }
 
+// Whether a draft runs in neither app: the browser runs it alone.
+export function noApp(draft: ProofingFlowDraft): boolean {
+  return !draft.idemApp && !draft.yiviApp;
+}
+
+// draft with no app ticked, and without what only an app does: the chip read,
+// the personal data, and a face check outside the document scan, which moves
+// into the scan or, without the document photo, goes.
+export function withoutApps(draft: ProofingFlowDraft): ProofingFlowDraft {
+  const next = {
+    ...draft,
+    idemApp: false,
+    yiviApp: false,
+    personalData: false,
+    documentAndChip: false,
+  };
+  if (!next.faceVerification || scansFace(next)) return next;
+  return next.documentPhoto
+    ? { ...next, faceProvider: FACE_PROVIDER_ID_SCAN }
+    : { ...next, faceVerification: false };
+}
+
+// Whether a draft may run in the Idem app: not when the personal data is the
+// only document it accepts, as the Idem app shares none.
+export function idemAppAllowed(draft: ProofingFlowDraft): boolean {
+  return !draft.personalData || !listsNoDocument(draft);
+}
+
 // Whether a flow accepts the registered personal data, which the Yivi app
 // shares (proofing.acceptsPersonalData).
 export function acceptsPersonalData(flow: {
@@ -536,8 +564,12 @@ export function withAssuranceLevel(
   level: Inherit<AssuranceLevel>,
 ): ProofingFlowDraft {
   const { faceMatchThreshold } = draft;
+  // Every level needs the chip read, which an app runs.
+  const apps =
+    level !== "" && noApp(draft) ? { idemApp: true, yiviApp: true } : {};
   return {
     ...draft,
+    ...apps,
     ...levelRequirement(level),
     assuranceLevel: level,
     faceMatchThreshold:
@@ -828,8 +860,7 @@ function appsDraftError(draft: ProofingFlowDraft): FlowDraftError | null {
   if (!personalDataAllowed(draft)) {
     return "personalDataYivi";
   }
-  // The Idem app accepts any document when the flow lists none.
-  if (draft.idemApp && listsNoDocument(draft)) {
+  if (draft.idemApp && !idemAppAllowed(draft)) {
     return "personalDataDocument";
   }
   return draft.documentPhoto && asksAge(draft) ? "personalDataAge" : null;

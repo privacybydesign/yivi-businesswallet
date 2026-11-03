@@ -24,6 +24,9 @@ import {
   attributeAvailable,
   missingReasonLocales,
   personalDataAllowed,
+  idemAppAllowed,
+  noApp,
+  withoutApps,
   lockedByLevel,
   retentionChoices,
   scansFace,
@@ -91,6 +94,7 @@ export function AdvancedSettings(
   return (
     <>
       <StepsSection {...props} />
+      <AppsChoice draft={draft} update={update} error={error} />
       <DocumentsSection draft={draft} update={update} error={error} />
       <ReceiveSection
         draft={draft}
@@ -150,6 +154,9 @@ function StepsSection({
   const { t } = useTranslation();
   const levelLock = useLevelLock(draft);
   const orgTtl = settings?.sessionTtlSeconds;
+  const appLock = noApp(draft)
+    ? { note: t("identityProofingFlows.editor.steps.needsApp") }
+    : undefined;
 
   return (
     <Section
@@ -161,7 +168,7 @@ function StepsSection({
         checked={draft.documentAndChip}
         label={t("identityProofingFlows.editor.steps.scanAndRead")}
         hint={t("identityProofingFlows.editor.steps.scanAndReadHint")}
-        lock={levelLock("documentAndChip")}
+        lock={levelLock("documentAndChip") ?? appLock}
         onChange={() => update({ documentAndChip: !draft.documentAndChip })}
       />
       <OptionRow
@@ -169,15 +176,31 @@ function StepsSection({
         checked={draft.documentPhoto}
         label={t("identityProofingFlows.steps.document_photo")}
         hint={t("identityProofingFlows.editor.steps.photoHint")}
-        onChange={() => update({ documentPhoto: !draft.documentPhoto })}
+        // Without an app the face check runs in the document scan alone.
+        onChange={() =>
+          update(
+            draft.documentPhoto && noApp(draft)
+              ? { documentPhoto: false, faceVerification: false }
+              : { documentPhoto: !draft.documentPhoto },
+          )
+        }
       />
       <OptionRow
         id="flow-step-face"
         checked={draft.faceVerification}
         label={t("identityProofingFlows.steps.face_verification")}
         hint={t("identityProofingFlows.editor.steps.faceHint")}
-        lock={levelLock("faceVerification")}
-        onChange={() => update({ faceVerification: !draft.faceVerification })}
+        lock={
+          levelLock("faceVerification") ??
+          (draft.documentPhoto ? undefined : appLock)
+        }
+        onChange={() =>
+          update(
+            draft.faceVerification || !noApp(draft)
+              ? { faceVerification: !draft.faceVerification }
+              : { faceVerification: true, faceProvider: FACE_PROVIDER_ID_SCAN },
+          )
+        }
       />
       {draft.faceVerification && draft.documentPhoto && (
         <OptionRow
@@ -185,7 +208,7 @@ function StepsSection({
           checked={scansFace(draft)}
           label={t("identityProofingFlows.editor.steps.faceInScan")}
           hint={t("identityProofingFlows.editor.steps.faceInScanHint")}
-          lock={levelLock("faceProvider")}
+          lock={levelLock("faceProvider") ?? appLock}
           onChange={() =>
             update({
               faceProvider: scansFace(draft)
@@ -245,7 +268,6 @@ function StepsSection({
           {employmentError}
         </p>
       )}
-      <AppsChoice draft={draft} update={update} error={error} />
       <div className="flex max-w-md flex-col gap-1.5">
         <label htmlFor="flow-lifetime" className={LABEL}>
           {t("identityProofingFlows.editor.steps.lifetime")}
@@ -589,40 +611,60 @@ function AppsChoice({
   error: FlowDraftError | null;
 }>): React.JSX.Element {
   const { t } = useTranslation();
+  const lastAppLock = useLevelLock(draft)("documentAndChip");
+  // The last app unticked leaves a flow the browser runs alone.
+  function toggle(patch: Partial<ProofingFlowDraft>): void {
+    const next = { ...draft, ...patch };
+    update(noApp(next) ? withoutApps(next) : patch);
+  }
+  function lockOf(ticked: boolean, other: boolean): OptionLock | undefined {
+    return ticked && !other ? lastAppLock : undefined;
+  }
 
   return (
-    <fieldset className="flex flex-col gap-4">
-      <legend className={`${LABEL} mb-1`}>
-        {t("identityProofingFlows.editor.steps.apps")}
-      </legend>
-      <OptionRow
-        id="flow-app-yivi"
-        checked={draft.yiviApp}
-        label={t("identityProofingFlows.editor.steps.yiviApp")}
-        hint={t("identityProofingFlows.editor.steps.yiviAppHint")}
-        // Only the Yivi app shares the personal data.
-        onChange={() =>
-          update(
-            draft.yiviApp
-              ? { yiviApp: false, personalData: false }
-              : { yiviApp: true },
-          )
-        }
-      />
-      <OptionRow
-        id="flow-app-idem"
-        checked={draft.idemApp}
-        label={t("identityProofingFlows.editor.steps.idemApp")}
-        hint={t("identityProofingFlows.editor.steps.idemAppHint")}
-        onChange={() => update({ idemApp: !draft.idemApp })}
-      />
-      <span className={HINT}>{t(appsHintKey(draft))}</span>
-      {(error === "apps" || error === "appsNeeded") && (
-        <p role="alert" className={ERROR}>
-          {t(`identityProofingFlows.new.errors.${error}`)}
-        </p>
-      )}
-    </fieldset>
+    <Section
+      title={t("identityProofingFlows.editor.steps.apps")}
+      hint={t("identityProofingFlows.editor.steps.appsHint")}
+    >
+      <fieldset className="flex flex-col gap-4">
+        <legend className="sr-only">
+          {t("identityProofingFlows.editor.steps.apps")}
+        </legend>
+        <OptionRow
+          id="flow-app-yivi"
+          checked={draft.yiviApp}
+          label={t("identityProofingFlows.editor.steps.yiviApp")}
+          hint={t("identityProofingFlows.editor.steps.yiviAppHint")}
+          lock={lockOf(draft.yiviApp, draft.idemApp)}
+          // Only the Yivi app shares the personal data.
+          onChange={() =>
+            toggle(
+              draft.yiviApp
+                ? { yiviApp: false, personalData: false }
+                : { yiviApp: true },
+            )
+          }
+        />
+        <OptionRow
+          id="flow-app-idem"
+          checked={draft.idemApp}
+          label={t("identityProofingFlows.editor.steps.idemApp")}
+          hint={t("identityProofingFlows.editor.steps.idemAppHint")}
+          lock={
+            idemAppAllowed(draft)
+              ? lockOf(draft.idemApp, draft.yiviApp)
+              : { note: t("identityProofingFlows.editor.steps.idemAppLock") }
+          }
+          onChange={() => toggle({ idemApp: !draft.idemApp })}
+        />
+        <span className={HINT}>{t(appsHintKey(draft))}</span>
+        {(error === "apps" || error === "appsNeeded") && (
+          <p role="alert" className={ERROR}>
+            {t(`identityProofingFlows.new.errors.${error}`)}
+          </p>
+        )}
+      </fieldset>
+    </Section>
   );
 }
 
