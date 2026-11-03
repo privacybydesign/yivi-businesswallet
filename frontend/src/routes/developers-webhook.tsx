@@ -14,6 +14,7 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
+import { blockingError } from "../lib/query-state";
 import {
   isSuccessStatus,
   ownEndpointDeliveries,
@@ -40,11 +41,12 @@ export function WebhookSection({
   const [editing, setEditing] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
 
-  if (webhook.isPending) {
-    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
+  const error = blockingError(webhook);
+  if (error !== null) {
+    return <p className={ERROR}>{proofingErrorMessage(error, t)}</p>;
   }
-  if (webhook.isError) {
-    return <p className={ERROR}>{proofingErrorMessage(webhook.error, t)}</p>;
+  if (webhook.data === undefined) {
+    return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
   }
   const hook = webhook.data;
   return (
@@ -365,25 +367,24 @@ function DeliveriesCard({
   const deliveries = useWebhookDeliveriesQuery(slug);
   const formatWhen = useWhenFormatter();
   const rows = ownEndpointDeliveries(deliveries.data ?? []);
+  const error = blockingError(deliveries);
 
   return (
     <Card>
       <h2 className="font-display border-line border-b px-5 py-4 text-[17px] font-bold">
         {t("identityProofing.webhooks.recent")}
       </h2>
-      {deliveries.isError && (
-        <p className={`${ERROR} px-5 py-4`}>
-          {proofingErrorMessage(deliveries.error, t)}
-        </p>
+      {error !== null && (
+        <p className={`${ERROR} px-5 py-4`}>{proofingErrorMessage(error, t)}</p>
       )}
-      {!deliveries.isError && rows.length === 0 && (
+      {error === null && rows.length === 0 && (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {deliveries.isPending
             ? t("common.loading")
             : t("identityProofing.webhooks.noDeliveries")}
         </p>
       )}
-      {!deliveries.isError && rows.length > 0 && (
+      {error === null && rows.length > 0 && (
         <ul className="divide-line divide-y">
           {rows.map((d) => (
             <li

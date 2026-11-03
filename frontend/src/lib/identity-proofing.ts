@@ -1,5 +1,9 @@
 import type { TFunction } from "i18next";
-import { ApiError } from "../api/http";
+import {
+  ApiError,
+  ApiValidationError,
+  SERVER_ERROR_MIN_STATUS,
+} from "../api/http";
 import {
   DATA_REQUEST_KINDS,
   EMPLOYMENT_KIND,
@@ -103,6 +107,21 @@ export function reviewPollContinues(
   error: Error | null,
 ): boolean {
   return !refusedForGood(error) && progress?.status === "needs_review";
+}
+
+// 4xx statuses that pass: a timeout, a rate limit (the hosted page's).
+const TRANSIENT_CLIENT_STATUSES: ReadonlySet<number> = new Set([408, 429]);
+
+// Whether a failed poll ends what it polls: a 4xx answer, or one the page
+// cannot read. A network error or 5xx leaves the next poll to try again.
+export function pollFailedForGood(error: Error | null): boolean {
+  if (error instanceof ApiError) {
+    return (
+      error.status < SERVER_ERROR_MIN_STATUS &&
+      !TRANSIENT_CLIENT_STATUSES.has(error.status)
+    );
+  }
+  return error instanceof ApiValidationError;
 }
 
 function refusedForGood(error: Error | null): boolean {

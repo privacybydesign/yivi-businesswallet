@@ -4,7 +4,7 @@ import * as React from "react";
 import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
-  useExternalRequestsInQuery,
+  useProofingOverviewQuery,
   useProofingPauseQuery,
   useProofingStatsQuery,
   useProofingWebhookQuery,
@@ -14,6 +14,7 @@ import type { ProofingRequest } from "../api/identity-proofing";
 import { isDataRequest } from "../api/identity-proofing";
 import { accessMessage } from "../lib/access-message";
 import { useWhenFormatter } from "../lib/format-when";
+import { blockingError } from "../lib/query-state";
 import {
   listedCount,
   proofingErrorMessage,
@@ -30,13 +31,9 @@ import {
 } from "../lib/proofing-reviews";
 import {
   TODO_ROWS,
-  cappedAmong,
-  finishedChecks,
   finishedOn,
   namelessKey,
   todoShows,
-  todoStatuses,
-  waitingForOthers,
 } from "../lib/proofing-todo";
 import { Card, Icon, TaskEmpty, TaskRow, TaskSection, TopBar } from "../ui";
 import { ResultText } from "./proofing-ui";
@@ -56,15 +53,16 @@ function Rows({
   empty,
   rows,
 }: Readonly<{
-  query: { isError: boolean; isPending: boolean; error: Error | null };
+  query: { data: unknown; isPending: boolean; error: Error | null };
   empty: string;
   rows: React.ReactElement[];
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  if (query.isError) {
+  const error = blockingError(query);
+  if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
-        {proofingErrorMessage(query.error, t)}
+        {proofingErrorMessage(error, t)}
       </p>
     );
   }
@@ -83,9 +81,12 @@ export default function IdentityProofingOverview(): React.JSX.Element {
   // Guaranteed by the ":orgSlug" route segment this component mounts under.
   const slug = orgSlug!;
   const org = useOrganizationQuery(slug);
+  const orgError = blockingError(org);
   const isAdmin = org.data?.role === "admin";
   const canReview = org.data?.canReview === true;
   const pause = useProofingPauseQuery(slug);
+  // Read alongside the org, not after it: the backend knows whose lists these are.
+  const overview = useProofingOverviewQuery(slug);
   const shows = todoShows({
     isAdmin,
     canReview,
@@ -105,23 +106,24 @@ export default function IdentityProofingOverview(): React.JSX.Element {
       />
       <div className="flex max-w-240 flex-col gap-6 p-4 sm:p-8">
         {pause.data?.paused && <ProofingPausedNotice pause={pause.data} />}
-        {org.isError && (
+        {orgError !== null && (
           <Card className="p-6">
             <p role="alert" className="text-error text-[14px]">
-              {accessMessage(org.error, t)}
+              {accessMessage(orgError, t)}
             </p>
           </Card>
         )}
         {/* Which lists there are hangs on the reader's right to decide, so
             they wait for it. */}
-        {!org.isError && org.data !== undefined && (
+        {org.data !== undefined && (
           <OverviewLists
             slug={slug}
             isAdmin={isAdmin}
             canReview={shows.decisions}
+            overview={overview}
           />
         )}
-        {!org.isError && org.data === undefined && (
+        {org.data === undefined && orgError === null && (
           <Card>
             <TaskEmpty>{t("common.loading")}</TaskEmpty>
           </Card>
@@ -131,32 +133,29 @@ export default function IdentityProofingOverview(): React.JSX.Element {
   );
 }
 
+type OverviewRead = ReturnType<typeof useProofingOverviewQuery>;
+
 function OverviewLists({
   slug,
   isAdmin,
   canReview,
+  overview,
 }: Readonly<{
   slug: string;
   isAdmin: boolean;
   canReview: boolean;
+  overview: OverviewRead;
 }>): React.JSX.Element {
-  const requests = useExternalRequestsInQuery(
-    slug,
-    todoStatuses({ canReview, finished: true }),
-  );
-
   return (
     <>
       {isAdmin && <WebhookAlert slug={slug} />}
       {canReview && <DecisionSection slug={slug} />}
-      <WaitingSection slug={slug} requests={requests} canReview={canReview} />
-      <FinishedSection slug={slug} requests={requests} />
+      <WaitingSection slug={slug} overview={overview} />
+      <FinishedSection slug={slug} overview={overview} />
       <LastMonth slug={slug} />
     </>
   );
 }
-
-type StatusReads = ReturnType<typeof useExternalRequestsInQuery>;
 
 // What the reader decides, the longest waiting first: an admin's and a
 // reviewer's, who see what waits in the whole org.
@@ -262,29 +261,23 @@ function flowLine(request: ProofingRequest, t: TFunction): string {
 // their own checks held for an admin, and the people who have not finished.
 function WaitingSection({
   slug,
-  requests,
-  canReview,
+  overview,
 }: Readonly<{
   slug: string;
-  requests: StatusReads;
-  canReview: boolean;
+  overview: OverviewRead;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
-  const waiting = waitingForOthers(requests.data ?? [], { canReview });
-  const count = listedCount(
-    waiting.length,
-    cappedAmong(requests.capped, todoStatuses({ canReview, finished: false })),
-    t,
-  );
+  const waiting = overview.data?.waiting ?? [];
+  const count = (overview.data?.unfinished ?? 0) + (overview.data?.held ?? 0);
 
   return (
     <TaskSection
       title={t("identityProofing.overview.waiting.title")}
-      count={requests.data ? count : undefined}
+      count={overview.data ? count : undefined}
       hint={t("identityProofing.overview.waiting.hint")}
       action={
-        waiting.length > TODO_ROWS ? (
+        count > waiting.length ? (
           <Link
             to={`/${slug}/identity-proofing/people`}
             className={SECTION_LINK}
@@ -295,9 +288,9 @@ function WaitingSection({
       }
     >
       <Rows
-        query={requests}
+        query={overview}
         empty={t("identityProofing.overview.waiting.empty")}
-        rows={waiting.slice(0, TODO_ROWS).map((request) => (
+        rows={waiting.map((request) => (
           <TaskRow
             key={request.id}
             title={<PersonName slug={slug} request={request} />}
@@ -319,14 +312,14 @@ function WaitingSection({
 // The newest checks that ended in a result; the rest are on All people.
 function FinishedSection({
   slug,
-  requests,
+  overview,
 }: Readonly<{
   slug: string;
-  requests: StatusReads;
+  overview: OverviewRead;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
-  const finished = finishedChecks(requests.data ?? []);
+  const finished = overview.data?.finished ?? [];
 
   return (
     <TaskSection
@@ -338,9 +331,9 @@ function FinishedSection({
       }
     >
       <Rows
-        query={requests}
+        query={overview}
         empty={t("identityProofing.overview.finished.empty")}
-        rows={finished.slice(0, TODO_ROWS).map((request) => (
+        rows={finished.map((request) => (
           <TaskRow
             key={request.id}
             title={<PersonName slug={slug} request={request} />}

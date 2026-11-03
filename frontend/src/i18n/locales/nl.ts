@@ -11,6 +11,10 @@ type Translation<T> = {
 
 export const nl: Translation<typeof en> = {
   common: {
+    pages: "Pagina's",
+    pageRange: "{{from}}–{{to}} van {{total}}",
+    previousPage: "Vorige",
+    nextPage: "Volgende",
     cancel: "Annuleren",
     canReview: "Mag beoordelen",
     close: "Sluiten",

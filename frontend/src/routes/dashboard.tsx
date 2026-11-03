@@ -8,6 +8,7 @@ import { IdentityBanner } from "./identity-banner";
 import { VerifyPerson } from "./proofing-send";
 import { VogBanner } from "./vog-banner";
 import { accessMessage } from "../lib/access-message";
+import { blockingError } from "../lib/query-state";
 import { needsIdentityBanner } from "../lib/identity-status";
 import { needsVogBanner } from "../lib/screening-status";
 import { greetingKey } from "../lib/greeting";
@@ -30,14 +31,15 @@ export default function Dashboard(): React.JSX.Element {
   const shows = todoShows({ isAdmin, canReview, paused });
   const greeting = t(greetingKey(), { name: me ? displayName(me) : "" });
 
-  if (org.isError) {
+  const orgError = blockingError(org);
+  if (orgError !== null) {
     return (
       <>
         <TopBar title={slug} />
         <div className="p-4 sm:p-8">
           <Card className="p-6">
             <p className="text-error text-[14px]">
-              {accessMessage(org.error, t)}
+              {accessMessage(orgError, t)}
             </p>
           </Card>
         </div>
@@ -75,7 +77,7 @@ export default function Dashboard(): React.JSX.Element {
               isAdmin={isAdmin}
               canReview={shows.decisions}
             />
-            <DashboardWaiting slug={slug} canReview={canReview} />
+            <DashboardWaiting slug={slug} />
           </>
         )}
         {shows.orgDetails && (

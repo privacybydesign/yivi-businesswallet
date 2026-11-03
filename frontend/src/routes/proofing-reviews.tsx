@@ -36,6 +36,7 @@ import {
   walletReviewReason,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
+import { blockingError } from "../lib/query-state";
 import { Card, StatusText, Table, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -85,7 +86,7 @@ export default function ProofingReviews(): React.JSX.Element {
                   slug={slug}
                   requests={waitingOfTab(tab, waitingNow)}
                   pending={waiting.isPending}
-                  error={waiting.error}
+                  error={blockingError(waiting)}
                 />
               )}
             </Card>
@@ -345,12 +346,13 @@ function ClosedTable({ slug }: Readonly<{ slug: string }>): React.JSX.Element {
   const { t } = useTranslation();
   const requests = useClosedReviewsQuery(slug, { enabled: true });
   const closed = closedRequests(requests.data ?? []);
+  const error = blockingError(requests);
   // The one line the table shows instead of rows, if any.
   let state: string | undefined;
   if (requests.isPending) {
     state = t("common.loading");
-  } else if (requests.isError) {
-    state = proofingErrorMessage(requests.error, t);
+  } else if (error !== null) {
+    state = proofingErrorMessage(error, t);
   } else if (closed.length === 0) {
     state = t("identityProofing.reviews.emptyClosed");
   }

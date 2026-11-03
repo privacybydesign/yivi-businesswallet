@@ -68,6 +68,7 @@ import {
   secondsUntil,
   sessionStage,
   sessionView,
+  pollFailedForGood,
   verifyErrorMessage,
 } from "../lib/identity-proofing";
 import type {
@@ -1842,7 +1843,7 @@ function YiviSession({
       />
     );
   }
-  if (disclosure.isError) {
+  if (pollFailedForGood(disclosure.error)) {
     return (
       <Failed
         message={verifyErrorMessage(target, disclosure.error, t)}

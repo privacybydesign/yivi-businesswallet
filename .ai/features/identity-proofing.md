@@ -21,7 +21,9 @@ listed), the **Webhook endpoint** and its **Recent deliveries**). The **All peop
 same table narrowed to that flow by the backend (`?flowId=`), as is All people
 when its Flow filter picks one, whose retention line then states that flow's
 retention. A count read from a list of 200, the cap, may be short, so it shows
-as "200+" ("12+" for a part of it). "Verify a person" in the
+as "200+" ("12+" for a part of it). The table draws 50 rows a page (`lib/paging.ts`,
+`ui/pager.tsx`): drawing all 200 made it take seconds to open. It opens on the page
+holding `?session=`; a filter goes back to the first page. "Verify a person" in the
 header of the Overview, of All people and of a flow opens the send form, for any member. From a
 flow the dialog sends on that flow; from the Overview or All people it asks first what to send
 (for an admin: an identity check, See my data or Delete my data, §15) and, for an identity
@@ -1483,7 +1485,7 @@ that ended (`approved`, `rejected`, `expired`; a withdrawn one is no news). A me
 reads the same lists about the checks they sent, as `GET .../requests` already
 scopes them. A member who cannot decide sees their own checks held for review under
 **Waiting for the person** as "Waiting for an admin", first, so the five rows never
-cut them off. The lists wait for the org's `canReview` before they load. The dashboard's **To do** holds
+cut them off. The dashboard's **To do** holds
 a row for what waits for the reader's decision and, for an admin, for the members
 who have not identified and those whose VOG needs attention
 (`lib/member-insights.ts`); **Waiting on others** holds the unfinished checks and,
@@ -1491,17 +1493,17 @@ for a member who cannot decide, the ones held for an admin. A row appears only
 with a count above zero. The line pointing to Settings › Organisation is an admin's,
 as only an admin opens that page.
 
-Each list is its own read, `GET .../requests?subjectKind=external&status=<s>`, one
-per status (`useExternalRequestsInQuery`, `todoStatuses`): `?status=` matches the
-status a request reads in (`EffectiveStatus`, in SQL `effectiveStatusColumn`), so a
-link that lapsed unstarted is `expired`, not `pending`, and cannot use up the 200 cap
-of the running ones. A count from a read that hit the cap shows as at least
-that many, "200+" (`listedCount` and `requestListCapped` in
-`lib/identity-proofing.ts`, `cappedAmong`). While a platform admin has paused the org's
+**Waiting** and **Finished** on both pages are one read, `GET .../overview`
+(`overview.go`, `useProofingOverviewQuery`), sent alongside the org's read rather than
+after it: the backend scopes it (an admin's whole org, a member's own; `held` only for a
+reader who cannot decide, `MayReview`) and returns exact counts and each list's first 5
+rows (`overviewRows`), matched on the status a request reads in (`EffectiveStatus`, in
+SQL `effectiveStatusColumn`), so a link that lapsed unstarted is `expired`, not
+`pending`. It is re-read every 10 s while a check runs. **Waiting for your decision**
+reads `useWaitingReviewsQuery`, which the sidebar already holds.
+While a platform admin has paused the org's
 proofing, only **Verify a person** is hidden on both pages (`todoShows`): every list
-route stays open, and the Overview puts why above the lists. The pure parts
-(`lib/proofing-todo.ts`) are tested; the counts come from the same lists as the
-Overview.
+route stays open, and the Overview puts why above the lists.
 
 ## 10. Data minimisation
 

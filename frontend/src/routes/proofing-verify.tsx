@@ -35,6 +35,7 @@ import {
   idemAppAvailable,
   acceptsPersonalData,
 } from "../lib/identity-proofing";
+import { blockingError } from "../lib/query-state";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
 import {
@@ -116,15 +117,16 @@ export default function ProofingVerify(): React.JSX.Element {
         }
       : found;
 
+  const error = blockingError(settings, flows, org);
   let body: React.JSX.Element;
-  if (settings.isPending || flows.isPending || org.isPending) {
+  if (error !== null) {
+    body = <p className={ERROR}>{proofingErrorMessage(error, t)}</p>;
+  } else if (
+    settings.data === undefined ||
+    flows.data === undefined ||
+    org.data === undefined
+  ) {
     body = <p className={HINT}>{t("common.loading")}</p>;
-  } else if (settings.isError || flows.isError || org.isError) {
-    body = (
-      <p className={ERROR}>
-        {proofingErrorMessage(settings.error ?? flows.error ?? org.error, t)}
-      </p>
-    );
   } else if (flow === undefined) {
     body = (
       <p className={ERROR}>{t("identityProofing.onScreen.missingFlow")}</p>

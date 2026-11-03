@@ -1,6 +1,10 @@
 export const en = {
   common: {
     cancel: "Cancel",
+    pages: "Pages",
+    pageRange: "{{from}}–{{to}} of {{total}}",
+    previousPage: "Previous",
+    nextPage: "Next",
     canReview: "Can review",
     close: "Close",
     comingSoon: "Coming soon",

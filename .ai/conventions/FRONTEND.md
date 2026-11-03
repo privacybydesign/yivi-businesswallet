@@ -40,7 +40,7 @@ Load when editing `frontend/`. General rules (magic values, formatter, scoped ch
 - **Resource clients**: one file per resource (`src/api/health.ts`), exporting plain async functions calling `request()`.
 - **Query hooks**: co-located `<resource>.queries.ts`, exporting `<resource>QueryKey` + `use<Resource>Query()`.
 - **Validate, don't cast**: zod schema per response, passed to `request({ schema })`; type via `z.infer`. Never cast `res.json()`.
-- **Errors**: `request()` throws `ApiError` (non-2xx; carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Surface via the query's `isError`/`error`, don't swallow.
+- **Errors**: `request()` throws `ApiError` (non-2xx; carries `status`/`body`/`url`) or `ApiValidationError` (schema mismatch). Surface via the query's `isError`/`error`, don't swallow. Show a read's error only while it has no data (`blockingError` in `lib/query-state.ts`): with `retry: false` and refetch on window focus, checking `isError` first replaces loaded rows, a running session or an unsaved form with the error on one failed background refetch. A poll stops on an error only when `pollFailedForGood` (a 4xx or an unreadable answer), not on a network error or 5xx.
 - **Retries**: idempotent GETs only (network + 5xx, capped backoff), in the transport — so `QueryClient` sets `retry: false`.
 - **Auth**: `getAuthHeaders()` in `http.ts` is a no-op stub; Yivi auth + central 401 handling plug in there without touching callers.
 
