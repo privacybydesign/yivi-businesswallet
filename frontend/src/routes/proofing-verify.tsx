@@ -27,7 +27,10 @@ import {
   methodChoices,
   proofingErrorMessage,
   sendKindFlows,
+  stageIndex,
+  STEP_DOCUMENT_PHOTO,
   verifyStages,
+  firstMethod,
   yiviAppAvailable,
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper, TopBar } from "../ui";
@@ -35,7 +38,6 @@ import { BrandMark } from "./proofing-ui";
 import {
   CheckEnded,
   DOCUMENT_SCAN_WIDE_PAGE,
-  MethodChoice,
   Overview,
   Session,
 } from "./proofing-verify-steps";
@@ -44,7 +46,7 @@ import type { VerifyOrg } from "./proofing-verify-steps";
 const HINT = "text-ink-soft text-[13px]";
 const ERROR = "text-error text-[12.5px]";
 
-type Step = "overview" | "method" | "session";
+type Step = "overview" | "session";
 
 // What the send form hands over: the subject as the sender typed it. Kept out
 // of the URL, and taken out of the history entry once read (the browser keeps
@@ -165,17 +167,20 @@ function VerifyFlow({
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
   const [method, setMethod] = useState<ProofingMethod>("idem_app");
-  // A flow the Yivi app cannot run leaves the Idem app only, still tapped on
-  // the app step as on a hosted link.
   const methods = methodChoices(yiviAppAvailable(flow));
-  // A flow the browser runs alone has no app step: Continue starts it.
-  const app = !flow.browserOnly;
+  const browserOnly = flow.browserOnly ?? false;
+  // Only a choice of apps is a step: one app starts at once, none is the
+  // browser alone.
   const stages = verifyStages({
-    app,
+    app: !browserOnly && methods.length > 1,
+    document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
     address: flow.addressMode === "required",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
   });
+  const [sessionStage, setSessionStage] = useState<
+    "document" | "method" | "session" | "done"
+  >("session");
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
@@ -205,7 +210,7 @@ function VerifyFlow({
   function restart(): void {
     setSent(undefined);
     create.reset();
-    setStep(app ? "method" : "overview");
+    setStep("overview");
   }
 
   return (
@@ -216,8 +221,14 @@ function VerifyFlow({
       </div>
       <Stepper
         steps={stages.map((s) => t(`identityProofing.onScreen.steps.${s}`))}
-        current={stages.indexOf(
-          currentStage({ step, inAddress, inDiplomas, inEmployment }),
+        current={stageIndex(
+          stages,
+          currentStage({
+            step: step === "session" ? sessionStage : step,
+            inAddress,
+            inDiplomas,
+            inEmployment,
+          }),
         )}
       />
       {step === "overview" && (
@@ -227,19 +238,19 @@ function VerifyFlow({
             ...flow,
             retentionDays: flow.retentionDays ?? settings.dataRetentionDays,
           }}
+          onlyApp={
+            !browserOnly && methods.length === 1 ? methods[0] : undefined
+          }
+          // Continue starts the session; with a choice of apps, the app is
+          // chosen in it.
           onContinue={() => {
-            if (app) {
-              setStep("method");
-              return;
-            }
-            setMethod("browser");
-            start("browser");
+            const first = firstMethod(browserOnly, methods);
+            setMethod(first);
+            start(first);
           }}
           starting={create.isPending}
           error={
-            !app && create.isError
-              ? proofingErrorMessage(create.error, t)
-              : undefined
+            create.isError ? proofingErrorMessage(create.error, t) : undefined
           }
           cancel={
             <Link
@@ -252,21 +263,6 @@ function VerifyFlow({
           }
         />
       )}
-      {step === "method" && (
-        <MethodChoice
-          methods={methods}
-          picked={method}
-          onChoose={(picked) => {
-            setMethod(picked);
-            start(picked);
-          }}
-          onBack={() => setStep("overview")}
-          starting={create.isPending}
-          error={
-            create.isError ? proofingErrorMessage(create.error, t) : undefined
-          }
-        />
-      )}
       {step === "session" && sent && (
         <Session
           target={{ kind: "request", slug, requestId: sent.id }}
@@ -274,6 +270,8 @@ function VerifyFlow({
           deepLink={sent.deepLink}
           deepLinkExpiresAt={sent.deepLinkExpiresAt}
           method={method}
+          methods={methods}
+          onStage={setSessionStage}
           diplomaMode={sent.diplomaMode}
           diplomas={sent.diplomas}
           onDiplomaStep={setInDiplomas}

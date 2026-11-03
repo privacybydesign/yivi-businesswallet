@@ -2399,10 +2399,21 @@ step runs with the Idem app or the Yivi app alike.
 - **A page, never a mail**: the scan runs from the on-screen page or the
   hosted page, so a flow with the step cannot be mailed or sent as a bare
   deep link (`document_scan_needs_page`, 422); `sendableByMail` checks it.
-- **Order**: the page shows the scan step (`DocumentScanStep` in
-  `routes/proofing-verify-steps.tsx`) while the progress says
-  `documentScan: "pending"` (absent when the flow takes no photo), before the
-  app's QR or the Yivi disclosure. The app's part shows once it is `done`.
+- **Order**: the app's part first, then the scan. The page shows the app
+  choice, then the Idem QR or the Yivi disclosure, and the scan step
+  (`DocumentScanStep` in `routes/proofing-verify-steps.tsx`) once the app did
+  its part, while the progress says `documentScan: "pending"` (absent when
+  the flow takes no photo).
+  - Idem: the app's submit before the scan answers 200, still active
+    (`handleSubmitSession`), and the status says `AppDone`
+    (`documentPhotoMissing`), which the progress reads live as `appDone`
+    (`withAppDone`) only in that stretch. The scan then decides the session
+    (`finishAfterBrowserStep`, as the engine itself: `appCaller.system`).
+  - Yivi: a disclosure before the scan is held back (the engine's
+    `document_photo_missing`); the poll answers `waitsForDocumentScan` and the
+    page shows the scan. Finishing the scan fetches the verifier's result
+    again and decides the session (`finishDocumentScan`).
+  - With no app the scan shows at once and decides the session.
 - **No app**: the engine says where each step runs (`flow.Location`: the
   photo in the browser, the face step where `selfieLocation` says, the scan
   and chip read in the app) and marks a flow with no app step

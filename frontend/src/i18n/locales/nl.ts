@@ -832,6 +832,7 @@ export const nl: Translation<typeof en> = {
         "Je identiteitscontrole is klaar. Iemand beoordeelt hem nadat je hier klaar bent.",
       steps: {
         overview: "Wat er wordt verzameld",
+        document: "Je ID fotograferen",
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
@@ -870,6 +871,7 @@ export const nl: Translation<typeof en> = {
       },
       method: {
         heading: "Hoe wil je je verifiëren?",
+        only: "Je verifieert met de {{app}}: deze controle werkt met geen andere app. Zorg dat die op je telefoon staat.",
         yivi: {
           title: "Yivi-app",
           detail:

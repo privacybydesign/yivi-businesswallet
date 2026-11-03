@@ -133,3 +133,104 @@ func TestAttributeReasonsRoundTrip(t *testing.T) {
 		t.Errorf("a version stored without reasons reads back %v, want none", got)
 	}
 }
+
+// A session created pending has no app link until its app is chosen; the
+// choice is made once, and only for an app the flow fits.
+func TestChooseMethod(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	chip := flow.FlowDefinition{ID: "flow", Version: 1, Name: "Chip", Steps: []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}}
+	pending := func(id string) session.Session {
+		return session.Session{
+			ID: id, TenantID: "org", Token: "tok-" + id, Status: session.StatusCreated,
+			Method: session.MethodPending, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+		}
+	}
+	statusOf := func(err error) int {
+		var refused *pp.RejectedError
+		if !errors.As(err, &refused) {
+			return 0
+		}
+		return refused.Status
+	}
+
+	t.Run("created pending", func(t *testing.T) {
+		store := newMemSessions()
+		s := New(DefaultConfig(), store, singleFlow{fd: chip}, nil, nil)
+		created, err := s.CreateSession(ctx, tenant, pp.SessionInput{FlowID: "flow", Method: pp.MethodPending})
+		if err != nil || created.Claim != nil {
+			t.Fatalf("CreateSession(pending) = %+v, %v; want no claim", created, err)
+		}
+		if stored, _ := store.Get("org", created.ID); stored.Method != session.MethodPending {
+			t.Errorf("stored method = %q, want %q", stored.Method, session.MethodPending)
+		}
+	})
+
+	t.Run("idem gives a claim once", func(t *testing.T) {
+		sess := pending("ps_idem")
+		store := newMemSessions(sess)
+		s := New(DefaultConfig(), store, singleFlow{fd: chip}, nil, nil)
+		chosen, err := s.ChooseMethod(ctx, tenant, sess.ID, sess.Token, pp.MethodIdem)
+		if err != nil || chosen.Claim == nil || chosen.Claim.DeepLink == "" {
+			t.Fatalf("ChooseMethod(idem) = %+v, %v; want a claim", chosen, err)
+		}
+		if stored, _ := store.Get("org", sess.ID); stored.Method != session.MethodNFCPassport {
+			t.Errorf("stored method = %q, want %q", stored.Method, session.MethodNFCPassport)
+		}
+		for _, m := range []pp.Method{pp.MethodIdem, pp.MethodYivi} {
+			if _, err := s.ChooseMethod(ctx, tenant, sess.ID, sess.Token, m); statusOf(err) != http.StatusConflict {
+				t.Errorf("ChooseMethod(%s) again = %v, want 409", m, err)
+			}
+		}
+	})
+
+	t.Run("yivi sets the method without a claim", func(t *testing.T) {
+		sess := pending("ps_yivi")
+		store := newMemSessions(sess)
+		s := New(DefaultConfig(), store, singleFlow{fd: chip}, nil, nil)
+		chosen, err := s.ChooseMethod(ctx, tenant, sess.ID, sess.Token, pp.MethodYivi)
+		if err != nil || chosen.Claim != nil {
+			t.Fatalf("ChooseMethod(yivi) = %+v, %v; want no claim", chosen, err)
+		}
+		if stored, _ := store.Get("org", sess.ID); stored.Method != session.MethodBiometricBoundLogin {
+			t.Errorf("stored method = %q, want %q", stored.Method, session.MethodBiometricBoundLogin)
+		}
+	})
+
+	t.Run("yivi refused where it does not fit", func(t *testing.T) {
+		sess := pending("ps_substantial")
+		substantial := chip
+		substantial.RequiredAssuranceLevel = flow.AssuranceLevelSubstantial
+		store := newMemSessions(sess)
+		s := New(DefaultConfig(), store, singleFlow{fd: substantial}, nil, nil)
+		if _, err := s.ChooseMethod(ctx, tenant, sess.ID, sess.Token, pp.MethodYivi); statusOf(err) != http.StatusBadRequest {
+			t.Errorf("ChooseMethod(yivi) on a substantial flow = %v, want 400", err)
+		}
+		if stored, _ := store.Get("org", sess.ID); stored.Method != session.MethodPending {
+			t.Errorf("stored method = %q, want still pending", stored.Method)
+		}
+	})
+
+	t.Run("other methods refused", func(t *testing.T) {
+		sess := pending("ps_other")
+		s := New(DefaultConfig(), newMemSessions(sess), singleFlow{fd: chip}, nil, nil)
+		for _, m := range []pp.Method{pp.MethodBrowser, pp.MethodPending, "", "carrier_pigeon"} {
+			if _, err := s.ChooseMethod(ctx, tenant, sess.ID, sess.Token, m); statusOf(err) != http.StatusBadRequest {
+				t.Errorf("ChooseMethod(%q) = %v, want 400", m, err)
+			}
+		}
+	})
+
+	t.Run("closed sessions refused", func(t *testing.T) {
+		expired, done, chosen := pending("ps_expired"), pending("ps_done"), pending("ps_chosen")
+		expired.Status, done.Status, chosen.Method = session.StatusExpired, session.StatusApproved, session.MethodNFCPassport
+		s := New(DefaultConfig(), newMemSessions(expired, done, chosen), singleFlow{fd: chip}, nil, nil)
+		for _, tc := range []struct {
+			sess session.Session
+			want int
+		}{{expired, http.StatusGone}, {done, http.StatusConflict}, {chosen, http.StatusConflict}} {
+			if _, err := s.ChooseMethod(ctx, tenant, tc.sess.ID, tc.sess.Token, pp.MethodIdem); statusOf(err) != tc.want {
+				t.Errorf("ChooseMethod on %s = %v, want %d", tc.sess.ID, err, tc.want)
+			}
+		}
+	})
+}

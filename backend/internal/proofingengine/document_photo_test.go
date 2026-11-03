@@ -115,23 +115,40 @@ func TestAppViewLeavesDocumentPhotoToBrowser(t *testing.T) {
 	}
 }
 
-// The app's submit before the browser's document photo came in is refused
-// with its own code, not decided.
-func TestSubmitWaitsForDocumentPhoto(t *testing.T) {
+// The app's part comes before the browser's document scan: its submit waits
+// (200, still active, nothing left for the app) and the status says the app
+// is done; the scan then decides the session.
+func TestAppSubmitWaitsForDocumentPhoto(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
 	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
 	sess.Steps.Document = &session.DocumentStepEvidence{}
 	sess.Steps.NFC = &session.NFCStepEvidence{}
-	s, _ := documentPhotoServer(sess, chipAndPhotoFlow)
+	s, store := documentPhotoServer(sess, chipAndPhotoFlow)
 	mux := http.NewServeMux()
 	s.Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, appRequest(http.MethodPost, "/app/"+sess.Token+"/submit", ""))
 	var body struct {
-		Code string `json:"code"`
+		Lifecycle     string `json:"lifecycle"`
+		ReadyToSubmit bool   `json:"readyToSubmit"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if rec.Code != http.StatusConflict || body.Code != pp.CodeDocumentPhotoMissing {
-		t.Errorf("submit = %d %s, want 409 %s", rec.Code, rec.Body.String(), pp.CodeDocumentPhotoMissing)
+	if rec.Code != http.StatusOK || body.Lifecycle != lifecycleActive || body.ReadyToSubmit {
+		t.Fatalf("submit = %d %s, want 200, still active", rec.Code, rec.Body.String())
+	}
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || !status.AppDone {
+		t.Fatalf("SessionStatus = %+v, %v; want the app done", status, err)
+	}
+
+	photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan()}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, photo); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	decided, _ := store.Get("org", sess.ID)
+	if !decided.Status.Terminal() && decided.Status != session.StatusNeedsReview {
+		t.Errorf("status %q after the scan, want the session decided", decided.Status)
 	}
 }
 

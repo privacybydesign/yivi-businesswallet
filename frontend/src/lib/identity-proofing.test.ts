@@ -63,7 +63,9 @@ import {
   sessionView,
   sendRequestFields,
   verifyStages,
+  stageIndex,
   methodChoices,
+  firstMethod,
   currentStage,
   progressPollContinues,
   employmentOwed,
@@ -2255,11 +2257,54 @@ describe("app step", () => {
     expect(methodChoices(true)).toEqual(["yivi_app", "idem_app"]);
   });
 
-  // Continue never starts a session (#304): a flow with one app still shows
-  // the app step, with that one app to tap.
+  // A flow with one app still shows the app step, with that one app to tap.
   it("offers the Idem app alone otherwise, still as a step of its own", () => {
     expect(methodChoices(false)).toEqual(["idem_app"]);
     expect(verifyStages({ diplomas: false })).toContain("method");
+  });
+
+  // One app has nothing to pick: the session starts in it, with no app step.
+  it("starts in the one app a flow allows, else pending or the browser", () => {
+    expect(firstMethod(false, ["yivi_app"])).toBe("yivi_app");
+    expect(firstMethod(false, ["yivi_app", "idem_app"])).toBe("pending");
+    expect(firstMethod(true, [])).toBe("browser");
+  });
+
+  it("puts the document photo after the app's part", () => {
+    expect(verifyStages({ document: true, diplomas: false })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "document",
+    ]);
+    expect(
+      verifyStages({ document: true, address: true, diplomas: true }),
+    ).toEqual([
+      "overview",
+      "method",
+      "session",
+      "document",
+      "address",
+      "diplomas",
+    ]);
+  });
+
+  it("places a done page past the last stage", () => {
+    const stages = verifyStages({ document: true, diplomas: false });
+    expect(stageIndex(stages, "method")).toBe(1);
+    expect(stageIndex(stages, "document")).toBe(3);
+    expect(stageIndex(stages, "done")).toBe(stages.length);
+  });
+
+  it("stays done once the session's outcome shows", () => {
+    expect(
+      currentStage({
+        step: "done",
+        inAddress: false,
+        inDiplomas: false,
+        inEmployment: false,
+      }),
+    ).toBe("done");
   });
 
   // A flow the browser runs alone has no app to choose.

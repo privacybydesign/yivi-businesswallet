@@ -56,6 +56,7 @@ import {
   reviewEventsUrl,
   getProofingYiviDisclosure,
   newProofingClaimLink,
+  chooseProofingMethod,
   startProofingYivi,
   startProofingDocumentScan,
   finishProofingDocumentScan,
@@ -81,6 +82,8 @@ import type {
   ProofingWebhook,
   WebhookDelivery,
   ProofingClaimLink,
+  ProofingChosenMethod,
+  ProofingAppMethod,
   ProofingApp,
   ProofingYiviDisclosure,
   ProofingYiviStart,
@@ -1044,6 +1047,15 @@ export function useProofingAppQuery(
   });
 }
 
+export function useChooseMethodMutation(
+  target: VerifyTarget,
+): UseMutationResult<ProofingChosenMethod, Error, ProofingAppMethod> {
+  return useMutation({
+    mutationFn: (method) => chooseProofingMethod(target, method),
+    meta: { suppressErrorToast: true },
+  });
+}
+
 export function useNewClaimLinkMutation(
   target: VerifyTarget,
 ): UseMutationResult<ProofingClaimLink, Error, void> {
@@ -1064,7 +1076,9 @@ export function useYiviDisclosureQuery(
     queryFn: ({ signal }) => getProofingYiviDisclosure(target, signal),
     enabled,
     refetchInterval: (query) =>
-      query.state.data?.done || query.state.status === "error"
+      query.state.data?.done ||
+      query.state.data?.waitsForDocumentScan ||
+      query.state.status === "error"
         ? false
         : ON_SCREEN_POLL_INTERVAL_MS,
   });

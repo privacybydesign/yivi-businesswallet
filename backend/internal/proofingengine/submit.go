@@ -47,7 +47,10 @@ func (s *Server) handleSubmitSession(w http.ResponseWriter, r *http.Request) {
 		resp.AlreadyRecorded = true
 		writeJSON(w, http.StatusOK, resp)
 	case errors.Is(err, errDocumentPhotoMissing):
-		writeErrorCode(w, http.StatusConflict, pp.CodeDocumentPhotoMissing, err.Error())
+		// The app's part is done before the browser's document scan: the
+		// session is decided once the scan is in (finishAfterBrowserStep),
+		// and the app hears of it as of any outcome.
+		writeJSON(w, http.StatusOK, s.stepResponseFor(sess, resolvedFlow))
 	case errors.Is(err, errStepsIncomplete):
 		writeErrorCode(w, http.StatusConflict, errCodeStepsIncomplete, err.Error())
 	case accessErrorCode(err) != "":

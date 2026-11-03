@@ -166,6 +166,9 @@ func (s *Service) HostedStatus(ctx context.Context, token string) (Request, erro
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Request{}, err
 	}
+	if req, err = s.withAppDone(ctx, req); err != nil {
+		return Request{}, err
+	}
 	return s.withLegalNotice(ctx, req)
 }
 
@@ -277,7 +280,7 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		return Sent{}, s.discardSession(ctx, tenant, sess,
 			fmt.Errorf("proofing: create session request %s: IPS offered no vcmrtd link", req.ID))
 	}
-	req.Method = method
+	req.Method = storedMethod(method)
 	attached, err := s.requests.AttachSession(ctx, req, sess)
 	if err != nil {
 		return Sent{}, s.discardSession(ctx, tenant, sess, err)

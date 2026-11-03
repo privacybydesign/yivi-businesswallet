@@ -809,6 +809,7 @@ export const en = {
         "Your identity check is done. Someone will review it after you finish here.",
       steps: {
         overview: "What is collected",
+        document: "Photograph your ID",
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
@@ -846,6 +847,7 @@ export const en = {
       },
       method: {
         heading: "How do you want to verify?",
+        only: "You verify with the {{app}}: this check works with no other app. Make sure it is on your phone.",
         yivi: {
           title: "Yivi app",
           detail:

@@ -40,6 +40,7 @@ type Provider interface {
 	SubmitDocumentPhoto(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, photo proofingprovider.DocumentPhoto) error
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
+	ChooseMethod(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, method proofingprovider.Method) (proofingprovider.Session, error)
 	SessionIdentity(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Identity, error)
 	CancelSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
 	DeleteSession(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) error
@@ -78,6 +79,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
+	SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
@@ -786,7 +788,7 @@ func (s *Service) CreateRequest(ctx context.Context, org Org, by Requester, in N
 	}
 	req, err := s.requests.Create(ctx, NewStoredRequest{
 		ID: id, OrgID: org.ID, RequestedBy: by.userID(), APIKeyID: by.APIKeyID, Subject: subject,
-		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: plan.method, Channel: in.Channel,
+		Flow: flow, LinkExpiresAt: sess.ExpiresAt, Method: storedMethod(plan.method), Channel: in.Channel,
 		Diplomas: plan.diplomas, Address: plan.address, Employment: plan.employment, FlowKind: plan.kind,
 	})
 	if err != nil {
@@ -1003,6 +1005,8 @@ func normalizeRequest(in NewRequest) (NewRequest, error) {
 		return NewRequest{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
 	case in.Channel != ChannelEmail && in.Channel != ChannelOnScreen && in.Channel != ChannelHosted:
 		return NewRequest{}, fmt.Errorf("%w: send the request by e-mail, show it on screen or as a link", ErrInvalidInput)
+	case in.Method == proofingprovider.MethodPending && in.Channel != ChannelOnScreen:
+		return NewRequest{}, fmt.Errorf("%w: only a session on this screen starts before its app is chosen", ErrInvalidInput)
 	case in.Method == proofingprovider.MethodYivi && in.Channel == ChannelEmail:
 		return NewRequest{}, fmt.Errorf("%w: a Yivi app session runs on this screen and cannot be e-mailed", ErrInvalidInput)
 	case in.Channel == ChannelHosted && !in.external():
@@ -1928,7 +1932,26 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	if err != nil {
 		return Request{}, err
 	}
-	return s.readReconciled(ctx, req)
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	return s.withAppDone(ctx, req)
+}
+
+// withAppDone reads from the engine whether an Idem request's app did its
+// part while its document scan is still to come, which the page then shows;
+// only then, so a poll reads the engine only in that stretch.
+func (s *Service) withAppDone(ctx context.Context, req Request) (Request, error) {
+	sess := req.liveSession(s.now())
+	if req.Method != proofingprovider.MethodIdem || !req.DocumentScan || req.DocumentScannedAt != nil || sess == nil || req.Status.Settled() {
+		return req, nil
+	}
+	res, err := s.ips.SessionStatus(ctx, requestTenant(req), sess.ID, sess.Token)
+	if err != nil {
+		return Request{}, fmt.Errorf("proofing: app of request %s: %w", req.ID, err)
+	}
+	req.appDone = res.AppDone
+	return req, nil
 }
 
 // RequestIf is Request for a caller whose scope the caller decides: allow sees the

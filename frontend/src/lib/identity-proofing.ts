@@ -23,6 +23,7 @@ import type {
   ProofingFlowSpec,
   ProofingImage,
   ProofingAppMethod,
+  ProofingMethod,
   ProofingRequest,
   RegisterAddress,
   WebhookDelivery,
@@ -1153,11 +1154,12 @@ export function dataRequestRefusal(
     : DATA_REQUEST_REFUSALS[errorCode as ProofingRejectionCode];
 }
 
-// The stages a verify page's stepper shows: what is collected, the app, its
-// session, then the address, the diploma upload and the Verzekeringsbericht
-// (when the flow has those steps).
+// The stages a verify page's stepper shows: what is collected, the document
+// photo, the app, its session, then the address, the diploma upload and the
+// Verzekeringsbericht (when the flow has those steps).
 export type VerifyStage =
   | "overview"
+  | "document"
   | "method"
   | "session"
   | "address"
@@ -1166,12 +1168,15 @@ export type VerifyStage =
 
 export function verifyStages({
   app = true,
+  document = false,
   address = false,
   diplomas,
   employment = false,
 }: {
   // False for a flow the browser runs alone: there is no app to choose.
   app?: boolean;
+  // A flow that photographs the document, after the app's part.
+  document?: boolean;
   address?: boolean;
   diplomas: boolean;
   employment?: boolean;
@@ -1180,18 +1185,37 @@ export function verifyStages({
     "overview",
     ...(app ? (["method"] as const) : []),
     "session",
+    ...(document ? (["document"] as const) : []),
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
     ...(employment ? (["employment"] as const) : []),
   ];
 }
 
-// The apps a verify page's app step offers: both when the Yivi app can run
-// the flow, else the Idem app alone. Continue always leads to this step, even
-// with one app, because tapping an app is what starts the session: a person
-// (or an admin checking a link) who only reads the first step uses nothing up.
+// The apps a verify page offers: both when the Yivi app can run the flow,
+// else the Idem app alone, which the session then starts in (firstMethod).
 export function methodChoices(yiviAvailable: boolean): ProofingAppMethod[] {
   return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
+}
+
+// The method a verify page starts its session with: the browser for a flow
+// with no app, the one app a flow allows (no app step), else pending, the app
+// then picked in the session.
+export function firstMethod(
+  browserOnly: boolean,
+  methods: readonly ProofingAppMethod[],
+): ProofingMethod {
+  if (browserOnly) return "browser";
+  return methods.length === 1 ? methods[0] : "pending";
+}
+
+// Where a verify page's stepper stands: at stage, or past the last one once
+// the session's outcome shows ("done").
+export function stageIndex(
+  stages: VerifyStage[],
+  stage: VerifyStage | "done",
+): number {
+  return stage === "done" ? stages.length : stages.indexOf(stage);
 }
 
 // The stage a verify page is at: the address, diploma or employment step
@@ -1202,11 +1226,11 @@ export function currentStage({
   inDiplomas,
   inEmployment,
 }: {
-  step: "overview" | "method" | "session";
+  step: VerifyStage | "done";
   inAddress: boolean;
   inDiplomas: boolean;
   inEmployment: boolean;
-}): VerifyStage {
+}): VerifyStage | "done" {
   if (inAddress) {
     return "address";
   }

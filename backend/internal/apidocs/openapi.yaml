@@ -6122,6 +6122,12 @@ paths:
                   value:
                     done: true
                     ok: true
+                waitsForDocumentScan:
+                  summary: Done in the Yivi app; the document photo, after it, decides
+                  value:
+                    done: false
+                    ok: false
+                    waitsForDocumentScan: true
                 refused:
                   summary: The document is not one the flow accepts
                   value:
@@ -6137,13 +6143,62 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the flow photographs the document and its photo is not in yet (`document_scan_pending`).
+          description: The request does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
           description: The proofing engine refused the step (`rejected_by_provider`), e.g. the disclosure is not complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/method:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of an on-screen request's session
+      description: >-
+        Requires organisation membership, and a request created on screen with method `pending`:
+        its session started with the flow, before the app was chosen. Sets the app (`idem_app`,
+        or `yivi_app` when the flow's `yiviAvailable`) before the document photo, which follows
+        the app's part, and answers the request, with an Idem session's `deepLink` as the QR code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingCreatedRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The app is chosen already (`link_started`), or the session has ended (`session_over`).
           content:
             application/json:
               schema:
@@ -8628,7 +8683,48 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link does not run in the Yivi app (`wrong_method`), its session has ended (`session_over`), or the flow photographs the document and its photo is not in yet (`document_scan_pending`).
+          description: The link does not run in the Yivi app (`wrong_method`), or its session has ended (`session_over`). A disclosure finished before the flow's document photo answers 200 with `waitsForDocumentScan`, and is decided as the scan finishes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/method:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
+    post:
+      tags: [identity-proofing]
+      summary: Choose the app of a hosted link's session
+      security: []
+      description: >-
+        As the org route of the same name, for a hosted link started with method `pending`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingChooseMethod'
+      responses:
+        '200':
+          description: The app is set; an Idem session's `deepLink` is the QR code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingHostedStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/HostedTooManyRequests'
+        '409':
+          description: As the org route of the same name.
           content:
             application/json:
               schema:
@@ -12687,6 +12783,9 @@ components:
           type: string
           enum: [pending, done]
           description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
+        appDone:
+          type: boolean
+          description: An Idem session whose app did its part while the document photo, which comes after it, is still to come; absent otherwise.
         expectedSubject:
           type: boolean
         flowKind:
@@ -12733,11 +12832,12 @@ components:
             an identity check on `flowId`.
         method:
           type: string
-          enum: [idem_app, yivi_app, browser]
+          enum: [idem_app, yivi_app, browser, pending]
           description: >-
             Absent follows the flow: `browser` for a flow the page runs alone (`browserOnly`),
             else `idem_app`. `browser` is taken only for such a flow, and the apps only for any
-            other.
+            other. `pending`, on screen only, starts the session with the flow and leaves the app
+            to `/method`.
         channel:
           type: string
           enum: [email, on_screen, hosted]
@@ -12819,6 +12919,14 @@ components:
           type: string
           enum: [waiting, connected, away]
       required: [app]
+    ProofingChooseMethod:
+      type: object
+      additionalProperties: false
+      properties:
+        method:
+          type: string
+          enum: [idem_app, yivi_app]
+      required: [method]
     ProofingDocumentScanStartRequest:
       type: object
       properties:
@@ -12858,6 +12966,9 @@ components:
         done:
           type: boolean
           description: False while the person has not finished in the Yivi app.
+        waitsForDocumentScan:
+          type: boolean
+          description: The person finished in the Yivi app, and the document photo, which comes after it, decides the session; absent otherwise.
         ok:
           type: boolean
           description: The disclosure approved the session; false rejected it.
@@ -13402,6 +13513,9 @@ components:
           type: string
           enum: [pending, done]
           description: The document photo, taken in the browser through `document-scan/start`; absent when the flow takes none.
+        appDone:
+          type: boolean
+          description: An Idem session whose app did its part while the document photo, which comes after it, is still to come; absent otherwise.
         dataExportUntil:
           type: string
           format: date-time
@@ -13560,7 +13674,8 @@ components:
       properties:
         method:
           type: string
-          enum: [idem_app, yivi_app, browser]
+          enum: [idem_app, yivi_app, browser, pending]
+          description: '`pending` starts the session with the flow; the app is chosen after (`/method`).'
       required: [method]
     ProofingHostedStarted:
       allOf:

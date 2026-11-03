@@ -452,6 +452,9 @@ type Request struct {
 	// the page started last; empty before one. Server-side only: it reads the
 	// photos.
 	documentScanTransactionID string
+	// appDone is an Idem request whose app did its part while the document
+	// scan is still to come, read live from the engine (withAppDone).
+	appDone bool
 }
 
 type ipsSession struct {
@@ -802,7 +805,7 @@ func yiviAppAvailable(f proofingprovider.Flow) bool {
 
 // sessionMethods are the methods a request may ask for; "" leaves it to the
 // flow (sessionMethod).
-var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser}
+var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser, proofingprovider.MethodPending}
 
 // sessionMethod is how a session of f runs, given the method asked for ("" for
 // none): a flow the browser runs alone (BrowserOnly) in the browser, with no
@@ -818,6 +821,9 @@ func sessionMethod(f proofingprovider.Flow, asked proofingprovider.Method) (proo
 	switch asked {
 	case "", proofingprovider.MethodIdem:
 		return proofingprovider.MethodIdem, nil
+	case proofingprovider.MethodPending:
+		// The session starts with the flow; the app is chosen later (ChooseMethod).
+		return proofingprovider.MethodPending, nil
 	case proofingprovider.MethodYivi:
 		if !yiviAppAvailable(f) {
 			return "", fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)

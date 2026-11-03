@@ -333,6 +333,8 @@ const proofingRequestSchema = z.object({
   // Whether the flow's document photo, taken in the browser by the ID scan,
   // is still to come; absent when the flow takes none.
   documentScan: documentScanSchema,
+  // An Idem session whose app did its part: the ID scan, after it, is next.
+  appDone: z.boolean().optional(),
   // Why the wallet put the session in review after the identity was
   // approved (no_current_employment, current_benefit,
   // current_other_income); absent otherwise.
@@ -398,7 +400,8 @@ export interface ProofingFlowSelection {
 // check in the browser showing its QR, so it is on-screen only. A flow the
 // browser runs alone (browserOnly) takes no app: its method is browser.
 export type ProofingAppMethod = "idem_app" | "yivi_app";
-export type ProofingMethod = ProofingAppMethod | "browser";
+// pending starts the session with the flow; the app is chosen in it after.
+export type ProofingMethod = ProofingAppMethod | "browser" | "pending";
 export type ProofingChannel = "email" | "on_screen" | "hosted";
 
 // An external person's request names its flow, or for a data request its
@@ -1347,6 +1350,8 @@ export interface ProofingProgress {
   // Whether the document photo is still to be taken in the browser; absent
   // when the flow takes none.
   documentScan?: "pending" | "done";
+  // An Idem session whose app did its part: the ID scan, after it, is next.
+  appDone?: boolean;
 }
 
 export function startProofingYivi(
@@ -1399,10 +1404,35 @@ export function newProofingClaimLink(
   });
 }
 
+const proofingChosenMethodSchema = z.object({
+  deepLink: z.string().optional(),
+  deepLinkExpiresAt: z.string().optional(),
+});
+
+export type ProofingChosenMethod = z.infer<typeof proofingChosenMethodSchema>;
+
+// Sets the app of a session started without one; an Idem session answers
+// its deep link, the QR code.
+export function chooseProofingMethod(
+  target: VerifyTarget,
+  method: ProofingAppMethod,
+  signal?: AbortSignal,
+): Promise<ProofingChosenMethod> {
+  return request(`${verifyPath(target)}/method`, {
+    schema: proofingChosenMethodSchema,
+    method: "POST",
+    body: { method },
+    signal,
+  });
+}
+
 // done is false while the subject has not finished in the Yivi app. Once done,
 // ok true approved the session, ok false rejected it and code says why.
+// waitsForDocumentScan: finished in the Yivi app, and the ID scan, after it,
+// decides the session.
 const proofingYiviDisclosureSchema = z.object({
   done: z.boolean(),
+  waitsForDocumentScan: z.boolean().optional(),
   ok: z.boolean(),
   code: z.string().optional(),
 });
@@ -1491,6 +1521,8 @@ const hostedProgressSchema = z.object({
   // Whether the document photo is still to be taken in the browser; absent
   // when the flow takes none.
   documentScan: documentScanSchema,
+  // An Idem session whose app did its part: the ID scan, after it, is next.
+  appDone: z.boolean().optional(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.

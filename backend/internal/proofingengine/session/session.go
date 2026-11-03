@@ -23,6 +23,9 @@ const (
 	// MethodBrowser is a flow the browser runs alone (FlowDefinition.BrowserOnly):
 	// no app claims it, and its browser steps decide it.
 	MethodBrowser Method = "browser"
+	// MethodPending is a session whose app is not chosen yet: the browser
+	// takes its steps until ChooseMethod sets the app.
+	MethodPending Method = "pending"
 )
 
 // Status is a session's place in its lifecycle; what failed or was read

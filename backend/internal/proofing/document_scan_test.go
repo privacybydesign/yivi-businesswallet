@@ -289,7 +289,8 @@ func TestSessionMethod(t *testing.T) {
 }
 
 // The Yivi app runs a flow that photographs the document: the photo is taken
-// in the browser. A disclosure before it is in waits for it.
+// in the browser, after the disclosure, which waits for it and then decides
+// the session as the scan finishes.
 func TestYiviRunsDocumentPhotoFlow(t *testing.T) {
 	if !yiviAppAvailable(photoFlow) {
 		t.Fatal("yiviAppAvailable(photoFlow) = false, want the Yivi app offered")
@@ -305,6 +306,17 @@ func TestYiviRunsDocumentPhotoFlow(t *testing.T) {
 	f.ips.referenceErr = &proofingprovider.RejectedError{Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing}
 	if _, err := f.svc.YiviDisclosure(context.Background(), testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrDocumentScanPending) {
 		t.Errorf("YiviDisclosure: %v, want ErrDocumentScanPending", err)
+	}
+
+	f.ips.referenceErr = nil
+	if _, err := f.svc.StartDocumentScan(context.Background(), testOrg.ID, sent.Request.ID, nil, "en"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.FinishDocumentScan(context.Background(), testOrg.ID, sent.Request.ID, nil, "trx-1", "res-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ips.references) != 1 {
+		t.Errorf("references after the scan = %d, want the waiting disclosure handed over", len(f.ips.references))
 	}
 }
 
