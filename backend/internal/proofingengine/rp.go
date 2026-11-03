@@ -1115,6 +1115,75 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 	return s.finishAfterBrowserStep(ctx, updated, fd)
 }
 
+// FailDocumentScan rejects a session whose document scan used up the scan
+// service's own attempts: a new transaction would give the person new ones.
+func (s *Server) FailDocumentScan(ctx context.Context, t pp.Tenant, id, token string, f pp.DocumentScanFailure) error {
+	sess, err := s.session(t, id, token)
+	if err != nil {
+		return err
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return fmt.Errorf("proofingengine: fail document scan: %w", err)
+	}
+	if fd == nil || !slices.Contains(fd.Steps, flow.StepDocumentPhoto) {
+		return rejected(http.StatusConflict, "this session's flow takes no document photo")
+	}
+	code := documentScanFailureCode(f)
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
+	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
+		if err := sessionOpenForDevices(*sess); err != nil {
+			return err
+		}
+		if sess.Steps.DocumentPhoto != nil {
+			return errStepAlreadyRecorded
+		}
+		if err := settleBoundLogin(sess, session.StatusRejected, time.Now().UTC()); err != nil {
+			return err
+		}
+		sess.ErrorCode = code
+		redactStepsForStorage(sess, bsnPolicy, redaction)
+		return nil
+	})
+	switch {
+	case errors.Is(err, errStepAlreadyRecorded):
+		return rejected(http.StatusConflict, "the document photo is in already")
+	case errors.Is(err, errSessionExpired):
+		return rejected(http.StatusGone, "session expired")
+	case errors.Is(err, errSessionComplete):
+		return rejected(http.StatusConflict, "session already finished")
+	case err != nil:
+		return fmt.Errorf("proofingengine: fail document scan: %w", err)
+	}
+	details := actorDetails(updated, session.DeviceRoleWeb)
+	details[detailErrorCode] = code
+	details[detailScanTask], details[detailScanAttempts] = f.Task, f.Attempts
+	if f.Code != "" {
+		details[detailScanCode] = f.Code
+	}
+	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
+	return nil
+}
+
+// documentScanExpiredCode is the scan service's code for a document past its
+// expiry date.
+const documentScanExpiredCode = "expiration_criteria_not_met"
+
+// documentScanFailureCode is the rejection code of f: the face step's for a
+// face task, an expired document's when the scan says so, else
+// errCodeDocScanFailed.
+func documentScanFailureCode(f pp.DocumentScanFailure) string {
+	switch {
+	case f.Task == pp.DocumentScanTaskFaceLiveness:
+		return errCodeLivenessFailed
+	case f.Task == pp.DocumentScanTaskFaceMatch:
+		return errCodeFaceNoMatch
+	case f.Code == documentScanExpiredCode:
+		return errCodeDocExpired
+	}
+	return errCodeDocScanFailed
+}
+
 // documentPhotoSides are p's front and, when it has one, back.
 func documentPhotoSides(p pp.DocumentPhoto) (session.DocumentPhotoSide, *session.DocumentPhotoSide, error) {
 	front, err := documentPhotoSide("front", p.Front, p.BSNRedacted)

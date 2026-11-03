@@ -2500,6 +2500,23 @@ step runs with the Idem app or the Yivi app alike.
     images, and hands them to the engine as the step's evidence.
   - A failed scan (`document_scan_failed`, 422) or one left unfinished
     shows the step again with "Try again", which starts a new transaction.
+  - An unfinished scan is reported too: `finish` with `transactionId` and no
+    `resultId`. The backend reads the transaction's status from CM
+    (`idscan.TransactionStatus`). One that used up CM's own attempts at a task
+    (`maximum_attempts_exceeded`) rejects the session (engine
+    `FailDocumentScan`): `LIVENESS_FAILED` or `FACE_NO_MATCH` for the face
+    tasks, `DOC_EXPIRED` for `expiration_criteria_not_met`, else
+    `DOCUMENT_SCAN_FAILED`. The wallet audits it as
+    `identity_proofing.document_scan_failed` on the request (task, attempts,
+    CM's code; `RequestStore.RecordDocumentScanFailed`), and the engine's log
+    line carries them too.
+    Otherwise (the person stopped, or CM gave no reason) it is
+    `document_scan_failed` and "Try again" stays.
+  - CM's page posts nothing once its attempts ran out: it offers to go on on
+    another device. So the page's progress poll (`Request`, `HostedStatus`)
+    asks CM too while a scan runs (`withSpentDocumentScan`, one status call
+    per poll) and fails the session the same way, and the page moves to the
+    outcome on its own.
   - A hosted page framed by a customer's own page reaches the camera only
     when the customer's iframe has `allow="camera"` too.
 - **BSN**: only under the flow's BlurBSN the transaction asks CM to black
@@ -2535,9 +2552,9 @@ step runs with the Idem app or the Yivi app alike.
     when `biometrics` is not requested, so All people shows them.
   - The match is against the photographed document, not the chip, so it
     reaches no assurance level (`matchedDocumentPhoto`).
-  - Open: a scan whose liveness failed counts as a failed scan and shows "Try
-    again", which starts a new transaction (and new face attempts). CM bills
-    every face check that ran.
+  - A scan out of CM's face attempts rejects the session (see the embed), so
+    "Try again" never hands out new face attempts. CM bills every face check
+    that ran.
 - **Configuration**: `ID_SCAN_KEY_ID` and `ID_SCAN_SECRET` (an HS256 JWT per
   call, `kid` the key id), and `ID_SCAN_API_URL` (default
   `https://api.cm.com/id-scan/v1`).

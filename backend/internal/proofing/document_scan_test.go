@@ -30,6 +30,8 @@ type fakeScanner struct {
 	result    idscan.Result
 	resultErr error
 	reads     []string
+	// status is what TransactionStatus answers for every transaction.
+	status idscan.Status
 }
 
 func (s *fakeScanner) CreateTransaction(_ context.Context, locale string, opts idscan.ScanOptions) (idscan.Transaction, error) {
@@ -41,6 +43,10 @@ func (s *fakeScanner) CreateTransaction(_ context.Context, locale string, opts i
 func (s *fakeScanner) Result(_ context.Context, transactionID, resultID string) (idscan.Result, error) {
 	s.reads = append(s.reads, transactionID+"/"+resultID)
 	return s.result, s.resultErr
+}
+
+func (s *fakeScanner) TransactionStatus(_ context.Context, _ string) (idscan.Status, error) {
+	return s.status, nil
 }
 
 var scannedResult = idscan.Result{
@@ -157,6 +163,58 @@ func checkScannedPhoto(t *testing.T, photo proofingprovider.DocumentPhoto) {
 // The scan follows the flow: the BSN blacked out only when the flow's
 // "Black out the BSN" is on, and the flow's age check enforced by the scan
 // service.
+// A scan the page reports ended without a result fails the session once the
+// scan service's own attempts ran out, so a new transaction gives none back;
+// one the person left can be tried again.
+func TestUnfinishedDocumentScan(t *testing.T) {
+	failed := func(task, state string) idscan.Status {
+		return idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{Task: task, State: state, Attempts: 3}}
+	}
+	for name, tc := range map[string]unfinishedScanCase{
+		"face liveness out of attempts": {failed(idscan.TaskFaceLiveness, idscan.StateMaximumAttemptsExceeded), true},
+		"face match out of attempts":    {failed(idscan.TaskFaceMatch, idscan.StateMaximumAttemptsExceeded), true},
+		"document out of attempts":      {failed(idscan.TaskDocumentScan, idscan.StateMaximumAttemptsExceeded), true},
+		"stopped by the person":         {failed(idscan.TaskFaceLiveness, idscan.StateAborted), false},
+		"failed without a reason":       {idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{}}, false},
+		"still running":                 {idscan.Status{State: idscan.StatePending}, false},
+	} {
+		t.Run(name, func(t *testing.T) { checkUnfinishedScan(t, tc) })
+	}
+}
+
+type unfinishedScanCase struct {
+	status idscan.Status
+	failed bool
+}
+
+// checkUnfinishedScan reports a scan ended without a result whose transaction
+// stands at tc's status, and checks whether it failed the session.
+func checkUnfinishedScan(t *testing.T, tc unfinishedScanCase) {
+	t.Helper()
+	f, scanner := newScanFixture(t)
+	ctx := context.Background()
+	id := f.sendOnScreen(t, photoFlow.ID, proofingprovider.MethodIdem).Request.ID
+	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "nl"); err != nil {
+		t.Fatalf("StartDocumentScan: %v", err)
+	}
+	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-other", ""); !errors.Is(err, ErrDocumentScanMismatch) {
+		t.Errorf("another transaction: %v, want ErrDocumentScanMismatch", err)
+	}
+	scanner.status = tc.status
+	err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "")
+	switch {
+	case !tc.failed:
+		if !errors.Is(err, ErrDocumentScanFailed) || len(f.ips.scanFailures) != 0 || len(f.requests.scanFailures) != 0 {
+			t.Errorf("FinishDocumentScan = %v, failures %+v, audited %+v; want ErrDocumentScanFailed and no failure",
+				err, f.ips.scanFailures, f.requests.scanFailures)
+		}
+	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.status.Failure.Task:
+		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.status.Failure.Task)
+	case len(f.requests.scanFailures) != 1 || f.requests.scanFailures[0] != f.ips.scanFailures[0]:
+		t.Errorf("audited %+v, want the failure %+v", f.requests.scanFailures, f.ips.scanFailures[0])
+	}
+}
+
 func TestDocumentScanFollowsTheFlow(t *testing.T) {
 	for name, tc := range map[string]struct {
 		flow func(*proofingprovider.Flow)
@@ -371,5 +429,49 @@ func TestHostedStartFollowsTheSentDocumentScan(t *testing.T) {
 				t.Error("StartHosted ran a flow whose document photo the page cannot take")
 			}
 		})
+	}
+}
+
+// The on-screen page polls through RequestIf: it hears there that the Idem
+// app did its part, so it starts the document scan.
+func TestPagePollSeesAppDone(t *testing.T) {
+	f, _ := newScanFixture(t)
+	ctx := context.Background()
+	id := f.sendOnScreen(t, photoFlow.ID, proofingprovider.MethodIdem).Request.ID
+	allow := func(Request) bool { return true }
+	if req, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || req.appDone {
+		t.Fatalf("poll before the app's part: appDone %v, %v", req.appDone, err)
+	}
+	f.ips.result.AppDone = true
+	if req, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || !req.appDone {
+		t.Errorf("poll after the app's part: appDone %v, %v; want the app done", req.appDone, err)
+	}
+}
+
+// CM's page posts nothing once its attempts ran out: the page's poll
+// (RequestIf) finds it and fails the session, with no finish call. A scan still running is left.
+func TestPollFailsSpentDocumentScan(t *testing.T) {
+	f, scanner := newScanFixture(t)
+	ctx := context.Background()
+	id := f.sendOnScreen(t, photoFlow.ID, proofingprovider.MethodIdem).Request.ID
+	allow := func(Request) bool { return true }
+	if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
+		t.Fatalf("poll before the scan: %v, failures %+v", err, f.ips.scanFailures)
+	}
+	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "nl"); err != nil {
+		t.Fatalf("StartDocumentScan: %v", err)
+	}
+	scanner.status = idscan.Status{State: idscan.StatePending}
+	if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
+		t.Fatalf("poll while scanning: %v, failures %+v", err, f.ips.scanFailures)
+	}
+	scanner.status = idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{
+		Task: idscan.TaskFaceMatch, State: idscan.StateMaximumAttemptsExceeded, Attempts: 3,
+	}}
+	if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 1 {
+		t.Fatalf("poll after the attempts ran out: %v, failures %+v; want the session failed", err, f.ips.scanFailures)
+	}
+	if f.ips.scanFailures[0].Task != idscan.TaskFaceMatch {
+		t.Errorf("failed at %q, want %q", f.ips.scanFailures[0].Task, idscan.TaskFaceMatch)
 	}
 }

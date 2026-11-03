@@ -1250,6 +1250,7 @@ const REJECTION_REASON_KEYS = {
   DOC_EXPIRED: "docExpired",
   DOC_NOT_AUTHENTIC: "docNotAuthentic",
   DOC_FIELDS_INVALID: "docFieldsInvalid",
+  DOCUMENT_SCAN_FAILED: "docScanFailed",
   DOCUMENT_MISMATCH: "documentMismatch",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
@@ -1476,10 +1477,11 @@ export function sessionStage({
 
 // How CM.com's embedded ID scan page ended, as it posts its parent page
 // (DocumentScanStep): finished with a result to hand the backend, or left
-// without one (cancelled, failed).
+// without one (cancelled, failed), which the backend is told too: a scan out
+// of CM's own attempts fails the session.
 export type DocumentScanMessage =
   | { kind: "finished"; transactionId: string; resultId: string }
-  | { kind: "unfinished" };
+  | { kind: "unfinished"; transactionId: string };
 
 // The state the ID scan page posts once its tasks are done.
 const DOCUMENT_SCAN_COMPLETED = "completed";
@@ -1509,7 +1511,7 @@ export function documentScanMessage(
         transactionId: data.transactionId,
         resultId: data.resultId,
       }
-    : { kind: "unfinished" };
+    : { kind: "unfinished", transactionId: data.transactionId };
 }
 
 // Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,

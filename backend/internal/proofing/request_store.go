@@ -262,19 +262,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	if r.expectedBirthDate, err = s.openSealed(r.ID, "expected birth date", birthDateCT); err != nil {
 		return Request{}, err
 	}
-	if addressCT != nil {
-		addr, err := s.decryptAddress(r.ID, addressCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectAddress = addr
-	}
-	if employmentCT != nil {
-		emp, err := s.decryptEmployment(r.ID, employmentCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectEmployment = emp
+	if err := s.openSubjectDetails(&r, addressCT, employmentCT); err != nil {
+		return Request{}, err
 	}
 	if sessionID != nil {
 		if s.cipher == nil {
@@ -293,6 +282,26 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+// openSubjectDetails decrypts the subject's address and employment statement
+// into r, each where the request holds one.
+func (s *RequestStore) openSubjectDetails(r *Request, addressCT, employmentCT []byte) error {
+	if addressCT != nil {
+		addr, err := s.decryptAddress(r.ID, addressCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectAddress = addr
+	}
+	if employmentCT != nil {
+		emp, err := s.decryptEmployment(r.ID, employmentCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectEmployment = emp
+	}
+	return nil
 }
 
 // nameRetention is how long a request's proofed name is kept, and the flow's
@@ -1021,6 +1030,24 @@ func (s *RequestStore) SetDocumentScanTransaction(ctx context.Context, req Reque
 		return s.audit.Record(ctx, q, audit.IdentityProofingDocumentScanStarted,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(withMethod(map[string]any{"status": string(req.Status)}, req.Method))))
+	})
+}
+
+// RecordDocumentScanFailed audits the request's document scan using up the
+// scan service's own attempts at failure's task: which task, after how many
+// attempts, and the service's code. An erased request records nothing.
+func (s *RequestStore) RecordDocumentScanFailed(ctx context.Context, req Request, failure proofingprovider.DocumentScanFailure) error {
+	fields := map[string]any{"task": failure.Task, "attempts": failure.Attempts}
+	if failure.Code != "" {
+		fields["scanCode"] = failure.Code
+	}
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return err
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingDocumentScanFailed,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(withMethod(fields, req.Method))))
 	})
 }
 

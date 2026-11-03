@@ -881,6 +881,7 @@ function DocumentScanStep({
         });
       } else if (scan) {
         setUnfinished(true);
+        finishScan({ transactionId: scan.transactionId });
       }
     }
     window.addEventListener("message", onMessage);
@@ -901,10 +902,12 @@ function DocumentScanStep({
   let problem: string | undefined;
   if (scan.error) {
     problem = verifyErrorMessage(target, scan.error, t);
+  } else if (unfinished) {
+    // Attempts left: the backend answers document_scan_failed, and a new
+    // scan gives the person another go.
+    problem = t("identityProofing.onScreen.documentScan.cancelled");
   } else if (finish.isError) {
     problem = verifyErrorMessage(target, finish.error, t);
-  } else if (unfinished) {
-    problem = t("identityProofing.onScreen.documentScan.cancelled");
   }
   return (
     <div className="flex flex-col items-center gap-4 text-center">

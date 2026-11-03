@@ -38,6 +38,7 @@ type Provider interface {
 	SessionResult(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SubmitReference(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
 	SubmitDocumentPhoto(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, photo proofingprovider.DocumentPhoto) error
+	FailDocumentScan(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, f proofingprovider.DocumentScanFailure) error
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
 	ChooseMethod(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, method proofingprovider.Method) (proofingprovider.Session, error)
@@ -79,6 +80,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
+	RecordDocumentScanFailed(ctx context.Context, req Request, failure proofingprovider.DocumentScanFailure) error
 	SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
@@ -1938,7 +1940,7 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Request{}, err
 	}
-	return s.withAppDone(ctx, req)
+	return s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req))
 }
 
 // withAppDone reads from the engine whether an Idem request's app did its
@@ -1968,7 +1970,11 @@ func (s *Service) RequestIf(ctx context.Context, orgID, id uuid.UUID, allow func
 	if !allow(req) {
 		return Request{}, ErrRequestNotFound
 	}
-	return s.readReconciled(ctx, req)
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	// The on-screen page polls through here, so it reads as Request does.
+	return s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req))
 }
 
 // readReconciled re-checks a request that may have moved on in the engine, at most

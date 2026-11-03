@@ -75,19 +75,14 @@ func TestResultFace(t *testing.T) {
 }
 
 // A scan whose face checks did not all pass, failed or still running, has no
-// result yet.
+// result yet: why it failed is TransactionStatus's to say.
 func TestResultFaceNotCompleted(t *testing.T) {
-	// The states ID Scan ends a task in that did not pass.
-	const (
-		stateAborted                 = "aborted"
-		stateMaximumAttemptsExceeded = "maximum_attempts_exceeded"
-	)
 	for name, body := range map[string]string{
-		"out of attempts":    faceScan("failed", stateMaximumAttemptsExceeded, "pending"),
-		"stopped":            faceScan("failed", stateAborted, "pending"),
+		"out of attempts":    faceScan("failed", StateMaximumAttemptsExceeded, "pending"),
+		"stopped":            faceScan("failed", StateAborted, "pending"),
 		"liveness running":   faceScan("pending", "pending", "pending"),
 		"match not done":     faceScan("pending", stateCompleted, "pending"),
-		"match out of tries": faceScan("failed", stateCompleted, stateMaximumAttemptsExceeded),
+		"match out of tries": faceScan("failed", stateCompleted, StateMaximumAttemptsExceeded),
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv := resultServer(t, body, pngBytes(t))

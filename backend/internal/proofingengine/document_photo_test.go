@@ -486,3 +486,83 @@ func TestDocumentScanAnswersAgeCheck(t *testing.T) {
 		t.Errorf("no date of birth: status %q, error %q; want rejected, %s", stored.Status, stored.ErrorCode, errCodeAgeNotDisclosed)
 	}
 }
+
+// A scan that used up the scan service's attempts rejects the session, with
+// the face step's code for a face task; a session with its photo in already,
+// or decided, is not failed again.
+func TestFailDocumentScan(t *testing.T) {
+	for name, tc := range map[string]struct {
+		failure pp.DocumentScanFailure
+		code    string
+	}{
+		"liveness":         {pp.DocumentScanFailure{Task: pp.DocumentScanTaskFaceLiveness, Attempts: 3}, errCodeLivenessFailed},
+		"face match":       {pp.DocumentScanFailure{Task: pp.DocumentScanTaskFaceMatch, Attempts: 3}, errCodeFaceNoMatch},
+		"expired document": {pp.DocumentScanFailure{Task: pp.DocumentScanTaskDocument, Code: documentScanExpiredCode}, errCodeDocExpired},
+		"document":         {pp.DocumentScanFailure{Task: pp.DocumentScanTaskDocument, Code: "image_quality"}, errCodeDocScanFailed},
+	} {
+		t.Run(name, func(t *testing.T) { checkFailDocumentScan(t, tc.failure, tc.code) })
+	}
+}
+
+// checkFailDocumentScan fails a fresh session's scan with f and checks it is
+// rejected with code, once.
+func checkFailDocumentScan(t *testing.T, f pp.DocumentScanFailure, code string) {
+	t.Helper()
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := session.Session{
+		ID: "ps_scan", TenantID: "org", Token: "tok-scan", Status: session.StatusCreated,
+		Method: session.MethodNFCPassport, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	s, store := documentPhotoServer(sess, chipAndPhotoFlow)
+	if err := s.FailDocumentScan(ctx, tenant, sess.ID, sess.Token, f); err != nil {
+		t.Fatalf("FailDocumentScan = %v", err)
+	}
+	if decided, _ := store.Get("org", sess.ID); decided.Status != session.StatusRejected || decided.ErrorCode != code {
+		t.Errorf("status %s, error %q; want rejected, %q", decided.Status, decided.ErrorCode, code)
+	}
+	var refused *pp.RejectedError
+	if err := s.FailDocumentScan(ctx, tenant, sess.ID, sess.Token, f); !errors.As(err, &refused) || refused.Status != http.StatusConflict {
+		t.Errorf("FailDocumentScan again = %v, want 409", err)
+	}
+}
+
+// A session rejected for its scan drops the stored selfie, as every other
+// decision does, unless the flow keeps face photos.
+func TestFailDocumentScanRedactsSelfie(t *testing.T) {
+	for name, keep := range map[string]bool{"dropped": false, "kept": true} {
+		t.Run(name, func(t *testing.T) {
+			sess := session.Session{
+				ID: "ps_scan", TenantID: "org", Token: "tok-scan", Status: session.StatusCreated,
+				Method: session.MethodNFCPassport, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+				Steps: session.StepEvidence{Selfie: &session.SelfieStepEvidence{Image: "c2VsZmll", MimeType: "image/png"}},
+			}
+			fd := chipAndPhotoFlow
+			fd.KeepFacePhotos = &keep
+			s, store := documentPhotoServer(sess, fd)
+			failure := pp.DocumentScanFailure{Task: pp.DocumentScanTaskFaceMatch, Attempts: 3}
+			if err := s.FailDocumentScan(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, failure); err != nil {
+				t.Fatalf("FailDocumentScan = %v", err)
+			}
+			decided, _ := store.Get("org", sess.ID)
+			if got := decided.Steps.Selfie != nil && decided.Steps.Selfie.Image != ""; got != keep {
+				t.Errorf("selfie image stored = %v, want %v", got, keep)
+			}
+		})
+	}
+}
+
+// A flow that takes no document photo has no scan to fail.
+func TestFailDocumentScanWithoutPhotoStep(t *testing.T) {
+	sess := session.Session{
+		ID: "ps_chip", TenantID: "org", Token: "tok-chip", Status: session.StatusCreated,
+		Method: session.MethodNFCPassport, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	chip := chipAndPhotoFlow
+	chip.Steps = []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}
+	s, _ := documentPhotoServer(sess, chip)
+	var refused *pp.RejectedError
+	err := s.FailDocumentScan(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, pp.DocumentScanFailure{Task: pp.DocumentScanTaskDocument})
+	if !errors.As(err, &refused) || refused.Status != http.StatusConflict {
+		t.Errorf("FailDocumentScan = %v, want 409", err)
+	}
+}

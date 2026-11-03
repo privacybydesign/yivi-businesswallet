@@ -5,6 +5,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
@@ -66,6 +67,42 @@ func TestStoreDocumentScan(t *testing.T) {
 	}
 	if trx != nil {
 		t.Errorf("purged transaction = %q, want it cleared", *trx)
+	}
+}
+
+// A scan out of the scan service's attempts is audited on its request with
+// the task, attempts and code; an erased request records nothing.
+func TestStoreDocumentScanFailed(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	store := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	req := createStarted(t, store, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
+
+	failure := proofingprovider.DocumentScanFailure{Task: "document_scan", Code: "image_quality", Attempts: 3}
+	if err := store.RecordDocumentScanFailed(ctx, req, failure); err != nil {
+		t.Fatalf("RecordDocumentScanFailed: %v", err)
+	}
+	var target, metadata string
+	if err := pool.QueryRow(ctx, `SELECT target_id, metadata::text FROM audit_events WHERE action = $1`,
+		audit.IdentityProofingDocumentScanFailed).Scan(&target, &metadata); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	for _, want := range []string{`"task": "document_scan"`, `"attempts": 3`, `"scanCode": "image_quality"`} {
+		if target != req.ID.String() || !strings.Contains(metadata, want) {
+			t.Errorf("audited on %s with %s; want the request, with %s", target, metadata, want)
+		}
+	}
+
+	if err := store.Purge(ctx, req, nil); err != nil {
+		t.Fatalf("Purge: %v", err)
+	}
+	if err := store.RecordDocumentScanFailed(ctx, req, failure); err != nil {
+		t.Fatalf("RecordDocumentScanFailed after purge: %v", err)
+	}
+	if n := countAction(t, pool, audit.IdentityProofingDocumentScanFailed); n != 1 {
+		t.Errorf("document_scan_failed audits = %d, want the one before the purge", n)
 	}
 }
 

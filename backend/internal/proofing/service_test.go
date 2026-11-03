@@ -67,6 +67,8 @@ type fakeRequests struct {
 	methods  []proofingprovider.Method
 	// handovers counts the new codes recorded.
 	handovers int
+	// scanFailures are the document scans audited as out of attempts.
+	scanFailures []proofingprovider.DocumentScanFailure
 	// employmentRejections are the reasons of the statements refused.
 	employmentRejections []string
 	// actors is the audit actor label of each start and outcome recorded, ""
@@ -419,6 +421,11 @@ func (f *fakeRequests) MarkDocumentScanned(_ context.Context, _ Request, _, tran
 	return nil
 }
 
+func (f *fakeRequests) RecordDocumentScanFailed(_ context.Context, _ Request, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
+	return nil
+}
+
 func (f *fakeRequests) SetMethod(_ context.Context, _ Request, _ string, method proofingprovider.Method) error {
 	if f.stored.Method != "" {
 		return ErrSessionOver
@@ -547,6 +554,8 @@ type fakeIPS struct {
 	documentPhotos   []proofingprovider.DocumentPhoto
 	referenceErr     error
 	documentPhotoErr error
+	// scanFailures are the scans FailDocumentScan failed the session on.
+	scanFailures []proofingprovider.DocumentScanFailure
 	// chosen are the apps ChooseMethod set.
 	chosen []proofingprovider.Method
 	// handovers counts fresh claim links asked for; handoverErr fails them.
@@ -679,6 +688,11 @@ func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, 
 	}
 	f.references = append(f.references, ref)
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+func (f *fakeIPS) FailDocumentScan(_ context.Context, _ proofingprovider.Tenant, _, _ string, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
+	return nil
 }
 
 func (f *fakeIPS) SubmitDocumentPhoto(_ context.Context, _ proofingprovider.Tenant, _, _ string, photo proofingprovider.DocumentPhoto) error {

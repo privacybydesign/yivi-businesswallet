@@ -3325,14 +3325,14 @@ describe("document scan message", () => {
         scanUrl,
         frame,
       ),
-    ).toEqual({ kind: "unfinished" });
+    ).toEqual({ kind: "unfinished", transactionId: "t1" });
     expect(
       documentScanMessage(
         message({ data: { transactionId: "t1", state: "completed" } }),
         scanUrl,
         frame,
       ),
-    ).toEqual({ kind: "unfinished" });
+    ).toEqual({ kind: "unfinished", transactionId: "t1" });
   });
 
   it("ignores a message from another origin or window", () => {
