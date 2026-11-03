@@ -132,7 +132,11 @@ function HostedFlow({
     if (flow.browserOnly) return "browser";
     // A session started with the flow has no app until one is chosen in it.
     if (page.started && page.method === undefined) return "pending";
-    return page.method === "yivi_app" ? "yivi_app" : "idem_app";
+    if (page.method === "yivi_app" || page.method === "idem_app") {
+      return page.method;
+    }
+    // The app Continue will start in, so the stepper is right before it.
+    return firstMethod(flow.browserOnly, methods);
   });
   // Only a choice of apps is a step: one app starts at once.
   const stages = verifyStages({

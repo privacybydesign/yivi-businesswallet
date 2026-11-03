@@ -166,9 +166,12 @@ function VerifyFlow({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
-  const [method, setMethod] = useState<ProofingMethod>("idem_app");
   const methods = methodChoices(yiviAppAvailable(flow));
   const browserOnly = flow.browserOnly ?? false;
+  // The app Continue will start in, so the stepper is right before it.
+  const [method, setMethod] = useState<ProofingMethod>(() =>
+    firstMethod(browserOnly, methods),
+  );
   // Only a choice of apps is a step: one app starts at once, none is the
   // browser alone.
   const stages = verifyStages({
