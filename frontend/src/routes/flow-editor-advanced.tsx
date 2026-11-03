@@ -12,6 +12,8 @@ import {
   ATTRIBUTE_DOCUMENT,
   BSN_POLICIES,
   DOCUMENT_KINDS,
+  FACE_PROVIDERS,
+  FACE_PROVIDER_ID_SCAN,
   FOLLOW_ORG,
   MAX_ATTRIBUTE_REASON_CHARS,
   REQUESTED_ATTRIBUTES,
@@ -23,6 +25,7 @@ import {
   missingReasonLocales,
   lockedByLevel,
   retentionChoices,
+  scansFace,
   ttlMinutes,
   wholeDays,
 } from "../lib/identity-proofing";
@@ -175,11 +178,29 @@ function StepsSection({
         lock={levelLock("faceVerification")}
         onChange={() => update({ faceVerification: !draft.faceVerification })}
       />
-      {draft.faceVerification && !draft.documentAndChip && (
-        <p className="text-warning-fg text-[12.5px]">
-          {t("identityProofingFlows.editor.steps.faceWithoutChip")}
-        </p>
+      {draft.faceVerification && draft.documentPhoto && (
+        <OptionRow
+          id="flow-face-in-scan"
+          checked={scansFace(draft)}
+          label={t("identityProofingFlows.editor.steps.faceInScan")}
+          hint={t("identityProofingFlows.editor.steps.faceInScanHint")}
+          lock={levelLock("faceProvider")}
+          onChange={() =>
+            update({
+              faceProvider: scansFace(draft)
+                ? FACE_PROVIDERS[0]
+                : FACE_PROVIDER_ID_SCAN,
+            })
+          }
+        />
       )}
+      {draft.faceVerification &&
+        !draft.documentAndChip &&
+        !scansFace(draft) && (
+          <p className="text-warning-fg text-[12.5px]">
+            {t("identityProofingFlows.editor.steps.faceWithoutChip")}
+          </p>
+        )}
       {error === "steps" && (
         <p role="alert" className={ERROR}>
           {t("identityProofingFlows.new.errors.steps")}
@@ -664,8 +685,8 @@ function ChecksSection({
       />
       <OptionRow
         id="flow-check-liveness"
-        checked={draft.faceVerification && draft.liveness}
-        disabled={!draft.faceVerification}
+        checked={draft.faceVerification && (draft.liveness || scansFace(draft))}
+        disabled={!draft.faceVerification || scansFace(draft)}
         label={t("identityProofingFlows.checks.liveness")}
         lock={levelLock("liveness")}
         onChange={() => update({ liveness: !draft.liveness })}

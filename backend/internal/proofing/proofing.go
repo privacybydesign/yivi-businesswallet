@@ -780,12 +780,15 @@ const (
 	// faceProviderEngine names a built-in face engine, which this engine does not
 	// have: a flow cannot pick it.
 	faceProviderEngine = "engine"
+	// faceProviderIDScan checks the face in the browser, on the document scan
+	// page right after the document photo.
+	faceProviderIDScan = "idscan"
 )
 
 // faceProviders are the values the wallet sets on a flow's face provider. It
-// always names one, so a flow never depends on the engine's default; the
-// engine verifies faces with Regula only.
-var faceProviders = []string{faceProviderRegula}
+// always names one, so a flow never depends on the engine's default: Regula
+// in the Idem app, or ID Scan with the document photo.
+var faceProviders = []string{faceProviderRegula, faceProviderIDScan}
 
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
 // matches the face against the sender's reference photo (the Yivi app runs no
@@ -930,6 +933,11 @@ func takesDocumentPhoto(f proofingprovider.Flow) bool {
 	return slices.Contains(f.Steps, stepDocumentPhoto)
 }
 
+// scansFace reports whether f checks the face in the document scan.
+func scansFace(f proofingprovider.Flow) bool {
+	return f.FaceProvider == faceProviderIDScan && takesDocumentPhoto(f)
+}
+
 // redactsDocumentBSN reports whether f's document photo has its BSN covered:
 // only when the flow's "Black out the BSN" is on (BlurBSN), as the engine's
 // coversDocumentBSN. The scan service covers it on any document, Dutch or
@@ -942,7 +950,7 @@ func redactsDocumentBSN(f proofingprovider.Flow) bool {
 // vcmrtd app and the wallet's session: a face step must run in the app and
 // have the chip photo to compare against.
 func flowCompletable(f proofingprovider.Flow) bool {
-	if !hasFaceStep(f.Steps) {
+	if !hasFaceStep(f.Steps) || scansFace(f) {
 		return true
 	}
 	return f.SelfieLocation != selfieLocationBrowser && slices.Contains(f.Steps, stepNFCRead)

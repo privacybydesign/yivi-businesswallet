@@ -42,11 +42,12 @@ const (
 
 // Codes SubmitReference refuses a disclosure with: the flow restricts the
 // document type, issuing country or expiry and the disclosure does not show
-// it complies, or the flow checks the age and the disclosure does not answer
-// it.
+// it complies, the flow checks the age and the disclosure does not answer
+// it, or the face checked in the document scan did not verify the person.
 const (
 	disclosureCodeDocumentRefused = "document_not_accepted"
 	disclosureCodeAgeNotDisclosed = "age_not_disclosed"
+	disclosureCodeFaceNotVerified = "face_not_verified"
 )
 
 // disclosureInfo is the result's "disclosure": where the photo and claims came from.
@@ -139,9 +140,26 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
 	}
 
+	// A face checked in the document scan is this session's face step too: it
+	// must have verified the person, as on the other paths, and its selfie and
+	// verdicts go in the result.
+	selfie, biometrics := faceStepEvidence(sess.Steps.Selfie)
+	if biometrics != nil {
+		if failed, code := faceStepFailure(fd, appResultRequest{Biometrics: biometrics}, nil); failed {
+			details[detailReason] = disclosureCodeFaceNotVerified
+			s.boundLoginFinish(sess, session.StatusRejected, code, nil, details, docRedaction.BlurBSN)
+			return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
+		}
+	}
+
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 	addDocumentPhoto(result, sess, docRedaction)
 	addDocumentCheck(result, sess)
+	addSelfie(result, sess, selfie, redaction)
+	if biometrics != nil && attrRequested(sess, attrBiometrics) {
+		result["biometrics"] = biometrics
+	}
+	addFaceCheck(result, sess)
 
 	if sess.Status == session.StatusCreated {
 		opened := sess

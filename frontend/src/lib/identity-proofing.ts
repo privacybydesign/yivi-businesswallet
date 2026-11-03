@@ -279,11 +279,23 @@ function storedDocumentKinds(
 
 type CountryScope = "any" | "only";
 
-// What verifies the face step; a new flow starts on the first, Regula. The
-// wallet runs no face engine of its own, so there is no "engine", and the
-// proofing engine verifies faces with Regula only, so Iris is not offered.
-export const FACE_PROVIDERS = ["regula"] as const;
+// What verifies the face step; a new flow starts on the first, Regula in the
+// Idem app. ID Scan checks the face in the browser, right after the document
+// photo. The wallet runs no face engine of its own, so there is no "engine",
+// and Iris is not offered.
+export const FACE_PROVIDERS = ["regula", "idscan"] as const;
 export type FaceProvider = (typeof FACE_PROVIDERS)[number];
+export const FACE_PROVIDER_ID_SCAN: FaceProvider = "idscan";
+
+// Whether the draft checks the face in the document scan: ID Scan's liveness
+// check and match, which only run with the document photo.
+export function scansFace(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.faceVerification &&
+    draft.documentPhoto &&
+    draft.faceProvider === FACE_PROVIDER_ID_SCAN
+  );
+}
 
 // The service's steps that capture the face (proofing.faceSteps).
 const FACE_STEPS = new Set([
@@ -783,7 +795,9 @@ function applyDraftOverrides(
   requestedAttributes: readonly string[],
 ): void {
   if (draft.faceVerification) {
-    spec.faceProvider = draft.faceProvider;
+    spec.faceProvider = scansFace(draft)
+      ? FACE_PROVIDER_ID_SCAN
+      : FACE_PROVIDERS[0];
   }
   if (draft.faceVerification && draft.faceMatchThreshold !== null) {
     spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
@@ -821,7 +835,8 @@ function draftRequiredChecks(draft: ProofingFlowDraft): string[] {
   }
   if (draft.faceVerification) {
     requiredChecks.push(CHECK_FACE_MATCH);
-    if (draft.liveness) {
+    // ID Scan matches only a face its liveness check passed.
+    if (draft.liveness || scansFace(draft)) {
       requiredChecks.push(CHECK_LIVENESS);
     }
   }

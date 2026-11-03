@@ -926,6 +926,7 @@ export const nl: Translation<typeof en> = {
         documentNotAccepted: "deze flow accepteert het gedeelde document niet.",
         ageNotDisclosed:
           "het gedeelde document gaf niet aan of je oud genoeg bent.",
+        faceNotVerified: "de gezichtscontrole in de ID-scan is niet gelukt.",
       },
       ended: {
         title: "Deze controle is beëindigd",
@@ -1799,6 +1800,9 @@ export const nl: Translation<typeof en> = {
           "De voor- en achterkant van een ID-kaart of rijbewijs, of de fotopagina van een paspoort, gemaakt in de browser met de ID-scan. Getoond op het scherm of verstuurd als gehoste link, nooit per mail.",
         faceHint:
           "Een selfie, gecontroleerd op een levend persoon en vergeleken met de foto op de chip.",
+        faceInScan: "Het gezicht controleren in de ID-scan",
+        faceInScanHint:
+          "Direct na de foto van het document, in de browser: de ID-scan controleert of de persoon levend is en vergelijkt het gezicht met de foto op het document. Niet met de chipfoto, dus dit haalt geen betrouwbaarheidsniveau.",
         diplomaHint:
           "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
         employmentHint:

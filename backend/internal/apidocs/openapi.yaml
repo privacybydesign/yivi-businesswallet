@@ -5220,7 +5220,8 @@ paths:
       description: >-
         Requires an administrator role in the organisation. The flow configuration: `name`,
         `steps`, and optionally `faceProvider` (`regula`, the default for a flow with a face
-        step and the only provider; anything else is refused),
+        step, or `idscan`, which checks the face in the document scan and needs the
+        `document_photo` step; anything else is refused),
         `requestedAttributes`, `attributeReasons`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
         `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
@@ -12099,11 +12100,16 @@ components:
             `invalid_input`). A flow saved before reasons existed has none.
         selfieLocation:
           type: string
-          description: Ignored; the wallet always sets the face capture to the app.
+          description: >-
+            Ignored; the wallet sets the face capture to the app, or to the browser for
+            `faceProvider` `idscan`.
         faceProvider:
           type: string
-          enum: [regula]
-          description: What verifies the face step; absent is `regula`, the only one.
+          enum: [regula, idscan]
+          description: >-
+            What verifies the face step; absent is `regula` (in the Idem app). `idscan` checks
+            liveness and matches the face against the photographed document's portrait in the
+            browser, right after the document photo, and needs the `document_photo` step.
         acceptedDocumentTypes:
           type: array
           items:

@@ -266,8 +266,9 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	}
 	requestedAttributes, flowVersion, retention := requestedAttributesOf(fd), fd.Version, fd.RetentionOverride
 	// A face match without nfc_read has no chip photo: the customer sends a
-	// reference photo with each session, and only such a flow takes one.
-	needsReference := flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
+	// reference photo with each session, and only such a flow takes one. ID
+	// Scan matches against the photographed document's portrait instead.
+	needsReference := needsReferencePhoto(resolvedFlow)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
 	if method == session.MethodBiometricBoundLogin {
 		// The Yivi method is the disclosure, with no face check and no chip read:
@@ -496,6 +497,7 @@ type resultView struct {
 			FaceMatchScore *float64 `json:"faceMatchScore"`
 			LivenessResult string   `json:"livenessResult"`
 		} `json:"biometrics"`
+		FaceCheck  *faceCheckInfo `json:"faceCheck"`
 		Disclosure *struct {
 			Source string `json:"source"`
 		} `json:"disclosure"`
@@ -646,6 +648,8 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	}
 	if b := res.Biometrics; b != nil {
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
+	} else if f := res.FaceCheck; f != nil {
+		ev.FaceMatch, ev.Liveness = f.FaceMatchScore, f.LivenessResult
 	}
 	addDocumentCheckEvidence(ev, res.DocumentCheck)
 	out.Evidence = ev
@@ -849,6 +853,13 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	return pp.Claim{DeepLink: resp.DeepLink, ExpiresAt: expiresAt, Handover: slotClaimed}, nil
 }
 
+// needsReferencePhoto reports whether fd matches the face against a photo
+// the customer sends: a face match without nfc_read has no chip photo. ID
+// Scan matches against the photographed document's portrait instead.
+func needsReferencePhoto(fd *flow.FlowDefinition) bool {
+	return flowNeedsFaceMatch(fd) && !slices.Contains(fd.Steps, flow.StepNFCRead) && fd.FaceProvider != flow.FaceProviderIDScan
+}
+
 // CancelSession ends a session with no outcome yet; one that has an outcome
 // is refused (409), one already cancelled is left as it is.
 func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string) error {
@@ -955,6 +966,10 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 		}
 		back = &side
 	}
+	scansFace := fd.FaceProvider == flow.FaceProviderIDScan
+	if scansFace != (p.Face != nil) {
+		return rejected(http.StatusBadRequest, "the face checks come with the document photo exactly when the flow's face provider is idscan")
+	}
 
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := sessionOpenForDevices(*sess); err != nil {
@@ -964,6 +979,15 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 			return errStepAlreadyRecorded
 		}
 		now := time.Now().UTC()
+		if scansFace {
+			face, err := idScanFaceEvidence(fd, *p.Face, now)
+			if err != nil {
+				return rejected(http.StatusBadRequest, err.Error())
+			}
+			sess.Steps.Selfie = face
+			sess.FaceAttempts = face.Attempts
+			sess.Access.RecordStep(session.DeviceRoleWeb, faceStepName(fd))
+		}
 		check := documentCheckEvidence(p.Check)
 		// An age check keeps the answer, never the date of birth, as for the chip.
 		ageOver := ageOverOf(&documentInfo{DateOfBirth: check.Document.DateOfBirth}, fd, now)
@@ -998,6 +1022,12 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 			details[detailDocumentScore] = *p.Check.Score
 		}
 		s.auditStepSubmitted(updated, fd, string(flow.StepDocumentPhoto), details)
+		if scansFace {
+			face := actorDetails(updated, session.DeviceRoleWeb)
+			face["livenessPassed"] = p.Face.LivenessPassed
+			face["provider"] = faceProviderIDScan
+			s.auditStepSubmitted(updated, fd, faceStepName(fd), face)
+		}
 	}
 	return s.finishBrowserSession(ctx, updated, fd)
 }

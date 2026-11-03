@@ -1,6 +1,7 @@
 package proofingengine
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"slices"
 
@@ -121,15 +122,7 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 		result["photo"] = &photo
 	}
 
-	if req.Selfie != nil && redaction.KeepFacePhotos && attrRequested(sess, attrSelfie) {
-		selfie := *req.Selfie
-		if converted, mime, err := images.ToDisplayablePNG(selfie.ImageBase64, selfie.MimeType); err != nil {
-			slog.Warn("identity proofing: could not convert the selfie for display", slog.String("session_id", sess.ID), slog.Any("error", err))
-		} else {
-			selfie.ImageBase64, selfie.MimeType = converted, mime
-		}
-		result["selfie"] = &selfie
-	}
+	addSelfie(result, sess, req.Selfie, redaction)
 
 	// A face matched against the relying party's own photo (a flow without
 	// nfc_read) says so, and releases that photo with the selfie, so whoever
@@ -169,6 +162,7 @@ func buildResult(sess session.Session, req appResultRequest, verifiedChipChecks 
 	// verified, not personal data.
 	result["assurance"] = computeAssurance(fd, req, verifiedChipChecks, faceMatchSourceOf(sess))
 	addDocumentCheck(result, sess)
+	addFaceCheck(result, sess)
 	return result
 }
 
@@ -193,6 +187,67 @@ func addDocumentCheck(result map[string]any, sess session.Session) {
 	c := p.Check
 	result["documentCheck"] = documentCheckInfo{
 		Verdict: c.Verdict, Score: c.Score, FieldsValid: c.FieldsValid, ZonesMatch: c.ZonesMatch, DocumentKind: c.Document.Kind,
+	}
+}
+
+// faceCheckInfo is a face step's verdicts as a session's result carries them:
+// the match score, whether it matched, the liveness result and the provider,
+// never the face.
+type faceCheckInfo struct {
+	FaceMatchScore *float64 `json:"faceMatchScore,omitempty"`
+	FaceVerified   *bool    `json:"faceVerified,omitempty"`
+	LivenessResult string   `json:"livenessResult"`
+	Engine         string   `json:"engine,omitempty"`
+}
+
+// faceStepEvidence is the face step ev as a result request carries it: the
+// selfie (nil for a Regula capture without a crop: no match ran, or no face
+// was found) and the verdicts; both nil without a face step.
+func faceStepEvidence(ev *session.SelfieStepEvidence) (*photoInfo, *biometricsInfo) {
+	if ev == nil {
+		return nil, nil
+	}
+	var selfie *photoInfo
+	if ev.Image != "" {
+		if raw, mime, err := decodeImageBase64(ev.Image, firstNonEmpty(ev.MimeType, defaultImageMime)); err == nil {
+			selfie = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
+		}
+	}
+	// Liveness ran on every face submission, so a failure is "failed", not
+	// "not_performed".
+	return selfie, &biometricsInfo{
+		FaceMatchScore: ev.FaceMatchScore, FaceVerified: ev.FaceVerified,
+		LivenessResult: livenessResults[ev.LivenessPassed], LivenessScore: ev.LivenessScore,
+		Engine: selfieEngine(ev),
+	}
+}
+
+// addSelfie adds selfie to result when the flow keeps the face photos and the
+// session requested it, as a browser shows it.
+func addSelfie(result map[string]any, sess session.Session, selfie *photoInfo, redaction privacy.RedactionPolicy) {
+	if selfie == nil || !redaction.KeepFacePhotos || !attrRequested(sess, attrSelfie) {
+		return
+	}
+	released := *selfie
+	if converted, mime, err := images.ToDisplayablePNG(released.ImageBase64, released.MimeType); err != nil {
+		slog.Warn("identity proofing: could not convert the selfie for display", slog.String("session_id", sess.ID), slog.Any("error", err))
+	} else {
+		released.ImageBase64, released.MimeType = converted, mime
+	}
+	result["selfie"] = &released
+}
+
+// addFaceCheck adds sess's face step verdicts to result, released whatever
+// was requested, like documentCheck: how the face was checked, not personal
+// data.
+func addFaceCheck(result map[string]any, sess session.Session) {
+	ev := sess.Steps.Selfie
+	if ev == nil {
+		return
+	}
+	result["faceCheck"] = faceCheckInfo{
+		FaceMatchScore: ev.FaceMatchScore, FaceVerified: ev.FaceVerified,
+		LivenessResult: livenessResults[ev.LivenessPassed], Engine: selfieEngine(ev),
 	}
 }
 

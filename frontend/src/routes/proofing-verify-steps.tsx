@@ -1797,6 +1797,9 @@ function yiviEndReason(code: string | undefined, t: TFunction): string {
   if (code === "age_not_disclosed") {
     return t("identityProofing.onScreen.yiviCodes.ageNotDisclosed");
   }
+  if (code === "face_not_verified") {
+    return t("identityProofing.onScreen.yiviCodes.faceNotVerified");
+  }
   return code ?? t("identityProofing.errors.generic");
 }
 

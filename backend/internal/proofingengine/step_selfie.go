@@ -13,6 +13,7 @@ import (
 
 const (
 	faceProviderRegula             = "regula"                    // SelfieStepEvidence.Provider, biometricsInfo.Engine
+	faceProviderIDScan             = "idscan"                    // SelfieStepEvidence.Provider, biometricsInfo.Engine
 	errCodeFaceProviderUnavailable = "FACE_PROVIDER_UNAVAILABLE" // Regula unreachable or not configured
 )
 
@@ -51,6 +52,10 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		defer regulaFaceVerifier{client: s.cfg.Regula}.Release(r.Context(), sess, live)
 	}
 	provider := s.faceProviderFor(resolvedFlow)
+	if provider == flow.FaceProviderIDScan {
+		writeError(w, http.StatusConflict, "this flow checks the face in the document scan")
+		return
+	}
 	verifier, ok := s.faceVerifier(provider, resolvedFlow)
 	if !ok {
 		writeFaceProviderUnavailable(w)
