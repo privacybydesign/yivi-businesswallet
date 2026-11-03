@@ -2186,15 +2186,17 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	// Kept before the engine decides, so the page never enters an address
 	// before it is there to compare with. The request asks it as required, so
 	// a presentation without it is refused.
+	var registered *Address
 	if req.Address.asked() {
 		claims, ok := presentation.RegisteredAddress()
 		if !ok {
 			return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no registered address, which the request requires")
 		}
-		registered := registeredAddress(claims)
-		if err := s.requests.SetRegisteredAddress(ctx, req, &registered); err != nil {
+		disclosed := registeredAddress(claims)
+		if err := s.requests.SetRegisteredAddress(ctx, req, &disclosed); err != nil {
 			return proofingprovider.YiviDisclosure{}, err
 		}
+		registered = &disclosed
 	}
 	tenant := requestTenant(req)
 	attributes := maps.Clone(doc.Claims)
@@ -2211,7 +2213,12 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, yiviStepError(err)
 	}
-	s.reconcile(ctx, tenant, req)
+	req = s.reconcile(ctx, tenant, req)
+	if disclosure.OK && registered != nil {
+		if err := s.keepRegisteredAddress(ctx, req, *registered); err != nil {
+			return proofingprovider.YiviDisclosure{}, err
+		}
+	}
 	return disclosure, nil
 }
 

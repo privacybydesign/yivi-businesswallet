@@ -124,14 +124,6 @@ function HostedFlow({
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
   const methods = methodChoices(flow.yiviAvailable);
-  // Only a choice of apps is a step: one app starts at once.
-  const stages = verifyStages({
-    app: !flow.browserOnly && methods.length > 1,
-    document: page.documentScan !== undefined,
-    address: flow.addressMode === "required",
-    diplomas: flow.diplomaMode === "required",
-    employment: flow.employmentMode === "required",
-  });
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
@@ -141,6 +133,15 @@ function HostedFlow({
     // A session started with the flow has no app until one is chosen in it.
     if (page.started && page.method === undefined) return "pending";
     return page.method === "yivi_app" ? "yivi_app" : "idem_app";
+  });
+  // Only a choice of apps is a step: one app starts at once.
+  const stages = verifyStages({
+    app: !flow.browserOnly && methods.length > 1,
+    document: page.documentScan !== undefined,
+    // The Yivi app shares the registered address: the person enters none.
+    address: flow.addressMode === "required" && method !== "yivi_app",
+    diplomas: flow.diplomaMode === "required",
+    employment: flow.employmentMode === "required",
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"
@@ -314,6 +315,7 @@ function HostedFlow({
               method={method}
               methods={methods}
               onStage={setSessionStage}
+              onMethod={setMethod}
               diplomaMode={flow.diplomaMode}
               diplomas={page.diplomas}
               onDiplomaStep={setInDiplomas}

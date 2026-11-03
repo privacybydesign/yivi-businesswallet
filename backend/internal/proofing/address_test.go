@@ -301,8 +301,8 @@ func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
 		if got := f.verifier.scopes[0]; got != tc.want {
 			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
 		}
-		if kept := f.requests.registeredAddress != nil; kept != tc.mode.asked() {
-			t.Errorf("address %s: registered address kept = %v", tc.mode, kept)
+		if kept := f.requests.stored.SubjectAddress != nil; kept != tc.mode.asked() {
+			t.Errorf("address %s: registered address kept as the address = %v", tc.mode, kept)
 		}
 	}
 }
@@ -397,22 +397,27 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := discloseYiviAddress(t, AddressRequired, tc.registered)
+			f := newAddressFixture(AddressRequired)
 			if tc.lookup != nil {
 				f.svc.addressLookup = tc.lookup
 			}
-			got, err := f.svc.AddAddress(context.Background(), testOrg.ID, f.requests.stored.ID, nil, tc.address)
+			entered, err := tc.address.normalized()
 			if err != nil {
-				t.Fatalf("AddAddress: %v", err)
+				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(*got.SubjectAddress, tc.want) {
-				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
+			if entered, err = f.svc.verifyAddress(context.Background(), entered); err != nil {
+				t.Fatalf("verifyAddress: %v", err)
 			}
-			if got.Status != StatusApproved || got.ErrorCode != "" || got.AddressReview != tc.wantReview {
-				t.Errorf("status = %s %q, address review %q; want approved, %q", got.Status, got.ErrorCode, got.AddressReview, tc.wantReview)
+			got := compareRegistered(entered, registeredAddress(tc.registered))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("address = %+v, want %+v", got, tc.want)
 			}
-			if f.requests.registeredAddress != nil {
-				t.Error("registered address kept after the address was added")
+			var review AddressReview
+			if r := addressReviewOf(got); r != nil {
+				review = *r
+			}
+			if review != tc.wantReview {
+				t.Errorf("address review %q, want %q", review, tc.wantReview)
 			}
 		})
 	}
@@ -443,16 +448,35 @@ func TestSelfDeclaredAddressReviewed(t *testing.T) {
 	}
 }
 
-func TestRegisteredAddressNotReviewed(t *testing.T) {
+// The Yivi app's registered address is the person's address: the page asks
+// none, and no reviewer confirms it.
+func TestYiviRegisteredAddressKept(t *testing.T) {
 	ctx := context.Background()
 	f := discloseYiviAddress(t, AddressRequired, brpClaims)
-	registered := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: "NL"}
-	got, err := f.svc.AddAddress(ctx, testOrg.ID, f.requests.stored.ID, nil, registered)
-	if err != nil || got.AddressReview != "" {
-		t.Fatalf("AddAddress = %q, %v; want no review", got.AddressReview, err)
+	want := Address{Street: "Kerkstraat", HouseNumber: "12 A", PostalCode: "6511AB", City: "Nijmegen", Country: registerCountry, Verification: AddressRegistered}
+	got := f.requests.stored
+	if got.SubjectAddress == nil || !reflect.DeepEqual(*got.SubjectAddress, want) || got.AddressReview != "" {
+		t.Fatalf("address = %+v, review %q; want the registered one, no review", got.SubjectAddress, got.AddressReview)
+	}
+	if addressUntil(*got) != nil {
+		t.Error("the page still asks the address")
+	}
+	if _, err := f.svc.AddAddress(ctx, testOrg.ID, got.ID, nil, testAddress); !errors.Is(err, ErrAddressClosed) {
+		t.Errorf("AddAddress after = %v; want ErrAddressClosed", err)
 	}
 	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("DecideAddressReview = %v; want ErrAddressNotUnderReview", err)
+	}
+}
+
+// A card without a house number names no one address: the page asks it.
+func TestYiviRegisteredAddressWithoutNumberAsked(t *testing.T) {
+	f := discloseYiviAddress(t, AddressRequired, withClaim(openid4vpverifier.ClaimAddressHouseNumber, ""))
+	if f.requests.stored.SubjectAddress != nil {
+		t.Fatalf("address kept = %+v; want none", f.requests.stored.SubjectAddress)
+	}
+	if addressUntil(*f.requests.stored) == nil {
+		t.Error("the page does not ask the address")
 	}
 }
 

@@ -2047,8 +2047,9 @@ hosted page.
 
 For onboarding that needs where the person lives. Wallet-side only, like the
 diplomas (§12): the engine knows nothing of it. The address is what the subject
-declares, never read off a document; a Dutch one is checked against the BAG,
-and on a Yivi app request against the registered (BRP) address too.
+declares, never read off a document, and a Dutch one is checked against the
+BAG; a Yivi app request takes the registered (BRP) address from the app
+instead, and asks none.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
   `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
@@ -2093,8 +2094,15 @@ and on a Yivi app request against the registered (BRP) address too.
   - Any other address: kept as entered, `unsupported`.
   - An address kept before this has no `verification`; the page shows it as
     declared.
-- **Compared with the registered address** (BRP), Yivi app only: the Idem app
-  has no way to the BRP yet.
+- **The registered address** (BRP), Yivi app only: the Idem app has no way
+  to the BRP yet.
+  - Kept as the address (`keepRegisteredAddress`, `registered`, no review)
+    when the disclosure approves, so `addressUntil` is absent and the page
+    shows no address form; the stepper drops its address stage once the Yivi
+    app is the app. A card without a postal code and house number (the
+    number is optional) names no one address: the page asks it, as for Idem.
+  - The comparison below (`compareRegistered`) is what an entered address
+    meets while a registered one is sealed.
   - A request that asks the address starts its disclosure as
     `ScopeProofingAddress`: the identity plus `pbdf.gemeente.address` (street,
     houseNumber, zipcode, city) as a required credential set: a holder

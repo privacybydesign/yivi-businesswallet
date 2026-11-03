@@ -174,7 +174,8 @@ function VerifyFlow({
   const stages = verifyStages({
     app: !browserOnly && methods.length > 1,
     document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
-    address: flow.addressMode === "required",
+    // The Yivi app shares the registered address: the person enters none.
+    address: flow.addressMode === "required" && method !== "yivi_app",
     diplomas: flow.diplomaMode === "required",
     employment: flow.employmentMode === "required",
   });
@@ -272,6 +273,7 @@ function VerifyFlow({
           method={method}
           methods={methods}
           onStage={setSessionStage}
+          onMethod={setMethod}
           diplomaMode={sent.diplomaMode}
           diplomas={sent.diplomas}
           onDiplomaStep={setInDiplomas}

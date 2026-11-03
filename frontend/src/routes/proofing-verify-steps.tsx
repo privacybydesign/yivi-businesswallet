@@ -471,6 +471,7 @@ export function Session({
   method,
   methods = [],
   onStage,
+  onMethod,
   onRestart,
   outcomeActions,
   renderEnded,
@@ -495,6 +496,8 @@ export function Session({
   methods?: ProofingAppMethod[];
   // Told where the session stands, for the page's stepper.
   onStage?: (stage: "document" | "method" | "session" | "done") => void;
+  // Told the app picked in the session (method pending).
+  onMethod?: (method: ProofingAppMethod) => void;
   onRestart?: () => void;
   outcomeActions?: React.ReactNode;
   renderEnded: (progress: ProofingProgress) => React.ReactNode;
@@ -698,6 +701,7 @@ export function Session({
               });
               setLink(out.deepLink);
               setChosen(app);
+              onMethod?.(app);
             },
           });
         }}
