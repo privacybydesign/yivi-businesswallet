@@ -902,6 +902,7 @@ export const en = {
         documentNotAccepted: "this flow does not accept the shared document.",
         ageNotDisclosed:
           "the shared document did not say whether you are old enough.",
+        faceNotVerified: "the face check in the ID scan did not pass.",
       },
       ended: {
         title: "This check has ended",
@@ -1754,6 +1755,9 @@ export const en = {
           "The front and back of an ID card or driving licence, or the photo page of a passport, taken in the browser with the ID scan. Shown on screen or sent as a hosted link, never by mail.",
         faceHint:
           "A selfie, checked to be a live person and compared with the photo on the chip.",
+        faceInScan: "Check the face in the ID scan",
+        faceInScanHint:
+          "Right after the document photo, in the browser: the ID scan checks the person is live and compares their face with the photo on the document. Not the chip photo, so it reaches no assurance level.",
         diplomaHint:
           "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
         employmentHint:

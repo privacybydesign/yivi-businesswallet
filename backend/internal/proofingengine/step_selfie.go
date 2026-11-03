@@ -13,6 +13,7 @@ import (
 
 const (
 	faceProviderRegula             = "regula"                    // SelfieStepEvidence.Provider, biometricsInfo.Engine
+	faceProviderIDScan             = "idscan"                    // SelfieStepEvidence.Provider, biometricsInfo.Engine
 	errCodeFaceProviderUnavailable = "FACE_PROVIDER_UNAVAILABLE" // Regula unreachable or not configured
 )
 
@@ -51,20 +52,20 @@ func (s *Server) handleSubmitSelfieStep(w http.ResponseWriter, r *http.Request) 
 		defer regulaFaceVerifier{client: s.cfg.Regula}.Release(r.Context(), sess, live)
 	}
 	provider := s.faceProviderFor(resolvedFlow)
+	if provider == flow.FaceProviderIDScan {
+		writeError(w, http.StatusConflict, "this flow checks the face in the document scan")
+		return
+	}
 	verifier, ok := s.faceVerifier(provider, resolvedFlow)
 	if !ok {
 		writeFaceProviderUnavailable(w)
 		return
 	}
 
-	var ref *faceReference
-	if flowNeedsFaceMatch(resolvedFlow) {
-		refImage, refMime, ok := s.faceMatchReference(sess)
-		if !ok {
-			writeError(w, http.StatusConflict, "the reference photo for face_match is not available yet")
-			return
-		}
-		ref = &faceReference{ImageBase64: refImage, MimeType: refMime}
+	ref, ok := s.selfieReference(sess, resolvedFlow)
+	if !ok {
+		writeError(w, http.StatusConflict, "the reference photo for face_match is not available yet")
+		return
 	}
 
 	stage := faceStepName(resolvedFlow)
@@ -202,6 +203,19 @@ const (
 )
 
 var livenessResults = map[bool]string{true: livenessPassed, false: livenessFailed}
+
+// selfieReference is the face step's reference when fd matches the face, nil
+// when it does not; ok is false while the reference has not landed.
+func (s *Server) selfieReference(sess session.Session, fd *flow.FlowDefinition) (*faceReference, bool) {
+	if !flowNeedsFaceMatch(fd) {
+		return nil, true
+	}
+	refImage, refMime, ok := s.faceMatchReference(sess)
+	if !ok {
+		return nil, false
+	}
+	return &faceReference{ImageBase64: refImage, MimeType: refMime}, true
+}
 
 // faceMatchReference is what the face is matched against: the customer's
 // reference photo (a flow without nfc_read), or the chip's DG2 portrait. ok is

@@ -2,7 +2,6 @@ package proofingengine
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -89,22 +88,7 @@ func (s *Server) finishSession(ctx context.Context, sess session.Session, fd *fl
 		req.Document = scannedDocumentInfo(p.Check.Document, s.cfg.Now())
 		req.AgeOver = p.AgeOver
 	}
-	if sess.Steps.Selfie != nil {
-		// A Regula selfie without a crop (no match ran, or no face found) has no
-		// image.
-		if sess.Steps.Selfie.Image != "" {
-			if raw, mime, err := decodeImageBase64(sess.Steps.Selfie.Image, firstNonEmpty(sess.Steps.Selfie.MimeType, defaultImageMime)); err == nil {
-				req.Selfie = &photoInfo{ImageBase64: base64.StdEncoding.EncodeToString(raw), MimeType: mime}
-			}
-		}
-		// Liveness ran on every face submission, so a failure is "failed", not
-		// "not_performed".
-		req.Biometrics = &biometricsInfo{
-			FaceMatchScore: sess.Steps.Selfie.FaceMatchScore, FaceVerified: sess.Steps.Selfie.FaceVerified,
-			LivenessResult: livenessResults[sess.Steps.Selfie.LivenessPassed], LivenessScore: sess.Steps.Selfie.LivenessScore,
-			Engine: selfieEngine(sess.Steps.Selfie),
-		}
-	}
+	req.Selfie, req.Biometrics = faceStepEvidence(sess.Steps.Selfie)
 	if sess.Steps.NFC != nil {
 		nfcReq, err := decodeNFCStepRequest(sess.Steps.NFC.Raw)
 		if err != nil {

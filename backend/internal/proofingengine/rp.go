@@ -266,8 +266,9 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	}
 	requestedAttributes, flowVersion, retention := requestedAttributesOf(fd), fd.Version, fd.RetentionOverride
 	// A face match without nfc_read has no chip photo: the customer sends a
-	// reference photo with each session, and only such a flow takes one.
-	needsReference := flowNeedsFaceMatch(resolvedFlow) && !slices.Contains(resolvedFlow.Steps, flow.StepNFCRead)
+	// reference photo with each session, and only such a flow takes one. ID
+	// Scan matches against the photographed document's portrait instead.
+	needsReference := needsReferencePhoto(resolvedFlow)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
 	if method == session.MethodBiometricBoundLogin {
 		// The Yivi method is the disclosure, with no face check and no chip read:
@@ -496,6 +497,7 @@ type resultView struct {
 			FaceMatchScore *float64 `json:"faceMatchScore"`
 			LivenessResult string   `json:"livenessResult"`
 		} `json:"biometrics"`
+		FaceCheck  *faceCheckInfo `json:"faceCheck"`
 		Disclosure *struct {
 			Source string `json:"source"`
 		} `json:"disclosure"`
@@ -616,15 +618,9 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	if res == nil {
 		return out, nil
 	}
-	ev := &pp.Evidence{Type: pp.EvidenceEMRTD, PassiveAuth: pp.CheckNotPerformed, ActiveAuth: pp.CheckNotPerformed}
-	if res.Disclosure != nil {
-		ev.Type = pp.EvidenceYivi
-	}
-	if res.FaceReference == faceReferenceRelyingParty {
-		ev.Type = pp.EvidenceReferencePhoto
-	}
-	if ev.Type == pp.EvidenceEMRTD && !v.chipRead {
-		ev.Type = pp.EvidenceDocumentPhoto
+	ev := &pp.Evidence{
+		Type:        evidenceTypeOf(res.Disclosure != nil, res.FaceReference, v.chipRead),
+		PassiveAuth: pp.CheckNotPerformed, ActiveAuth: pp.CheckNotPerformed,
 	}
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
@@ -646,6 +642,8 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	}
 	if b := res.Biometrics; b != nil {
 		ev.FaceMatch, ev.Liveness = b.FaceMatchScore, b.LivenessResult
+	} else if f := res.FaceCheck; f != nil {
+		ev.FaceMatch, ev.Liveness = f.FaceMatchScore, f.LivenessResult
 	}
 	addDocumentCheckEvidence(ev, res.DocumentCheck)
 	out.Evidence = ev
@@ -653,6 +651,20 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	out.Photo, out.Selfie, out.ReferencePhoto = res.Photo.image(), res.Selfie.image(), res.ReferencePhoto.image()
 	out.DocumentImage, out.DocumentImageBack = res.DocumentImage.image(), res.DocumentImageBack.image()
 	return out, nil
+}
+
+// evidenceTypeOf is a result's pp.Evidence* type: a Yivi disclosure, a
+// reference photo the customer sent, the chip, or else the document photo.
+func evidenceTypeOf(disclosed bool, faceReference string, chipRead bool) string {
+	switch {
+	case faceReference == faceReferenceRelyingParty:
+		return pp.EvidenceReferencePhoto
+	case disclosed:
+		return pp.EvidenceYivi
+	case chipRead:
+		return pp.EvidenceEMRTD
+	}
+	return pp.EvidenceDocumentPhoto
 }
 
 // addDocumentCheckEvidence adds the document scan's check c, if any, to ev.
@@ -849,6 +861,13 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	return pp.Claim{DeepLink: resp.DeepLink, ExpiresAt: expiresAt, Handover: slotClaimed}, nil
 }
 
+// needsReferencePhoto reports whether fd matches the face against a photo
+// the customer sends: a face match without nfc_read has no chip photo. ID
+// Scan matches against the photographed document's portrait instead.
+func needsReferencePhoto(fd *flow.FlowDefinition) bool {
+	return flowNeedsFaceMatch(fd) && !slices.Contains(fd.Steps, flow.StepNFCRead) && fd.FaceProvider != flow.FaceProviderIDScan
+}
+
 // CancelSession ends a session with no outcome yet; one that has an outcome
 // is refused (409), one already cancelled is left as it is.
 func (s *Server) CancelSession(_ context.Context, t pp.Tenant, id, token string) error {
@@ -943,17 +962,13 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 	if fd == nil || !slices.Contains(fd.Steps, flow.StepDocumentPhoto) {
 		return rejected(http.StatusConflict, "this session's flow takes no document photo")
 	}
-	front, err := documentPhotoSide("front", p.Front, p.BSNRedacted)
+	front, back, err := documentPhotoSides(p)
 	if err != nil {
 		return rejected(http.StatusBadRequest, err.Error())
 	}
-	var back *session.DocumentPhotoSide
-	if p.Back != nil {
-		side, err := documentPhotoSide("back", *p.Back, p.BSNRedacted)
-		if err != nil {
-			return rejected(http.StatusBadRequest, err.Error())
-		}
-		back = &side
+	scansFace := fd.FaceProvider == flow.FaceProviderIDScan
+	if scansFace != (p.Face != nil) {
+		return rejected(http.StatusBadRequest, "the face checks come with the document photo exactly when the flow's face provider is idscan")
 	}
 
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
@@ -964,6 +979,9 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 			return errStepAlreadyRecorded
 		}
 		now := time.Now().UTC()
+		if err := recordIDScanFace(sess, fd, p.Face, now); err != nil {
+			return err
+		}
 		check := documentCheckEvidence(p.Check)
 		// An age check keeps the answer, never the date of birth, as for the chip.
 		ageOver := ageOverOf(&documentInfo{DateOfBirth: check.Document.DateOfBirth}, fd, now)
@@ -989,17 +1007,59 @@ func (s *Server) SubmitDocumentPhoto(ctx context.Context, t pp.Tenant, id, token
 	case err != nil:
 		return fmt.Errorf("proofingengine: submit document photo: %w", err)
 	default:
-		details := actorDetails(updated, session.DeviceRoleWeb)
-		// The scan service's judgement, in the server's log line.
-		if p.Check.Verdict != "" {
-			details[detailDocumentVerdict] = string(p.Check.Verdict)
-		}
-		if p.Check.Score != nil {
-			details[detailDocumentScore] = *p.Check.Score
-		}
-		s.auditStepSubmitted(updated, fd, string(flow.StepDocumentPhoto), details)
+		s.auditDocumentPhoto(updated, fd, p)
 	}
 	return s.finishBrowserSession(ctx, updated, fd)
+}
+
+// documentPhotoSides are p's front and, when it has one, back.
+func documentPhotoSides(p pp.DocumentPhoto) (session.DocumentPhotoSide, *session.DocumentPhotoSide, error) {
+	front, err := documentPhotoSide("front", p.Front, p.BSNRedacted)
+	if err != nil || p.Back == nil {
+		return front, nil, err
+	}
+	back, err := documentPhotoSide("back", *p.Back, p.BSNRedacted)
+	if err != nil {
+		return front, nil, err
+	}
+	return front, &back, nil
+}
+
+// recordIDScanFace stores the face checks f ID Scan made with the document
+// photo, if any, as sess's face step.
+func recordIDScanFace(sess *session.Session, fd *flow.FlowDefinition, f *pp.FaceCheck, now time.Time) error {
+	if f == nil {
+		return nil
+	}
+	face, err := idScanFaceEvidence(fd, *f, now)
+	if err != nil {
+		return rejected(http.StatusBadRequest, err.Error())
+	}
+	sess.Steps.Selfie = face
+	sess.FaceAttempts = face.Attempts
+	sess.Access.RecordStep(session.DeviceRoleWeb, faceStepName(fd))
+	return nil
+}
+
+// auditDocumentPhoto audits the document_photo step p, and the face step ID
+// Scan made with it.
+func (s *Server) auditDocumentPhoto(updated session.Session, fd *flow.FlowDefinition, p pp.DocumentPhoto) {
+	details := actorDetails(updated, session.DeviceRoleWeb)
+	// The scan service's judgement, in the server's log line.
+	if p.Check.Verdict != "" {
+		details[detailDocumentVerdict] = string(p.Check.Verdict)
+	}
+	if p.Check.Score != nil {
+		details[detailDocumentScore] = *p.Check.Score
+	}
+	s.auditStepSubmitted(updated, fd, string(flow.StepDocumentPhoto), details)
+	if p.Face == nil {
+		return
+	}
+	face := actorDetails(updated, session.DeviceRoleWeb)
+	face["livenessPassed"] = p.Face.LivenessPassed
+	face["provider"] = faceProviderIDScan
+	s.auditStepSubmitted(updated, fd, faceStepName(fd), face)
 }
 
 // documentCheckEvidence is c as the session keeps it.

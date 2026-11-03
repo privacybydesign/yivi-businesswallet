@@ -119,12 +119,16 @@ type FaceProvider string
 const (
 	FaceProviderRegula FaceProvider = "regula"
 	FaceProviderEngine FaceProvider = "engine"
+	// FaceProviderIDScan checks the face in the browser, on the document
+	// scan service's page right after the document photo: its liveness
+	// check, and its match against the photographed document's portrait.
+	FaceProviderIDScan FaceProvider = "idscan"
 )
 
 // ValidFaceProvider reports whether p is a known FaceProvider, including "".
 func ValidFaceProvider(p FaceProvider) bool {
 	switch p {
-	case "", FaceProviderRegula, FaceProviderEngine:
+	case "", FaceProviderRegula, FaceProviderEngine, FaceProviderIDScan:
 		return true
 	default:
 		return false
@@ -330,7 +334,7 @@ type FlowDefinition struct {
 	SelfieLocation StepLocation `json:"SelfieLocation"`
 	// FaceProvider is the face verifier; empty is the deployment default. Regula
 	// needs SelfieLocation native: only the Idem app runs a Regula liveness
-	// session.
+	// session. ID Scan needs the document photo and SelfieLocation browser.
 	FaceProvider FaceProvider `json:"FaceProvider"`
 	// AcceptedDocumentTypes are the document codes ("P", ...) or kinds
 	// (DocumentKindPassport, ...) accepted; empty accepts any. A driving
@@ -577,6 +581,9 @@ func validate(fd FlowDefinition) error {
 	}
 	if fd.FaceProvider == FaceProviderRegula && fd.EffectiveSelfieLocation() != LocationNative {
 		return errors.New("flow: faceProvider regula requires selfieLocation native")
+	}
+	if fd.FaceProvider == FaceProviderIDScan && (!seenSteps[StepDocumentPhoto] || fd.EffectiveSelfieLocation() != LocationBrowser) {
+		return errors.New("flow: faceProvider idscan requires document_photo in steps and selfieLocation browser")
 	}
 
 	// A face match without the chip read is valid: it matches against the

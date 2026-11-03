@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,9 @@ func TestDocumentScanFollowsTheFlow(t *testing.T) {
 		"BSN blacked":   {func(f *proofingprovider.Flow) { f.BlurBSN = new(true) }, idscan.ScanOptions{RedactBSN: true}},
 		"BSN kept":      {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyRetrieve }, idscan.ScanOptions{}},
 		"age check, 18": {func(f *proofingprovider.Flow) { f.RequestedAttributes, f.AgeOver = []string{attributeAgeOver}, 18 }, idscan.ScanOptions{MinimumAge: 18}},
+		"face in the scan": {func(f *proofingprovider.Flow) {
+			f.Steps, f.FaceProvider = append(slices.Clone(f.Steps), "face_verification"), faceProviderIDScan
+		}, idscan.ScanOptions{Face: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, scanner := newScanFixture(t)

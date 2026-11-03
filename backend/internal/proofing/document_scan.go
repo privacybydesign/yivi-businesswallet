@@ -163,6 +163,14 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 		back := providerImage(*res.Back)
 		photo.Back = &back
 	}
+	if res.Face != nil {
+		// A completed scan's liveness check passed: a failed one fails the scan.
+		photo.Face = &proofingprovider.FaceCheck{LivenessPassed: true, MatchScore: res.Face.MatchScore}
+		if res.Face.Selfie != nil {
+			selfie := providerImage(*res.Face.Selfie)
+			photo.Face.Selfie = &selfie
+		}
+	}
 	if err := s.ips.SubmitDocumentPhoto(ctx, requestTenant(req), sess.ID, sess.Token, photo); err != nil {
 		return documentScanStepError(err)
 	}
@@ -177,7 +185,7 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 // documentScanOptions are the rules of flow f the scan service enforces: the
 // BSN blacked out when f says so, and f's age check.
 func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
-	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f)}
+	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), Face: scansFace(f)}
 	if slices.Contains(f.RequestedAttributes, attributeAgeOver) {
 		opts.MinimumAge = f.AgeOver
 	}

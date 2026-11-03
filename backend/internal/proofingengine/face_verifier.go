@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
+
+	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
@@ -220,8 +224,47 @@ func regulaTag(sess session.Session) string {
 
 // selfieEngine is biometricsInfo.Engine for recorded selfie evidence.
 func selfieEngine(ev *session.SelfieStepEvidence) string {
-	if ev.Provider == faceProviderRegula {
-		return faceProviderRegula
+	if ev.Provider == faceProviderRegula || ev.Provider == faceProviderIDScan {
+		return ev.Provider
 	}
 	return ""
+}
+
+// idScanFaceMatchThreshold is the score ID Scan reads as a match: the bottom
+// of its recommended authentic range.
+const idScanFaceMatchThreshold = 0.90
+
+// idScanMatchThreshold is the score a face ID Scan matched must reach at fd's
+// face step: the flow's own face.match threshold when it sets one, else
+// idScanFaceMatchThreshold; never under the floor of the level fd requires.
+func idScanMatchThreshold(fd *flow.FlowDefinition) float64 {
+	threshold := idScanFaceMatchThreshold
+	if own, ok := fd.CheckThresholds[flow.CheckFaceMatch]; ok {
+		threshold = own
+	}
+	if level, ok := flow.RequirementFor(fd.RequiredAssuranceLevel); ok {
+		threshold = max(threshold, level.MinFaceMatch)
+	}
+	return threshold
+}
+
+// idScanFaceEvidence is the face step's evidence from ID Scan's face checks,
+// matched at fd's threshold; the live face kept as the selfie.
+func idScanFaceEvidence(fd *flow.FlowDefinition, face pp.FaceCheck, now time.Time) (*session.SelfieStepEvidence, error) {
+	ev := &session.SelfieStepEvidence{
+		Provider: faceProviderIDScan, LivenessPassed: face.LivenessPassed, FaceMatchScore: face.MatchScore,
+		Attempts: 1, Timing: stepTiming(nil, now),
+	}
+	if face.MatchScore != nil {
+		matched := *face.MatchScore >= idScanMatchThreshold(fd)
+		ev.FaceVerified = &matched
+	}
+	if face.Selfie != nil && face.Selfie.Base64 != "" {
+		raw, mime, err := decodeImageBase64(face.Selfie.Base64, firstNonEmpty(face.Selfie.MimeType, defaultImageMime))
+		if err != nil {
+			return nil, fmt.Errorf("invalid selfie image: %w", err)
+		}
+		ev.Image, ev.MimeType = base64.StdEncoding.EncodeToString(raw), mime
+	}
+	return ev, nil
 }

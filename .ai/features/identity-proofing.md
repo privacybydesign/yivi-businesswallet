@@ -2488,6 +2488,36 @@ step runs with the Idem app or the Yivi app alike.
   - `mrz_strings`: the whole MRZ, as an older Dutch document carries the BSN
     in its optional data (`mrz` is refused).
   - `signature`: the holder's signature, under the same setting.
+- **Face in the scan** (`faceProvider: idscan`): CM's page runs its
+  `face_liveness` and `face_match` tasks right after the document scan, in the
+  same transaction (`ScanOptions.Face`).
+  - Only with `document_photo`: CM takes `face_liveness` only with
+    `document_scan`, and `face_match` only with both. The wallet
+    (`normalizeFlow`) and the engine (`flow.Validate`) refuse it otherwise.
+  - The face step runs in the browser (`selfieLocation: browser`), so a flow
+    of the photo and the face is `browserOnly`. Liveness is always required:
+    CM matches only a face it found live.
+  - The flow editor offers it as "Check the face in the ID scan", under the
+    face step, when the document photo is on.
+
+  | CM gives | Engine | Error code |
+  |---|---|---|
+  | `face_liveness` state: `completed` passes; `aborted` or `maximum_attempts_exceeded` fails | the face step's liveness (`SelfieStepEvidence`, provider `idscan`) | `LIVENESS_FAILED` |
+  | `face_match` score, 0 to 1 | a match from 0.90 (CM's authentic range), or the flow's own `face.match` threshold | `FACE_NO_MATCH` |
+  | the liveness image (its video is never fetched) | the session's selfie, under `keepFacePhotos` | |
+
+  - The face result goes to the engine with the document photo
+    (`DocumentPhoto.Face`), which records it as the face step. The selfie
+    endpoint refuses such a flow (409).
+  - Every result carries `faceCheck` (match score, matched, liveness result,
+    provider: no face), like `documentCheck`, whatever the flow requests. The
+    identity read falls back to it for `evidence[].faceMatch` and `liveness`
+    when `biometrics` is not requested, so All people shows them.
+  - The match is against the photographed document, not the chip, so it
+    reaches no assurance level (`matchedDocumentPhoto`).
+  - Open: a scan whose liveness failed counts as a failed scan and shows "Try
+    again", which starts a new transaction (and new face attempts). CM bills
+    every face check that ran.
 - **Configuration**: `ID_SCAN_KEY_ID` and `ID_SCAN_SECRET` (an HS256 JWT per
   call, `kid` the key id), and `ID_SCAN_API_URL` (default
   `https://api.cm.com/id-scan/v1`).

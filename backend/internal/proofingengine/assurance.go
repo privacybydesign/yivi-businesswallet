@@ -143,8 +143,8 @@ func checkItems(fd *flow.FlowDefinition, check flow.Check, req appResultRequest,
 		if req.Biometrics == nil {
 			return []assuranceItem{{State: checkStateNotRun}}
 		}
-		// Regula's liveness verdict is authoritative without a score.
-		if req.Biometrics.LivenessScore == nil && req.Biometrics.Engine != faceProviderRegula {
+		// Regula's and ID Scan's liveness verdicts are authoritative without a score.
+		if req.Biometrics.LivenessScore == nil && req.Biometrics.Engine != faceProviderRegula && req.Biometrics.Engine != faceProviderIDScan {
 			// No liveness score (a provider without one, or the Yivi face check, which
 			// runs no liveness): not applicable rather than a guessed verdict.
 			return []assuranceItem{{State: checkStateNotApplicable}}
@@ -205,13 +205,20 @@ type faceMatchSource int
 const (
 	matchedChipPortrait faceMatchSource = iota
 	matchedRelyingPartyPhoto
+	// matchedDocumentPhoto is the portrait on the photographed document,
+	// matched by the document scan service.
+	matchedDocumentPhoto
 )
 
 // faceMatchSourceOf is sess's: the customer's reference photo when it sent
-// one, else the chip's own portrait.
+// one, the photographed document when the scan service checked the face, else
+// the chip's own portrait.
 func faceMatchSourceOf(sess session.Session) faceMatchSource {
 	if sess.ReferencePhoto != "" {
 		return matchedRelyingPartyPhoto
+	}
+	if sess.Steps.Selfie != nil && sess.Steps.Selfie.Provider == faceProviderIDScan {
+		return matchedDocumentPhoto
 	}
 	return matchedChipPortrait
 }

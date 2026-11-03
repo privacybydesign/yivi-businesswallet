@@ -545,6 +545,23 @@ describe("face provider", () => {
       draftFromFlow({ ...stored, faceProvider: "engine" }).faceProvider,
     ).toBe("regula");
     expect(draftFromFlow(stored).faceProvider).toBe("regula");
+    expect(
+      draftFromFlow({ ...stored, faceProvider: "idscan" }).faceProvider,
+    ).toBe("idscan");
+  });
+
+  it("checks the face in the ID scan only with the document photo, liveness included", () => {
+    const scanned = draft({
+      documentPhoto: true,
+      faceProvider: "idscan",
+      liveness: false,
+    });
+    const spec = flowSpecFromDraft(scanned);
+    expect(spec.faceProvider).toBe("idscan");
+    expect(spec.requiredChecks).toContain("face.liveness");
+    expect(
+      flowSpecFromDraft({ ...scanned, documentPhoto: false }).faceProvider,
+    ).toBe("regula");
   });
 });
 

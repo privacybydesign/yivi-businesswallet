@@ -161,6 +161,8 @@ type Result struct {
 	Document    Document
 	Front       Image
 	Back        *Image
+	// Face is the face checks' outcome; nil when the scan asked none.
+	Face *Face
 }
 
 // Document is what ID Scan read off the document. Dates are YYYY-MM-DD and
@@ -188,6 +190,9 @@ type ScanOptions struct {
 	RedactBSN bool
 	// MinimumAge, when above 0, has ID Scan refuse a holder younger than it.
 	MinimumAge int
+	// Face adds the face checks: a liveness check of the person, and a match
+	// of their face against the document's portrait.
+	Face bool
 }
 
 type createRequest struct {
@@ -233,8 +238,12 @@ func (c *Client) CreateTransaction(ctx context.Context, locale string, opts Scan
 	if opts.MinimumAge > 0 {
 		settings.MinimumAge = &opts.MinimumAge
 	}
+	tasks := []string{taskDocumentScan}
+	if opts.Face {
+		tasks = append(tasks, faceTasks...)
+	}
 	body, err := json.Marshal(createRequest{
-		Tasks: []string{taskDocumentScan}, Locale: locale,
+		Tasks: tasks, Locale: locale,
 		Settings: createSettings{DocumentScan: settings},
 	})
 	if err != nil {
@@ -251,14 +260,16 @@ func (c *Client) CreateTransaction(ctx context.Context, locale string, opts Scan
 }
 
 type resultResponse struct {
-	State string `json:"state"`
-	Tasks []struct {
-		Type   string        `json:"type"`
-		State  string        `json:"state"`
-		Score  *float64      `json:"score"`
-		Result []resultField `json:"result"`
-		Files  []file        `json:"files"`
-	} `json:"tasks"`
+	State string       `json:"state"`
+	Tasks []taskResult `json:"tasks"`
+}
+
+type taskResult struct {
+	Type   string        `json:"type"`
+	State  string        `json:"state"`
+	Score  *float64      `json:"score"`
+	Result []resultField `json:"result"`
+	Files  []file        `json:"files"`
 }
 
 // resultField is one field ID Scan read: its value per zone, whether it is
@@ -297,7 +308,8 @@ type file struct {
 }
 
 // Result reads transactionID's result resultID, the ids the page's return URL
-// carries, and downloads the document's photos once it completed.
+// carries, and downloads the document's photos, and the liveness check's
+// still when the face was checked, once every task completed.
 func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Result, error) {
 	var out resultResponse
 	target := c.baseURL + "/transactions/" + url.PathEscape(transactionID) + "/results/" + url.PathEscape(resultID)
@@ -309,10 +321,10 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	completed, scanned := out.State == stateCompleted, Authenticity("")
 	var score *float64
 	for _, task := range out.Tasks {
+		completed = completed && task.State == stateCompleted
 		if task.Type != taskDocumentScan {
 			continue
 		}
-		completed = completed && task.State == stateCompleted
 		scanned, score = authenticity(task.Score), task.Score
 		fields = append(fields, task.Result...)
 		for _, f := range task.Files {
@@ -324,6 +336,7 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	if !completed {
 		return Result{}, nil
 	}
+	face, selfie := readFace(out.Tasks)
 	front, back := sides(files)
 	if front == nil {
 		return Result{}, ErrNoDocumentImage
@@ -344,6 +357,12 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 			return Result{}, err
 		}
 		res.Back = &img
+	}
+	if face != nil {
+		if face.Selfie, err = c.downloadSelfie(ctx, selfie); err != nil {
+			return Result{}, err
+		}
+		res.Face = face
 	}
 	return res, nil
 }

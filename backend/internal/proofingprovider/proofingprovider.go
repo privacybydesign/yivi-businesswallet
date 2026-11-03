@@ -41,8 +41,9 @@ type FlowSpec struct {
 	// SelfieLocation is which client captures the face: "native" (the vcmrtd
 	// app) or "browser". The engine defaults an empty value to browser.
 	SelfieLocation string `json:"selfieLocation,omitempty"`
-	// FaceProvider verifies the face step: "regula", "engine", or empty for
-	// the engine's default (Regula when configured).
+	// FaceProvider verifies the face step: "regula", "engine", "idscan" (in
+	// the browser, with the document photo), or empty for the engine's
+	// default (Regula when configured).
 	FaceProvider             string             `json:"faceProvider,omitempty"`
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
@@ -240,6 +241,18 @@ type DocumentPhoto struct {
 	Back        *Image
 	BSNRedacted bool
 	Check       DocumentCheck
+	// Face is the scan service's face checks, for a flow whose face step it
+	// runs (FaceProvider idscan); nil otherwise.
+	Face *FaceCheck
+}
+
+// FaceCheck is a document scan service's face checks, in the engine's terms:
+// whether its liveness check passed, its score for the live face against the
+// document's portrait (nil when it gave none), and the live face.
+type FaceCheck struct {
+	LivenessPassed bool
+	MatchScore     *float64
+	Selfie         *Image
 }
 
 // DocumentCheck is a document scan service's result, in the engine's terms
@@ -375,7 +388,8 @@ type Reference struct {
 }
 
 // YiviDisclosure is the engine taking a Reference: OK approved the session,
-// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed).
+// OK false rejected it (Code says why: document_not_accepted, age_not_disclosed,
+// face_not_verified).
 type YiviDisclosure struct {
 	OK   bool
 	Code string

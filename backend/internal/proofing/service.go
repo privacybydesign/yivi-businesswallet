@@ -642,6 +642,14 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	if !slices.Contains(faceProviders, in.FaceProvider) {
 		return in, fmt.Errorf("%w: unknown face provider %q", ErrInvalidInput, in.FaceProvider)
 	}
+	if in.FaceProvider == faceProviderIDScan {
+		// ID Scan checks the face on its page in the browser, right after the
+		// document photo.
+		if !slices.Contains(in.Steps, stepDocumentPhoto) {
+			return in, fmt.Errorf("%w: the face is checked in the document scan only with the document photo", ErrInvalidInput)
+		}
+		in.SelfieLocation = selfieLocationBrowser
+	}
 	return in, nil
 }
 
