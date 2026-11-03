@@ -262,19 +262,8 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	if r.expectedBirthDate, err = s.openSealed(r.ID, "expected birth date", birthDateCT); err != nil {
 		return Request{}, err
 	}
-	if addressCT != nil {
-		addr, err := s.decryptAddress(r.ID, addressCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectAddress = addr
-	}
-	if employmentCT != nil {
-		emp, err := s.decryptEmployment(r.ID, employmentCT)
-		if err != nil {
-			return Request{}, err
-		}
-		r.SubjectEmployment = emp
+	if err := s.openSubjectDetails(&r, addressCT, employmentCT); err != nil {
+		return Request{}, err
 	}
 	if sessionID != nil {
 		if s.cipher == nil {
@@ -293,6 +282,26 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+// openSubjectDetails decrypts the subject's address and employment statement
+// into r, each where the request holds one.
+func (s *RequestStore) openSubjectDetails(r *Request, addressCT, employmentCT []byte) error {
+	if addressCT != nil {
+		addr, err := s.decryptAddress(r.ID, addressCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectAddress = addr
+	}
+	if employmentCT != nil {
+		emp, err := s.decryptEmployment(r.ID, employmentCT)
+		if err != nil {
+			return err
+		}
+		r.SubjectEmployment = emp
+	}
+	return nil
 }
 
 // nameRetention is how long a request's proofed name is kept, and the flow's
