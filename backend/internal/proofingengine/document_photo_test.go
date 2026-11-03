@@ -526,6 +526,31 @@ func checkFailDocumentScan(t *testing.T, f pp.DocumentScanFailure, code string) 
 	}
 }
 
+// A session rejected for its scan drops the stored selfie, as every other
+// decision does, unless the flow keeps face photos.
+func TestFailDocumentScanRedactsSelfie(t *testing.T) {
+	for name, keep := range map[string]bool{"dropped": false, "kept": true} {
+		t.Run(name, func(t *testing.T) {
+			sess := session.Session{
+				ID: "ps_scan", TenantID: "org", Token: "tok-scan", Status: session.StatusCreated,
+				Method: session.MethodNFCPassport, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+				Steps: session.StepEvidence{Selfie: &session.SelfieStepEvidence{Image: "c2VsZmll", MimeType: "image/png"}},
+			}
+			fd := chipAndPhotoFlow
+			fd.KeepFacePhotos = &keep
+			s, store := documentPhotoServer(sess, fd)
+			failure := pp.DocumentScanFailure{Task: pp.DocumentScanTaskFaceMatch, Attempts: 3}
+			if err := s.FailDocumentScan(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, failure); err != nil {
+				t.Fatalf("FailDocumentScan = %v", err)
+			}
+			decided, _ := store.Get("org", sess.ID)
+			if got := decided.Steps.Selfie != nil && decided.Steps.Selfie.Image != ""; got != keep {
+				t.Errorf("selfie image stored = %v, want %v", got, keep)
+			}
+		})
+	}
+}
+
 // A flow that takes no document photo has no scan to fail.
 func TestFailDocumentScanWithoutPhotoStep(t *testing.T) {
 	sess := session.Session{

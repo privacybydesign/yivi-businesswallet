@@ -1130,6 +1130,7 @@ func (s *Server) FailDocumentScan(ctx context.Context, t pp.Tenant, id, token st
 		return rejected(http.StatusConflict, "this session's flow takes no document photo")
 	}
 	code := documentScanFailureCode(f)
+	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := sessionOpenForDevices(*sess); err != nil {
 			return err
@@ -1141,6 +1142,7 @@ func (s *Server) FailDocumentScan(ctx context.Context, t pp.Tenant, id, token st
 			return err
 		}
 		sess.ErrorCode = code
+		redactStepsForStorage(sess, bsnPolicy, redaction)
 		return nil
 	})
 	switch {
