@@ -901,19 +901,25 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
+	out, err := s.scanRequests(rows)
+	if err != nil {
+		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
+	}
+	return out, nil
+}
+
+// scanRequests reads every row of rows, and closes them.
+func (s *RequestStore) scanRequests(rows pgx.Rows) ([]Request, error) {
 	defer rows.Close()
 	out := []Request{}
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
 		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
+			return nil, err
 		}
 		out = append(out, req)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ListExternalPage returns up to limit of the org's external requests, newest
@@ -931,16 +937,8 @@ func (s *RequestStore) ListExternalPage(ctx context.Context, orgID uuid.UUID, af
 	if err != nil {
 		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
-	defer rows.Close()
-	out := []Request{}
-	for rows.Next() {
-		req, err := s.scanRequest(rows)
-		if err != nil {
-			return nil, fmt.Errorf("proofing: scan request org %s: %w", orgID, err)
-		}
-		out = append(out, req)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := s.scanRequests(rows)
+	if err != nil {
 		return nil, fmt.Errorf("proofing: page requests org %s: %w", orgID, err)
 	}
 	return out, nil

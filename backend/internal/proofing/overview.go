@@ -90,16 +90,8 @@ func (s *RequestStore) overviewList(ctx context.Context, orgID uuid.UUID, scope 
 	if err != nil {
 		return nil, fmt.Errorf("proofing: overview list org %s: %w", orgID, err)
 	}
-	defer rows.Close()
-	out := []Request{}
-	for rows.Next() {
-		req, err := s.scanRequest(rows)
-		if err != nil {
-			return nil, fmt.Errorf("proofing: scan overview request org %s: %w", orgID, err)
-		}
-		out = append(out, req)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := s.scanRequests(rows)
+	if err != nil {
 		return nil, fmt.Errorf("proofing: overview list org %s: %w", orgID, err)
 	}
 	return out, nil
