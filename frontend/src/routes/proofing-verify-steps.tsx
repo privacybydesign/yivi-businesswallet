@@ -66,10 +66,14 @@ import {
   dataRequestRefusal,
   reasonIn,
   secondsUntil,
+  sessionStage,
   sessionView,
   verifyErrorMessage,
 } from "../lib/identity-proofing";
-import type { RequestedAttribute } from "../lib/identity-proofing";
+import type {
+  RequestedAttribute,
+  SessionStage,
+} from "../lib/identity-proofing";
 import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { legalReasonIn } from "../lib/legal-retention";
@@ -495,7 +499,7 @@ export function Session({
   // (method pending).
   methods?: ProofingAppMethod[];
   // Told where the session stands, for the page's stepper.
-  onStage?: (stage: "document" | "method" | "session" | "done") => void;
+  onStage?: (stage: SessionStage) => void;
   // Told the app picked in the session (method pending).
   onMethod?: (method: ProofingAppMethod) => void;
   onRestart?: () => void;
@@ -596,14 +600,11 @@ export function Session({
     current.documentScan === "pending" &&
     isProofingLive(current.status) &&
     (chosen === "browser" || current.appDone === true || yiviDone);
-  let stage: "document" | "method" | "session" | "done" = "session";
-  if (showsOutcome || over) {
-    stage = "done";
-  } else if (chosen === "pending") {
-    stage = "method";
-  } else if (scanning || chosen === "browser") {
-    stage = "document";
-  }
+  const stage = sessionStage({
+    ended: showsOutcome || over,
+    method: chosen,
+    scanning,
+  });
   useEffect(() => {
     onStage?.(stage);
   }, [stage, onStage]);

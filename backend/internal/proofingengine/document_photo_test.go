@@ -303,13 +303,7 @@ func TestDocumentPhotoOnlyFlowDecidedByPhoto(t *testing.T) {
 func TestYiviDisclosureBindsTheScannedHolder(t *testing.T) {
 	ageCheck := chipAndPhotoFlow
 	ageCheck.RequestedAttributes, ageCheck.AgeOver = []string{attrAgeOver}, 18
-	for name, tc := range map[string]struct {
-		fd        flow.FlowDefinition
-		claims    map[string]string
-		scan      func(*pp.DocumentCheck)
-		status    session.Status
-		errorCode string
-	}{
+	for name, tc := range map[string]yiviHolderCase{
 		"same holder, MRZ spelling": {
 			fd: chipAndPhotoFlow, claims: map[string]string{"firstName": "ANNA", "lastName": "JANSEN", "dateOfBirth": "1990-03-10"},
 			status: session.StatusApproved,
@@ -344,36 +338,49 @@ func TestYiviDisclosureBindsTheScannedHolder(t *testing.T) {
 			status: session.StatusRejected, errorCode: errCodeDocMismatch,
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
-			sess := session.Session{
-				ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
-				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
-			}
-			s, store := documentPhotoServer(sess, tc.fd)
-			scan := authenticScan()
-			if tc.scan != nil {
-				tc.scan(&scan)
-			}
-			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
-				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
-			}); err != nil {
-				t.Fatalf("SubmitDocumentPhoto = %v", err)
-			}
-			claims := map[string]string{"country": "NLD"}
-			maps.Copy(claims, tc.claims)
-			ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: claims}
-			disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref)
-			if err != nil {
-				t.Fatalf("SubmitReference = %v", err)
-			}
-			if disclosure.OK != (tc.status != session.StatusRejected) {
-				t.Errorf("disclosure OK = %v, want %v", disclosure.OK, tc.status != session.StatusRejected)
-			}
-			if decided, _ := store.Get("org", sess.ID); decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
-				t.Errorf("status %s, error %q; want %s, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
-			}
-		})
+		t.Run(name, func(t *testing.T) { checkYiviHolder(t, tc) })
+	}
+}
+
+type yiviHolderCase struct {
+	fd        flow.FlowDefinition
+	claims    map[string]string
+	scan      func(*pp.DocumentCheck)
+	status    session.Status
+	errorCode string
+}
+
+// checkYiviHolder submits tc's scan, then its Yivi disclosure, and checks the
+// session's decision.
+func checkYiviHolder(t *testing.T, tc yiviHolderCase) {
+	t.Helper()
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := session.Session{
+		ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
+		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	s, store := documentPhotoServer(sess, tc.fd)
+	scan := authenticScan()
+	if tc.scan != nil {
+		tc.scan(&scan)
+	}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: scan,
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	claims := map[string]string{"country": "NLD"}
+	maps.Copy(claims, tc.claims)
+	ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: claims}
+	disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref)
+	if err != nil {
+		t.Fatalf("SubmitReference = %v", err)
+	}
+	if disclosure.OK != (tc.status != session.StatusRejected) {
+		t.Errorf("disclosure OK = %v, want %v", disclosure.OK, tc.status != session.StatusRejected)
+	}
+	if decided, _ := store.Get("org", sess.ID); decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
+		t.Errorf("status %s, error %q; want %s, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
 	}
 }
 

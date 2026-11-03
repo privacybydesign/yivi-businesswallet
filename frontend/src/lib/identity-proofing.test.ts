@@ -60,6 +60,7 @@ import {
   readsIdentity,
   sendableByMail,
   documentScanMessage,
+  sessionStage,
   sessionView,
   sendRequestFields,
   verifyStages,
@@ -2090,6 +2091,31 @@ describe("erasure handlings mirror backend/internal/proofing", () => {
   it("has every backend handling and no other", () => {
     expect(backend.length).toBeGreaterThan(0);
     expect([...ERASURE_HANDLINGS].sort()).toEqual([...backend].sort());
+  });
+});
+
+describe("sessionStage", () => {
+  const app = { ended: false, method: "idem_app" as const, scanning: false };
+
+  it("is done once the session ended, whatever the method", () => {
+    expect(sessionStage({ ...app, ended: true })).toBe("done");
+    expect(
+      sessionStage({ ended: true, method: "pending", scanning: false }),
+    ).toBe("done");
+  });
+
+  it("chooses the app while the method is pending", () => {
+    expect(sessionStage({ ...app, method: "pending" })).toBe("method");
+  });
+
+  it("takes the document while the ID scan shows, or with no app", () => {
+    expect(sessionStage({ ...app, scanning: true })).toBe("document");
+    expect(sessionStage({ ...app, method: "browser" })).toBe("document");
+  });
+
+  it("runs the app's session otherwise", () => {
+    expect(sessionStage(app)).toBe("session");
+    expect(sessionStage({ ...app, method: "yivi_app" })).toBe("session");
   });
 });
 

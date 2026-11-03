@@ -1301,6 +1301,29 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
+// Where a verify page's session stands, for its stepper: done once it shows
+// the outcome or ended, the app's choice while pending, the document while the
+// ID scan shows or with no app (browser), else the app's session.
+export type SessionStage = "document" | "method" | "session" | "done";
+
+export function sessionStage({
+  ended,
+  method,
+  scanning,
+}: {
+  ended: boolean;
+  method: ProofingMethod;
+  scanning: boolean;
+}): SessionStage {
+  if (ended) {
+    return "done";
+  }
+  if (method === "pending") {
+    return "method";
+  }
+  return scanning || method === "browser" ? "document" : "session";
+}
+
 // How CM.com's embedded ID scan page ended, as it posts its parent page
 // (DocumentScanStep): finished with a result to hand the backend, or left
 // without one (cancelled, failed).

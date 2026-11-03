@@ -429,12 +429,8 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	if res.App == "" {
 		res.App = pp.AppWaiting
 	}
-	if sess.Method == session.MethodNFCPassport && !sess.Status.Terminal() {
-		fd, err := s.resolveSessionFlow(ctx, sess)
-		if err != nil {
-			return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
-		}
-		res.AppDone = fd != nil && documentPhotoMissing(sess, fd)
+	if res.AppDone, err = s.idemAppDone(ctx, sess); err != nil {
+		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
 	}
 	res.Method = methodOf(roles)
 	if out.Disclosure {
@@ -447,6 +443,19 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 		res.AssuranceLevel, res.EIDASLevel = out.Assurance.Level, out.Assurance.EIDASLevel
 	}
 	return res, nil
+}
+
+// idemAppDone reports whether sess is a running Idem session whose app did
+// every step it runs, the document photo still to come (pp.Result.AppDone).
+func (s *Server) idemAppDone(ctx context.Context, sess session.Session) (bool, error) {
+	if sess.Method != session.MethodNFCPassport || sess.Status.Terminal() {
+		return false, nil
+	}
+	fd, err := s.resolveSessionFlow(ctx, sess)
+	if err != nil {
+		return false, err
+	}
+	return fd != nil && documentPhotoMissing(sess, fd), nil
 }
 
 // methodOf is how the subject took part on a device: the slots of the
