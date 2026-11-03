@@ -24,6 +24,7 @@ package proofing
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"time"
@@ -442,6 +443,15 @@ type Request struct {
 	// latest OpenID4VP disclosure; empty before one is started. Server-side
 	// only: it reads the disclosed claims.
 	yiviTransactionID string
+	// DocumentScan is whether the request's flow photographs the document,
+	// in the browser (stepDocumentPhoto), when it was sent; DocumentScannedAt
+	// when the photos reached the engine, nil before.
+	DocumentScan      bool
+	DocumentScannedAt *time.Time
+	// documentScanTransactionID is the document scan service's transaction
+	// the page started last; empty before one. Server-side only: it reads the
+	// photos.
+	documentScanTransactionID string
 }
 
 type ipsSession struct {
@@ -778,15 +788,40 @@ const (
 var faceProviders = []string{faceProviderRegula}
 
 // yiviAppAvailable reports whether flow f can run in the Yivi app: unless it
-// photographs the document, which only the Idem app does, matches the face
-// against the sender's reference photo (the Yivi app runs no face check),
-// checks an age the Yivi credentials carry no claim for
+// matches the face against the sender's reference photo (the Yivi app runs no
+// face check), checks an age the Yivi credentials carry no claim for
 // (openid4vpverifier.AgeClaim), or requires a level above what a Yivi session
 // reaches (yiviEIDASLevel), which enforceAssurance would only reject at the
-// end.
+// end. A flow the browser runs alone (BrowserOnly) needs no app at all.
 func yiviAppAvailable(f proofingprovider.Flow) bool {
-	return !slices.Contains(f.Steps, stepDocumentPhoto) && !flowNeedsReferencePhoto(f) &&
-		yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+	return !f.BrowserOnly && !flowNeedsReferencePhoto(f) && yiviAnswersAge(f) && meetsAssurance(yiviEIDASLevel, f.RequiredAssuranceLevel)
+}
+
+// sessionMethods are the methods a request may ask for; "" leaves it to the
+// flow (sessionMethod).
+var sessionMethods = []proofingprovider.Method{"", proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser}
+
+// sessionMethod is how a session of f runs, given the method asked for ("" for
+// none): a flow the browser runs alone (BrowserOnly) in the browser, with no
+// app; any other in an app, the Idem app unless the Yivi app is asked for and
+// can run it.
+func sessionMethod(f proofingprovider.Flow, asked proofingprovider.Method) (proofingprovider.Method, error) {
+	if f.BrowserOnly {
+		if asked != "" && asked != proofingprovider.MethodBrowser {
+			return "", fmt.Errorf("%w: this flow runs in the browser alone, with no app", ErrInvalidInput)
+		}
+		return proofingprovider.MethodBrowser, nil
+	}
+	switch asked {
+	case "", proofingprovider.MethodIdem:
+		return proofingprovider.MethodIdem, nil
+	case proofingprovider.MethodYivi:
+		if !yiviAppAvailable(f) {
+			return "", fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+		}
+		return proofingprovider.MethodYivi, nil
+	}
+	return "", fmt.Errorf("%w: this flow has steps an app runs: choose the Idem app or the Yivi app", ErrInvalidInput)
 }
 
 // keepsFacePhoto reports whether f releases the holder's photo: it keeps the
@@ -884,8 +919,24 @@ const (
 const attributeAgeOver = "age_over"
 
 // stepDocumentPhoto is the photos of the document's front and back, taken in
-// the Idem app.
+// the browser through the document scan service (StartDocumentScan).
 const stepDocumentPhoto = "document_photo"
+
+// bsnPolicyRetrieve is the flow BSN policy that keeps the BSN; empty is omit.
+const bsnPolicyRetrieve = "retrieve"
+
+// takesDocumentPhoto reports whether flow f photographs the document.
+func takesDocumentPhoto(f proofingprovider.Flow) bool {
+	return slices.Contains(f.Steps, stepDocumentPhoto)
+}
+
+// redactsDocumentBSN reports whether f's document photo has its BSN covered:
+// only when the flow's "Black out the BSN" is on (BlurBSN), as the engine's
+// coversDocumentBSN. The scan service covers it on any document, Dutch or
+// not.
+func redactsDocumentBSN(f proofingprovider.Flow) bool {
+	return f.BlurBSN != nil && *f.BlurBSN
+}
 
 // flowCompletable reports whether a recipient can finish flow f with only the
 // vcmrtd app and the wallet's session: a face step must run in the app and

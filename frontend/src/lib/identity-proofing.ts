@@ -22,7 +22,7 @@ import type {
   ProofingFlowSelection,
   ProofingFlowSpec,
   ProofingImage,
-  ProofingMethod,
+  ProofingAppMethod,
   ProofingRequest,
   RegisterAddress,
   WebhookDelivery,
@@ -139,10 +139,9 @@ export function proofingStatusLabel(status: string, t: TFunction): string {
 //   - Steps: document_capture (the document scan: vcmrtd reads the MRZ with the
 //     camera to derive the chip access key) and nfc_read (the NFC chip read) are
 //     always submitted together, so they toggle as a pair; document_photo (a
-//     photo of the document's printed page) stands on its own and is listed
-//     right after document_capture, as the Idem app takes it: the MRZ scan
-//     photographs the side it reads; face_verification is one step covering
-//     selfie, liveness and face match.
+//     photo of the document's printed page) stands on its own and is taken in
+//     the browser, with the ID scan, before the app runs the rest;
+//     face_verification is one step covering selfie, liveness and face match.
 //   - Checks: nfc.passive_auth is mandatory with nfc_read and face.match with
 //     face_verification, so those are locked on; nfc.chip_auth and face.liveness
 //     are optional; a check without its step is unavailable. A threshold exists
@@ -176,18 +175,20 @@ export const FACE_MATCH_RECOMMENDED = 0.75;
 export const SUBSTANTIAL_FACE_MATCH_FLOOR = 0.75;
 
 // The requested data the service's admin page offers, in the order the editor
-// lists them, and the step that produces each: the document scan gives the
-// document and holder (dg1), the chip read the age check, its extras, photo and
-// check results, the face step its selfie and biometrics.
+// lists them, and the steps that produce each: the document scan or the
+// document photo gives the document and holder (dg1) and the age check, the
+// chip read the age check too, its extras, photo and check results, the face
+// step its selfie and biometrics. With no MRZ or chip read, the engine takes
+// the document photo's read fields as the document (finishSession).
 export const REQUESTED_ATTRIBUTES = [
-  { value: "dg1", step: STEP_DOCUMENT_CAPTURE },
-  { value: "age_over", step: STEP_NFC_READ },
-  { value: "chip_checks", step: STEP_NFC_READ },
-  { value: "biometrics", step: STEP_FACE_VERIFICATION },
-  { value: "dg11", step: STEP_NFC_READ },
-  { value: "dg2", step: STEP_NFC_READ },
-  { value: "selfie", step: STEP_FACE_VERIFICATION },
-  { value: "document_image", step: STEP_DOCUMENT_PHOTO },
+  { value: "dg1", steps: [STEP_DOCUMENT_CAPTURE, STEP_DOCUMENT_PHOTO] },
+  { value: "age_over", steps: [STEP_NFC_READ, STEP_DOCUMENT_PHOTO] },
+  { value: "chip_checks", steps: [STEP_NFC_READ] },
+  { value: "biometrics", steps: [STEP_FACE_VERIFICATION] },
+  { value: "dg11", steps: [STEP_NFC_READ] },
+  { value: "dg2", steps: [STEP_NFC_READ] },
+  { value: "selfie", steps: [STEP_FACE_VERIFICATION] },
+  { value: "document_image", steps: [STEP_DOCUMENT_PHOTO] },
 ] as const;
 
 // The requested data of a flow that releases nothing but the outcome
@@ -299,14 +300,16 @@ const SELFIE_LOCATION_BROWSER = "browser";
 const YIVI_EIDAS_LEVEL = "low";
 
 // Whether the Yivi app can run a flow (proofing.yiviAppAvailable): unless it
-// photographs the document, which only the Idem app does, matches the face
-// against the sender's reference photo (proofing.NeedsReferencePhoto: a face
-// step without the chip read, outside the browser), where the Yivi app
-// matches against its credential's photo instead, or requires a level above
-// what a Yivi session reaches, or checks an age the Yivi passport and id-card
-// carry no claim for (AGE_OVER_CHOICES).
+// matches the face against the sender's reference photo
+// (proofing.NeedsReferencePhoto: a face step without the chip read, outside
+// the browser), where the Yivi app matches against its credential's photo
+// instead, or requires a level above what a Yivi session reaches, or checks an
+// age the Yivi passport and id-card carry no claim for (AGE_OVER_CHOICES). A
+// document photo is taken in the browser, whichever app runs the session; a
+// flow the browser runs alone (browserOnly) needs no app at all.
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
+  browserOnly?: boolean;
   selfieLocation?: string;
   requiredAssuranceLevel?: string;
   requestedAttributes?: readonly string[];
@@ -320,7 +323,7 @@ export function yiviAppAvailable(flow: {
     !flow.requiredAssuranceLevel ||
     flow.requiredAssuranceLevel === YIVI_EIDAS_LEVEL;
   return (
-    !flow.steps.includes(STEP_DOCUMENT_PHOTO) &&
+    !flow.browserOnly &&
     !needsReferencePhoto &&
     (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
       AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
@@ -501,7 +504,11 @@ export function attributeAvailable(
   value: string,
 ): boolean {
   const attr = REQUESTED_ATTRIBUTES.find((a) => a.value === value);
-  return attr !== undefined && draftSteps(draft).includes(attr.step);
+  if (attr === undefined) {
+    return false;
+  }
+  const steps: readonly string[] = attr.steps;
+  return draftSteps(draft).some((step) => steps.includes(step));
 }
 
 // The requested data a draft collects: ticked, with its step in the draft.
@@ -1082,6 +1089,9 @@ const REJECTION_REASON_KEYS = {
   DOC_TAMPERED: "docTampered",
   CHIP_CLONE_DETECTED: "chipCloneDetected",
   DOC_EXPIRED: "docExpired",
+  DOC_NOT_AUTHENTIC: "docNotAuthentic",
+  DOC_FIELDS_INVALID: "docFieldsInvalid",
+  DOCUMENT_MISMATCH: "documentMismatch",
   ASSURANCE_NOT_MET: "assuranceNotMet",
   IDENTITY_MISMATCH: "identityMismatch",
   MANUAL_REVIEW_REJECTED: "manualReviewRejected",
@@ -1140,17 +1150,20 @@ export type VerifyStage =
   | "employment";
 
 export function verifyStages({
+  app = true,
   address = false,
   diplomas,
   employment = false,
 }: {
+  // False for a flow the browser runs alone: there is no app to choose.
+  app?: boolean;
   address?: boolean;
   diplomas: boolean;
   employment?: boolean;
 }): VerifyStage[] {
   return [
     "overview",
-    "method",
+    ...(app ? (["method"] as const) : []),
     "session",
     ...(address ? (["address"] as const) : []),
     ...(diplomas ? (["diplomas"] as const) : []),
@@ -1162,7 +1175,7 @@ export function verifyStages({
 // the flow, else the Idem app alone. Continue always leads to this step, even
 // with one app, because tapping an app is what starts the session: a person
 // (or an admin checking a link) who only reads the first step uses nothing up.
-export function methodChoices(yiviAvailable: boolean): ProofingMethod[] {
+export function methodChoices(yiviAvailable: boolean): ProofingAppMethod[] {
   return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
 }
 
@@ -1249,13 +1262,54 @@ export function sessionView({
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
 }
 
+// How CM.com's embedded ID scan page ended, as it posts its parent page
+// (DocumentScanStep): finished with a result to hand the backend, or left
+// without one (cancelled, failed).
+export type DocumentScanMessage =
+  | { kind: "finished"; transactionId: string; resultId: string }
+  | { kind: "unfinished" };
+
+// The state the ID scan page posts once its tasks are done.
+const DOCUMENT_SCAN_COMPLETED = "completed";
+
+// What a window message says of the embedded ID scan, or undefined when it is
+// not the scan's: it must come from the frame showing scanUrl (source) and
+// from scanUrl's origin, and carry a transaction id.
+export function documentScanMessage(
+  event: { origin: string; source: unknown; data: unknown },
+  scanUrl: string,
+  frame: unknown,
+): DocumentScanMessage | undefined {
+  if (frame === null || event.source !== frame) return undefined;
+  if (event.origin !== new URL(scanUrl).origin) return undefined;
+  const data = event.data as
+    | { transactionId?: unknown; state?: unknown; resultId?: unknown }
+    | null
+    | undefined;
+  if (typeof data?.transactionId !== "string" || data.transactionId === "") {
+    return undefined;
+  }
+  return data.state === DOCUMENT_SCAN_COMPLETED &&
+    typeof data.resultId === "string" &&
+    data.resultId !== ""
+    ? {
+        kind: "finished",
+        transactionId: data.transactionId,
+        resultId: data.resultId,
+      }
+    : { kind: "unfinished" };
+}
+
 // Whether a request on flow can be mailed (proofing.ErrDiplomasNeedPage,
-// ErrAddressNeedsPage, ErrEmploymentNeedsPage): a flow that asks for
-// diplomas, the address or the Verzekeringsbericht has them given on the page
-// that runs the session. No flow picked yet is mailable.
+// ErrAddressNeedsPage, ErrEmploymentNeedsPage, ErrDocumentScanNeedsPage): a
+// flow that asks for diplomas, the address or the Verzekeringsbericht has them
+// given on the page that runs the session, and one that photographs the
+// document takes the photo there, with the ID scan. No flow picked yet is
+// mailable.
 export function sendableByMail(
   flow:
     | {
+        steps?: readonly string[];
         diplomaMode?: DiplomaMode;
         addressMode?: AddressMode;
         employmentMode?: EmploymentMode;
@@ -1263,6 +1317,7 @@ export function sendableByMail(
     | undefined,
 ): boolean {
   return (
+    !(flow?.steps ?? []).includes(STEP_DOCUMENT_PHOTO) &&
     (flow?.diplomaMode ?? "off") === "off" &&
     (flow?.addressMode ?? "off") === "off" &&
     (flow?.employmentMode ?? "off") === "off"
@@ -1531,6 +1586,12 @@ const PROOFING_ERROR_KEYS = {
   address_not_asked: "identityProofing.errors.addressNotAsked",
   address_not_found: "identityProofing.errors.addressNotFound",
   employment_needs_page: "identityProofing.errors.employmentNeedsPage",
+  document_scan_needs_page: "identityProofing.errors.documentScanNeedsPage",
+  document_scan_failed: "identityProofing.errors.documentScanFailed",
+  document_scan_mismatch: "identityProofing.errors.documentScanMismatch",
+  document_scan_done: "identityProofing.errors.documentScanDone",
+  document_scan_pending: "identityProofing.errors.documentScanPending",
+  no_document_scanner: "identityProofing.errors.noDocumentScanner",
   employment_closed: "identityProofing.errors.employmentClosed",
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
@@ -1578,6 +1639,10 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "device_active":
     case "diplomas_closed":
     case "employment_closed":
+    case "document_scan_failed":
+    case "document_scan_mismatch":
+    case "document_scan_done":
+    case "document_scan_pending":
     case "seal_check_unavailable":
     case "export_unavailable":
     case "too_large":
@@ -2296,6 +2361,15 @@ export function showsSessionIdentity(
 }
 
 // The outcomes a chip or face check reports.
+// A document scan's verdicts on a photographed document.
+export const DOCUMENT_VERDICTS = ["authentic", "doubtful", "fake"] as const;
+
+export function isDocumentVerdict(
+  value: string,
+): value is (typeof DOCUMENT_VERDICTS)[number] {
+  return (DOCUMENT_VERDICTS as readonly string[]).includes(value);
+}
+
 export const CHECK_OUTCOMES = [
   "valid",
   "invalid",

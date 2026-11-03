@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/images"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
@@ -114,20 +115,33 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		withholdDisclosedBirthDate(&info)
 	}
 
+	doc := documentFromDisclosure(info)
+	_, redaction := effectivePrivacyPolicy(fd)
+	docRedaction := redaction
+	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
+
 	details := map[string]any{detailStage: "disclosure", "credential": info.Credential}
-	if failed, errorCode := disclosureComplianceFailure(fd, documentFromDisclosure(info), time.Now()); failed {
+	if failed, errorCode := disclosureComplianceFailure(fd, doc, time.Now()); failed {
 		details[detailReason] = disclosureCodeDocumentRefused
-		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details)
+		s.boundLoginFinish(sess, session.StatusRejected, errorCode, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
 	}
 	if asksAge(fd) && ageOver == nil {
 		details[detailReason] = disclosureCodeAgeNotDisclosed
-		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details)
+		s.boundLoginFinish(sess, session.StatusRejected, errCodeAgeNotDisclosed, nil, details, docRedaction.BlurBSN)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeAgeNotDisclosed}, nil
 	}
+	decided, err := s.decideByDocumentPhoto(sess, fd, doc, details, docRedaction.BlurBSN)
+	switch {
+	case err != nil:
+		return proofingprovider.YiviDisclosure{}, err
+	case decided == session.StatusRejected:
+		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeDocumentRefused}, nil
+	}
 
-	_, redaction := effectivePrivacyPolicy(fd)
 	result := buildBoundLoginResult(sess, info, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
+	addDocumentPhoto(result, sess, docRedaction)
+	addDocumentCheck(result, sess)
 
 	if sess.Status == session.StatusCreated {
 		opened := sess
@@ -135,10 +149,80 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		s.auditProofing(opened, eventSessionOpened, nil)
 	}
 	s.auditProofing(sess, eventDisclosureReceived, map[string]any{"credential": info.Credential})
-	if _, ok := s.boundLoginFinish(sess, session.StatusApproved, "", result, details); !ok {
-		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not approved", sess.ID)
+	if _, ok := s.boundLoginFinish(sess, decided, "", result, details, docRedaction.BlurBSN); !ok {
+		return proofingprovider.YiviDisclosure{}, fmt.Errorf("proofingengine: accept reference: session %s not decided", sess.ID)
 	}
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+// decideByDocumentPhoto checks the disclosed document doc against the
+// browser's document photo: an error while the photo is not in yet, rejected
+// (sess is decided so) when the scanned document is refused or its holder is
+// not doc's (scannedHolderOf), needs_review when the scan was doubtful or read
+// no holder, else approved. The holder, not the document number, binds the
+// two: the disclosure carries no number, and a holder may photograph another
+// document of theirs than the one in the Yivi app.
+func (s *Server) decideByDocumentPhoto(sess session.Session, fd *flow.FlowDefinition, doc documentInfo, details map[string]any, redactDocument bool) (session.Status, error) {
+	if fd != nil && slices.Contains(fd.Steps, flow.StepDocumentPhoto) && sess.Steps.DocumentPhoto == nil {
+		return "", &proofingprovider.RejectedError{
+			Status: http.StatusConflict, Code: proofingprovider.CodeDocumentPhotoMissing,
+			Message: "the document photo is taken in the browser and has not come in yet",
+		}
+	}
+	scanCode, doubtful := documentPhotoOutcome(sess, "")
+	if p := sess.Steps.DocumentPhoto; scanCode == "" && p != nil && p.Check != nil {
+		switch scannedHolderOf(doc, p.Check.Document) {
+		case holderOther:
+			scanCode = errCodeDocMismatch
+		case holderUnknown:
+			doubtful = true
+		}
+	}
+	switch {
+	case scanCode != "":
+		details[detailReason] = disclosureCodeDocumentRefused
+		s.boundLoginFinish(sess, session.StatusRejected, scanCode, nil, details, redactDocument)
+		return session.StatusRejected, nil
+	case doubtful:
+		details[detailReason] = reasonDocumentDoubtful
+		return session.StatusNeedsReview, nil
+	}
+	return session.StatusApproved, nil
+}
+
+// scannedHolder is whether a document scan read the disclosed holder.
+type scannedHolder int
+
+const (
+	holderSame scannedHolder = iota
+	holderOther
+	holderUnknown
+)
+
+// scannedHolderOf compares the holder of the disclosed document doc with the
+// one the scan read: the same full name (diploma.SameName), and the same date
+// of birth when both carry one. An age check withholds the date on both
+// sides, so the name alone decides there. A scan that read no surname, or a
+// date that does not parse, cannot tell.
+func scannedHolderOf(doc documentInfo, scanned session.ScannedDocument) scannedHolder {
+	if strings.TrimSpace(scanned.Surname) == "" || strings.TrimSpace(doc.LastName) == "" {
+		return holderUnknown
+	}
+	if !diploma.SameName(doc.FirstName+" "+doc.LastName, scanned.GivenNames+" "+scanned.Surname) {
+		return holderOther
+	}
+	if doc.DateOfBirth == "" || scanned.DateOfBirth == "" {
+		return holderSame
+	}
+	disclosed, errDisclosed := diploma.ParseDate(doc.DateOfBirth)
+	read, errRead := diploma.ParseDate(scanned.DateOfBirth)
+	switch {
+	case errDisclosed != nil || errRead != nil:
+		return holderUnknown
+	case !disclosed.Equal(read):
+		return holderOther
+	}
+	return holderSame
 }
 
 // disclosedPhoto is the disclosed photo as the result releases it: only when
@@ -224,9 +308,25 @@ func buildBoundLoginResult(sess session.Session, info disclosureInfo, photo *pho
 	return result
 }
 
+// addDocumentPhoto adds the browser's document photo to result as buildResult
+// releases it: only when asked, with the BSN covered under docRedaction.
+func addDocumentPhoto(result map[string]any, sess session.Session, docRedaction privacy.RedactionPolicy) {
+	p := sess.Steps.DocumentPhoto
+	if p == nil || !attrRequested(sess, attrDocumentImage) {
+		return
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(&p.Front), docRedaction); img != nil {
+		result["documentImage"] = img
+	}
+	if img := releasedDocumentImage(sess, documentImageFromSide(p.Back), docRedaction); img != nil {
+		result["documentImageBack"] = img
+	}
+}
+
 // boundLoginFinish settles sess as to (stepping through opened and
-// in_progress), stores result and error code, and reports it.
-func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any) (session.Session, bool) {
+// in_progress), stores result and error code, and reports it. redactDocument
+// covers the BSN in the stored document photo in the same write.
+func (s *Server) boundLoginFinish(sess session.Session, to session.Status, errorCode string, result map[string]any, details map[string]any, redactDocument bool) (session.Session, bool) {
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if sess.Status.Terminal() {
 			return errSessionComplete
@@ -248,6 +348,9 @@ func (s *Server) boundLoginFinish(sess session.Session, to session.Status, error
 		sess.ErrorCode = errorCode
 		if result != nil {
 			sess.Result = result
+		}
+		if redactDocument {
+			redactStoredDocumentPhoto(sess)
 		}
 		return nil
 	})

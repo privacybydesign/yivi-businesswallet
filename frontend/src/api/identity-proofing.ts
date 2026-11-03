@@ -208,6 +208,9 @@ const proofingFlowSchema = z.object({
   active: z.boolean(),
   name: z.string(),
   steps: z.array(z.string()),
+  // The engine's answer: the page runs every step itself, no app is chosen.
+  // Absent is false.
+  browserOnly: z.boolean().optional(),
   requestedAttributes: z.array(z.string()).optional(),
   ageOver: z.number().optional(),
   // Absent for a version saved before reasons existed.
@@ -263,6 +266,13 @@ const proofingFlowSchema = z.object({
 });
 
 export type ProofingFlow = z.infer<typeof proofingFlowSchema>;
+
+// Whether a session's document photo, taken in the browser by the ID scan,
+// is still to come (pending) or in; absent when the flow takes none.
+const documentScanSchema = z
+  .enum(["pending", "done"])
+  .optional()
+  .catch(undefined);
 
 const proofingRequestSchema = z.object({
   id: z.string(),
@@ -320,6 +330,9 @@ const proofingRequestSchema = z.object({
   employmentMode: employmentModeSchema,
   employment: proofingEmploymentSchema.optional(),
   employmentUntil: z.string().optional(),
+  // Whether the flow's document photo, taken in the browser by the ID scan,
+  // is still to come; absent when the flow takes none.
+  documentScan: documentScanSchema,
   // Why the wallet put the session in review after the identity was
   // approved (no_current_employment, current_benefit,
   // current_other_income); absent otherwise.
@@ -382,8 +395,10 @@ export interface ProofingFlowSelection {
 
 // The app the subject proofs with, and how the session reaches them: mailed
 // (the default) or shown on the sender's screen. A Yivi session runs its face
-// check in the browser showing its QR, so it is on-screen only.
-export type ProofingMethod = "idem_app" | "yivi_app";
+// check in the browser showing its QR, so it is on-screen only. A flow the
+// browser runs alone (browserOnly) takes no app: its method is browser.
+export type ProofingAppMethod = "idem_app" | "yivi_app";
+export type ProofingMethod = ProofingAppMethod | "browser";
 export type ProofingChannel = "email" | "on_screen" | "hosted";
 
 // An external person's request names its flow, or for a data request its
@@ -1169,6 +1184,15 @@ const proofingResultSchema = z.object({
       activeAuth: z.string().optional(),
       faceMatch: z.number().optional(),
       liveness: z.string().optional(),
+      // The document scan's result on a photographed document.
+      documentCheck: z
+        .object({
+          verdict: z.string(),
+          score: z.number().optional(),
+          fields: z.string(),
+          zones: z.string(),
+        })
+        .optional(),
     }),
   ),
   photo: proofingImageSchema.optional(),
@@ -1320,6 +1344,9 @@ export interface ProofingProgress {
   // Until when the subject can upload their Verzekeringsbericht, once
   // approved and while none is kept.
   employmentUntil?: string;
+  // Whether the document photo is still to be taken in the browser; absent
+  // when the flow takes none.
+  documentScan?: "pending" | "done";
 }
 
 export function startProofingYivi(
@@ -1394,6 +1421,42 @@ export function getProofingYiviDisclosure(
   });
 }
 
+// The ID scan page a session's document photo is taken on, which the page
+// embeds.
+const proofingDocumentScanStartSchema = z.object({ url: z.string() });
+
+export type ProofingDocumentScanStart = z.infer<
+  typeof proofingDocumentScanStartSchema
+>;
+
+export function startProofingDocumentScan(
+  target: VerifyTarget,
+  input: { locale: string },
+  signal?: AbortSignal,
+): Promise<ProofingDocumentScanStart> {
+  return request(`${verifyPath(target)}/document-scan/start`, {
+    schema: proofingDocumentScanStartSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+// Hands the finished ID scan the embedded page posted to the backend, which
+// reads its photos and adds them to the session; it answers 204.
+export async function finishProofingDocumentScan(
+  target: VerifyTarget,
+  input: { transactionId: string; resultId: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`${verifyPath(target)}/document-scan/finish`, {
+    schema: z.unknown(),
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
 const hostedLegalRetentionSchema = z.object({
   // How many of the person's sessions the law holds.
   sessions: z.number(),
@@ -1425,6 +1488,9 @@ const hostedProgressSchema = z.object({
   // they cannot, and once one is kept (employmentGiven).
   employmentUntil: z.string().optional(),
   employmentGiven: z.boolean(),
+  // Whether the document photo is still to be taken in the browser; absent
+  // when the flow takes none.
+  documentScan: documentScanSchema,
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1478,6 +1544,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     // Empty for a flow saved without reasons.
     attributeReasons: attributeReasonsSchema,
     yiviAvailable: z.boolean(),
+    // The page runs every step itself: no app is chosen.
+    browserOnly: z.boolean(),
     diplomaMode: diplomaModeSchema,
     addressMode: addressModeSchema,
     employmentMode: employmentModeSchema,

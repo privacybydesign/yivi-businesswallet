@@ -20,6 +20,9 @@ const (
 	// ID-card credential decides the session, with no face check here. The
 	// value keeps its stored name.
 	MethodBiometricBoundLogin Method = "biometric_bound_login"
+	// MethodBrowser is a flow the browser runs alone (FlowDefinition.BrowserOnly):
+	// no app claims it, and its browser steps decide it.
+	MethodBrowser Method = "browser"
 )
 
 // Status is a session's place in its lifecycle; what failed or was read
@@ -198,20 +201,54 @@ type StepTiming struct {
 }
 
 // DocumentPhotoStepEvidence is the document_photo step's evidence: photos of
-// the document's front and back, taken by the app. Back is nil for a
+// the document's front and back, taken in the browser (SubmitDocumentPhoto). Back is nil for a
 // document without one worth taking (a passport's data page).
 type DocumentPhotoStepEvidence struct {
 	Front  DocumentPhotoSide  `json:"front"`
 	Back   *DocumentPhotoSide `json:"back,omitempty"`
 	Timing StepTiming         `json:"timing"`
+	// Check is what the document scan service found; nil when the photos
+	// came without one. AgeOver is an age-check flow's answer from the date
+	// of birth it read, which is then not kept.
+	Check   *DocumentCheck `json:"check,omitempty"`
+	AgeOver *AgeOver       `json:"ageOver,omitempty"`
+}
+
+// DocumentCheck is a document scan service's result on the document photo:
+// its verdict (authentic, doubtful or fake) and score, whether the fields it
+// validated were valid and its zones (MRZ, printed text) read the same (nil
+// when it checked none), and what it read off the document.
+type DocumentCheck struct {
+	Verdict     string          `json:"verdict,omitempty"`
+	Score       *float64        `json:"score,omitempty"`
+	FieldsValid *bool           `json:"fieldsValid,omitempty"`
+	ZonesMatch  *bool           `json:"zonesMatch,omitempty"`
+	Document    ScannedDocument `json:"document"`
+}
+
+// ScannedDocument is what a document scan service read off a document: dates
+// YYYY-MM-DD, states ICAO alpha-3 codes, Kind a flow document kind.
+type ScannedDocument struct {
+	Kind           string `json:"kind,omitempty"`
+	IssuingState   string `json:"issuingState,omitempty"`
+	Nationality    string `json:"nationality,omitempty"`
+	Number         string `json:"number,omitempty"`
+	Surname        string `json:"surname,omitempty"`
+	GivenNames     string `json:"givenNames,omitempty"`
+	DateOfBirth    string `json:"dateOfBirth,omitempty"`
+	DateOfExpiry   string `json:"dateOfExpiry,omitempty"`
+	Sex            string `json:"sex,omitempty"`
+	PersonalNumber string `json:"personalNumber,omitempty"`
 }
 
 // DocumentPhotoSide is one side's photo, plain base64. BSNRegion, when the app
-// found the printed BSN, is where a BlurBSN policy covers it.
+// found the printed BSN, is where a BlurBSN policy covers it; BSNRedacted is
+// the scan service having blacked it out already.
 type DocumentPhotoSide struct {
-	Image     string       `json:"image"`
-	MimeType  string       `json:"mimeType"`
-	BSNRegion *ImageRegion `json:"bsnRegion,omitempty"`
+	Image       string       `json:"image"`
+	MimeType    string       `json:"mimeType"`
+	BSNRegion   *ImageRegion `json:"bsnRegion,omitempty"`
+	BSNRedacted bool         `json:"bsnRedacted,omitempty"`
 }
 
 // ImageRegion is a box in an image, normalised to [0,1] from the top left.

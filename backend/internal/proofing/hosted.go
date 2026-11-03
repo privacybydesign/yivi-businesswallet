@@ -229,9 +229,6 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 		}
 		return Sent{}, ErrSessionOver
 	}
-	if method != proofingprovider.MethodIdem && method != proofingprovider.MethodYivi {
-		return Sent{}, fmt.Errorf("%w: choose the Idem app or the Yivi app", ErrInvalidInput)
-	}
 	settings, err := s.orgSettings.Get(ctx, req.OrganizationID)
 	if err != nil {
 		return Sent{}, err
@@ -243,8 +240,16 @@ func (s *Service) startHosted(ctx context.Context, req Request, method proofingp
 	if !externalCompletable(flow) {
 		return Sent{}, ErrFlowNotCompletable
 	}
-	if method == proofingprovider.MethodYivi && !yiviAppAvailable(flow) {
-		return Sent{}, fmt.Errorf("%w: this flow does not run in the Yivi app", ErrInvalidInput)
+	if method, err = sessionMethod(flow, method); err != nil {
+		return Sent{}, err
+	}
+	// document_scan was fixed at the send: a flow that gained or lost the
+	// photo since has a page that would never ask for it, or never get it.
+	if takesDocumentPhoto(flow) != req.DocumentScan {
+		return Sent{}, ErrFlowNotCompletable
+	}
+	if takesDocumentPhoto(flow) && s.documentScanner == nil {
+		return Sent{}, ErrNoDocumentScanner
 	}
 	// The reference photo was held for this start; a flow that needs one
 	// it lacks (the flow changed since the send) cannot run.

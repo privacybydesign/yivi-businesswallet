@@ -748,17 +748,20 @@ func stepResults(sess session.Session, fd *flow.FlowDefinition) map[string]stepR
 	return out
 }
 
-// currentStep is the first step without a result, "" once the session is no
-// longer active. nil without a flow: "" would tell the Idem app there is
-// nothing left to do.
+// currentStep is the first app step (appSteps) without a result, "" once the
+// session is no longer active. nil without a flow: "" would tell the Idem app
+// there is nothing left to do.
 func currentStep(sess session.Session, fd *flow.FlowDefinition) *string {
 	if fd == nil {
 		return nil
 	}
 	step := ""
 	if sessionLifecycle(sess) == lifecycleActive {
-		if _, remaining := flowStepProgress(sess, fd); len(remaining) > 0 {
-			step = remaining[0]
+		for _, appStep := range appSteps(fd) {
+			if !stepHasEvidence(sess, appStep) {
+				step = string(appStep)
+				break
+			}
 		}
 	}
 	return &step

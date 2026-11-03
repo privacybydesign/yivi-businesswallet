@@ -59,6 +59,7 @@ import {
   mailLifetimeMinutes,
   readsIdentity,
   sendableByMail,
+  documentScanMessage,
   sessionView,
   sendRequestFields,
   verifyStages,
@@ -561,10 +562,16 @@ describe("yiviAppAvailable", () => {
     );
   });
 
-  it("leaves a flow that photographs the document to the Idem app", () => {
+  it("offers a flow that photographs the document, taken in the browser", () => {
     expect(yiviAppAvailable({ steps: ["nfc_read", "document_photo"] })).toBe(
-      false,
+      true,
     );
+  });
+
+  it("offers no app for a flow the browser runs alone", () => {
+    expect(
+      yiviAppAvailable({ steps: ["document_photo"], browserOnly: true }),
+    ).toBe(false);
   });
 
   it("offers an age check the Yivi credentials answer", () => {
@@ -600,6 +607,16 @@ describe("attributeAvailable", () => {
     expect(attributeAvailable(chipOnly, "document_image")).toBe(false);
     const withPhoto = draft({ documentPhoto: true });
     expect(attributeAvailable(withPhoto, "document_image")).toBe(true);
+    // The document photo alone reads the document and answers the age check.
+    const photoOnly = draft({
+      documentAndChip: false,
+      documentPhoto: true,
+      faceVerification: false,
+    });
+    expect(attributeAvailable(photoOnly, "dg1")).toBe(true);
+    expect(attributeAvailable(photoOnly, "age_over")).toBe(true);
+    expect(attributeAvailable(photoOnly, "chip_checks")).toBe(false);
+    expect(attributeAvailable(photoOnly, "dg2")).toBe(false);
     expect(draftSteps(withPhoto)).toEqual([
       "document_capture",
       "document_photo",
@@ -2228,6 +2245,14 @@ describe("app step", () => {
     expect(verifyStages({ diplomas: false })).toContain("method");
   });
 
+  // A flow the browser runs alone has no app to choose.
+  it("leaves the app step out for a flow with no app", () => {
+    expect(verifyStages({ app: false, diplomas: false })).toEqual([
+      "overview",
+      "session",
+    ]);
+  });
+
   it("offers the Yivi app for an age check only at an age it answers", () => {
     const ageCheck = (ageOver: number) =>
       methodChoices(
@@ -2265,6 +2290,17 @@ describe("address step", () => {
       "address",
     );
     expect(currentStage({ ...at, inDiplomas: true })).toBe("diplomas");
+  });
+
+  it("mails only a flow that takes no document photo", () => {
+    expect(sendableByMail({ steps: ["document_capture", "nfc_read"] })).toBe(
+      true,
+    );
+    expect(
+      sendableByMail({
+        steps: ["document_capture", "nfc_read", "document_photo"],
+      }),
+    ).toBe(false);
   });
 
   it("mails only a flow that asks for no address", () => {
@@ -3057,5 +3093,66 @@ describe("latestAddressDecision", () => {
       latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
     ).toBeUndefined();
     expect(latestAddressDecision([])).toBeUndefined();
+  });
+});
+
+describe("document scan message", () => {
+  const scanUrl = "https://idscan.test/s/1";
+  const frame = {};
+  const message = (
+    over: Partial<{ origin: string; source: unknown; data: unknown }>,
+  ) => ({
+    origin: "https://idscan.test",
+    source: frame,
+    data: { transactionId: "t1", state: "completed", resultId: "r1" },
+    ...over,
+  });
+
+  it("reads a completed scan's transaction and result", () => {
+    expect(documentScanMessage(message({}), scanUrl, frame)).toEqual({
+      kind: "finished",
+      transactionId: "t1",
+      resultId: "r1",
+    });
+  });
+
+  it("reads a failed or resultless scan as unfinished", () => {
+    expect(
+      documentScanMessage(
+        message({ data: { transactionId: "t1", state: "failed" } }),
+        scanUrl,
+        frame,
+      ),
+    ).toEqual({ kind: "unfinished" });
+    expect(
+      documentScanMessage(
+        message({ data: { transactionId: "t1", state: "completed" } }),
+        scanUrl,
+        frame,
+      ),
+    ).toEqual({ kind: "unfinished" });
+  });
+
+  it("ignores a message from another origin or window", () => {
+    expect(
+      documentScanMessage(
+        message({ origin: "https://evil.test" }),
+        scanUrl,
+        frame,
+      ),
+    ).toBeUndefined();
+    expect(
+      documentScanMessage(message({ source: {} }), scanUrl, frame),
+    ).toBeUndefined();
+    expect(documentScanMessage(message({}), scanUrl, null)).toBeUndefined();
+  });
+
+  it("ignores a message without a transaction", () => {
+    expect(
+      documentScanMessage(message({ data: "ready" }), scanUrl, frame),
+    ).toBeUndefined();
+    expect(
+      documentScanMessage(message({ data: null }), scanUrl, frame),
+    ).toBeUndefined();
   });
 });
