@@ -89,6 +89,10 @@ func (f *fakeVerifier) StartPresentation(_ context.Context, _ openid4vpverifier.
 	return openid4vpverifier.Session{TransactionID: "verifier-tx", WalletLink: "openid4vp://?request_uri=https%3A%2F%2Fverifier.test"}, nil
 }
 
+func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
+	return f.StartPresentation(ctx, openid4vpverifier.ScopeProofing)
+}
+
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
 	byCredential := map[string]map[string]string{
 		"email": {openid4vpverifier.ClaimEmail: f.email},

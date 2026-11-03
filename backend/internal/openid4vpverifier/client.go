@@ -69,13 +69,23 @@ type startRequest struct {
 // aspect-flag claims are chosen per org - see queryFor); every other scope
 // ignores it.
 func (c *Client) StartPresentation(ctx context.Context, scope Scope, claims ...string) (Session, error) {
+	return c.start(ctx, c.vcts.queryFor(scope, claims))
+}
+
+// StartProofing creates an identity proofing presentation request: any one of
+// req's sources, as StartPresentation.
+func (c *Client) StartProofing(ctx context.Context, req ProofingRequest) (Session, error) {
+	return c.start(ctx, c.vcts.proofingRequestQuery(req))
+}
+
+func (c *Client) start(ctx context.Context, query dcqlQuery) (Session, error) {
 	nonce, err := randomNonce()
 	if err != nil {
 		return Session{}, err
 	}
 	body, err := json.Marshal(startRequest{
 		Type:                    "vp_token",
-		DCQLQuery:               c.vcts.queryFor(scope, claims),
+		DCQLQuery:               query,
 		Nonce:                   nonce,
 		JARMode:                 "by_reference",
 		RequestURIMethod:        requestURIMethodGet,

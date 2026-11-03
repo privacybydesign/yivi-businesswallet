@@ -293,16 +293,13 @@ func discloseYiviAddress(t *testing.T, mode AddressMode, registered map[string]s
 }
 
 func TestYiviAsksRegisteredAddressOnlyWhenAddressAsked(t *testing.T) {
-	for _, tc := range []struct {
-		mode AddressMode
-		want openid4vpverifier.Scope
-	}{{AddressRequired, openid4vpverifier.ScopeProofingAddress}, {AddressOff, openid4vpverifier.ScopeProofing}} {
-		f := discloseYiviAddress(t, tc.mode, brpClaims)
-		if got := f.verifier.scopes[0]; got != tc.want {
-			t.Errorf("address %s: scope = %v, want %v", tc.mode, got, tc.want)
+	for _, mode := range []AddressMode{AddressRequired, AddressOff} {
+		f := discloseYiviAddress(t, mode, brpClaims)
+		if got := f.verifier.requests[0].Address; got != mode.asked() {
+			t.Errorf("address %s: asks the registered address = %v", mode, got)
 		}
-		if kept := f.requests.stored.SubjectAddress != nil; kept != tc.mode.asked() {
-			t.Errorf("address %s: registered address kept as the address = %v", tc.mode, kept)
+		if kept := f.requests.stored.SubjectAddress != nil; kept != mode.asked() {
+			t.Errorf("address %s: registered address kept as the address = %v", mode, kept)
 		}
 	}
 }

@@ -123,7 +123,7 @@ function HostedFlow({
   const { t } = useTranslation();
   const { organization, flow } = page;
   const dataRequest = isDataRequest(flow.kind);
-  const methods = methodChoices(flow.yiviAvailable);
+  const methods = methodChoices(flow.yiviAvailable, flow.idemAvailable);
   const [inAddress, setInAddress] = useState(false);
   const [inDiplomas, setInDiplomas] = useState(false);
   const [inEmployment, setInEmployment] = useState(false);
@@ -318,6 +318,7 @@ function HostedFlow({
               deepLink={started?.deepLink}
               method={method}
               methods={methods}
+              yiviPersonalData={flow.yiviPersonalData}
               onStage={setSessionStage}
               onMethod={setMethod}
               diplomaMode={flow.diplomaMode}

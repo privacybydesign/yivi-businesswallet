@@ -32,6 +32,8 @@ import {
   verifyStages,
   firstMethod,
   yiviAppAvailable,
+  idemAppAvailable,
+  acceptsPersonalData,
 } from "../lib/identity-proofing";
 import { Button, Card, Stepper, TopBar } from "../ui";
 import { BrandMark } from "./proofing-ui";
@@ -166,7 +168,7 @@ function VerifyFlow({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("overview");
-  const methods = methodChoices(yiviAppAvailable(flow));
+  const methods = methodChoices(yiviAppAvailable(flow), idemAppAvailable(flow));
   const browserOnly = flow.browserOnly ?? false;
   // The app Continue will start in, so the stepper is right before it.
   const [method, setMethod] = useState<ProofingMethod>(() =>
@@ -275,6 +277,7 @@ function VerifyFlow({
           deepLinkExpiresAt={sent.deepLinkExpiresAt}
           method={method}
           methods={methods}
+          yiviPersonalData={acceptsPersonalData(flow)}
           onStage={setSessionStage}
           onMethod={setMethod}
           diplomaMode={sent.diplomaMode}

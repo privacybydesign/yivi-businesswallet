@@ -315,6 +315,7 @@ export function Overview({
 // has none (firstMethod).
 export function MethodChoice({
   methods,
+  yiviPersonalData = false,
   picked,
   onChoose,
   onBack,
@@ -322,6 +323,8 @@ export function MethodChoice({
   error,
 }: Readonly<{
   methods: ProofingAppMethod[];
+  // The Yivi app shares the registered personal data, not a document.
+  yiviPersonalData?: boolean;
   // The app last tapped: it shows as starting while the session is created.
   picked: ProofingMethod;
   onChoose: (method: ProofingAppMethod) => void;
@@ -360,9 +363,13 @@ export function MethodChoice({
                   )}
                 </span>
                 <span className="text-ink-soft text-[14px] leading-[21px]">
-                  {t(
-                    `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
-                  )}
+                  {value === "yivi_app" && yiviPersonalData
+                    ? t(
+                        "identityProofing.onScreen.method.yivi.detailPersonalData",
+                      )
+                    : t(
+                        `identityProofing.onScreen.method.${METHOD_KEYS[value]}.detail`,
+                      )}
                 </span>
               </span>
               {busy ? (
@@ -474,6 +481,7 @@ export function Session({
   deepLinkExpiresAt,
   method,
   methods = [],
+  yiviPersonalData = false,
   onStage,
   onMethod,
   onRestart,
@@ -495,9 +503,11 @@ export function Session({
   deepLink?: string;
   deepLinkExpiresAt?: string;
   method: ProofingMethod;
-  // The apps to choose from, first, for a session started with the flow
-  // (method pending).
+  // The apps to choose from once the document photo is in, for a session
+  // started with the flow (method pending).
   methods?: ProofingAppMethod[];
+  // The Yivi app shares the registered personal data (MethodChoice).
+  yiviPersonalData?: boolean;
   // Told where the session stands, for the page's stepper.
   onStage?: (stage: SessionStage) => void;
   // Told the app picked in the session (method pending).
@@ -691,6 +701,7 @@ export function Session({
     return (
       <MethodChoice
         methods={methods}
+        yiviPersonalData={yiviPersonalData}
         picked={picked ?? chosen}
         onChoose={(app) => {
           setPicked(app);

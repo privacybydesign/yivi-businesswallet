@@ -45,6 +45,9 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
 		AgeOver: in.AgeOver,
 	}
+	for _, app := range in.Apps {
+		fd.Apps = append(fd.Apps, flow.App(app))
+	}
 	for _, c := range in.RequiredChecks {
 		fd.RequiredChecks = append(fd.RequiredChecks, flow.Check(c))
 	}
@@ -79,6 +82,9 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
 		AgeOver: fd.AgeOver,
+	}
+	for _, app := range fd.Apps {
+		spec.Apps = append(spec.Apps, string(app))
 	}
 	for _, st := range fd.Steps {
 		spec.Steps = append(spec.Steps, string(st))
@@ -272,10 +278,8 @@ func (s *Server) CreateSession(ctx context.Context, t pp.Tenant, in pp.SessionIn
 	// Scan matches against the photographed document's portrait instead.
 	needsReference := needsReferencePhoto(resolvedFlow)
 	hasReference := in.ReferencePhoto != nil && in.ReferencePhoto.Base64 != ""
-	if method == session.MethodBiometricBoundLogin {
-		if err := yiviFits(resolvedFlow); err != nil {
-			return pp.Session{}, err
-		}
+	if err := methodAllowed(resolvedFlow, method); err != nil {
+		return pp.Session{}, err
 	}
 	switch {
 	case needsReference && !hasReference:
@@ -893,6 +897,23 @@ func yiviFits(fd *flow.FlowDefinition) error {
 	return nil
 }
 
+// methodAllowed refuses an app method fd does not allow (flow.AllowsApp), and
+// the Yivi method on a flow it cannot serve (yiviFits).
+func methodAllowed(fd *flow.FlowDefinition, method session.Method) error {
+	switch method {
+	case session.MethodNFCPassport:
+		if !fd.AllowsApp(flow.AppIdem) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Idem app")
+		}
+	case session.MethodBiometricBoundLogin:
+		if !fd.AllowsApp(flow.AppYivi) {
+			return rejected(http.StatusBadRequest, "this flow does not run in the Yivi app")
+		}
+		return yiviFits(fd)
+	}
+	return nil
+}
+
 var errMethodChosen = errors.New("the session's app is chosen already")
 
 // ChooseMethod sets the app of a session created without one (pp.MethodPending)
@@ -916,10 +937,8 @@ func (s *Server) ChooseMethod(ctx context.Context, t pp.Tenant, id, token string
 	if err != nil {
 		return pp.Session{}, fmt.Errorf("proofingengine: resolve flow: %w", err)
 	}
-	if chosen == session.MethodBiometricBoundLogin {
-		if err := yiviFits(&fd); err != nil {
-			return pp.Session{}, err
-		}
+	if err := methodAllowed(&fd, chosen); err != nil {
+		return pp.Session{}, err
 	}
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := sessionOpenForDevices(*sess); err != nil {

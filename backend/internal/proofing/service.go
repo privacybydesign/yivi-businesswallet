@@ -52,7 +52,7 @@ type Provider interface {
 // verifier is the OpenID4VP verifier a Yivi request's disclosure runs at
 // (implemented by *openid4vpverifier.Client), the one auth uses.
 type verifier interface {
-	StartPresentation(ctx context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error)
+	StartProofing(ctx context.Context, req openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error)
 	Result(ctx context.Context, transactionID string) (openid4vpverifier.Presentation, error)
 }
 
@@ -858,6 +858,9 @@ func (s *Service) planRequest(ctx context.Context, org Org, tenant proofingprovi
 	method, err := sessionMethod(flow, in.Method)
 	if err != nil {
 		return requestPlan{}, err
+	}
+	if method == proofingprovider.MethodYivi && in.Channel == ChannelEmail {
+		return requestPlan{}, fmt.Errorf("%w: this flow runs in the Yivi app only, on this screen or a link, and cannot be e-mailed", ErrInvalidInput)
 	}
 	if subject.BirthDate != "" && !readsIdentity(flow) {
 		return requestPlan{}, fmt.Errorf("%w: this flow does not read the name and date of birth, so it cannot check for one person", ErrInvalidInput)
@@ -2096,15 +2099,17 @@ func (s *Service) StartYivi(ctx context.Context, orgID, id uuid.UUID, requestedB
 }
 
 func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) (YiviStart, error) {
-	claims, err := s.yiviClaims(ctx, req)
+	f, err := s.sessionFlow(ctx, req)
 	if err != nil {
 		return YiviStart{}, err
 	}
-	scope := openid4vpverifier.ScopeProofing
-	if req.Address.asked() {
-		scope = openid4vpverifier.ScopeProofingAddress
+	claims, err := yiviClaims(f)
+	if err != nil {
+		return YiviStart{}, err
 	}
-	started, err := s.verifier.StartPresentation(ctx, scope, claims...)
+	started, err := s.verifier.StartProofing(ctx, openid4vpverifier.ProofingRequest{
+		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(),
+	})
 	if err != nil {
 		return YiviStart{}, err
 	}
@@ -2132,14 +2137,11 @@ func (s *Service) sessionFlow(ctx context.Context, req Request) (proofingprovide
 	return versions[i], nil
 }
 
-// yiviClaims are the claims req's Yivi disclosure asks for besides the
-// identity: the photo when the flow keeps it, and an age check's age claim in
+// yiviClaims are the claims flow f's Yivi disclosure asks for besides the
+// identity: the document's photo when the flow keeps it (personal data has
+// none, so its credential is not asked it), and an age check's age claim in
 // place of the date of birth.
-func (s *Service) yiviClaims(ctx context.Context, req Request) ([]string, error) {
-	f, err := s.sessionFlow(ctx, req)
-	if err != nil {
-		return nil, err
-	}
+func yiviClaims(f proofingprovider.Flow) ([]string, error) {
 	var claims []string
 	if keepsFacePhoto(f) {
 		claims = append(claims, openid4vpverifier.ClaimPhoto)
@@ -2179,9 +2181,9 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 	if err != nil {
 		return proofingprovider.YiviDisclosure{}, err
 	}
-	doc, ok := presentation.Document()
-	if !ok {
-		return proofingprovider.YiviDisclosure{}, errors.New("proofing: the presentation carries no passport, id-card or residence permit")
+	doc, err := disclosedIdentity(presentation)
+	if err != nil {
+		return proofingprovider.YiviDisclosure{}, err
 	}
 	// Kept before the engine decides, so the page never enters an address
 	// before it is there to compare with. The request asks it as required, so
@@ -2220,6 +2222,32 @@ func (s *Service) yiviDisclosure(ctx context.Context, req Request, sess *ipsSess
 		}
 	}
 	return disclosure, nil
+}
+
+// disclosedIdentity is who the presentation discloses, as the engine reads a
+// document credential: the document the person picked, or the registered
+// personal data under the same claim names.
+func disclosedIdentity(p openid4vpverifier.Presentation) (openid4vpverifier.IdentityDocument, error) {
+	if doc, ok := p.Document(); ok {
+		return doc, nil
+	}
+	data, ok := p.PersonalData()
+	if !ok {
+		return data, errors.New("proofing: the presentation carries no identity document or registered personal data")
+	}
+	claims := map[string]string{}
+	for k, v := range data.Claims {
+		switch k {
+		case openid4vpverifier.ClaimPersonalFirstNames, openid4vpverifier.ClaimPersonalPrefix, openid4vpverifier.ClaimPersonalFamilyName:
+		case openid4vpverifier.ClaimPersonalDateOfBirth:
+			claims[openid4vpverifier.ClaimDateOfBirth] = v
+		default:
+			claims[k] = v
+		}
+	}
+	claims[openid4vpverifier.ClaimGivenNames] = data.Claims[openid4vpverifier.ClaimPersonalFirstNames]
+	claims[openid4vpverifier.ClaimFamilyName] = strings.TrimSpace(data.Claims[openid4vpverifier.ClaimPersonalPrefix] + " " + data.Claims[openid4vpverifier.ClaimPersonalFamilyName])
+	return openid4vpverifier.IdentityDocument{Credential: data.Credential, Claims: claims}, nil
 }
 
 // yiviStepError reads the engine no longer knowing the session (purged, or the stub

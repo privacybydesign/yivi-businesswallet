@@ -218,6 +218,8 @@ const proofingFlowSchema = z.object({
   selfieLocation: z.string().optional(),
   // "regula", "engine", or absent for the proofing service's default.
   faceProvider: z.string().optional(),
+  // The apps a session may run in ("idem", "yivi"); absent allows both.
+  apps: z.array(z.string()).optional(),
   acceptedDocumentTypes: z.array(z.string()).optional(),
   acceptedIssuingCountries: z.array(z.string()).optional(),
   requiredChecks: z.array(z.string()).optional(),
@@ -375,6 +377,7 @@ export interface ProofingFlowSpec {
   ageOver?: number;
   attributeReasons?: AttributeReasons;
   faceProvider?: string;
+  apps?: string[];
   acceptedDocumentTypes?: string[];
   acceptedIssuingCountries?: string[];
   requiredChecks?: string[];
@@ -1576,6 +1579,10 @@ const hostedProofingSchema = hostedProgressSchema.extend({
     // Empty for a flow saved without reasons.
     attributeReasons: attributeReasonsSchema,
     yiviAvailable: z.boolean(),
+    // False for a flow locked to the Yivi app.
+    idemAvailable: z.boolean(),
+    // The Yivi app shares the registered personal data, not a document.
+    yiviPersonalData: z.boolean(),
     // The page runs every step itself: no app is chosen.
     browserOnly: z.boolean(),
     diplomaMode: diplomaModeSchema,

@@ -695,18 +695,15 @@ type fakeVerifier struct {
 	started      int
 	presentation *openid4vpverifier.Presentation
 	polled       []string
-	// claims are each start's extra claims, scopes each start's scope.
-	claims [][]string
-	scopes []openid4vpverifier.Scope
+	// claims are each start's extra claims, requests each start.
+	claims   [][]string
+	requests []openid4vpverifier.ProofingRequest
 }
 
-func (f *fakeVerifier) StartPresentation(_ context.Context, scope openid4vpverifier.Scope, claims ...string) (openid4vpverifier.Session, error) {
-	if scope != openid4vpverifier.ScopeProofing && scope != openid4vpverifier.ScopeProofingAddress {
-		return openid4vpverifier.Session{}, errors.New("unexpected scope")
-	}
+func (f *fakeVerifier) StartProofing(_ context.Context, req openid4vpverifier.ProofingRequest) (openid4vpverifier.Session, error) {
 	f.started++
-	f.claims = append(f.claims, claims)
-	f.scopes = append(f.scopes, scope)
+	f.claims = append(f.claims, req.Claims)
+	f.requests = append(f.requests, req)
 	return openid4vpverifier.Session{TransactionID: "tx-" + strconv.Itoa(f.started), WalletLink: "openid4vp://?request_uri=x"}, nil
 }
 

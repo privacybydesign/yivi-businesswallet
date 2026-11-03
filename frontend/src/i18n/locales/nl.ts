@@ -876,6 +876,8 @@ export const nl: Translation<typeof en> = {
           title: "Yivi-app",
           detail:
             "Deel het paspoort, de identiteitskaart of de verblijfsvergunning die al in je Yivi-app staat.",
+          detailPersonalData:
+            "Deel een document of je persoonsgegevens (geladen met DigiD) die deze controle accepteert, uit je Yivi-app.",
         },
         idem: {
           title: "Idem-app",
@@ -1750,6 +1752,15 @@ export const nl: Translation<typeof en> = {
           "Kies een drempel voor de gezichtsvergelijking die het niveau toestaat.",
         retentionSeconds: "Vul een heel aantal seconden in.",
         ageOver: "Vul een heel aantal jaren van 1 tot en met 120 in.",
+        apps: "De Idem-app heeft niets te doen in deze flow: zet het scannen en lezen van het document of de gezichtscontrole in de app aan, of vink de Idem-app uit.",
+        appsNeeded:
+          "Het scannen en lezen van het document en de gezichtscontrole in de app hebben een app nodig: vink de Yivi-app, de Idem-app of beide aan.",
+        personalDataYivi:
+          "Persoonsgegevens komen alleen uit de Yivi-app: vink onder Apps de Yivi-app aan, of vink persoonsgegevens uit.",
+        personalDataDocument:
+          "De Idem-app deelt geen persoonsgegevens maar leest een document: vink ook een documenttype aan, of vink onder Apps de Idem-app uit.",
+        personalDataAge:
+          "Met persoonsgegevens wordt de foto van het document aan de persoon gekoppeld via de geboortedatum, die een leeftijdscheck niet bewaart: zet de leeftijdscheck uit.",
         identity:
           "Een diplomaflow heeft de naam en geboortedatum nodig: zet het scannen van het document aan en vink Naam en documentgegevens aan.",
       },
@@ -1814,6 +1825,20 @@ export const nl: Translation<typeof en> = {
         lifetime: "Geldigheid QR-code",
         lifetimeHint:
           "Daarna verloopt de sessie en is een nieuw verzoek nodig.",
+        apps: "Apps",
+        yiviApp: "Yivi-app",
+        yiviAppHint:
+          "De persoon deelt zijn gegevens uit de Yivi-app, op dit scherm of via een link.",
+        idemApp: "Idem-app",
+        idemAppHint:
+          "De persoon scant zijn paspoort of ID-kaart met de Idem-app en leest de chip uit.",
+        appsBoth:
+          "De persoon kiest een van de twee apps. Wat je ontvangt hangt af van de gekozen app.",
+        appsNone: "Geen app: de ID-scan in de browser is de hele controle.",
+        appsOnly: {
+          yivi: "Deze flow werkt alleen met de Yivi-app: de persoon krijgt dat te zien en geen keuze.",
+          idem: "Deze flow werkt alleen met de Idem-app: de persoon krijgt dat te zien en geen keuze.",
+        },
         lifetimeDefault: "Standaard van de organisatie ({{minutes}} minuten)",
         minutes_one: "{{count}} minuut",
         minutes_other: "{{count}} minuten",
@@ -1826,6 +1851,10 @@ export const nl: Translation<typeof en> = {
         identity_card: "Identiteitskaart",
         residence_permit: "Verblijfsvergunning",
         drivers_license: "Nederlands rijbewijs",
+        personal_data: "Persoonsgegevens (BRP, met DigiD)",
+        personalDataHint:
+          "Werkt alleen in de Yivi-app: naam en geboortedatum uit de BRP, geladen met DigiD. Een foto van het document wordt daarmee vergeleken. Met de Idem-app laat de persoon een van de documenttypes hierboven lezen.",
+        personalDataLock: "Alleen als onder Apps de Yivi-app is aangevinkt.",
         countries: "Landen van uitgifte",
         any: "Elk land",
         only: "Alleen deze landen",

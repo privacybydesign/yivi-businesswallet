@@ -74,7 +74,7 @@ func TestBoundLoginResultReleasesPhotoOnlyWhenKept(t *testing.T) {
 		"kept, not asked": {keepFaces, []string{attrDocument}, false},
 	} {
 		sess := session.Session{RequestedAttributes: tc.requested}
-		result := buildBoundLoginResult(sess, disclosureInfo{}, s.disclosedPhoto(sess, face.ImageBase64, tc.redaction), nil)
+		result := buildBoundLoginResult(sess, disclosureInfo{}, documentInfo{}, s.disclosedPhoto(sess, face.ImageBase64, tc.redaction), nil)
 		if _, got := result["photo"]; got != tc.kept {
 			t.Errorf("%s: photo released = %v, want %v", name, got, tc.kept)
 		}

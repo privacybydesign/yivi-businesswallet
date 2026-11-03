@@ -44,7 +44,12 @@ type FlowSpec struct {
 	// FaceProvider verifies the face step: "regula", "engine", "idscan" (in
 	// the browser, with the document photo), or empty for the engine's
 	// default (Regula when configured).
-	FaceProvider             string             `json:"faceProvider,omitempty"`
+	FaceProvider string `json:"faceProvider,omitempty"`
+	// Apps are the apps a session may run in ("idem", "yivi"); empty allows
+	// every app the flow suits.
+	Apps []string `json:"apps,omitempty"`
+	// AcceptedDocumentTypes may list "personal_data", the registered personal
+	// data the Yivi app shares in place of a document.
 	AcceptedDocumentTypes    []string           `json:"acceptedDocumentTypes,omitempty"`
 	AcceptedIssuingCountries []string           `json:"acceptedIssuingCountries,omitempty"`
 	RequiredChecks           []string           `json:"requiredChecks,omitempty"`

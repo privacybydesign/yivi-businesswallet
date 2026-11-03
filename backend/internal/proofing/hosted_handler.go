@@ -258,6 +258,11 @@ type hostedViewResponse struct {
 		// attribute and language; empty for a flow saved without reasons.
 		AttributeReasons map[string]map[string]string `json:"attributeReasons"`
 		YiviAvailable    bool                         `json:"yiviAvailable"`
+		// IdemAvailable is false for a flow locked to the Yivi app.
+		IdemAvailable bool `json:"idemAvailable"`
+		// YiviPersonalData is a flow whose Yivi app shares the registered
+		// personal data, not a document.
+		YiviPersonalData bool `json:"yiviPersonalData"`
 		// BrowserOnly is a flow the browser runs alone: no app is chosen.
 		BrowserOnly bool `json:"browserOnly"`
 		// DiplomaMode is whether the session asks for DUO diploma extracts.
@@ -385,6 +390,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		out.Flow.AttributeReasons = map[string]map[string]string{}
 	}
 	out.Flow.YiviAvailable = yiviAppAvailable(f)
+	out.Flow.IdemAvailable = idemAppAvailable(f)
+	out.Flow.YiviPersonalData = acceptsPersonalData(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
 	out.Flow.AddressMode = addressModeOf(hosted.Request)

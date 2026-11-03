@@ -323,6 +323,7 @@ const YIVI_EIDAS_LEVEL = "low";
 export function yiviAppAvailable(flow: {
   steps: readonly string[];
   browserOnly?: boolean;
+  apps?: readonly string[];
   selfieLocation?: string;
   requiredAssuranceLevel?: string;
   requestedAttributes?: readonly string[];
@@ -337,11 +338,57 @@ export function yiviAppAvailable(flow: {
     flow.requiredAssuranceLevel === YIVI_EIDAS_LEVEL;
   return (
     !flow.browserOnly &&
+    allowsApp(flow, APP_YIVI) &&
     !needsReferencePhoto &&
     (!(flow.requestedAttributes ?? []).includes(ATTRIBUTE_AGE_OVER) ||
       AGE_OVER_CHOICES.includes(flow.ageOver ?? 0)) &&
     levelMet
   );
+}
+
+// The apps a flow may lock its sessions to (proofing.appIdem, appYivi).
+export const APP_IDEM = "idem";
+export const APP_YIVI = "yivi";
+
+// Whether a flow may run in app: every app when it names none.
+export function allowsApp(
+  flow: { apps?: readonly string[] },
+  app: string,
+): boolean {
+  return !flow.apps?.length || flow.apps.includes(app);
+}
+
+// Whether the Idem app can run a flow (proofing.idemAppAvailable): one with an
+// app step that the flow does not lock to the Yivi app.
+export function idemAppAvailable(flow: {
+  browserOnly?: boolean;
+  apps?: readonly string[];
+}): boolean {
+  return !flow.browserOnly && allowsApp(flow, APP_IDEM);
+}
+
+// The registered personal data (BRP, loaded in the Yivi app with DigiD),
+// accepted next to the documents (flow.DocumentKindPersonalData): the Yivi
+// app offers the person any one of what the flow accepts.
+export const PERSONAL_DATA = "personal_data";
+
+function isPersonalData(type: string): boolean {
+  return type.toLowerCase() === PERSONAL_DATA;
+}
+
+// Whether a draft may accept the personal data: only the Yivi app shares it,
+// so only a flow the Yivi app runs (flow.validateApps). An Idem session reads
+// one of the flow's documents instead.
+export function personalDataAllowed(draft: ProofingFlowDraft): boolean {
+  return draft.yiviApp;
+}
+
+// Whether a flow accepts the registered personal data, which the Yivi app
+// shares (proofing.acceptsPersonalData).
+export function acceptsPersonalData(flow: {
+  acceptedDocumentTypes?: readonly string[];
+}): boolean {
+  return (flow.acceptedDocumentTypes ?? []).some(isPersonalData);
 }
 
 // "" is no requirement.
@@ -359,6 +406,12 @@ export interface ProofingFlowDraft {
   chipAuthentication: boolean;
   liveness: boolean;
   faceProvider: FaceProvider;
+  // The apps a session may run in. Neither is a flow the browser runs alone;
+  // the Idem app's steps (the chip read, the face in the app) need it ticked.
+  idemApp: boolean;
+  yiviApp: boolean;
+  // The registered personal data is accepted, next to documentKinds.
+  personalData: boolean;
   // The face match threshold, 0..1; null sets none, so the deployment's applies.
   faceMatchThreshold: number | null;
   requestedAttributes: ReadonlySet<string>;
@@ -594,6 +647,9 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     chipAuthentication: false,
     liveness: false,
     faceProvider: FACE_PROVIDERS[0],
+    idemApp: true,
+    yiviApp: true,
+    personalData: false,
     faceMatchThreshold: null,
     requestedAttributes: new Set(),
     ageOver: String(DEFAULT_AGE_OVER),
@@ -628,7 +684,12 @@ export type EditableFlow = Omit<ProofingFlow, "allowed" | "default">;
 // its level needs ticked.
 export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
   const checks = new Set(flow.requiredChecks ?? []);
-  const storedTypes = flow.acceptedDocumentTypes ?? [];
+  const storedPersonalData = (flow.acceptedDocumentTypes ?? []).some(
+    isPersonalData,
+  );
+  const storedTypes = (flow.acceptedDocumentTypes ?? []).filter(
+    (type) => !isPersonalData(type),
+  );
   const storedCountries = flow.acceptedIssuingCountries ?? [];
   const draft: ProofingFlowDraft = {
     name: flow.name,
@@ -640,11 +701,24 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     chipAuthentication: checks.has(CHECK_CHIP_AUTH),
     liveness: checks.has(CHECK_LIVENESS),
     faceProvider: oneOf(FACE_PROVIDERS, flow.faceProvider) || FACE_PROVIDERS[0],
+    // A flow naming no app runs in either, or in none when the browser runs
+    // it alone.
+    idemApp: flow.apps?.length
+      ? flow.apps.includes(APP_IDEM)
+      : !flow.browserOnly,
+    yiviApp: flow.apps?.length
+      ? flow.apps.includes(APP_YIVI)
+      : !flow.browserOnly,
+    personalData: storedPersonalData,
     faceMatchThreshold: flow.checkThresholds?.[CHECK_FACE_MATCH] ?? null,
     requestedAttributes: new Set(flow.requestedAttributes ?? []),
     ageOver: String(flow.ageOver ?? DEFAULT_AGE_OVER),
     attributeReasons: flow.attributeReasons ?? {},
-    documentKinds: storedDocumentKinds(storedTypes),
+    // Personal data alone accepts no document from the Yivi app.
+    documentKinds:
+      storedPersonalData && storedTypes.length === 0
+        ? new Set()
+        : storedDocumentKinds(storedTypes),
     otherDocumentTypes: storedTypes.filter(
       (type) => documentKindOf(type) === undefined,
     ),
@@ -677,6 +751,11 @@ export type FlowDraftError =
   | "issuingCountries"
   | "faceMatchThreshold"
   | "ageOver"
+  | "apps"
+  | "appsNeeded"
+  | "personalDataYivi"
+  | "personalDataDocument"
+  | "personalDataAge"
   | "reasons";
 
 // requiresIdentity is identityRequired for the flow's kind and diplomas.
@@ -700,7 +779,11 @@ export function flowDraftError(
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
   }
-  if (draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0) {
+  if (
+    draft.documentKinds.size === 0 &&
+    draft.otherDocumentTypes.length === 0 &&
+    !draft.personalData
+  ) {
     return "documentTypes";
   }
   if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
@@ -719,11 +802,39 @@ export function flowDraftError(
   if (ageOverInvalid(draft)) {
     return "ageOver";
   }
+  if (draft.idemApp && !draftHasAppStep(draft)) {
+    return "apps";
+  }
+  if (!draft.idemApp && !draft.yiviApp && draftHasAppStep(draft)) {
+    return "appsNeeded";
+  }
+  if (draft.personalData && !personalDataAllowed(draft)) {
+    return "personalDataYivi";
+  }
+  // The Idem app accepts any document when the flow lists none.
+  if (
+    draft.personalData &&
+    draft.idemApp &&
+    draft.documentKinds.size === 0 &&
+    draft.otherDocumentTypes.length === 0
+  ) {
+    return "personalDataDocument";
+  }
+  if (draft.personalData && draft.documentPhoto && asksAge(draft)) {
+    return "personalDataAge";
+  }
 
   const unexplained = collectedAttributes(draft).some(
     (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
   );
   return unexplained ? "reasons" : null;
+}
+
+// Whether an app runs a step of draft: the chip read, or the face step
+// outside the document scan (flow.Location). The Idem app has nothing to do
+// without one; the Yivi app takes their place with its disclosure.
+function draftHasAppStep(draft: ProofingFlowDraft): boolean {
+  return draft.documentAndChip || (draft.faceVerification && !scansFace(draft));
 }
 
 // Whether draft's age check asks an age the service refuses
@@ -744,6 +855,22 @@ function ageOverInvalid(draft: ProofingFlowDraft): boolean {
 // one of them. The Yivi app's credentials always have a kind, so it accepts
 // either list.
 function acceptedDocumentTypes(draft: ProofingFlowDraft): string[] {
+  const documents = acceptedDocuments(draft);
+  if (!draft.personalData) {
+    return documents;
+  }
+  // Next to the personal data, an empty list would ask the Yivi app for the
+  // personal data alone: every kind ticked is named, which the engine still
+  // reads as any document.
+  const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
+  const named =
+    documents.length === 0
+      ? [...ticked, ...draft.otherDocumentTypes]
+      : documents;
+  return [...named, PERSONAL_DATA];
+}
+
+function acceptedDocuments(draft: ProofingFlowDraft): string[] {
   const ticked = DOCUMENT_KINDS.filter((kind) => draft.documentKinds.has(kind));
   const stored = draft.storedDocumentTypes;
   if (stored !== null) {
@@ -800,6 +927,11 @@ function applyDraftOverrides(
       ? FACE_PROVIDER_ID_SCAN
       : FACE_PROVIDERS[0];
   }
+  // Both apps, or none for a flow the browser runs alone, name no app.
+  if (draft.idemApp !== draft.yiviApp) {
+    spec.apps = [draft.idemApp ? APP_IDEM : APP_YIVI];
+  }
+
   if (draft.faceVerification && draft.faceMatchThreshold !== null) {
     spec.checkThresholds = { [CHECK_FACE_MATCH]: draft.faceMatchThreshold };
   }
@@ -1192,9 +1324,16 @@ export function verifyStages({
   ];
 }
 
-// The apps a verify page offers: both when the Yivi app can run the flow,
-// else the Idem app alone, which the session then starts in (firstMethod).
-export function methodChoices(yiviAvailable: boolean): ProofingAppMethod[] {
+// The apps a verify page's app step offers: both when the Yivi app can run
+// the flow, else the Idem app alone, or the Yivi app alone for a flow locked
+// to it. The step shows even with one app.
+export function methodChoices(
+  yiviAvailable: boolean,
+  idemAvailable = true,
+): ProofingAppMethod[] {
+  if (!idemAvailable) {
+    return yiviAvailable ? ["yivi_app"] : [];
+  }
   return yiviAvailable ? ["yivi_app", "idem_app"] : ["idem_app"];
 }
 

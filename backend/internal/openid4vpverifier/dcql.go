@@ -13,8 +13,10 @@ type vcts struct {
 	idCard   string
 	// residencePermit carries the same claims as the passport and id-card.
 	residencePermit string
-	email           string
-	phone           string
+	// drivingLicence is asked only when a flow accepts driving licences.
+	drivingLicence string
+	email          string
+	phone          string
 	// vog is the opt-in member-screening credential (#242 §4): a statement by
 	// Stichting Privacy by Design about a VOG PDF it validated at issuance, not a
 	// live Justis statement - the org accepts that trade-off knowingly when it
@@ -24,10 +26,16 @@ type vcts struct {
 	// Nijmegen for anyone in the Netherlands. It exists only in the production
 	// scheme, so it does not follow the configured one.
 	registeredAddress string
+	// personalData is the registered (BRP) personal data, issued by Gemeente
+	// Nijmegen after a DigiD login, like registeredAddress.
+	personalData string
 }
 
 // registeredAddressVCT is registeredAddress's vct in every scheme.
 const registeredAddressVCT = "pbdf.gemeente.address"
+
+// personalDataVCT is personalData's vct in every scheme.
+const personalDataVCT = "pbdf.gemeente.personalData"
 
 func vctsFor(scheme string) vcts {
 	if scheme == "" {
@@ -37,10 +45,12 @@ func vctsFor(scheme string) vcts {
 		passport:          scheme + ".pbdf.passport",
 		idCard:            scheme + ".pbdf.idcard",
 		residencePermit:   scheme + ".pbdf.residencepermit",
+		drivingLicence:    scheme + ".pbdf.drivinglicence",
 		email:             scheme + ".sidn-pbdf.email",
 		phone:             scheme + ".sidn-pbdf.mobilenumber",
 		vog:               scheme + ".pbdf.vog",
 		registeredAddress: registeredAddressVCT,
+		personalData:      personalDataVCT,
 	}
 }
 
@@ -53,10 +63,12 @@ const (
 	credIDPassport        = "passport"
 	credIDIDCard          = "idcard"
 	credIDResidencePermit = "residencepermit"
+	credIDDrivingLicence  = "drivinglicence"
 	credIDEmail           = "email"
 	credIDPhone           = "phone"
 	credIDVog             = "vog"
 	credIDAddress         = "address"
+	credIDPersonalData    = "personaldata"
 )
 
 // DCQL types (OpenID4VP Digital Credentials Query Language).
@@ -132,9 +144,9 @@ func (v vcts) queryFor(scope Scope, claims []string) dcqlQuery {
 	case ScopeIdentityVog:
 		return v.identityVogQuery(claims)
 	case ScopeProofing:
-		return v.proofingQuery(claims)
+		return v.proofingRequestQuery(ProofingRequest{Claims: claims})
 	case ScopeProofingAddress:
-		return v.proofingAddressQuery(claims)
+		return v.proofingRequestQuery(ProofingRequest{Claims: claims, Address: true})
 	default:
 		return v.loginQuery()
 	}
@@ -221,38 +233,74 @@ func isAgeClaim(claim string) bool {
 	return false
 }
 
-// proofingQuery discloses a verified identity (passport, id-card OR residence
-// permit), and nothing else: no email or phone, which proofing a person does not need.
-// extra are further claims of the flow's: the photo (ClaimPhoto), and an age
-// claim (AgeClaim), which replaces the date of birth an age check never
-// receives.
-func (v vcts) proofingQuery(extra []string) dcqlQuery {
-	names := []string{ClaimGivenNames, ClaimFamilyName, ClaimNationality}
-	if !slices.ContainsFunc(extra, isAgeClaim) {
-		names = append(names, ClaimDateOfBirth)
-	}
-	claims := claimPaths(append(names, extra...)...)
-	return dcqlQuery{
-		Credentials: []dcqlCredential{
-			{ID: credIDPassport, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.passport}}, Claims: claims},
-			{ID: credIDIDCard, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.idCard}}, Claims: claims},
-			{ID: credIDResidencePermit, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.residencePermit}}, Claims: claims},
-		},
-		CredentialSets: []dcqlCredentialSet{
-			{Options: [][]string{{credIDPassport}, {credIDIDCard}, {credIDResidencePermit}}},
-		},
-	}
+// Identity sources a proofing request may ask (ProofingRequest.Sources): the
+// document kinds, plus the registered personal data.
+const (
+	SourcePassport        = "passport"
+	SourceIdentityCard    = "identity_card"
+	SourceResidencePermit = "residence_permit"
+	SourceDrivingLicence  = "drivers_license"
+	SourcePersonalData    = "personal_data"
+)
+
+// ProofingRequest is an identity proofing disclosure: any one of Sources, the
+// flow's accepted documents (empty is a passport, id-card or residence
+// permit), with the Claims a flow adds to a document (the photo, an age claim)
+// and, with Address, the registered address as well.
+type ProofingRequest struct {
+	Sources []string
+	Claims  []string
+	Address bool
 }
 
-// proofingAddressQuery is proofingQuery plus the registered address as a
-// required set: the Yivi app has a holder without it get it (issuance during
-// disclosure) before disclosing.
-func (v vcts) proofingAddressQuery(extra []string) dcqlQuery {
-	q := v.proofingQuery(extra)
-	q.Credentials = append(q.Credentials, dcqlCredential{
-		ID: credIDAddress, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.registeredAddress}},
-		Claims: claimPaths(ClaimAddressStreet, ClaimAddressHouseNumber, ClaimAddressPostalCode, ClaimAddressCity),
-	})
-	q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}})
+// defaultProofingSources are what a request naming no source asks.
+var defaultProofingSources = []string{SourcePassport, SourceIdentityCard, SourceResidencePermit}
+
+// proofingRequestQuery offers the holder each of req's sources as an option of
+// one credential set: they share one. A document credential discloses the
+// name, nationality and date of birth (an age claim replaces it) plus req's
+// claims; the personal data its name and date of birth, which ties a
+// photographed document to the person, and an age claim, never a photo.
+func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
+	sources := req.Sources
+	if len(sources) == 0 {
+		sources = defaultProofingSources
+	}
+	names := []string{ClaimGivenNames, ClaimFamilyName, ClaimNationality}
+	if !slices.ContainsFunc(req.Claims, isAgeClaim) {
+		names = append(names, ClaimDateOfBirth)
+	}
+	documentClaims := claimPaths(append(names, req.Claims...)...)
+	personalClaims := claimPaths(append(
+		[]string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth},
+		slices.DeleteFunc(slices.Clone(req.Claims), func(c string) bool { return c == ClaimPhoto })...)...)
+
+	var q dcqlQuery
+	var options [][]string
+	add := func(id, vct string, claims []dcqlClaim) {
+		q.Credentials = append(q.Credentials, dcqlCredential{ID: id, Format: formatSDJWT, Meta: dcqlMeta{[]string{vct}}, Claims: claims})
+		options = append(options, []string{id})
+	}
+	for _, c := range [...]struct{ source, id, vct string }{
+		{SourcePassport, credIDPassport, v.passport},
+		{SourceIdentityCard, credIDIDCard, v.idCard},
+		{SourceResidencePermit, credIDResidencePermit, v.residencePermit},
+		{SourceDrivingLicence, credIDDrivingLicence, v.drivingLicence},
+	} {
+		if slices.Contains(sources, c.source) {
+			add(c.id, c.vct, documentClaims)
+		}
+	}
+	if slices.Contains(sources, SourcePersonalData) {
+		add(credIDPersonalData, v.personalData, personalClaims)
+	}
+	q.CredentialSets = []dcqlCredentialSet{{Options: options}}
+	if req.Address {
+		q.Credentials = append(q.Credentials, dcqlCredential{
+			ID: credIDAddress, Format: formatSDJWT, Meta: dcqlMeta{[]string{v.registeredAddress}},
+			Claims: claimPaths(ClaimAddressStreet, ClaimAddressHouseNumber, ClaimAddressPostalCode, ClaimAddressCity),
+		})
+		q.CredentialSets = append(q.CredentialSets, dcqlCredentialSet{Options: [][]string{{credIDAddress}}})
+	}
 	return q
 }

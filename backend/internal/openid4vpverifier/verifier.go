@@ -40,6 +40,12 @@ const (
 	ClaimAddressPostalCode  = "zipcode"
 	ClaimAddressCity        = "city"
 
+	// pbdf.gemeente.personalData claim keys (SourcePersonalData).
+	ClaimPersonalFirstNames  = "firstnames"
+	ClaimPersonalPrefix      = "prefix"
+	ClaimPersonalFamilyName  = "familyname"
+	ClaimPersonalDateOfBirth = "dateofbirth"
+
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because
 	// they come from a different credential's own attribute names.
@@ -124,7 +130,9 @@ func (p Presentation) Document() (IdentityDocument, bool) {
 	if v == (vcts{}) {
 		v = vctsFor(defaultCredentialScheme)
 	}
-	for _, c := range [...]struct{ id, vct string }{{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}} {
+	for _, c := range [...]struct{ id, vct string }{
+		{credIDPassport, v.passport}, {credIDIDCard, v.idCard}, {credIDResidencePermit, v.residencePermit}, {credIDDrivingLicence, v.drivingLicence},
+	} {
 		if claims, ok := p.ByCredential[c.id]; ok {
 			return IdentityDocument{Credential: c.vct, Claims: claims}, true
 		}
@@ -137,6 +145,16 @@ func (p Presentation) Document() (IdentityDocument, bool) {
 func (p Presentation) RegisteredAddress() (map[string]string, bool) {
 	claims, ok := p.ByCredential[credIDAddress]
 	return claims, ok
+}
+
+// PersonalData returns the registered personal data (SourcePersonalData) as an
+// IdentityDocument, though it is none; false when the wallet left it out.
+func (p Presentation) PersonalData() (IdentityDocument, bool) {
+	claims, ok := p.ByCredential[credIDPersonalData]
+	if !ok {
+		return IdentityDocument{}, false
+	}
+	return IdentityDocument{Credential: personalDataVCT, Claims: claims}, true
 }
 
 // VogClaims returns the pbdf.vog credential's disclosed claims; see IdentityClaims.
