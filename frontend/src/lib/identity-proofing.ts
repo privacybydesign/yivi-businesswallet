@@ -785,15 +785,8 @@ export function flowDraftError(
   if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
     return "issuingCountries";
   }
-  if (draft.faceVerification && draft.faceMatchThreshold !== null) {
-    const value = draft.faceMatchThreshold;
-    if (
-      !Number.isFinite(value) ||
-      value < faceMatchFloor(draft.assuranceLevel) ||
-      value > FACE_MATCH_MAX
-    ) {
-      return "faceMatchThreshold";
-    }
+  if (faceMatchThresholdInvalid(draft)) {
+    return "faceMatchThreshold";
   }
   if (ageOverInvalid(draft)) {
     return "ageOver";
@@ -807,6 +800,18 @@ export function flowDraftError(
     (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
   );
   return unexplained ? "reasons" : null;
+}
+
+// Whether draft sets a face match threshold outside what its level allows.
+function faceMatchThresholdInvalid(draft: ProofingFlowDraft): boolean {
+  const value = draft.faceMatchThreshold;
+  return (
+    draft.faceVerification &&
+    value !== null &&
+    (!Number.isFinite(value) ||
+      value < faceMatchFloor(draft.assuranceLevel) ||
+      value > FACE_MATCH_MAX)
+  );
 }
 
 // What is wrong with draft's apps, or with the personal data they share.
