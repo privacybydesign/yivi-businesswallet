@@ -21,7 +21,9 @@ listed), the **Webhook endpoint** and its **Recent deliveries**). The **All peop
 same table narrowed to that flow by the backend (`?flowId=`), as is All people
 when its Flow filter picks one, whose retention line then states that flow's
 retention. A count read from a list of 200, the cap, may be short, so it shows
-as "200+" ("12+" for a part of it). "Verify a person" in the
+as "200+" ("12+" for a part of it). The table draws 50 rows a page (`lib/paging.ts`,
+`ui/pager.tsx`): drawing all 200 made it take seconds to open. It opens on the page
+holding `?session=`; a filter goes back to the first page. "Verify a person" in the
 header of the Overview, of All people and of a flow opens the send form, for any member. From a
 flow the dialog sends on that flow; from the Overview or All people it asks first what to send
 (for an admin: an identity check, See my data or Delete my data, §15) and, for an identity

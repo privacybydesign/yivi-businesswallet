@@ -1,6 +1,7 @@
 export { Icon } from "./icon";
 export type { IconName } from "./icon";
 export { Button } from "./button";
+export { Pager } from "./pager";
 export { Card } from "./card";
 export { Tag } from "./tag";
 export { StatusText } from "./status-text";
