@@ -1970,7 +1970,11 @@ func (s *Service) RequestIf(ctx context.Context, orgID, id uuid.UUID, allow func
 	if !allow(req) {
 		return Request{}, ErrRequestNotFound
 	}
-	return s.readReconciled(ctx, req)
+	if req, err = s.readReconciled(ctx, req); err != nil {
+		return Request{}, err
+	}
+	// The on-screen page polls through here, so it reads as Request does.
+	return s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req))
 }
 
 // readReconciled re-checks a request that may have moved on in the engine, at most
