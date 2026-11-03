@@ -77,7 +77,7 @@ export default function Dashboard(): React.JSX.Element {
               isAdmin={isAdmin}
               canReview={shows.decisions}
             />
-            <DashboardWaiting slug={slug} canReview={canReview} />
+            <DashboardWaiting slug={slug} />
           </>
         )}
         {shows.orgDetails && (

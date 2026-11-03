@@ -1,10 +1,5 @@
 import { useEffect } from "react";
-import {
-  useMutation,
-  useQueries,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { followReviewEvents } from "./review-events";
@@ -17,6 +12,7 @@ import {
   getProofingSettings,
   getProofingFlowVersions,
   getProofingFlows,
+  getProofingOverview,
   getProofingRequests,
   getProofingStats,
   setProofingFlowSelection,
@@ -108,7 +104,7 @@ import type {
   EmploymentMode,
   EmploymentVerdict,
   ProofingDataMatch,
-  ListedStatus,
+  ProofingOverview,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -428,68 +424,19 @@ export function useExternalRequestsQuery(
   });
 }
 
-function externalInKey(slug: string, status: ListedStatus): readonly string[] {
-  return [...proofingRequestsQueryKey(slug), "external", status];
-}
-
-// The external requests that read in each of the given statuses, one read
-// per status, so the backend's cap counts each on its own: what the to-do
-// lists are built from. While one of them still runs, they are all re-read
-// together, so a check that ends leaves one list for another in one go.
-export function useExternalRequestsInQuery(
+// Under the requests key, so whatever refreshes the org's requests refreshes it.
+export function useProofingOverviewQuery(
   slug: string,
-  statuses: readonly ListedStatus[],
-): StatusReads {
-  const queryClient = useQueryClient();
-  const running = (): boolean =>
-    statuses.some((status) =>
-      queryClient
-        .getQueryData<ProofingRequest[]>(externalInKey(slug, status))
-        ?.some((r) => isProofingLive(r.status)),
-    );
-  return useQueries({
-    queries: statuses.map((status) => ({
-      queryKey: externalInKey(slug, status),
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        getProofingRequests(slug, { subjectKind: "external", status }, signal),
-      enabled: slug !== "",
-      refetchInterval: () => (running() ? REQUESTS_POLL_INTERVAL_MS : false),
-    })),
-    combine: (results) => combineStatusReads(statuses, results),
+): UseQueryResult<ProofingOverview, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "overview"],
+    queryFn: ({ signal }) => getProofingOverview(slug, signal),
+    enabled: slug !== "",
+    refetchInterval: (query) =>
+      (query.state.data?.unfinished ?? 0) > 0
+        ? REQUESTS_POLL_INTERVAL_MS
+        : false,
   });
-}
-
-interface StatusReads {
-  // Every status's requests, once all landed.
-  data: ProofingRequest[] | undefined;
-  // The statuses whose read hit the backend's cap: more of them may exist
-  // than were read.
-  capped: readonly ListedStatus[];
-  isPending: boolean;
-  isError: boolean;
-  error: Error | null;
-}
-
-// The reads of statuses, in that order, as one list once every one landed,
-// pending while any is and failed when any did.
-export function combineStatusReads(
-  statuses: readonly ListedStatus[],
-  results: readonly Pick<
-    UseQueryResult<ProofingRequest[], Error>,
-    "data" | "isPending" | "isError" | "error"
-  >[],
-): StatusReads {
-  return {
-    data: results.every((r) => r.data !== undefined)
-      ? results.flatMap((r) => r.data ?? [])
-      : undefined,
-    capped: statuses.filter((_, i) =>
-      requestListCapped(results[i]?.data ?? []),
-    ),
-    isPending: results.some((r) => r.isPending),
-    isError: results.some((r) => r.isError),
-    error: results.find((r) => r.error)?.error ?? null,
-  };
 }
 
 // The requests sent to one member, newest first. Under the requests key, so

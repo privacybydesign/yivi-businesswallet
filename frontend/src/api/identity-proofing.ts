@@ -930,6 +930,26 @@ export function getProofingRequests(
   });
 }
 
+// The overview's lists in one read, counted and cut by the backend.
+const proofingOverviewSchema = z.object({
+  unfinished: z.number().int(),
+  held: z.number().int(),
+  waiting: z.array(proofingRequestSchema),
+  finished: z.array(proofingRequestSchema),
+});
+
+export type ProofingOverview = z.infer<typeof proofingOverviewSchema>;
+
+export function getProofingOverview(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingOverview> {
+  return request(`${base(slug)}/overview`, {
+    schema: proofingOverviewSchema,
+    signal,
+  });
+}
+
 // The stream that tells a reviewer's page when the org's reviews change: a
 // Server-Sent Events URL, for an EventSource.
 export function reviewEventsUrl(slug: string): string {

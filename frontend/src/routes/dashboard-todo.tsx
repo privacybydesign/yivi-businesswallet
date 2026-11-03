@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMemberInsightsQuery } from "../api/organization.queries";
 import {
-  useExternalRequestsInQuery,
+  useProofingOverviewQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import { accessMessage } from "../lib/access-message";
@@ -13,18 +13,7 @@ import {
   notIdentifiedCount,
   screeningAttentionCount,
 } from "../lib/member-insights";
-import {
-  inReviewOldestFirst,
-  reviewPath,
-  waitingOldestFirst,
-} from "../lib/proofing-reviews";
-import {
-  HELD_STATUSES,
-  UNFINISHED_STATUSES,
-  cappedAmong,
-  todoStatuses,
-  unfinishedChecks,
-} from "../lib/proofing-todo";
+import { reviewPath, waitingOldestFirst } from "../lib/proofing-reviews";
 import { TaskEmpty, TaskRow, TaskSection } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 
@@ -164,31 +153,21 @@ export function DashboardTodo({
 // member who cannot decide, their own checks held for an admin.
 export function DashboardWaiting({
   slug,
-  canReview,
 }: Readonly<{
   slug: string;
-  canReview: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const requests = useExternalRequestsInQuery(
-    slug,
-    todoStatuses({ canReview, finished: false }),
-  );
-  const all = requests.data ?? [];
+  const requests = useProofingOverviewQuery(slug);
   const items: Item[] = [];
   const overview = `/${slug}/identity-proofing`;
 
-  const unfinished = unfinishedChecks(all).length;
+  const unfinished = requests.data?.unfinished ?? 0;
   if (unfinished > 0) {
     items.push({
       key: "unfinished",
       title: t("dashboard.waiting.unfinished", {
         count: unfinished,
-        number: listedCount(
-          unfinished,
-          cappedAmong(requests.capped, UNFINISHED_STATUSES),
-          t,
-        ),
+        number: String(unfinished),
       }),
       detail: t("dashboard.waiting.unfinishedDetail"),
       to: overview,
@@ -196,17 +175,14 @@ export function DashboardWaiting({
     });
   }
 
-  const forAdmin = canReview ? 0 : inReviewOldestFirst(all).length;
+  // Held for an admin: only a reader who cannot decide has any.
+  const forAdmin = requests.data?.held ?? 0;
   if (forAdmin > 0) {
     items.push({
       key: "forAdmin",
       title: t("dashboard.waiting.forAdmin", {
         count: forAdmin,
-        number: listedCount(
-          forAdmin,
-          cappedAmong(requests.capped, HELD_STATUSES),
-          t,
-        ),
+        number: String(forAdmin),
       }),
       detail: t("dashboard.waiting.forAdminDetail"),
       to: overview,

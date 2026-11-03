@@ -5593,6 +5593,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/overview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: The identity proofing overview
+      description: >-
+        Requires organisation membership. The external requests the overview and the dashboard
+        list, in one read: an administrator's of the whole organisation, a member's of the
+        requests they sent. Statuses are read as `status` reads (a lapsed link is `expired`).
+        The counts are exact; each list holds at most its first 5 rows.
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unfinished, held, waiting, finished]
+                properties:
+                  unfinished:
+                    type: integer
+                    description: The requests the person has not finished (`pending`, `in_progress`).
+                  held:
+                    type: integer
+                    description: >-
+                      For a caller who cannot decide them, their requests in review; 0 for one who
+                      can, who finds them on the Reviews page.
+                  waiting:
+                    description: >-
+                      The requests `held` counts, the longest in review first, then the unfinished
+                      ones, the longest waiting first.
+                    allOf:
+                      - $ref: '#/components/schemas/ProofingRequestList'
+                  finished:
+                    description: >-
+                      The requests that ended in a result (`approved`, `rejected`, `expired`),
+                      the latest first.
+                    allOf:
+                      - $ref: '#/components/schemas/ProofingRequestList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '409':
+          description: The deployment has no identity proofing encryption key (`no_encryption_key`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/requests:
     parameters:
       - name: slug

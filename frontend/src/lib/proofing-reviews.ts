@@ -97,16 +97,6 @@ export function waitingOldestFirst(
     .sort((a, b) => sinceMillis(a) - sinceMillis(b));
 }
 
-// The checks in review, the longest first: what waits without its address.
-// An approved check whose address waits is finished for its sender.
-export function inReviewOldestFirst(
-  requests: readonly ProofingRequest[],
-): ProofingRequest[] {
-  return requests
-    .filter(isInReview)
-    .sort((a, b) => sinceMillis(a) - sinceMillis(b));
-}
-
 interface ReviewCounts {
   all: number;
   checks: number;

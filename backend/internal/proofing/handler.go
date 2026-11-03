@@ -123,6 +123,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/flow-selection", admin(respond.HandlerFunc(h.configureFlows)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/data-request-flows", admin(respond.HandlerFunc(h.listDataRequestFlows)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.listRequests)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/overview", member(respond.HandlerFunc(h.overview)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests", member(respond.HandlerFunc(h.createRequest)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/stats", member(respond.HandlerFunc(h.stats)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/reviews/events", reviewer(respond.HandlerFunc(h.reviewEvents)))
@@ -459,21 +460,30 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapError(err)
 	}
+	out, err := h.listedResponses(r.Context(), reqs)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
+// listedResponses is reqs as a list shows them, each with its diplomas.
+func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]requestResponse, error) {
 	ids := make([]uuid.UUID, 0, len(reqs))
 	for _, req := range reqs {
 		ids = append(ids, req.ID)
 	}
-	diplomas, err := h.service.RequestDiplomas(r.Context(), ids)
+	diplomas, err := h.service.RequestDiplomas(ctx, ids)
 	if err != nil {
-		return mapError(err)
+		return nil, mapError(err)
 	}
 	now := time.Now()
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, requestResponseFor(r.Context(), req, diplomas[req.ID], now))
+		out = append(out, requestResponseFor(ctx, req, diplomas[req.ID], now))
 	}
-	respond.JSON(w, r, http.StatusOK, out)
-	return nil
+	return out, nil
 }
 
 // requestResponseFor is req's response as the caller sees it: a member who

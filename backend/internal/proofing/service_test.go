@@ -157,6 +157,10 @@ func (f *fakeRequests) List(context.Context, uuid.UUID, RequestFilter) ([]Reques
 	return []Request{*f.stored}, nil
 }
 
+func (f *fakeRequests) Overview(context.Context, uuid.UUID, OverviewScope) (Overview, error) {
+	return Overview{}, nil
+}
+
 func (f *fakeRequests) ExtendSession(_ context.Context, _ Request, _ string, expiresAt time.Time) error {
 	if f.stored.session != nil && expiresAt.After(f.stored.session.ExpiresAt) {
 		f.stored.session.ExpiresAt = expiresAt

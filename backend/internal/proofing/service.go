@@ -67,6 +67,7 @@ type requestStore interface {
 	Create(ctx context.Context, in NewStoredRequest) (Request, error)
 	AttachSession(ctx context.Context, req Request, sess proofingprovider.Session) (bool, error)
 	List(ctx context.Context, orgID uuid.UUID, filter RequestFilter) ([]Request, error)
+	Overview(ctx context.Context, orgID uuid.UUID, scope OverviewScope) (Overview, error)
 	MarkStarted(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	ExtendSession(ctx context.Context, req Request, sessionID string, expiresAt time.Time) error
 	EndSession(ctx context.Context, req Request, sessionID string, ipsStatus proofingprovider.Status, method proofingprovider.Method) error
