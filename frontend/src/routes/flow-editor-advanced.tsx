@@ -563,6 +563,20 @@ function ReceiveSection({
   );
 }
 
+// The hint under the apps: both, one, or none ticked.
+function appsHintKey(draft: ProofingFlowDraft) {
+  if (draft.idemApp && draft.yiviApp) {
+    return "identityProofingFlows.editor.steps.appsBoth";
+  }
+  if (draft.idemApp) {
+    return "identityProofingFlows.editor.steps.appsOnly.idem";
+  }
+  if (draft.yiviApp) {
+    return "identityProofingFlows.editor.steps.appsOnly.yivi";
+  }
+  return "identityProofingFlows.editor.steps.appsNone";
+}
+
 // Which apps the flow's sessions run in, after what happens: both apps can
 // do every step, each in its own way.
 function AppsChoice({
@@ -575,8 +589,6 @@ function AppsChoice({
   error: FlowDraftError | null;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const only =
-    draft.idemApp === draft.yiviApp ? null : draft.idemApp ? "idem" : "yivi";
 
   return (
     <fieldset className="flex flex-col gap-4">
@@ -602,19 +614,9 @@ function AppsChoice({
         checked={draft.idemApp}
         label={t("identityProofingFlows.editor.steps.idemApp")}
         hint={t("identityProofingFlows.editor.steps.idemAppHint")}
-        onChange={() =>
-          update(draft.idemApp ? { idemApp: false } : { idemApp: true })
-        }
+        onChange={() => update({ idemApp: !draft.idemApp })}
       />
-      <span className={HINT}>
-        {only === null
-          ? t(
-              draft.idemApp
-                ? "identityProofingFlows.editor.steps.appsBoth"
-                : "identityProofingFlows.editor.steps.appsNone",
-            )
-          : t(`identityProofingFlows.editor.steps.appsOnly.${only}`)}
-      </span>
+      <span className={HINT}>{t(appsHintKey(draft))}</span>
       {(error === "apps" || error === "appsNeeded") && (
         <p role="alert" className={ERROR}>
           {t(`identityProofingFlows.new.errors.${error}`)}

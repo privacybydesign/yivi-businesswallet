@@ -89,50 +89,57 @@ func TestYiviOnlyFlowRefusesOtherMethods(t *testing.T) {
 // date of birth and surname: another date rejects, another surname goes to a
 // reviewer, and the document in the result is the photographed one.
 func TestPersonalDataDisclosure(t *testing.T) {
-	for name, tc := range map[string]struct {
-		lastName, born string
-		status         session.Status
-		errorCode      string
-	}{
+	for name, tc := range map[string]personalDataCase{
 		"same person":        {"Jansen", "10-03-1990", session.StatusApproved, ""},
 		"prefix and accents": {"Jánsen", "1990-03-10", session.StatusApproved, ""},
 		"another surname":    {"de Vries", "10-03-1990", session.StatusNeedsReview, ""},
 		"another birth date": {"Jansen", "11-03-1990", session.StatusRejected, errCodeDocMismatch},
 		"no birth date":      {"Jansen", "", session.StatusRejected, errCodeDocMismatch},
 	} {
-		t.Run(name, func(t *testing.T) {
-			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
-			sess := session.Session{
-				ID: "ps_brp", TenantID: "org", Token: "tok-brp", Status: session.StatusCreated,
-				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
-				RequestedAttributes: personalDataFlow.RequestedAttributes,
-			}
-			s, store := documentPhotoServer(sess, personalDataFlow)
-			face := pp.FaceCheck{LivenessPassed: true, MatchScore: new(0.95), Selfie: &pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}}
-			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
-				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(), Face: &face,
-			}); err != nil {
-				t.Fatalf("SubmitDocumentPhoto = %v", err)
-			}
-			attributes := map[string]string{"firstName": "Anna", "lastName": tc.lastName}
-			if tc.born != "" {
-				attributes["dateOfBirth"] = tc.born
-			}
-			if _, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, pp.Reference{Credential: "pbdf.gemeente.personalData", Attributes: attributes}); err != nil {
-				t.Fatalf("SubmitReference = %v", err)
-			}
-			decided, _ := store.Get("org", sess.ID)
-			if decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
-				t.Fatalf("status %q, error %q; want %q, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
-			}
-			if tc.status == session.StatusRejected {
-				return
-			}
-			doc, ok := decided.Result["document"].(documentInfo)
-			if !ok || doc.Number != scannedNumber || doc.Kind != pp.DocumentKindPassport {
-				t.Errorf("document %+v, want the photographed passport", decided.Result["document"])
-			}
-		})
+		t.Run(name, func(t *testing.T) { checkPersonalDataDisclosure(t, tc) })
+	}
+}
+
+type personalDataCase struct {
+	lastName, born string
+	status         session.Status
+	errorCode      string
+}
+
+// checkPersonalDataDisclosure photographs the passport, discloses tc's
+// personal data, and checks the session's decision.
+func checkPersonalDataDisclosure(t *testing.T, tc personalDataCase) {
+	t.Helper()
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := session.Session{
+		ID: "ps_brp", TenantID: "org", Token: "tok-brp", Status: session.StatusCreated,
+		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+		RequestedAttributes: personalDataFlow.RequestedAttributes,
+	}
+	s, store := documentPhotoServer(sess, personalDataFlow)
+	face := pp.FaceCheck{LivenessPassed: true, MatchScore: new(0.95), Selfie: &pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(), Face: &face,
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	attributes := map[string]string{"firstName": "Anna", "lastName": tc.lastName}
+	if tc.born != "" {
+		attributes["dateOfBirth"] = tc.born
+	}
+	if _, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, pp.Reference{Credential: "pbdf.gemeente.personalData", Attributes: attributes}); err != nil {
+		t.Fatalf("SubmitReference = %v", err)
+	}
+	decided, _ := store.Get("org", sess.ID)
+	if decided.Status != tc.status || decided.ErrorCode != tc.errorCode {
+		t.Fatalf("status %q, error %q; want %q, %q", decided.Status, decided.ErrorCode, tc.status, tc.errorCode)
+	}
+	if tc.status == session.StatusRejected {
+		return
+	}
+	doc, ok := decided.Result["document"].(documentInfo)
+	if !ok || doc.Number != scannedNumber || doc.Kind != pp.DocumentKindPassport {
+		t.Errorf("document %+v, want the photographed passport", decided.Result["document"])
 	}
 }
 

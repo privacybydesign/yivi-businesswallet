@@ -779,11 +779,7 @@ export function flowDraftError(
   if (!reachesAssuranceLevel(draft)) {
     return "assuranceLevel";
   }
-  if (
-    draft.documentKinds.size === 0 &&
-    draft.otherDocumentTypes.length === 0 &&
-    !draft.personalData
-  ) {
+  if (listsNoDocument(draft) && !draft.personalData) {
     return "documentTypes";
   }
   if (draft.countryScope === "only" && draft.issuingCountries.length === 0) {
@@ -802,32 +798,42 @@ export function flowDraftError(
   if (ageOverInvalid(draft)) {
     return "ageOver";
   }
-  if (draft.idemApp && !draftHasAppStep(draft)) {
-    return "apps";
-  }
-  if (!draft.idemApp && !draft.yiviApp && draftHasAppStep(draft)) {
-    return "appsNeeded";
-  }
-  if (draft.personalData && !personalDataAllowed(draft)) {
-    return "personalDataYivi";
-  }
-  // The Idem app accepts any document when the flow lists none.
-  if (
-    draft.personalData &&
-    draft.idemApp &&
-    draft.documentKinds.size === 0 &&
-    draft.otherDocumentTypes.length === 0
-  ) {
-    return "personalDataDocument";
-  }
-  if (draft.personalData && draft.documentPhoto && asksAge(draft)) {
-    return "personalDataAge";
+  const apps = appsDraftError(draft);
+  if (apps) {
+    return apps;
   }
 
   const unexplained = collectedAttributes(draft).some(
     (attribute) => missingReasonLocales(draft, attribute, locales).length > 0,
   );
   return unexplained ? "reasons" : null;
+}
+
+// What is wrong with draft's apps, or with the personal data they share.
+function appsDraftError(draft: ProofingFlowDraft): FlowDraftError | null {
+  if (draft.idemApp && !draftHasAppStep(draft)) {
+    return "apps";
+  }
+  if (!draft.idemApp && !draft.yiviApp && draftHasAppStep(draft)) {
+    return "appsNeeded";
+  }
+  if (!draft.personalData) {
+    return null;
+  }
+  if (!personalDataAllowed(draft)) {
+    return "personalDataYivi";
+  }
+  // The Idem app accepts any document when the flow lists none.
+  if (draft.idemApp && listsNoDocument(draft)) {
+    return "personalDataDocument";
+  }
+  return draft.documentPhoto && asksAge(draft) ? "personalDataAge" : null;
+}
+
+function listsNoDocument(draft: ProofingFlowDraft): boolean {
+  return (
+    draft.documentKinds.size === 0 && draft.otherDocumentTypes.length === 0
+  );
 }
 
 // Whether an app runs a step of draft: the chip read, or the face step

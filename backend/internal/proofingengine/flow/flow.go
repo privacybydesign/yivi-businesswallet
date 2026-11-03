@@ -740,7 +740,7 @@ func validate(fd FlowDefinition) error {
 }
 
 // validateApps refuses an unknown or repeated app, personal data a flow's
-// apps cannot take, and a flow locked to the Idem app that leaves the app no
+// apps cannot take (validatePersonalData), and a flow locked to the Idem app that leaves the app no
 // step.
 func validateApps(fd FlowDefinition, seenSteps map[Step]bool) error {
 	seen := map[App]bool{}
@@ -753,22 +753,31 @@ func validateApps(fd FlowDefinition, seenSteps map[Step]bool) error {
 		}
 		seen[app] = true
 	}
-	if fd.AcceptsPersonalData() {
-		if !fd.AllowsApp(AppYivi) || fd.BrowserOnly() {
-			return errors.New("flow: personal_data is shared by the Yivi app alone: let the flow run in the Yivi app")
-		}
-		// The Idem app reads a document, and accepts any when none is listed.
-		if fd.AllowsApp(AppIdem) && len(fd.acceptedDocuments()) == 0 {
-			return errors.New("flow: personal_data next to the Idem app needs a document type too: the Idem app reads a document and shares no personal data")
-		}
-		// The scan's date of birth ties it to the person, and an age check keeps none.
-		if seenSteps[StepDocumentPhoto] && fd.AgeOver != 0 {
-			return errors.New("flow: personal_data with document_photo cannot check an age: the photographed document is tied to the person by its date of birth, which an age check does not keep")
-		}
+	if err := validatePersonalData(fd, seenSteps); err != nil {
+		return err
 	}
 	if len(fd.Apps) == 1 && fd.Apps[0] == AppIdem &&
 		!slices.ContainsFunc(fd.Steps, func(step Step) bool { return fd.Location(step) == LocationNative }) {
 		return errors.New("flow: the Idem app runs no step of this flow, so it cannot be its only app")
+	}
+	return nil
+}
+
+// validatePersonalData refuses personal data on a flow the Yivi app does not
+// run, next to the Idem app with no document to read, or with an age check
+// on a document photo.
+func validatePersonalData(fd FlowDefinition, seenSteps map[Step]bool) error {
+	switch {
+	case !fd.AcceptsPersonalData():
+		return nil
+	case !fd.AllowsApp(AppYivi) || fd.BrowserOnly():
+		return errors.New("flow: personal_data is shared by the Yivi app alone: let the flow run in the Yivi app")
+	// The Idem app reads a document, and accepts any when none is listed.
+	case fd.AllowsApp(AppIdem) && len(fd.acceptedDocuments()) == 0:
+		return errors.New("flow: personal_data next to the Idem app needs a document type too: the Idem app reads a document and shares no personal data")
+	// The scan's date of birth ties it to the person, and an age check keeps none.
+	case seenSteps[StepDocumentPhoto] && fd.AgeOver != 0:
+		return errors.New("flow: personal_data with document_photo cannot check an age: the photographed document is tied to the person by its date of birth, which an age check does not keep")
 	}
 	return nil
 }
