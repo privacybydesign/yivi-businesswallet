@@ -1024,6 +1024,24 @@ func (s *RequestStore) SetDocumentScanTransaction(ctx context.Context, req Reque
 	})
 }
 
+// RecordDocumentScanFailed audits the request's document scan using up the
+// scan service's own attempts at failure's task: which task, after how many
+// attempts, and the service's code. An erased request records nothing.
+func (s *RequestStore) RecordDocumentScanFailed(ctx context.Context, req Request, failure proofingprovider.DocumentScanFailure) error {
+	fields := map[string]any{"task": failure.Task, "attempts": failure.Attempts}
+	if failure.Code != "" {
+		fields["scanCode"] = failure.Code
+	}
+	return database.InTx(ctx, s.db, func(q database.Querier) error {
+		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {
+			return err
+		}
+		return s.audit.Record(ctx, q, audit.IdentityProofingDocumentScanFailed,
+			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
+			audit.Created(req.auditFields(withMethod(fields, req.Method))))
+	})
+}
+
 // SetMethod records the app the subject chose for the request's session, one
 // that started without (proofingprovider.MethodPending). ErrSessionOver once
 // the request moved to another session, settled, or has its app already.

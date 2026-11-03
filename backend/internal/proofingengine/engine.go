@@ -153,6 +153,11 @@ const (
 	// service's judgement of a document photo and its score.
 	detailDocumentVerdict = "documentVerdict"
 	detailDocumentScore   = "documentScore"
+	// detailScanTask, detailScanAttempts and detailScanCode are the scan
+	// service's task that used up its attempts, how many, and its last code.
+	detailScanTask     = "task"
+	detailScanAttempts = "attempts"
+	detailScanCode     = "scanCode"
 )
 
 // deviceTrailDetails are the detail keys a device event may carry into the
@@ -389,13 +394,16 @@ func (s *Server) auditProofing(sess session.Session, eventType string, extra map
 		slog.String("event", eventType), slog.String("session_id", sess.ID),
 		slog.String("org_id", sess.TenantID), slog.String("status", string(sess.Status)),
 	}
-	for _, k := range []string{detailStage, detailRole, detailReason, detailErrorCode, detailVia, detailDocumentVerdict} {
+	for _, k := range []string{detailStage, detailRole, detailReason, detailErrorCode, detailVia, detailDocumentVerdict, detailScanTask, detailScanCode} {
 		if v, ok := extra[k].(string); ok && v != "" {
 			attrs = append(attrs, slog.String(k, v))
 		}
 	}
 	if v, ok := extra[detailDocumentScore].(float64); ok {
 		attrs = append(attrs, slog.Float64(detailDocumentScore, v))
+	}
+	if v, ok := extra[detailScanAttempts].(int); ok {
+		attrs = append(attrs, slog.Int(detailScanAttempts, v))
 	}
 	slog.LogAttrs(context.Background(), slog.LevelInfo, "identity proofing: session event", attrs...)
 	if notifyEventTypes[eventType] {

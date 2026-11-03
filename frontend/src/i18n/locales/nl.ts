@@ -2490,6 +2490,7 @@ export const nl: Translation<typeof en> = {
       identityProofingSessionHandover:
         "Nieuwe code voor identiteitsverificatie uitgegeven",
       identityProofingDocumentScanStarted: "Documentscan gestart",
+      identityProofingDocumentScanFailed: "Documentscan zonder pogingen over",
       identityProofingSessionEnded:
         "Identiteitsverificatiesessie onafgerond beëindigd",
       identityProofingSessionCancelled:

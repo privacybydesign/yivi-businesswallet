@@ -80,6 +80,7 @@ type requestStore interface {
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
+	RecordDocumentScanFailed(ctx context.Context, req Request, failure proofingprovider.DocumentScanFailure) error
 	SetMethod(ctx context.Context, req Request, sessionID string, method proofingprovider.Method) error
 	ReferencePhoto(ctx context.Context, req Request) (*proofingprovider.Image, error)
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)

@@ -2506,7 +2506,10 @@ step runs with the Idem app or the Yivi app alike.
     (`maximum_attempts_exceeded`) rejects the session (engine
     `FailDocumentScan`): `LIVENESS_FAILED` or `FACE_NO_MATCH` for the face
     tasks, `DOC_EXPIRED` for `expiration_criteria_not_met`, else
-    `DOCUMENT_SCAN_FAILED`, audited with the task, attempts and CM's code.
+    `DOCUMENT_SCAN_FAILED`. The wallet audits it as
+    `identity_proofing.document_scan_failed` on the request (task, attempts,
+    CM's code; `RequestStore.RecordDocumentScanFailed`), and the engine's log
+    line carries them too.
     Otherwise (the person stopped, or CM gave no reason) it is
     `document_scan_failed` and "Try again" stays.
   - CM's page posts nothing once its attempts ran out: it offers to go on on

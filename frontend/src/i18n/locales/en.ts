@@ -2438,6 +2438,7 @@ export const en = {
       identityProofingSessionStarted: "Started identity proofing",
       identityProofingSessionHandover: "Issued a new identity proofing code",
       identityProofingDocumentScanStarted: "Started the document scan",
+      identityProofingDocumentScanFailed: "Document scan out of attempts",
       identityProofingSessionEnded:
         "Identity proofing session ended unfinished",
       identityProofingSessionCancelled: "Identity proofing session cancelled",

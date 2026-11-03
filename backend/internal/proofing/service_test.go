@@ -67,6 +67,8 @@ type fakeRequests struct {
 	methods  []proofingprovider.Method
 	// handovers counts the new codes recorded.
 	handovers int
+	// scanFailures are the document scans audited as out of attempts.
+	scanFailures []proofingprovider.DocumentScanFailure
 	// employmentRejections are the reasons of the statements refused.
 	employmentRejections []string
 	// actors is the audit actor label of each start and outcome recorded, ""
@@ -416,6 +418,11 @@ func (f *fakeRequests) MarkDocumentScanned(_ context.Context, _ Request, _, tran
 	}
 	at := time.Now()
 	f.stored.DocumentScannedAt = &at
+	return nil
+}
+
+func (f *fakeRequests) RecordDocumentScanFailed(_ context.Context, _ Request, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
 	return nil
 }
 

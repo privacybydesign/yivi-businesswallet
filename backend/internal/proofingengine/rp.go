@@ -1157,9 +1157,9 @@ func (s *Server) FailDocumentScan(ctx context.Context, t pp.Tenant, id, token st
 	}
 	details := actorDetails(updated, session.DeviceRoleWeb)
 	details[detailErrorCode] = code
-	details["task"], details["attempts"] = f.Task, f.Attempts
+	details[detailScanTask], details[detailScanAttempts] = f.Task, f.Attempts
 	if f.Code != "" {
-		details["scanCode"] = f.Code
+		details[detailScanCode] = f.Code
 	}
 	s.auditProofing(updated, eventTypeForStatus(updated.Status), details)
 	return nil

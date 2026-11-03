@@ -204,11 +204,14 @@ func checkUnfinishedScan(t *testing.T, tc unfinishedScanCase) {
 	err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "")
 	switch {
 	case !tc.failed:
-		if !errors.Is(err, ErrDocumentScanFailed) || len(f.ips.scanFailures) != 0 {
-			t.Errorf("FinishDocumentScan = %v, failures %+v; want ErrDocumentScanFailed and no failure", err, f.ips.scanFailures)
+		if !errors.Is(err, ErrDocumentScanFailed) || len(f.ips.scanFailures) != 0 || len(f.requests.scanFailures) != 0 {
+			t.Errorf("FinishDocumentScan = %v, failures %+v, audited %+v; want ErrDocumentScanFailed and no failure",
+				err, f.ips.scanFailures, f.requests.scanFailures)
 		}
 	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.status.Failure.Task:
 		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.status.Failure.Task)
+	case len(f.requests.scanFailures) != 1 || f.requests.scanFailures[0] != f.ips.scanFailures[0]:
+		t.Errorf("audited %+v, want the failure %+v", f.requests.scanFailures, f.ips.scanFailures[0])
 	}
 }
 

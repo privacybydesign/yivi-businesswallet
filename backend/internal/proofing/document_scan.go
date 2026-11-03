@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
@@ -211,6 +212,12 @@ func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess 
 	failure := proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
 	if err := s.ips.FailDocumentScan(ctx, requestTenant(req), sess.ID, sess.Token, failure); err != nil {
 		return documentScanStepError(err)
+	}
+	// The scan service's doing, not that of whoever's poll noticed it. The
+	// session is rejected either way, and its rejection audited on reconcile.
+	if err := s.requests.RecordDocumentScanFailed(audit.WithoutActor(ctx), req, failure); err != nil {
+		slog.WarnContext(ctx, "identity proofing: audit a failed document scan",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
 	}
 	return nil
 }
