@@ -547,6 +547,8 @@ type fakeIPS struct {
 	documentPhotos   []proofingprovider.DocumentPhoto
 	referenceErr     error
 	documentPhotoErr error
+	// scanFailures are the scans FailDocumentScan failed the session on.
+	scanFailures []proofingprovider.DocumentScanFailure
 	// chosen are the apps ChooseMethod set.
 	chosen []proofingprovider.Method
 	// handovers counts fresh claim links asked for; handoverErr fails them.
@@ -679,6 +681,11 @@ func (f *fakeIPS) SubmitReference(_ context.Context, _ proofingprovider.Tenant, 
 	}
 	f.references = append(f.references, ref)
 	return proofingprovider.YiviDisclosure{OK: true}, nil
+}
+
+func (f *fakeIPS) FailDocumentScan(_ context.Context, _ proofingprovider.Tenant, _, _ string, failure proofingprovider.DocumentScanFailure) error {
+	f.scanFailures = append(f.scanFailures, failure)
+	return nil
 }
 
 func (f *fakeIPS) SubmitDocumentPhoto(_ context.Context, _ proofingprovider.Tenant, _, _ string, photo proofingprovider.DocumentPhoto) error {

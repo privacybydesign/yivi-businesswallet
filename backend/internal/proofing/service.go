@@ -38,6 +38,7 @@ type Provider interface {
 	SessionResult(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Result, error)
 	SubmitReference(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, ref proofingprovider.Reference) (proofingprovider.YiviDisclosure, error)
 	SubmitDocumentPhoto(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, photo proofingprovider.DocumentPhoto) error
+	FailDocumentScan(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, f proofingprovider.DocumentScanFailure) error
 	DecideReview(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, d proofingprovider.ReviewDecision) error
 	SessionHandover(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string) (proofingprovider.Claim, error)
 	ChooseMethod(ctx context.Context, t proofingprovider.Tenant, sessionID, sessionToken string, method proofingprovider.Method) (proofingprovider.Session, error)
@@ -1938,7 +1939,7 @@ func (s *Service) Request(ctx context.Context, orgID, id uuid.UUID, requestedBy 
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Request{}, err
 	}
-	return s.withAppDone(ctx, req)
+	return s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req))
 }
 
 // withAppDone reads from the engine whether an Idem request's app did its

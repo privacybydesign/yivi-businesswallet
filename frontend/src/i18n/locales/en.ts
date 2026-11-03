@@ -510,6 +510,8 @@ export const en = {
       docExpired: "document expired",
       docNotAuthentic: "the document photographed is not genuine",
       docFieldsInvalid: "the document's printed data failed its check",
+      docScanFailed:
+        "the document photo did not succeed in any of its attempts",
       documentMismatch: "the document photographed is not the one read",
       assuranceNotMet: "below the flow's required assurance level",
       manualReviewRejected: "refused by a reviewer",

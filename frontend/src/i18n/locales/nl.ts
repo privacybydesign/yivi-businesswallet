@@ -527,6 +527,8 @@ export const nl: Translation<typeof en> = {
       docExpired: "document verlopen",
       docNotAuthentic: "het gefotografeerde document is niet echt",
       docFieldsInvalid: "de gedrukte gegevens van het document zijn afgekeurd",
+      docScanFailed:
+        "de foto van het document is niet gelukt, ook niet na alle pogingen",
       documentMismatch:
         "het gefotografeerde document is niet het gelezen document",
       assuranceNotMet: "onder het vereiste betrouwbaarheidsniveau van de flow",

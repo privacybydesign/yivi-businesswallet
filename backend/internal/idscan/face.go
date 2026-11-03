@@ -23,7 +23,7 @@ var faceTasks = []string{taskFaceLiveness, taskFaceMatch}
 var ErrNoSelfie = errors.New("idscan: the liveness check holds no still")
 
 // Face is the face checks' outcome on a completed scan: the liveness check
-// passed, or the scan would have failed.
+// passed, or the scan would have failed (TransactionStatus).
 type Face struct {
 	// MatchScore is ID Scan's similarity of the live face to the document's
 	// portrait, 0 to 1; nil when it gave none.

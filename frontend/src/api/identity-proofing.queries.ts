@@ -1018,7 +1018,11 @@ export function useStartDocumentScanMutation(
 // the page moves on from the scan step.
 export function useFinishDocumentScanMutation(
   target: VerifyTarget,
-): UseMutationResult<void, Error, { transactionId: string; resultId: string }> {
+): UseMutationResult<
+  void,
+  Error,
+  { transactionId: string; resultId?: string }
+> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input) => finishProofingDocumentScan(target, input),

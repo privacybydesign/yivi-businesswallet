@@ -166,7 +166,7 @@ func (s *Service) HostedStatus(ctx context.Context, token string) (Request, erro
 	if req, err = s.readReconciled(ctx, req); err != nil {
 		return Request{}, err
 	}
-	if req, err = s.withAppDone(ctx, req); err != nil {
+	if req, err = s.withAppDone(ctx, s.withSpentDocumentScan(ctx, req)); err != nil {
 		return Request{}, err
 	}
 	return s.withLegalNotice(ctx, req)

@@ -403,6 +403,25 @@ func (s *Stub) SubmitDocumentPhoto(_ context.Context, t Tenant, sessionID, sessi
 	return err
 }
 
+// FailDocumentScan rejects a stub session that has not decided, as the engine
+// does, with LIVENESS_FAILED for any task.
+func (s *Stub) FailDocumentScan(ctx context.Context, t Tenant, sessionID, sessionToken string, _ DocumentScanFailure) error {
+	current, err := s.SessionResult(ctx, t, sessionID, sessionToken)
+	if err != nil {
+		return err
+	}
+	if current.Status == StatusApproved || current.Status == StatusRejected {
+		return &RejectedError{Status: http.StatusConflict, Message: "session already finished"}
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.sessions[sessionID]
+	sess.decided = &Result{Status: StatusRejected, ErrorCode: "LIVENESS_FAILED", CompletedAt: &now, Method: current.Method}
+	s.sessions[sessionID] = sess
+	return nil
+}
+
 // CancelSession ends a stub session that has not decided, as the engine does.
 func (s *Stub) CancelSession(ctx context.Context, t Tenant, sessionID, sessionToken string) error {
 	current, err := s.SessionResult(ctx, t, sessionID, sessionToken)

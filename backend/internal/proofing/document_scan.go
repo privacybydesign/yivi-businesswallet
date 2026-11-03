@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -44,6 +45,7 @@ var (
 type documentScanner interface {
 	CreateTransaction(ctx context.Context, locale string, opts idscan.ScanOptions) (idscan.Transaction, error)
 	Result(ctx context.Context, transactionID, resultID string) (idscan.Result, error)
+	TransactionStatus(ctx context.Context, transactionID string) (idscan.Status, error)
 }
 
 // SetDocumentScanner gives the service its document scan service.
@@ -140,7 +142,11 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 		return nil
 	}
 	if resultID == "" {
-		return ErrDocumentScanFailed
+		if err := s.documentScanUnfinished(ctx, req, sess, transactionID); err != nil {
+			return err
+		}
+		s.reconcile(ctx, requestTenant(req), req)
+		return nil
 	}
 	res, err := s.documentScanner.Result(ctx, transactionID, resultID)
 	if errors.Is(err, idscan.ErrNoDocumentImage) {
@@ -187,6 +193,52 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	}
 	s.reconcile(ctx, requestTenant(req), req)
 	return nil
+}
+
+// documentScanUnfinished is a scan the page reports ended without a result.
+// One that used up the scan service's own attempts fails the session, as a new
+// transaction would give the person new ones; any other the person may try
+// again (ErrDocumentScanFailed).
+func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess *ipsSession, transactionID string) error {
+	status, err := s.documentScanner.TransactionStatus(ctx, transactionID)
+	if err != nil {
+		return fmt.Errorf("proofing: document scan status request %s: %w", req.ID, err)
+	}
+	f := status.Failure
+	if f == nil || f.State != idscan.StateMaximumAttemptsExceeded {
+		return ErrDocumentScanFailed
+	}
+	failure := proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
+	if err := s.ips.FailDocumentScan(ctx, requestTenant(req), sess.ID, sess.Token, failure); err != nil {
+		return documentScanStepError(err)
+	}
+	return nil
+}
+
+// withSpentDocumentScan fails req's session, on a poll of its page, once its
+// running document scan used up the scan service's own attempts. CM's page
+// does not post the page then: it offers to go on on another device, so the
+// poll asks CM itself.
+func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Request {
+	if req.documentScanTransactionID == "" || req.DocumentScannedAt != nil {
+		return req
+	}
+	sess, err := s.documentScanSession(req)
+	if err != nil {
+		// No scan to watch: not asked, no scanner, or the session is over.
+		return req
+	}
+	switch err := s.documentScanUnfinished(ctx, req, sess, req.documentScanTransactionID); {
+	case err == nil:
+		return s.reconcile(ctx, requestTenant(req), req)
+	case errors.Is(err, ErrDocumentScanFailed), errors.Is(err, ErrSessionOver):
+		// Still running, or ended with attempts left: the page handles it.
+	default:
+		// The next poll asks again.
+		slog.WarnContext(ctx, "identity proofing: could not read a document scan's status",
+			slog.String("request_id", req.ID.String()), slog.Any("error", err))
+	}
+	return req
 }
 
 // documentScanOptions are the rules of flow f the scan service enforces: the

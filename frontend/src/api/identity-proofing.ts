@@ -1476,10 +1476,13 @@ export function startProofingDocumentScan(
 }
 
 // Hands the finished ID scan the embedded page posted to the backend, which
-// reads its photos and adds them to the session; it answers 204.
+// reads its photos and adds them to the session; it answers 204. Without a
+// resultId it reports a scan that ended unfinished: 204 once one out of ID
+// Scan's own attempts failed the session, document_scan_failed for one the
+// person may try again.
 export async function finishProofingDocumentScan(
   target: VerifyTarget,
-  input: { transactionId: string; resultId: string },
+  input: { transactionId: string; resultId?: string },
   signal?: AbortSignal,
 ): Promise<void> {
   await request(`${verifyPath(target)}/document-scan/finish`, {

@@ -6277,6 +6277,10 @@ paths:
         Requires organisation membership. Hands the photos of the scan the page started last
         to the session as its `document_photo` step: `transactionId` and `resultId` are what the
         embedded ID Scan page posted its parent when done. Finishing it again changes nothing.
+        Without `resultId` it reports a scan that ended unfinished: one that used up ID Scan's own
+        attempts rejects the session (`LIVENESS_FAILED` or `FACE_NO_MATCH` for the face checks,
+        `DOC_EXPIRED` for an expired document, else `DOCUMENT_SCAN_FAILED`), as a new scan would
+        give the person new attempts.
       requestBody:
         required: true
         content:
@@ -6285,7 +6289,7 @@ paths:
               $ref: '#/components/schemas/ProofingDocumentScanFinishRequest'
       responses:
         '204':
-          description: The photos are in.
+          description: The photos are in, or the session was rejected for a scan out of attempts.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -6301,7 +6305,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person did not finish the scan, or it gave no photo (`document_scan_failed`); start another.
+          description: The person did not finish the scan with attempts left, or it gave no photo (`document_scan_failed`); start another.
           content:
             application/json:
               schema:
@@ -8794,7 +8798,7 @@ paths:
               $ref: '#/components/schemas/ProofingDocumentScanFinishRequest'
       responses:
         '204':
-          description: The photos are in.
+          description: The photos are in, or the session was rejected for a scan out of attempts.
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -8810,7 +8814,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The person did not finish the scan (`document_scan_failed`); start another.
+          description: The person did not finish the scan with attempts left (`document_scan_failed`); start another.
           content:
             application/json:
               schema:

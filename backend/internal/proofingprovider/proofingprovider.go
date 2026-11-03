@@ -238,6 +238,22 @@ type Image struct {
 	Base64   string
 }
 
+// The scan service's tasks a DocumentScanFailure names.
+const (
+	DocumentScanTaskDocument     = "document_scan"
+	DocumentScanTaskFaceLiveness = "face_liveness"
+	DocumentScanTaskFaceMatch    = "face_match"
+)
+
+// DocumentScanFailure is a document scan that used up the scan service's own
+// attempts at Task (FailDocumentScan). Code is the service's code for the
+// document's last attempt, if any (such as expiration_criteria_not_met).
+type DocumentScanFailure struct {
+	Task     string
+	Code     string
+	Attempts int
+}
+
 // DocumentPhoto is the document_photo step's photos, taken in the browser by
 // a document scan service rather than by an app: the front and, for a
 // document that has one, the back. BSNRedacted is the scan service having
