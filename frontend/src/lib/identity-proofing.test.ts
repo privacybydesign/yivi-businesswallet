@@ -92,6 +92,10 @@ import {
   faceMatchValue,
   flowDraftError,
   personalDataAllowed,
+  idemAppAllowed,
+  noApp,
+  scansFace,
+  withoutApps,
   formatFaceMatch,
   reachesAssuranceLevel,
   flowSpecFromDraft,
@@ -212,6 +216,36 @@ describe("flowSpecFromDraft", () => {
     expect(personalDataAllowed(draft({ idemApp: false }))).toBe(true);
     expect(personalDataAllowed(draft())).toBe(true);
     expect(personalDataAllowed(draft({ yiviApp: false }))).toBe(false);
+  });
+
+  it("leaves only what the browser runs once no app is ticked", () => {
+    const browser = withoutApps(
+      draft({ documentPhoto: true, personalData: true }),
+    );
+    expect(noApp(browser)).toBe(true);
+    expect(browser.documentAndChip).toBe(false);
+    expect(browser.personalData).toBe(false);
+    expect(scansFace(browser)).toBe(true);
+    expect(flowDraftError(browser)).toBeNull();
+    expect(withoutApps(draft()).faceVerification).toBe(false);
+  });
+
+  it("ticks both apps back once a level needs the chip read", () => {
+    const low = withAssuranceLevel(withoutApps(draft()), "low");
+    expect(low.idemApp && low.yiviApp && low.documentAndChip).toBe(true);
+    expect(noApp(withAssuranceLevel(withoutApps(draft()), ""))).toBe(true);
+  });
+
+  it("refuses the Idem app while personal data is the only document type", () => {
+    const onlyPersonalData = {
+      documentKinds: new Set<(typeof DOCUMENT_KINDS)[number]>(),
+      personalData: true,
+    };
+    expect(idemAppAllowed(draft(onlyPersonalData))).toBe(false);
+    expect(idemAppAllowed(draft({ personalData: true }))).toBe(true);
+    expect(
+      idemAppAllowed(draft({ ...onlyPersonalData, personalData: false })),
+    ).toBe(true);
   });
 
   it("refuses the Idem app ticked on a flow it has nothing to do in", () => {

@@ -27,6 +27,7 @@ import {
   selectedLocales,
   withAssuranceLevel,
   withIdentity,
+  idemAppAllowed,
 } from "../lib/identity-proofing";
 import type {
   AssuranceLevel,
@@ -149,8 +150,13 @@ export function FlowEditor({
   const shown = touched ? invalid : null;
   const version = (editing?.version ?? 0) + 1;
 
+  // Personal data as the only document type unticks the Idem app, which
+  // shares none.
   function update(patch: Partial<ProofingFlowDraft>): void {
-    setDraft((current) => ({ ...current, ...patch }));
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      return idemAppAllowed(next) ? next : { ...next, idemApp: false };
+    });
   }
 
   // Choosing required diplomas or required employment ticks Document data,
