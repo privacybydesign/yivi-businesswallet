@@ -238,18 +238,17 @@ var (
 )
 
 // Odixus keeps a copy of a new employee's identity document, as the
-// employer's identification duty asks, and accepts no driving licence.
+// employer's identification duty asks. Both flows copy the ones built for
+// Odixus in the flow editor.
 var (
-	odixusDocuments = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard, flow.DocumentKindResidencePermit}
-	// odixusDigiDDocuments put the registered personal data (loaded in the
-	// Yivi app with DigiD) first; the photographed document must be one of
-	// the others and is tied to it by date of birth and surname.
-	odixusDigiDDocuments = append([]string{flow.DocumentKindPersonalData}, odixusDocuments...)
-	odixusDigiDSteps     = []flow.Step{flow.StepDocumentPhoto, flow.StepFaceVerification}
-	odixusChipSteps      = []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead, flow.StepDocumentPhoto}
-	chipChecks           = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth}
-	odixusDigiDData      = []string{"dg1", "document_image", "selfie", "biometrics"}
-	odixusChipData       = []string{"dg1", "document_image", "dg11", "dg2", "chip_checks"}
+	odixusDigiDSteps     = []flow.Step{flow.StepDocumentCapture, flow.StepDocumentPhoto, flow.StepNFCRead, flow.StepFaceVerification}
+	odixusChipSteps      = []flow.Step{flow.StepDocumentCapture, flow.StepDocumentPhoto, flow.StepNFCRead}
+	odixusDigiDChecks    = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckFaceMatch, flow.CheckFaceLiveness}
+	odixusChipChecks     = []flow.Check{flow.CheckNFCPassiveAuth}
+	odixusDigiDDocuments = []string{flow.DocumentKindPersonalData}
+	odixusChipDocuments  = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard}
+	odixusDigiDData      = []string{"dg1", "biometrics", "selfie", "document_image"}
+	odixusChipData       = []string{"dg1", "document_image"}
 	odixusCopyReason     = map[string]string{
 		"en": "To keep a copy of your identity document, as the law asks of your employer.",
 		"nl": "Om een kopie van je identiteitsbewijs te bewaren, zoals de wet van je werkgever vraagt.",
@@ -369,24 +368,27 @@ var demoProofingOrgs = []demoProofingOrg{
 		slug: odixusSlug, defaultFlow: flowOdixusDigiD, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
 			// With DigiD: personal data and the registered address from the
-			// Yivi app, then CM's ID scan photographs both sides of the
-			// document and checks the face against it.
+			// Yivi app, then CM's ID scan photographs the document and checks
+			// the face against it.
 			{def: flow.FlowDefinition{
 				Name: flowOdixusDigiD, Steps: odixusDigiDSteps, Apps: []flow.App{flow.AppYivi},
-				SelfieLocation: flow.LocationBrowser, FaceProvider: flow.FaceProviderIDScan, RequiredChecks: faceChecks,
-				AcceptedDocumentTypes: odixusDigiDDocuments,
-				LegalBasis:            privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
+				SelfieLocation: flow.LocationBrowser, FaceProvider: flow.FaceProviderIDScan, RequiredChecks: odixusDigiDChecks,
+				AcceptedDocumentTypes: odixusDigiDDocuments, RequestedAttributes: odixusDigiDData,
+				RequiredAssuranceLevel: flow.AssuranceLevelLow,
+				BSNPolicy:              privacy.BSNPolicyMask, BlurBSN: new(true), KeepFacePhotos: new(true),
+				LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
 				AttributeReasons: odixusReasons(odixusDigiDData),
 			}, address: proofing.AddressRequired},
-			// Without DigiD: the Idem app reads the document's chip, CM's ID
-			// scan photographs the same document (its number must match the
-			// chip's) without a face check, and the person enters their address.
+			// Without DigiD: the Idem app reads the document's chip and CM's
+			// ID scan photographs the same document.
 			{def: flow.FlowDefinition{
 				Name: flowOdixusNoDigiD, Steps: odixusChipSteps, Apps: []flow.App{flow.AppIdem},
-				RequiredChecks: chipChecks, AcceptedDocumentTypes: odixusDocuments,
+				RequiredChecks: odixusChipChecks, AcceptedDocumentTypes: odixusChipDocuments,
+				RequestedAttributes: odixusChipData,
+				BSNPolicy:           privacy.BSNPolicyMask, BlurBSN: new(true), KeepFacePhotos: new(false),
 				LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
 				AttributeReasons: odixusReasons(odixusChipData),
-			}, address: proofing.AddressRequired},
+			}},
 		},
 		theme: odixusTheme,
 	},
