@@ -103,11 +103,8 @@ func TestSeedProofingIsIdempotent(t *testing.T) {
 		t.Fatalf("odixus flows: %v", err)
 	}
 	for _, f := range odixusFlows {
-		if f.Name != flowOdixusOnboarding {
-			continue
-		}
 		if mode, err := proofing.NewFlowAddressStore(pool, audit.NopRecorder{}).Get(ctx, odixusID, f.ID); err != nil || mode != proofing.AddressRequired {
-			t.Errorf("odixus onboarding address = %q, %v; want required", mode, err)
+			t.Errorf("odixus %s address = %q, %v; want required", f.Name, mode, err)
 		}
 	}
 

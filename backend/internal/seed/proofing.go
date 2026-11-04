@@ -237,6 +237,36 @@ var (
 	faceOnlyAttributes    = []string{"selfie", "biometrics"}
 )
 
+// Odixus keeps a copy of a new employee's identity document, as the
+// employer's identification duty asks, and accepts no driving licence.
+var (
+	odixusDocuments = []string{flow.DocumentKindPassport, flow.DocumentKindIdentityCard, flow.DocumentKindResidencePermit}
+	// odixusDigiDDocuments put the registered personal data (loaded in the
+	// Yivi app with DigiD) first; the photographed document must be one of
+	// the others and is tied to it by date of birth and surname.
+	odixusDigiDDocuments = append([]string{flow.DocumentKindPersonalData}, odixusDocuments...)
+	odixusDigiDSteps     = []flow.Step{flow.StepDocumentPhoto, flow.StepFaceVerification}
+	odixusChipSteps      = []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead, flow.StepDocumentPhoto}
+	chipChecks           = []flow.Check{flow.CheckNFCPassiveAuth, flow.CheckNFCChipAuth}
+	odixusDigiDData      = []string{"dg1", "document_image", "selfie", "biometrics"}
+	odixusChipData       = []string{"dg1", "document_image", "dg11", "dg2", "chip_checks"}
+	odixusCopyReason     = map[string]string{
+		"en": "To keep a copy of your identity document, as the law asks of your employer.",
+		"nl": "Om een kopie van je identiteitsbewijs te bewaren, zoals de wet van je werkgever vraagt.",
+	}
+)
+
+// odixusReasons are reasonsFor attributes, with the document image's reason
+// naming the copy Odixus must keep.
+func odixusReasons(attributes []string) map[string]map[string]string {
+	reasons := reasonsFor(attributes...)
+	reasons["document_image"] = maps.Clone(odixusCopyReason)
+	return reasons
+}
+
+// odixusPurpose is why Odixus onboards someone.
+const odixusPurpose = "Onboarding nieuwe medewerker: identificatie en kopie van het identiteitsbewijs"
+
 // demoRetentionDays and shortRetentionDays are how long a demo org's flows
 // keep a session's personal data: most orgs', and CM's minimum for a ticket's
 // age check. The org's own retention is a fixed default, so each flow sets it.
@@ -271,7 +301,8 @@ const (
 	flowASRAccountChange = "Rekeningnummer wijzigen"
 	flowUnibetOnboarding = "Nieuwe klant (AMLR)"
 	flowCMAgeCheck       = "Ticket: echte persoon en leeftijd"
-	flowOdixusOnboarding = "Nieuwe klant met woonadres"
+	flowOdixusDigiD      = "Onboarding met DigiD"
+	flowOdixusNoDigiD    = "Onboarding zonder DigiD"
 )
 
 var demoProofingOrgs = []demoProofingOrg{
@@ -335,11 +366,27 @@ var demoProofingOrgs = []demoProofingOrg{
 		theme: cmTheme,
 	},
 	{
-		slug: odixusSlug, defaultFlow: flowOdixusOnboarding, retentionDays: demoRetentionDays,
+		slug: odixusSlug, defaultFlow: flowOdixusDigiD, retentionDays: demoRetentionDays,
 		flows: []demoProofingFlow{
-			// A new client identifies themselves, then enters the postal
-			// address they live at.
-			{def: chipAndFace(flowOdixusOnboarding, privacy.LegalBasisContract, "Onboarding nieuwe klant"), address: proofing.AddressRequired},
+			// With DigiD: personal data and the registered address from the
+			// Yivi app, then CM's ID scan photographs both sides of the
+			// document and checks the face against it.
+			{def: flow.FlowDefinition{
+				Name: flowOdixusDigiD, Steps: odixusDigiDSteps, Apps: []flow.App{flow.AppYivi},
+				SelfieLocation: flow.LocationBrowser, FaceProvider: flow.FaceProviderIDScan, RequiredChecks: faceChecks,
+				AcceptedDocumentTypes: odixusDigiDDocuments,
+				LegalBasis:            privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
+				AttributeReasons: odixusReasons(odixusDigiDData),
+			}, address: proofing.AddressRequired},
+			// Without DigiD: the Idem app reads the document's chip, CM's ID
+			// scan photographs the same document (its number must match the
+			// chip's) without a face check, and the person enters their address.
+			{def: flow.FlowDefinition{
+				Name: flowOdixusNoDigiD, Steps: odixusChipSteps, Apps: []flow.App{flow.AppIdem},
+				RequiredChecks: chipChecks, AcceptedDocumentTypes: odixusDocuments,
+				LegalBasis: privacy.LegalBasisLegalObligation, ProcessingPurpose: odixusPurpose,
+				AttributeReasons: odixusReasons(odixusChipData),
+			}, address: proofing.AddressRequired},
 		},
 		theme: odixusTheme,
 	},
