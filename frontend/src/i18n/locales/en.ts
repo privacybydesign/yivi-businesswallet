@@ -1321,6 +1321,7 @@ export const en = {
         data_erasure: "A reviewer approves every request to delete data",
         no_current_employment: "The Verzekeringsbericht lists no current job",
         current_benefit: "The Verzekeringsbericht lists a current UWV benefit",
+        alwaysReview: "The flow sends every check to review",
         current_other_income:
           "The Verzekeringsbericht lists other current income without hours worked",
       },
@@ -1350,6 +1351,8 @@ export const en = {
         title: "Review an identity check",
         why: {
           title: "Why this waits for you",
+          alwaysReview:
+            "This flow has a reviewer approve every check. Look at the automatic checks below before you decide.",
           body: "No signature or register vouches for part of this check, so a person has to check it.",
           no_current_employment:
             "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below.",
@@ -1866,6 +1869,13 @@ export const en = {
           warning:
             "Below {{min}} is not recommended: more people who are not the document's holder get through.",
         },
+      },
+      review: {
+        title: "Review",
+        hint: "What happens to a session that passes every check.",
+        always: "Always send to review",
+        alwaysHint:
+          "A session that passes every check waits for a reviewer to approve it. A failed check still rejects it.",
       },
       privacy: {
         title: "Privacy",

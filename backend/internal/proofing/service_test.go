@@ -1838,6 +1838,37 @@ func TestYiviAgeCheckAsksAgeClaim(t *testing.T) {
 	}
 }
 
+// AlwaysReviewed answers for the flow version a request in review pinned,
+// not the flow's active one.
+func TestAlwaysReviewed(t *testing.T) {
+	f := newFixture()
+	sent := f.sendYivi(t)
+	req := sent.Request
+	req.Status = StatusNeedsReview
+	pinned := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{AlwaysReview: true}, ID: req.FlowID, Version: req.FlowVersion}
+	later := proofingprovider.Flow{ID: req.FlowID, Version: req.FlowVersion + 1, Active: true}
+	laterReviews := proofingprovider.Flow{FlowSpec: pinned.FlowSpec, ID: req.FlowID, Version: req.FlowVersion + 2}
+	for name, tc := range map[string]struct {
+		versions []proofingprovider.Flow
+		version  int
+		status   Status
+		want     bool
+	}{
+		"pinned version reviews": {[]proofingprovider.Flow{pinned, later}, req.FlowVersion, StatusNeedsReview, true},
+		"later version reviews":  {[]proofingprovider.Flow{later, laterReviews}, req.FlowVersion, StatusNeedsReview, false},
+		"version unknown":        {[]proofingprovider.Flow{pinned}, 0, StatusNeedsReview, false},
+		"pinned version missing": {[]proofingprovider.Flow{later}, req.FlowVersion, StatusNeedsReview, false},
+		"not in review":          {[]proofingprovider.Flow{pinned}, req.FlowVersion, StatusApproved, false},
+	} {
+		f.ips.flowVersions = tc.versions
+		req.FlowVersion, req.Status = tc.version, tc.status
+		got, err := f.svc.AlwaysReviewed(context.Background(), []Request{req}, time.Now())
+		if err != nil || got[req.ID] != tc.want {
+			t.Errorf("%s: AlwaysReviewed = %v, %v; want %v", name, got[req.ID], err, tc.want)
+		}
+	}
+}
+
 // The Yivi disclosure asks for the photo only when the flow keeps it.
 func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
 	keep := true

@@ -30,14 +30,14 @@ import {
   evidenceDocumentLabel,
   ownReview,
   reviewPath,
-  walletReviewReason,
+  checkReviewReason,
 } from "../lib/proofing-reviews";
 import type {
   AutomaticCheck,
   CheckDecisionDraft,
   OwnReview,
   RejectReasonKey,
-  WalletReviewReason,
+  CheckReviewReason,
 } from "../lib/proofing-reviews";
 import { Button, Icon, Select, StatusText, TopBar } from "../ui";
 import { SessionEmployment } from "./proofing-people";
@@ -107,7 +107,7 @@ export function IdentityCheckReview({
       <div className="flex flex-wrap items-start gap-6 p-4 sm:p-8">
         <div className="flex min-w-0 flex-[1_1_34rem] flex-col gap-6">
           {waiting ? (
-            <WhyItWaits reason={walletReviewReason(request)} />
+            <WhyItWaits reason={checkReviewReason(request)} />
           ) : (
             <ClosedNote request={request} />
           )}
@@ -128,11 +128,11 @@ export function IdentityCheckReview({
   );
 }
 
-// Why the check waits: the engine's, or the wallet's own reason when it held
-// an approved check for review.
+// Why the check waits: the engine's, the flow's, or the wallet's own reason
+// when it held an approved check for review.
 function WhyItWaits({
   reason,
-}: Readonly<{ reason: WalletReviewReason | undefined }>): React.JSX.Element {
+}: Readonly<{ reason: CheckReviewReason | undefined }>): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <section

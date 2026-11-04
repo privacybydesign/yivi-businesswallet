@@ -104,6 +104,7 @@ export function AdvancedSettings(
         error={error}
       />
       <ChecksSection draft={draft} update={update} />
+      <ReviewSection draft={draft} update={update} />
       <PrivacySection draft={draft} update={update} settings={settings} />
     </>
   );
@@ -833,6 +834,31 @@ function ChecksSection({
       {draft.faceVerification && (
         <FaceMatchThreshold draft={draft} update={update} />
       )}
+    </Section>
+  );
+}
+
+function ReviewSection({
+  draft,
+  update,
+}: Readonly<{
+  draft: ProofingFlowDraft;
+  update: (patch: Partial<ProofingFlowDraft>) => void;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <Section
+      title={t("identityProofingFlows.editor.review.title")}
+      hint={t("identityProofingFlows.editor.review.hint")}
+    >
+      <OptionRow
+        id="flow-always-review"
+        checked={draft.alwaysReview}
+        label={t("identityProofingFlows.editor.review.always")}
+        hint={t("identityProofingFlows.editor.review.alwaysHint")}
+        onChange={() => update({ alwaysReview: !draft.alwaysReview })}
+      />
     </Section>
   );
 }

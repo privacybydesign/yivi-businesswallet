@@ -33,7 +33,7 @@ import {
   waitingOfTab,
   waitingOldestFirst,
   waitingSince,
-  walletReviewReason,
+  checkReviewReason,
 } from "../lib/proofing-reviews";
 import type { ReviewTab } from "../lib/proofing-reviews";
 import { blockingError } from "../lib/query-state";
@@ -226,7 +226,7 @@ function WaitingTable({
 function reviewWhy(request: ProofingRequest, t: TFunction): string {
   if (!isAddressReview(request)) {
     return t(
-      `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
+      `identityProofing.reviews.why.${checkReviewReason(request) ?? request.flowKind}`,
     );
   }
   if (request.address?.verification === "registered_mismatch") {

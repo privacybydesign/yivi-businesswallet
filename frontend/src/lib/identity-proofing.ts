@@ -481,6 +481,8 @@ export interface ProofingFlowDraft {
   bsnPolicy: BsnPolicy;
   blackOutBsn: boolean;
   keepFacePhotos: boolean;
+  // A session the checks would approve waits for a reviewer instead.
+  alwaysReview: boolean;
   // Whole seconds the flow keeps its finished sessions; 0 follows the org's.
   retentionSeconds: number;
   // How long a session of the flow runs; 0 follows the org's.
@@ -714,6 +716,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     bsnPolicy: NEW_FLOW_BSN_POLICY,
     blackOutBsn: true,
     keepFacePhotos: false,
+    alwaysReview: false,
     retentionSeconds: FOLLOW_ORG,
     sessionTtlSeconds: FOLLOW_ORG,
     carried: {},
@@ -780,6 +783,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy) || UNSET_BSN_POLICY,
     blackOutBsn: flow.blurBsn ?? false,
     keepFacePhotos: flow.keepFacePhotos ?? false,
+    alwaysReview: flow.alwaysReview ?? false,
     retentionSeconds: flow.retentionOverrideSeconds ?? FOLLOW_ORG,
     sessionTtlSeconds: flow.sessionTtlSeconds ?? FOLLOW_ORG,
     carried: {
@@ -972,6 +976,7 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     bsnPolicy: draft.bsnPolicy,
     blurBsn: draft.blackOutBsn,
     keepFacePhotos: draft.keepFacePhotos,
+    alwaysReview: draft.alwaysReview,
   };
   applyDraftOverrides(spec, draft, requestedAttributes);
   return spec;

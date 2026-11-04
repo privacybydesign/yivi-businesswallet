@@ -28,6 +28,7 @@ import {
   waitingOldestFirst,
   WALLET_REVIEW_REASONS,
   walletReviewReason,
+  checkReviewReason,
 } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
@@ -463,5 +464,28 @@ describe("wallet review reasons mirror the backend", () => {
     );
     expect(walletReviewReason({ reviewReason: "other" })).toBeUndefined();
     expect(walletReviewReason({})).toBeUndefined();
+  });
+});
+
+describe("checkReviewReason", () => {
+  it("prefers the wallet's reason, then the flow's, else the engine's", () => {
+    expect(
+      checkReviewReason({
+        reviewReason: "current_benefit",
+        flowAlwaysReview: true,
+      }),
+    ).toBe("current_benefit");
+    expect(checkReviewReason({ flowAlwaysReview: true })).toBe("alwaysReview");
+    expect(checkReviewReason({ flowAlwaysReview: false })).toBeUndefined();
+    expect(checkReviewReason({})).toBeUndefined();
+  });
+
+  it("has copy for every reason in the list and on the review page", () => {
+    for (const reason of [...WALLET_REVIEW_REASONS, "alwaysReview"]) {
+      expect(i18n.exists(`identityProofing.reviews.why.${reason}`)).toBe(true);
+      expect(i18n.exists(`identityProofing.reviews.check.why.${reason}`)).toBe(
+        true,
+      );
+    }
   });
 });

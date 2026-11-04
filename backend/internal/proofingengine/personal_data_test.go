@@ -96,7 +96,20 @@ func TestPersonalDataDisclosure(t *testing.T) {
 		"another birth date": {"Jansen", "11-03-1990", session.StatusRejected, errCodeDocMismatch},
 		"no birth date":      {"Jansen", "", session.StatusRejected, errCodeDocMismatch},
 	} {
-		t.Run(name, func(t *testing.T) { checkPersonalDataDisclosure(t, tc) })
+		t.Run(name, func(t *testing.T) { checkPersonalDataDisclosure(t, personalDataFlow, tc) })
+	}
+}
+
+// A flow that always reviews sends the disclosure it would approve to a
+// reviewer, and still rejects the one it would reject.
+func TestPersonalDataDisclosureAlwaysReview(t *testing.T) {
+	fd := personalDataFlow
+	fd.AlwaysReview = true
+	for name, tc := range map[string]personalDataCase{
+		"same person":        {"Jansen", "10-03-1990", session.StatusNeedsReview, ""},
+		"another birth date": {"Jansen", "11-03-1990", session.StatusRejected, errCodeDocMismatch},
+	} {
+		t.Run(name, func(t *testing.T) { checkPersonalDataDisclosure(t, fd, tc) })
 	}
 }
 
@@ -107,16 +120,16 @@ type personalDataCase struct {
 }
 
 // checkPersonalDataDisclosure photographs the passport, discloses tc's
-// personal data, and checks the session's decision.
-func checkPersonalDataDisclosure(t *testing.T, tc personalDataCase) {
+// personal data in a session of fd, and checks the session's decision.
+func checkPersonalDataDisclosure(t *testing.T, fd flow.FlowDefinition, tc personalDataCase) {
 	t.Helper()
 	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
 	sess := session.Session{
 		ID: "ps_brp", TenantID: "org", Token: "tok-brp", Status: session.StatusCreated,
 		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
-		RequestedAttributes: personalDataFlow.RequestedAttributes,
+		RequestedAttributes: fd.RequestedAttributes,
 	}
-	s, store := documentPhotoServer(sess, personalDataFlow)
+	s, store := documentPhotoServer(sess, fd)
 	face := pp.FaceCheck{LivenessPassed: true, MatchScore: new(0.95), Selfie: &pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}}
 	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
 		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(), Face: &face,

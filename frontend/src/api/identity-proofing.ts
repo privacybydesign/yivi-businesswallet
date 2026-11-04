@@ -233,6 +233,7 @@ const proofingFlowSchema = z.object({
   assuranceTiers: z.array(assuranceTierSchema).optional(),
   legalBasis: z.string().optional(),
   processingPurpose: z.string().optional(),
+  alwaysReview: z.boolean().optional(),
   createdAt: z.string(),
   // False for a flow a recipient cannot finish with only the vcmrtd app.
   completable: z.boolean(),
@@ -341,6 +342,8 @@ const proofingRequestSchema = z.object({
   // approved (no_current_employment, current_benefit,
   // current_other_income); absent otherwise.
   reviewReason: z.string().optional(),
+  // A request in review whose flow version sends every session to review.
+  flowAlwaysReview: z.boolean().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -391,6 +394,7 @@ export interface ProofingFlowSpec {
   assuranceTiers?: ProofingAssuranceTier[];
   legalBasis?: string;
   processingPurpose?: string;
+  alwaysReview?: boolean;
 }
 
 export interface ProofingFlowSelection {

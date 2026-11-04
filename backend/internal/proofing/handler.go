@@ -396,6 +396,9 @@ type requestResponse struct {
 	// identity was approved (no_current_employment, current_benefit,
 	// current_other_income); absent otherwise.
 	ReviewReason string `json:"reviewReason,omitempty"`
+	// FlowAlwaysReview is a request in review whose flow version sends every
+	// session to review.
+	FlowAlwaysReview bool `json:"flowAlwaysReview,omitempty"`
 	// FlowKind is what the session is for; a data request goes to review once
 	// the person is proven. DataExportUntil is until when an approved "see my
 	// data" request's data downloads.
@@ -479,9 +482,15 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 		return nil, mapError(err)
 	}
 	now := time.Now()
+	always, err := h.service.AlwaysReviewed(ctx, reqs, now)
+	if err != nil {
+		return nil, mapError(err)
+	}
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, requestResponseFor(ctx, req, diplomas[req.ID], now))
+		res := requestResponseFor(ctx, req, diplomas[req.ID], now)
+		res.FlowAlwaysReview = always[req.ID]
+		out = append(out, res)
 	}
 	return out, nil
 }
@@ -646,6 +655,11 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if out.Decisions, err = h.decisionsFor(r.Context(), req); err != nil {
 		return mapError(err)
 	}
+	always, err := h.service.AlwaysReviewed(r.Context(), []Request{req}, time.Now())
+	if err != nil {
+		return mapError(err)
+	}
+	out.FlowAlwaysReview = always[req.ID]
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }

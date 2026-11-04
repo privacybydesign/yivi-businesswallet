@@ -1397,6 +1397,17 @@ and the sidebar. Closed reads
 `?addressReview=confirmed` and `...=rejected` (`useClosedReviewsQuery`), each
 narrowed before its cap.
 
+**Always send to review (`alwaysReview` on a flow version).**
+- Set in the flow editor's Review section. The engine sends a session it would
+  approve to `needs_review` (audit reason `flow_always_review`): in
+  `sessionOutcome` for the Idem app and the browser, in `acceptReference` for Yivi.
+- Every rejection still rejects (chip, document, face, level not met).
+- The whole session is reviewed as one. The extra steps open while it waits (`stepsUntil`).
+- Request reads carry `flowAlwaysReview` for a row in review whose pinned version
+  sets it (`Service.AlwaysReviewed`, one `ListFlowVersions` per flow). The list's
+  and the review page's "why" read it (`checkReviewReason`). A wallet reason
+  (`reviewReason`) goes first.
+
 **Live updates, no polling.**
 - A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
   `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
