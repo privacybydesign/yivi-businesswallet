@@ -2524,6 +2524,13 @@ step runs with the Idem app or the Yivi app alike.
     asks CM too while a scan runs (`withSpentDocumentScan`, one status call
     per poll) and fails the session the same way, and the page moves to the
     outcome on its own.
+  - A face task out of attempts is different: CM's page says it cannot go
+    on, but CM leaves the task and the transaction `pending`, even past its
+    expiry (seen on staging, 2026-11-04).
+    - `TransactionStatus` therefore reads a `face_liveness` or `face_match`
+      task at 4 attempts or more (`faceAttemptsLimit`, CM's own limit) as
+      `maximum_attempts_exceeded`.
+    - The poll then fails the session as above.
   - A hosted page framed by a customer's own page reaches the camera only
     when the customer's iframe has `allow="camera"` too.
 - **BSN**: only under the flow's BlurBSN the transaction asks CM to black
@@ -2546,7 +2553,7 @@ step runs with the Idem app or the Yivi app alike.
 
   | CM gives | Engine | Error code |
   |---|---|---|
-  | `face_liveness` state: `completed` passes; `aborted` or `maximum_attempts_exceeded` fails | the face step's liveness (`SelfieStepEvidence`, provider `idscan`) | `LIVENESS_FAILED` |
+  | `face_liveness` state: `completed` passes; `aborted`, `maximum_attempts_exceeded` or 4 attempts still `pending` fails | the face step's liveness (`SelfieStepEvidence`, provider `idscan`) | `LIVENESS_FAILED` |
   | `face_match` score, 0 to 1 | a match from 0.90 (CM's authentic range), or the flow's own `face.match` threshold | `FACE_NO_MATCH` |
   | the liveness image (its video is never fetched) | the session's selfie, under `keepFacePhotos` | |
 

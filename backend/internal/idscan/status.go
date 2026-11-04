@@ -5,7 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 )
+
+// faceAttemptsLimit is ID Scan's own number of tries at a face check. Once a
+// face task has used them up ID Scan's page says it cannot go on, but leaves
+// the task and the transaction pending, even past its expiry.
+const faceAttemptsLimit = 4
 
 // The tasks a scan can fail at, as Failure names them.
 const (
@@ -60,11 +66,21 @@ type statusResponse struct {
 // TransactionStatus reads transactionID's state, which needs no result id: a
 // failed transaction has none. On a failed one it names the task that ended
 // without passing; ID Scan runs the tasks in order, so that is the first one
-// not completed.
+// not completed. A pending one with a face check out of attempts is failed
+// too (faceAttemptsLimit).
 func (c *Client) TransactionStatus(ctx context.Context, transactionID string) (Status, error) {
 	var out statusResponse
 	if err := c.call(ctx, http.MethodGet, c.baseURL+"/transactions/"+url.PathEscape(transactionID), nil, http.StatusOK, &out); err != nil {
 		return Status{}, fmt.Errorf("idscan: status of transaction %s: %w", transactionID, err)
+	}
+	if out.State == StatePending {
+		for _, task := range out.Tasks {
+			if slices.Contains(faceTasks, task.Type) && task.State != stateCompleted && task.Attempts >= faceAttemptsLimit {
+				return Status{State: StateFailed, Failure: &Failure{
+					Task: task.Type, State: StateMaximumAttemptsExceeded, Attempts: task.Attempts,
+				}}, nil
+			}
+		}
 	}
 	status := Status{State: out.State}
 	if out.State != StateFailed {
