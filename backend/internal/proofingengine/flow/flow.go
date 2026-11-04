@@ -571,6 +571,27 @@ func (fd *FlowDefinition) AcceptsDocumentType(t, kind string) bool {
 		})
 }
 
+// OfferedDocumentKinds are the document kinds the Idem app offers the person,
+// in documentKinds order; nil offers every kind. A listed code is matched on
+// the MRZ, not a kind the person can pick, so a list with one offers every
+// kind and AcceptsDocumentType still decides.
+func (fd *FlowDefinition) OfferedDocumentKinds() []string {
+	accepted := fd.acceptedDocuments()
+	isKind := func(a string) bool {
+		return slices.ContainsFunc(documentKinds, func(k string) bool { return strings.EqualFold(a, k) })
+	}
+	if len(accepted) == 0 || slices.ContainsFunc(accepted, func(a string) bool { return !isKind(a) }) {
+		return nil
+	}
+	offered := slices.DeleteFunc(slices.Clone(documentKinds), func(k string) bool {
+		return !slices.ContainsFunc(accepted, func(a string) bool { return strings.EqualFold(a, k) })
+	})
+	if len(offered) == len(documentKinds) {
+		return nil
+	}
+	return offered
+}
+
 // ValidationError is Validate refusing a flow definition, as opposed to a
 // store failure: the message says which rule.
 type ValidationError struct{ err error }

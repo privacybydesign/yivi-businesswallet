@@ -13950,6 +13950,13 @@ components:
           type: array
           items:
             type: string
+        acceptedDocumentKinds:
+          type: array
+          description: The kinds of document the app offers the person; absent offers every kind. The engine still
+            refuses a document outside the flow at submit.
+          items:
+            type: string
+            enum: [passport, identity_card, residence_permit, drivers_license]
         steps:
           type: array
           items:

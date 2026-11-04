@@ -394,6 +394,11 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     empty list, any document: `DocumentKindOf` leaves some cards without a
     kind (a foreigner's card coded `ID` is a residence permit in Belgium, an
     identity card in Estonia), which a list of all four would refuse.
+    - The Idem app offers only the accepted kinds, as the Yivi disclosure
+      does: the app session view's `acceptedDocumentKinds`
+      (`OfferedDocumentKinds`), absent for any document or a list with a
+      code, which the app cannot match before the MRZ is read. Submit still
+      refuses a document outside the flow (`flowComplianceFailure`).
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
