@@ -931,7 +931,8 @@ export const nl: Translation<typeof en> = {
         connectedHint:
           "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
         finishedHeading: "De Idem-app is klaar",
-        finishedHint: "De telefoon heeft zijn deel gedaan. De controle wordt op deze pagina afgerond.",
+        finishedHint:
+          "De telefoon heeft zijn deel gedaan. De controle wordt op deze pagina afgerond.",
         awayHeading: "De Idem-app is gesloten",
         awayHint:
           "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",

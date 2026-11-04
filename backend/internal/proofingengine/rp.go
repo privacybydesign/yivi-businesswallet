@@ -464,9 +464,11 @@ func (s *Server) idemFlow(ctx context.Context, sess session.Session) (*flow.Flow
 
 // appFinished reports whether a phone claimed sess and its app did every
 // step it runs: the phone no longer holds the session, whatever the browser
-// still does.
+// still does. With no browser step left the app still has to submit, so it
+// holds the session until it did.
 func appFinished(sess session.Session, fd *flow.FlowDefinition) bool {
-	return fd != nil && sess.Access.Native != nil && !nativeHandoffPending(sess, fd)
+	return fd != nil && sess.Access.Native != nil && !nativeHandoffPending(sess, fd) &&
+		(sess.Status == session.StatusNeedsReview || !requiredStepsComplete(sess, fd))
 }
 
 // methodOf is how the subject took part on a device: the slots of the
