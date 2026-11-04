@@ -888,6 +888,8 @@ export const en = {
         getYivi: "No Yivi app yet? Get it from the",
         appStore: "App Store",
         playStore: "Google Play",
+        yiviPrivacy: "Yivi's privacy policy",
+        yiviPrivacyUrl: "https://www.yivi.app/en/privacy",
         idemHeading: "Scan with the Idem app",
         idemHint: "Open the Idem app and scan this code from inside the app.",
         openIdem: "Open in the Idem app",

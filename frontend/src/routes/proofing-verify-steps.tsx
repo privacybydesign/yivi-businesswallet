@@ -1916,6 +1916,16 @@ function YiviSession({
           {t("identityProofing.onScreen.scan.playStore")}
         </a>
       </p>
+      <p className={`${HINT} text-center`}>
+        <a
+          href={t("identityProofing.onScreen.scan.yiviPrivacyUrl")}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link font-semibold hover:underline"
+        >
+          {t("identityProofing.onScreen.scan.yiviPrivacy")}
+        </a>
+      </p>
       {start.data && <Countdown seconds={secondsLeft} />}
     </>
   );
