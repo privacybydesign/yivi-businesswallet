@@ -785,3 +785,24 @@ func TestAcceptsTypeByCodeOrKind(t *testing.T) {
 		t.Error("a document of unknown kind matches no kind")
 	}
 }
+
+func TestAppDocumentKinds(t *testing.T) {
+	cases := []struct {
+		accepted []string
+		want     []string
+	}{
+		{nil, nil},
+		{[]string{DocumentKindPersonalData, DocumentKindPassport}, []string{DocumentKindPassport}},
+		{[]string{"DRIVERS_LICENSE", "Identity_Card"}, []string{DocumentKindIdentityCard, DocumentTypeDrivingLicence}},
+		{[]string{"P", "IR"}, []string{DocumentKindPassport, DocumentKindResidencePermit}},
+		{[]string{"ID"}, []string{DocumentKindIdentityCard, DocumentKindResidencePermit}},
+		{[]string{DocumentKindPassport, "AC"}, nil},
+		{slices.Clone(documentKinds), nil},
+	}
+	for _, c := range cases {
+		got := FlowDefinition{AcceptedDocumentTypes: c.accepted}.AppDocumentKinds()
+		if !slices.Equal(got, c.want) {
+			t.Errorf("AppDocumentKinds(%q) = %q, want %q", c.accepted, got, c.want)
+		}
+	}
+}

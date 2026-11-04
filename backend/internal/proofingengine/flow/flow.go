@@ -571,6 +571,45 @@ func (fd *FlowDefinition) AcceptsDocumentType(t, kind string) bool {
 		})
 }
 
+// AppDocumentKinds are the kinds of document the Idem app offers to read for
+// fd, in documentKinds order: every kind AcceptsDocumentType may take, nil
+// when that is any. A code ("P", "ID") stands for every kind that carries it.
+func (fd FlowDefinition) AppDocumentKinds() []string {
+	offered := map[string]bool{}
+	for _, a := range fd.acceptedDocuments() {
+		kinds := kindsCarrying(a)
+		if kinds == nil {
+			return nil
+		}
+		for _, k := range kinds {
+			offered[k] = true
+		}
+	}
+	if len(offered) == 0 || len(offered) == len(documentKinds) {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(documentKinds), func(k string) bool { return !offered[k] })
+}
+
+// kindsCarrying are the kinds of document an accepted type a names: itself
+// for a kind, every kind that carries it for a code, nil when unknown.
+func kindsCarrying(a string) []string {
+	if i := slices.IndexFunc(documentKinds, func(k string) bool { return strings.EqualFold(a, k) }); i >= 0 {
+		return documentKinds[i : i+1]
+	}
+	c := strings.ToUpper(strings.TrimRight(a, "<"))
+	switch {
+	case strings.HasPrefix(c, "P"):
+		return []string{DocumentKindPassport}
+	case slices.Contains(residencePermitCodes, c):
+		return []string{DocumentKindResidencePermit}
+	case c == "I" || c == "ID":
+		return []string{DocumentKindIdentityCard, DocumentKindResidencePermit}
+	default:
+		return nil
+	}
+}
+
 // ValidationError is Validate refusing a flow definition, as opposed to a
 // store failure: the message says which rule.
 type ValidationError struct{ err error }
