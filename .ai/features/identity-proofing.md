@@ -394,6 +394,11 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     empty list, any document: `DocumentKindOf` leaves some cards without a
     kind (a foreigner's card coded `ID` is a residence permit in Belgium, an
     identity card in Estonia), which a list of all four would refuse.
+    - The Idem app offers only these: the app session view's
+      `documentTypes` (`flow.AppDocumentKinds`), absent for any. A code
+      stands for every kind carrying it (`ID`: identity card and residence
+      permit), and an unknown code offers all. With one kind and no matching
+      document saved on the phone, the app skips the document choice.
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
