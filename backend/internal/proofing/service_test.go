@@ -1774,6 +1774,10 @@ func TestClaimLink(t *testing.T) {
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrDeviceActive) {
 		t.Errorf("ClaimLink while the app is active = %v, want %v", err, ErrDeviceActive)
 	}
+	f.ips.handoverErr = &proofingprovider.RejectedError{Status: http.StatusConflict, Code: proofingprovider.CodeAppFinished}
+	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrAppFinished) {
+		t.Errorf("ClaimLink once the app did its part = %v, want %v", err, ErrAppFinished)
+	}
 	f.ips.handoverErr = &proofingprovider.RejectedError{Status: http.StatusGone, Code: "session_expired"}
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrSessionOver) {
 		t.Errorf("ClaimLink after IPS ended it = %v, want %v", err, ErrSessionOver)

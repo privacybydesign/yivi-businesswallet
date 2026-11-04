@@ -420,6 +420,10 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 		return pp.Result{}, err
 	}
 	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt, ExpiresAt: sess.ExpiresAt}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	}
 	var roles []string
 	for _, d := range out.Devices {
 		roles = append(roles, d.Role)
@@ -433,9 +437,10 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	if res.App == "" {
 		res.App = pp.AppWaiting
 	}
-	if res.AppDone, err = s.idemAppDone(ctx, sess); err != nil {
-		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	if appFinished(sess, fd) {
+		res.App = pp.AppFinished
 	}
+	res.AppDone = fd != nil && documentPhotoMissing(sess, fd)
 	res.Method = methodOf(roles)
 	if out.Disclosure {
 		res.Method = pp.MethodYivi
@@ -449,17 +454,19 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	return res, nil
 }
 
-// idemAppDone reports whether sess is a running Idem session whose app did
-// every step it runs, the document photo still to come (pp.Result.AppDone).
-func (s *Server) idemAppDone(ctx context.Context, sess session.Session) (bool, error) {
+// idemFlow is the flow of a running Idem session, nil for any other session.
+func (s *Server) idemFlow(ctx context.Context, sess session.Session) (*flow.FlowDefinition, error) {
 	if sess.Method != session.MethodNFCPassport || sess.Status.Terminal() {
-		return false, nil
+		return nil, nil
 	}
-	fd, err := s.resolveSessionFlow(ctx, sess)
-	if err != nil {
-		return false, err
-	}
-	return fd != nil && documentPhotoMissing(sess, fd), nil
+	return s.resolveSessionFlow(ctx, sess)
+}
+
+// appFinished reports whether a phone claimed sess and its app did every
+// step it runs: the phone no longer holds the session, whatever the browser
+// still does.
+func appFinished(sess session.Session, fd *flow.FlowDefinition) bool {
+	return fd != nil && sess.Access.Native != nil && !nativeHandoffPending(sess, fd)
 }
 
 // methodOf is how the subject took part on a device: the slots of the
@@ -827,10 +834,12 @@ var errWrongSessionToken = errors.New("the session token does not match")
 // errDeviceActive refuses a handover of a slot whose device is still there.
 var errDeviceActive = errors.New("the device holding this slot is still active; only it can hand the session over")
 
+var errAppFinished = errors.New("the Idem app did every step it runs; there is nothing left to hand over")
+
 // SessionHandover gives a fresh Idem app link for the native slot: its claim
 // while empty, a handover once its app left (inactive or stale). An app
 // still active is refused with pp.CodeDeviceActive.
-func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
+func (s *Server) SessionHandover(ctx context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
 	sess, err := s.session(t, id, token)
 	if err != nil {
 		return pp.Claim{}, err
@@ -838,12 +847,19 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	if sess.Method != session.MethodNFCPassport {
 		return pp.Claim{}, rejected(http.StatusConflict, "only Idem-app sessions have device slots")
 	}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Claim{}, fmt.Errorf("proofingengine: session handover: %w", err)
+	}
 	role := session.DeviceRoleNative
 	var grant string
 	slotClaimed := false
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := sessionOpenForDevices(*sess); err != nil {
 			return err
+		}
+		if appFinished(*sess, fd) {
+			return errAppFinished
 		}
 		ttl := s.cfg.ClaimTokenTTL
 		if d := sess.Access.Slot(role); d != nil {
@@ -859,6 +875,8 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	switch {
 	case errors.Is(err, errDeviceActive):
 		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeDeviceActive}
+	case errors.Is(err, errAppFinished):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeAppFinished}
 	case errors.Is(err, errSessionExpired):
 		return pp.Claim{}, &pp.RejectedError{Status: http.StatusGone, Message: err.Error(), Code: errCodeSessionExpired}
 	case errors.Is(err, errSessionComplete):

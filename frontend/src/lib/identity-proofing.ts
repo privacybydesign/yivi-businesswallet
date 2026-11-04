@@ -1838,6 +1838,7 @@ const PROOFING_ERROR_KEYS = {
   link_started: "identityProofing.errors.linkStarted",
   session_over: "identityProofing.errors.sessionOver",
   device_active: "identityProofing.errors.deviceActive",
+  app_finished: "identityProofing.errors.appFinished",
   diplomas_need_page: "identityProofing.errors.diplomasNeedPage",
   hosted_disabled: "identityProofing.errors.hostedDisabled",
   redirect_not_allowed: "identityProofing.errors.redirectNotAllowed",
@@ -1901,6 +1902,7 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.generic");
     case "link_started":
     case "device_active":
+    case "app_finished":
     case "diplomas_closed":
     case "employment_closed":
     case "document_scan_failed":

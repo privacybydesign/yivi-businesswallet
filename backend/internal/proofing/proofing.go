@@ -264,6 +264,9 @@ var (
 	// ErrDeviceActive is a new claim link refused while the Idem app holding
 	// the session is still active.
 	ErrDeviceActive = errors.New("proofing: the app holding the session is still active")
+	// ErrAppFinished is a new claim link refused once the Idem app did its
+	// part: no phone holds the session any more.
+	ErrAppFinished = errors.New("proofing: the Idem app already did its part")
 	// ErrResultNotReady is a result read before the session has an outcome.
 	ErrResultNotReady = errors.New("proofing: the session has no outcome yet")
 	// ErrNotHosted is a headless start of a request not created hosted.

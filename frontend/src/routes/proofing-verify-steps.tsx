@@ -609,12 +609,14 @@ export function Session({
   const choose = useChooseMethodMutation(target);
   // The Yivi app is done and its disclosure waits for the ID scan.
   const [yiviDone, setYiviDone] = useState(false);
+  // The Idem app's phone did its part and no longer holds the session.
+  const [idemDone, setIdemDone] = useState(false);
   // The ID scan comes after the app's part: once the Yivi app or the Idem
   // app did its part, or at once with no app.
   const scanning =
     current.documentScan === "pending" &&
     isProofingLive(current.status) &&
-    (chosen === "browser" || current.appDone === true || yiviDone);
+    (chosen === "browser" || current.appDone === true || yiviDone || idemDone);
   const stage = sessionStage({
     ended: showsOutcome || over,
     method: chosen,
@@ -792,6 +794,7 @@ export function Session({
           deepLinkExpiresAt={appLink.expiresAt}
           sessionSecondsLeft={secondsLeft}
           fallback={manualIdem}
+          onFinished={() => setIdemDone(true)}
         />
       )}
       {chosen !== "yivi_app" && target.kind !== "request" && manualIdem}
@@ -1650,19 +1653,22 @@ interface IdemCode {
 // while nobody scanned (renewed as it lapses), hidden while the app holds the
 // session, and a handover QR the moment the app is closed, so whoever is beside
 // the subject scans it without asking. fallback is the manual "new code" for
-// when where the phone is cannot be read.
+// when where the phone is cannot be read. Once the app did its part the
+// phone no longer holds the session: no code, and onFinished hands the page on.
 function IdemOnScreen({
   target,
   deepLink,
   deepLinkExpiresAt,
   sessionSecondsLeft,
   fallback,
+  onFinished,
 }: Readonly<{
   target: Extract<VerifyTarget, { kind: "request" }>;
   deepLink?: string;
   deepLinkExpiresAt?: string;
   sessionSecondsLeft: number;
   fallback: React.ReactNode;
+  onFinished?: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const app = useProofingAppQuery(target.slug, target.requestId, true);
@@ -1684,15 +1690,25 @@ function IdemOnScreen({
   const [seen, setSeen] = useState(app.data);
   if (app.data !== seen) {
     setSeen(app.data);
-    if (app.data === "connected") setCode(undefined);
+    if (app.data === "connected" || app.data === "finished") setCode(undefined);
   }
+  const finished = app.data === "finished";
+  useEffect(() => {
+    if (finished) onFinished?.();
+  }, [finished, onFinished]);
   // The latest read, for a mint that answers after the app came back.
   const latest = useRef(app.data);
   // The poll the last mint was for: a refused one waits for the next poll.
   const mintedFor = useRef(0);
   useEffect(() => {
     latest.current = app.data;
-    if (app.data === undefined || app.data === "connected") return;
+    if (
+      app.data === undefined ||
+      app.data === "connected" ||
+      app.data === "finished"
+    ) {
+      return;
+    }
     if (shown || isPending || mintedFor.current === app.dataUpdatedAt) return;
     mintedFor.current = app.dataUpdatedAt;
     const wanted = app.data;
@@ -1705,6 +1721,22 @@ function IdemOnScreen({
 
   if (app.data === undefined && app.isError) {
     return <>{fallback}</>;
+  }
+  if (finished) {
+    return (
+      <div className="flex flex-col items-center gap-2 text-center">
+        <span className="bg-tile text-tile-fg rounded-yivi flex h-12 w-12 items-center justify-center">
+          <Icon name="phone" size={24} />
+        </span>
+        <StepHeading>
+          {t("identityProofing.onScreen.scan.finishedHeading")}
+        </StepHeading>
+        <p className={HINT}>
+          {t("identityProofing.onScreen.scan.finishedHint")}
+        </p>
+        <Countdown seconds={sessionSecondsLeft} />
+      </div>
+    );
   }
   if (state === "connected") {
     return (

@@ -180,13 +180,15 @@ type Result struct {
 }
 
 // App is where an Idem session's phone is: none scanned yet, holding the
-// session, or away (closed or silent), when a claim link hands it over.
+// session, or away (closed or silent), when a claim link hands it over; or
+// finished, its part done, so it no longer holds the session.
 type App string
 
 const (
 	AppWaiting   App = "waiting"
 	AppConnected App = "connected"
 	AppAway      App = "away"
+	AppFinished  App = "finished"
 )
 
 // Identity is a session's outcome with who was proofed and on what evidence,
@@ -443,6 +445,10 @@ type RejectedError struct {
 // CodeDeviceActive is the engine refusing a handover while the app holding the
 // session is still active: the subject carries on there.
 const CodeDeviceActive = "device_active"
+
+// CodeAppFinished is the engine refusing a handover once the Idem app did
+// every step it runs: there is nothing left for a phone to take over.
+const CodeAppFinished = "app_finished"
 
 // CodeDocumentPhotoMissing is the engine refusing to decide a session whose
 // flow takes a document photo before the browser submitted it

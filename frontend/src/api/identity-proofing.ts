@@ -1400,7 +1400,7 @@ export type ProofingClaimLink = z.infer<typeof proofingClaimLinkSchema>;
 // Where a running on-screen Idem request's phone is: no phone scanned yet, the
 // app holds the session, or it was closed and a claim link hands it over.
 const proofingAppSchema = z.object({
-  app: z.enum(["waiting", "connected", "away"]).catch("waiting"),
+  app: z.enum(["waiting", "connected", "away", "finished"]).catch("waiting"),
 });
 
 export type ProofingApp = z.infer<typeof proofingAppSchema>["app"];

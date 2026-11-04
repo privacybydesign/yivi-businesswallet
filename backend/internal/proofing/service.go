@@ -2047,7 +2047,8 @@ func (s *Service) App(ctx context.Context, orgID, id uuid.UUID, requestedBy *uui
 
 // ClaimLink is a fresh vcmrtd link for a sent Idem request: a new claim once
 // the first lapsed unscanned, or a handover to another phone once the app that
-// held the session left. An app still active is ErrDeviceActive.
+// held the session left. An app still active is ErrDeviceActive, one that did
+// its part ErrAppFinished.
 func (s *Service) ClaimLink(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.Claim, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -2070,6 +2071,8 @@ func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.
 	switch {
 	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeDeviceActive:
 		return proofingprovider.Claim{}, ErrDeviceActive
+	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeAppFinished:
+		return proofingprovider.Claim{}, ErrAppFinished
 	case errors.As(err, &rejected):
 		return proofingprovider.Claim{}, ErrSessionOver
 	case err != nil:

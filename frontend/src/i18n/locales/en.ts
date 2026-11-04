@@ -563,6 +563,8 @@ export const en = {
       sessionOver: "This session has ended. Start a new one.",
       deviceActive:
         "The Idem app still has this session open: carry on there, or close it first.",
+      appFinished:
+        "The Idem app already did its part: carry on on this page.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
       redirectNotAllowed:
@@ -904,6 +906,8 @@ export const en = {
         connectedHeading: "Continuing in the Idem app",
         connectedHint:
           "The phone has the session open. If the app is closed, a code to carry on appears here.",
+        finishedHeading: "The Idem app is done",
+        finishedHint: "The phone did its part. The check finishes on this page.",
         awayHeading: "The Idem app was closed",
         awayHint:
           "Scan this code with the Idem app to carry on where the session was, on the same phone or another one.",
