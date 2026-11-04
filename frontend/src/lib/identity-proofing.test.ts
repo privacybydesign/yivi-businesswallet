@@ -377,6 +377,7 @@ describe("flowSpecFromDraft", () => {
         bsnPolicy: "mask",
         blackOutBsn: false,
         keepFacePhotos: true,
+        alwaysReview: true,
         retentionSeconds: 3600,
         sessionTtlSeconds: 300,
       }),
@@ -388,6 +389,7 @@ describe("flowSpecFromDraft", () => {
       bsnPolicy: "mask",
       blurBsn: false,
       keepFacePhotos: true,
+      alwaysReview: true,
       retentionOverrideSeconds: 3600,
       sessionTtlSeconds: 300,
     });
@@ -608,6 +610,7 @@ describe("what a stored flow without a setting shows", () => {
       bsnPolicy: "omit",
       blackOutBsn: false,
       keepFacePhotos: false,
+      alwaysReview: false,
       retentionSeconds: 0,
       sessionTtlSeconds: 0,
     });
@@ -620,6 +623,7 @@ describe("what a stored flow without a setting shows", () => {
         bsnPolicy: "mask",
         blurBsn: true,
         keepFacePhotos: true,
+        alwaysReview: true,
         retentionOverrideSeconds: 86_400,
         sessionTtlSeconds: 120,
       }),
@@ -627,6 +631,7 @@ describe("what a stored flow without a setting shows", () => {
       bsnPolicy: "mask",
       blackOutBsn: true,
       keepFacePhotos: true,
+      alwaysReview: true,
       retentionSeconds: 86_400,
       sessionTtlSeconds: 120,
     });

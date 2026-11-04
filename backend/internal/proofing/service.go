@@ -1960,6 +1960,30 @@ func (s *Service) withAppDone(ctx context.Context, req Request) (Request, error)
 	return req, nil
 }
 
+// AlwaysReviewed is which of reqs wait for review because the flow version
+// each pinned sends every session to review, read once per flow.
+func (s *Service) AlwaysReviewed(ctx context.Context, reqs []Request, now time.Time) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	versions := map[string][]proofingprovider.Flow{}
+	for _, req := range reqs {
+		if req.FlowVersion == 0 || req.FlowKind.dataRequest() || req.EffectiveStatus(now) != StatusNeedsReview {
+			continue
+		}
+		flows, read := versions[req.FlowID]
+		if !read {
+			var err error
+			flows, err = s.ips.ListFlowVersions(ctx, requestTenant(req), req.FlowID)
+			if err != nil && !errors.Is(err, proofingprovider.ErrNotFound) {
+				return nil, fmt.Errorf("proofing: flow versions of request %s: %w", req.ID, err)
+			}
+			versions[req.FlowID] = flows
+		}
+		i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.Version == req.FlowVersion })
+		out[req.ID] = i >= 0 && flows[i].AlwaysReview
+	}
+	return out, nil
+}
+
 // RequestIf is Request for a caller whose scope the caller decides: allow sees the
 // request as stored, and one it refuses is ErrRequestNotFound, never re-checked in
 // the engine.

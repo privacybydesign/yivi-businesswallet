@@ -204,6 +204,19 @@ export function walletReviewReason(
   );
 }
 
+// Why an identity check waits: the wallet's own reason, else its flow sending
+// every session to review; undefined is the engine's doubt.
+export type CheckReviewReason = WalletReviewReason | "alwaysReview";
+
+export function checkReviewReason(
+  request: Pick<ProofingRequest, "reviewReason" | "flowAlwaysReview">,
+): CheckReviewReason | undefined {
+  return (
+    walletReviewReason(request) ??
+    (request.flowAlwaysReview === true ? "alwaysReview" : undefined)
+  );
+}
+
 // Why the reader may not decide an identity check: they sent it, or it is
 // about them. Another reviewer decides it (the backend's ownReview, 403
 // own_review), unless the backend lets the reader (reviewsOwn: a platform

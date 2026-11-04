@@ -69,6 +69,8 @@ type FlowSpec struct {
 	// SessionTTLSeconds is how long a session of this flow runs; 0 follows the
 	// org's session lifetime.
 	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
+	// AlwaysReview sends a session that would be approved to review instead.
+	AlwaysReview bool `json:"alwaysReview,omitempty"`
 }
 
 // AssuranceTier maps a minimum score percentage to an assurance tier name.

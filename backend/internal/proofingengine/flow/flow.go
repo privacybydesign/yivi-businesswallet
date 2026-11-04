@@ -417,6 +417,9 @@ type FlowDefinition struct {
 	// the org's session lifetime. The wallet reads it when it creates a session;
 	// the engine only keeps it.
 	SessionTTL time.Duration `json:"SessionTTL"`
+	// AlwaysReview sends a session that would be approved to review instead;
+	// a rejection stays a rejection.
+	AlwaysReview bool `json:"AlwaysReview"`
 	// AssuranceTiers override DefaultAssuranceTiers: the percentage-of-checks
 	// ladder a session's achieved score maps onto, as opposed to the eIDAS level
 	// RequiredAssuranceLevel demands. Empty uses the default.

@@ -229,6 +229,12 @@ func TestRegulaSkipsFailedLiveness(t *testing.T) {
 	}
 }
 
+// alwaysReview is fd sending every session it would approve to review.
+func alwaysReview(fd *flow.FlowDefinition) *flow.FlowDefinition {
+	fd.AlwaysReview = true
+	return fd
+}
+
 func TestSessionOutcome(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	faceDone := session.Session{Steps: session.StepEvidence{Selfie: &session.SelfieStepEvidence{}}}
@@ -271,6 +277,11 @@ func TestSessionOutcome(t *testing.T) {
 		{"liveness failed, capture only", selfieOnlyFlow(), faceDone, notLiveRegula(), verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeLivenessFailed},
 		{"face did not match", substantialFlow(""), faceDone, noMatch, verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeFaceNoMatch},
 		{"tampered chip", chipFlow(""), session.Session{}, appResultRequest{}, tampered, flow.AssuranceLevelLow, session.StatusRejected, "DOC_TAMPERED"},
+		// A flow that always reviews holds what it would approve, never what it would reject.
+		{"always review, passes", alwaysReview(substantialFlow(flow.AssuranceLevelSubstantial)), faceDone, liveRegulaMatch(), verifiedChip(), flow.AssuranceLevelSubstantial, session.StatusNeedsReview, ""},
+		{"always review, only low", alwaysReview(substantialFlow(flow.AssuranceLevelSubstantial)), faceDone, liveRegulaMatch(), chipWithoutAA(), flow.AssuranceLevelLow, session.StatusRejected, errCodeAssuranceNotMet},
+		{"always review, face did not match", alwaysReview(substantialFlow("")), faceDone, noMatch, verifiedChip(), flow.AssuranceLevelLow, session.StatusRejected, errCodeFaceNoMatch},
+		{"always review, tampered chip", alwaysReview(chipFlow("")), session.Session{}, appResultRequest{}, tampered, flow.AssuranceLevelLow, session.StatusRejected, "DOC_TAMPERED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			achieved := computeEIDASAssuranceLevel(tc.fd, tc.req, tc.checks, matchedChipPortrait)

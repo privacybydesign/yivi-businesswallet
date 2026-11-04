@@ -43,7 +43,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
 		SessionTTL:        time.Duration(in.SessionTTLSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
-		AgeOver: in.AgeOver,
+		AgeOver: in.AgeOver, AlwaysReview: in.AlwaysReview,
 	}
 	for _, app := range in.Apps {
 		fd.Apps = append(fd.Apps, flow.App(app))
@@ -81,7 +81,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
-		AgeOver: fd.AgeOver,
+		AgeOver: fd.AgeOver, AlwaysReview: fd.AlwaysReview,
 	}
 	for _, app := range fd.Apps {
 		spec.Apps = append(spec.Apps, string(app))

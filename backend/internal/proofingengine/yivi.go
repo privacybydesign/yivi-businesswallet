@@ -132,6 +132,11 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
 	}
 
+	if decided == session.StatusApproved && alwaysReviews(fd) {
+		decided = session.StatusNeedsReview
+		details[detailReason] = reasonFlowAlwaysReview
+	}
+
 	result := buildBoundLoginResult(sess, info, doc, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)
 	addDocumentPhoto(result, sess, docRedaction)
 	addDocumentCheck(result, sess)

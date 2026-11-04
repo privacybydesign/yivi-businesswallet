@@ -1352,6 +1352,7 @@ export const nl: Translation<typeof en> = {
           "In het Verzekeringsbericht staat geen huidige baan",
         current_benefit:
           "In het Verzekeringsbericht staat een lopende uitkering van UWV",
+        alwaysReview: "De flow laat elke controle beoordelen",
         current_other_income:
           "In het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren",
       },
@@ -1382,6 +1383,8 @@ export const nl: Translation<typeof en> = {
         title: "Een identiteitscontrole beoordelen",
         why: {
           title: "Waarom dit op jou wacht",
+          alwaysReview:
+            "Deze flow laat elke controle door een beoordelaar goedkeuren. Bekijk de automatische controles hieronder voordat je beslist.",
           body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
           no_current_employment:
             "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder.",
@@ -1908,6 +1911,13 @@ export const nl: Translation<typeof en> = {
           warning:
             "Onder {{min}} wordt afgeraden: meer mensen die niet de houder van het document zijn komen erdoor.",
         },
+      },
+      review: {
+        title: "Beoordeling",
+        hint: "Wat er gebeurt met een sessie die alle controles doorstaat.",
+        always: "Altijd laten beoordelen",
+        alwaysHint:
+          "Een sessie die alle controles doorstaat, wacht op een beoordelaar die hem goedkeurt. Een mislukte controle wijst hem nog steeds af.",
       },
       privacy: {
         title: "Privacy",

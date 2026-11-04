@@ -5225,7 +5225,8 @@ paths:
         `requestedAttributes`, `attributeReasons`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
         `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
-        `legalBasis` and `processingPurpose`. Face capture is always set to the app (`selfieLocation` is
+        `legalBasis`, `processingPurpose` and `alwaysReview` (a session the checks would approve
+        goes to `needs_review` instead; a rejection stays one). Face capture is always set to the app (`selfieLocation` is
         overwritten). An empty `name` or `steps`, an unknown `faceProvider`, or a missing `attributeReasons` entry, is 400
         `invalid_input`. The proofing engine validates the combination (including `regula` on a
         deployment without Regula) and its refusal is returned as 422 `rejected_by_provider`.
@@ -5938,7 +5939,8 @@ paths:
         polls. An administrator sees any request, a member only one they sent, and a member
         with the reviewer right also one waiting for review, a data request in any status, and
         a check whose address is reviewed, waiting or decided (without `proofedName`,
-        `employment` and diplomas).
+        `employment` and diplomas). `flowAlwaysReview` is set on a request in `needs_review`
+        whose flow version sends every session to review.
       responses:
         '200':
           description: The request.
