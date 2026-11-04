@@ -141,6 +141,14 @@ func TestAppSubmitWaitsForDocumentPhoto(t *testing.T) {
 	if err != nil || !status.AppDone {
 		t.Fatalf("SessionStatus = %+v, %v; want the app done", status, err)
 	}
+	if status.App != pp.AppFinished {
+		t.Errorf("SessionStatus app = %q, want %q: the phone no longer holds the session", status.App, pp.AppFinished)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if !errors.As(err, &refused) || refused.Code != pp.CodeAppFinished {
+		t.Errorf("SessionHandover after the app's part = %v, want %s", err, pp.CodeAppFinished)
+	}
 
 	photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan()}
 	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, photo); err != nil {
@@ -564,5 +572,45 @@ func TestFailDocumentScanWithoutPhotoStep(t *testing.T) {
 	err := s.FailDocumentScan(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, pp.DocumentScanFailure{Task: pp.DocumentScanTaskDocument})
 	if !errors.As(err, &refused) || refused.Status != http.StatusConflict {
 		t.Errorf("FailDocumentScan = %v, want 409", err)
+	}
+}
+
+// Until the app did its part, its phone holds the session and can hand it on.
+func TestAppHoldsSessionUntilItsPartIsDone(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
+	sess.Steps.Document = &session.DocumentStepEvidence{}
+	s, _ := documentPhotoServer(sess, chipAndPhotoFlow)
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || status.App == pp.AppFinished || status.AppDone {
+		t.Fatalf("SessionStatus = %+v, %v; want the app not finished before the chip read", status, err)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if errors.As(err, &refused) && refused.Code == pp.CodeAppFinished {
+		t.Errorf("SessionHandover before the chip read = %v, want no %s", err, pp.CodeAppFinished)
+	}
+}
+
+// With no browser step after the chip read, the app still has to submit: its
+// phone holds the session until it did.
+func TestAppHoldsSessionUntilItSubmits(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
+	sess.Steps.Document = &session.DocumentStepEvidence{}
+	sess.Steps.NFC = &session.NFCStepEvidence{}
+	chipOnly := chipAndPhotoFlow
+	chipOnly.Steps = []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}
+	s, _ := documentPhotoServer(sess, chipOnly)
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || status.App == pp.AppFinished {
+		t.Fatalf("SessionStatus = %+v, %v; want the app not finished before its submit", status, err)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if errors.As(err, &refused) && refused.Code == pp.CodeAppFinished {
+		t.Errorf("SessionHandover before the app's submit = %v, want no %s", err, pp.CodeAppFinished)
 	}
 }

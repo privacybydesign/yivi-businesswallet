@@ -584,6 +584,8 @@ export const nl: Translation<typeof en> = {
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
       deviceActive:
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
+      appFinished:
+        "De Idem-app heeft zijn deel al gedaan: ga verder op deze pagina.",
       hostedDisabled:
         "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
       redirectNotAllowed:
@@ -928,6 +930,9 @@ export const nl: Translation<typeof en> = {
         connectedHeading: "Verder in de Idem-app",
         connectedHint:
           "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
+        finishedHeading: "De Idem-app is klaar",
+        finishedHint:
+          "De telefoon heeft zijn deel gedaan. De controle wordt op deze pagina afgerond.",
         awayHeading: "De Idem-app is gesloten",
         awayHint:
           "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",

@@ -6025,7 +6025,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request does not run in the Idem app or is a test request (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
+          description: The request does not run in the Idem app or is a test request (`wrong_method`), its session has ended (`session_over`), the app holding it is still active (`device_active`), or the app already did its part (`app_finished`).
           content:
             application/json:
               schema:
@@ -8660,7 +8660,7 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The link does not run in the Idem app (`wrong_method`), its session has ended (`session_over`), or the app holding it is still active (`device_active`).
+          description: The link does not run in the Idem app (`wrong_method`), its session has ended (`session_over`), the app holding it is still active (`device_active`), or the app already did its part (`app_finished`).
           content:
             application/json:
               schema:
@@ -12995,7 +12995,7 @@ components:
       properties:
         app:
           type: string
-          enum: [waiting, connected, away]
+          enum: [waiting, connected, away, finished]
       required: [app]
     ProofingChooseMethod:
       type: object
