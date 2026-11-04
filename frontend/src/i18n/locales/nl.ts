@@ -912,6 +912,8 @@ export const nl: Translation<typeof en> = {
         getYivi: "Nog geen Yivi-app? Download hem via de",
         appStore: "App Store",
         playStore: "Google Play",
+        yiviPrivacy: "Yivi's privacyregels",
+        yiviPrivacyUrl: "https://www.yivi.app/privacy",
         idemHeading: "Scan met de Idem-app",
         idemHint: "Open de Idem-app en scan deze code vanuit de app.",
         openIdem: "Openen in de Idem-app",
