@@ -1338,6 +1338,48 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	}
 }
 
+// webhookFixture is an org whose endpoint subscribes to some events, and a
+// user who sends its requests.
+type webhookFixture struct {
+	pool     *pgxpool.Pool
+	requests *RequestStore
+	webhooks *WebhookStore
+	orgID    uuid.UUID
+	sam      uuid.UUID
+}
+
+func newWebhookFixture(t *testing.T, events []string) webhookFixture {
+	t.Helper()
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	f := webhookFixture{
+		pool: pool, requests: NewRequestStore(pool, audit.NopRecorder{}, cipher),
+		webhooks: NewWebhookStore(pool, audit.NopRecorder{}, cipher),
+		orgID:    makeOrg(t, pool, "acme"), sam: makeUser(t, pool, "sam@example.org"),
+	}
+	if _, _, err := f.webhooks.Save(context.Background(), f.orgID, "https://hooks.example.org/x", events); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return f
+}
+
+// An outcome the engine reports before any poll saw the app join still says
+// which app decided it, as the session does.
+func TestOutcomeWebhookCarriesReportedMethod(t *testing.T) {
+	f := newWebhookFixture(t, []string{EventSessionVerified})
+	ctx := context.Background()
+	req := createStarted(t, f.requests, newStoredRequest(f.orgID, f.sam, externalSubject("a@example.org")), "s1")
+	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Method: proofingprovider.MethodIdem}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	var method string
+	if err := f.pool.QueryRow(ctx, `SELECT payload->>'method' FROM identity_proofing_webhook_deliveries
+		WHERE event = $1`, EventSessionVerified).Scan(&method); err != nil || method != string(proofingprovider.MethodIdem) {
+		t.Errorf("session.verified method = %q, %v; want %q", method, err, proofingprovider.MethodIdem)
+	}
+}
+
 // An org without an endpoint of its own is sent nothing: no delivery is queued
 // for it.
 func TestWebhookNoEndpointNoDeliveries(t *testing.T) {
@@ -1425,7 +1467,7 @@ func TestWebhookLeaseFence(t *testing.T) {
 		t.Fatalf("claimDue = %d, %v", len(late), err)
 	}
 	// The lease lapses and another worker claims and delivers it.
-	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now(), leased_until = now()`); err != nil {
 		t.Fatal(err)
 	}
 	current, err := webhooks.claimDue(ctx, 1, 1)
@@ -1544,9 +1586,9 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 	got := keys()
 	slices.SortFunc(got, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
 	want := [][]string{
-		{DeliveryDelivered, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
+		{DeliveryDelivered, "flowId", "flowKind", "sessionId", "status"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deliveries = %v, want %v", got, want)

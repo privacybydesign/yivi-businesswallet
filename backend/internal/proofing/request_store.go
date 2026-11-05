@@ -1488,6 +1488,7 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		}
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
+		decided.Method = methodOr(res.Method, req.Method)
 		if err := enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status)); err != nil {
 			return err
 		}

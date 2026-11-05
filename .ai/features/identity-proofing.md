@@ -976,24 +976,32 @@ post-review outcome stay the system's.
     the API says so once at boot. Events
   `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
   `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added` /
-  `.address_added` / `.address_reviewed` (`WebhookEvents`) are written to the
+  `.address_added` / `.address_reviewed` / `.employment_added` (`WebhookEvents`) are written to the
   outbox (`identity_proofing_webhook_deliveries`, keyed by org) in the same transaction as the
   change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
   `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`,
-  `AddAddress`, `DecideAddressReview`); an
+  `AddAddress`, `DecideAddressReview`, `AddEmployment`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
-  request whatever is subscribed. The payload is the session id, status, flow,
-  method, assurance and error code: never a name or photo (the API has the
+  request whatever is subscribed. The payload is the session id, status, flow and
+  its kind (`flowKind`), method, assurance and error code: never a name or photo (the API has the
   name).
-  - Only `session.address_added` carries personal data: the address the person
-    entered, without the registered (BRP) one (`Address.forIntegrator`).
+  - Only what the person added after the identity check carries personal data
+    (`webhookPersonalKeys`, dropped once a delivery is final):
+    - `session.diploma_added`: the diploma, without its PDF, name or birth date;
+    - `session.address_added`: the address entered, without the registered (BRP)
+      one (`Address.forIntegrator`);
+    - `session.employment_added`: the statement's current relations.
+  - Delivery is at least once and unordered: a retry can overtake a later
+    event, and a session decided before a poll saw it start sends no
+    `session.started`. Receivers deduplicate on the delivery id.
   - `session.address_reviewed` carries the decision as `addressReview`.
   A delivery's `sessionId` is the `ps_` id (absent for a `test` delivery). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
   - Per batch (`deliveryBatch` 20) `claimDue` takes at most `endpointWorkers`
-    (2) of one endpoint's deliveries, its oldest (a `row_number()` per
-    org over everything due, held rows counted, so across replicas too).
+    (2) of one endpoint's deliveries, its oldest, counting the ones still
+    leased (`leased_until`, cleared by `recordAttempt`) and the ones a
+    concurrent claim has locked, so across replicas too.
     `deliveryWorkers` (10) send at once, `sendFair` keeping to 2 per URL. The
     next batch waits for the last, so an endpoint that never answers costs
     every other org one `safehttp.RequestTimeout` per batch, not its backlog.
