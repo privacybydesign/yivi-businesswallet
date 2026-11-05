@@ -8130,15 +8130,17 @@ paths:
         must resolve to a public address when an event is sent) and `events`, at least one
         of `session.created`, `session.started`, `session.handover`, `session.verified`, `session.failed`,
         `session.review_opened`, `session.expired`, `session.cancelled`, `session.purged`,
-        `session.diploma_added`, `session.address_added` and `session.address_reviewed`. An
+        `session.diploma_added`, `session.address_added`, `session.address_reviewed` and
+        `session.employment_added`. An
         endpoint is sent only the events it was saved with: save it again to add a new one. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
         readable. Each event is a POST of `{id, type, createdAt, data}`; `data` holds
-        `sessionId` (`ps_…`), `status`, `flowId`, and when known `method`,
-        `assuranceLevel`, `eidasLevel`, `errorCode` (such as `IDENTITY_MISMATCH`) and
-        `expectedSubject: true`; never the person's name or photo. Only `session.address_added`
-        carries a person's data: the address they entered (`address`), never the registered (BRP)
-        one. `session.address_reviewed` carries the decision as `addressReview`. It is signed in the
+        `sessionId` (`ps_…`), `status`, `flowId`, `flowKind`, and when known `method`,
+        `assuranceLevel`, `eidasLevel`, `errorCode` (such as `IDENTITY_MISMATCH`), `reviewReason`
+        and `expectedSubject: true`; never the person's name or photo. Only what the person added
+        after their identity check carries their data: `session.diploma_added` the diploma
+        (`diploma`), `session.address_added` the address they entered (`address`, never the
+        registered (BRP) one) and `session.employment_added` the statement (`employment`). `session.address_reviewed` carries the decision as `addressReview`. It is signed in the
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
         `Yivi-Event` and `Yivi-Delivery`; for 24 hours after a secret rotation it carries a
         second `v1` under the previous secret. An organisation without an endpoint is sent no
@@ -11987,7 +11989,10 @@ components:
         What the organisation's webhook endpoint receives: a POST signed in `Yivi-Signature`
         (`t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">` with the endpoint's `whsec_…`
         secret; for 24 hours after a rotation a second `v1` under the previous one), with `Yivi-Event` and `Yivi-Delivery` headers. Answer 2xx; anything else
-        is tried up to 8 times in all over about 24 hours.
+        is tried up to 8 times in all over about 24 hours. An event can arrive more than once
+        (deduplicate on `id`) and out of order, and a session can skip one (a session decided
+        before its start was seen sends no `session.started`): read the session for its
+        current state.
       properties:
         id:
           type: string
@@ -12002,8 +12007,9 @@ components:
         data:
           type: object
           description: >-
-            Never the person's name or photo. Only `session.address_added` carries a person's
-            data, the address they entered. A `test` event's data is only `message`.
+            Never the person's name or photo. Only `session.diploma_added`,
+            `session.address_added` and `session.employment_added` carry a person's data: what
+            they added after their identity check. A `test` event's data is only `message`.
           properties:
             sessionId:
               type: string
@@ -12013,6 +12019,12 @@ components:
               enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
             flowId:
               type: string
+            flowKind:
+              type: string
+              enum: [identity, data_access, data_erasure]
+              description: >-
+                What the session is for: an identity check, or a person's request to see
+                (`data_access`) or erase (`data_erasure`) their data.
             method:
               type: string
             assuranceLevel:
@@ -12022,6 +12034,12 @@ components:
             errorCode:
               type: string
               example: IDENTITY_MISMATCH
+            reviewReason:
+              type: string
+              enum: [no_current_employment, current_benefit, current_other_income]
+              description: >-
+                Why the wallet sent the session to review after its identity was approved,
+                as on the session. Absent otherwise.
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
@@ -12032,7 +12050,9 @@ components:
               allOf:
                 - $ref: '#/components/schemas/ProofingAddress'
             employment:
-              $ref: '#/components/schemas/ProofingEmployment'
+              description: Only on `session.employment_added`.
+              allOf:
+                - $ref: '#/components/schemas/ProofingEmployment'
             addressReview:
               type: string
               enum: [confirmed, rejected]
@@ -12064,6 +12084,7 @@ components:
           sessionId: ps_q4r7tz2mxk3vbn6hw5jc2dfa7e
           status: approved
           flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+          flowKind: identity
           method: idem_app
           assuranceLevel: substantial
           eidasLevel: substantial

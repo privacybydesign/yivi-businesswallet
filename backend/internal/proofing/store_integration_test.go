@@ -1338,6 +1338,31 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	}
 }
 
+// An outcome the engine reports before any poll saw the app join still says
+// which app decided it, as the session does.
+func TestOutcomeWebhookCarriesReportedMethod(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionVerified}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
+	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Method: proofingprovider.MethodIdem}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	var method string
+	if err := pool.QueryRow(ctx, `SELECT payload->>'method' FROM identity_proofing_webhook_deliveries
+		WHERE event = $1`, EventSessionVerified).Scan(&method); err != nil || method != string(proofingprovider.MethodIdem) {
+		t.Errorf("session.verified method = %q, %v; want %q", method, err, proofingprovider.MethodIdem)
+	}
+}
+
 // An org without an endpoint of its own is sent nothing: no delivery is queued
 // for it.
 func TestWebhookNoEndpointNoDeliveries(t *testing.T) {
