@@ -6337,7 +6337,8 @@ paths:
         Without `resultId` it reports a scan that ended unfinished: one that used up ID Scan's own
         attempts rejects the session (`LIVENESS_FAILED` or `FACE_NO_MATCH` for the face checks,
         `DOC_EXPIRED` for an expired document, else `DOCUMENT_SCAN_FAILED`), as a new scan would
-        give the person new attempts.
+        give the person new attempts. So does one that ended at a face check, which ID Scan reports
+        as still running once its page gave up.
       requestBody:
         required: true
         content:

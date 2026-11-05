@@ -165,10 +165,15 @@ func checkScannedPhoto(t *testing.T, photo proofingprovider.DocumentPhoto) {
 // service.
 // A scan the page reports ended without a result fails the session once the
 // scan service's own attempts ran out, so a new transaction gives none back;
-// one the person left can be tried again.
+// one the person left can be tried again. ID Scan's page posts only once a
+// task is over, but its API leaves a face check out of attempts pending: the
+// page's report at a face check fails the session.
 func TestUnfinishedDocumentScan(t *testing.T) {
 	failed := func(task, state string) idscan.Status {
 		return idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{Task: task, State: state, Attempts: 3}}
+	}
+	running := func(task string) idscan.Status {
+		return idscan.Status{State: idscan.StatePending, Running: &idscan.Running{Task: task, Attempts: 2}}
 	}
 	for name, tc := range map[string]unfinishedScanCase{
 		"face liveness out of attempts": {failed(idscan.TaskFaceLiveness, idscan.StateMaximumAttemptsExceeded), true},
@@ -177,6 +182,9 @@ func TestUnfinishedDocumentScan(t *testing.T) {
 		"stopped by the person":         {failed(idscan.TaskFaceLiveness, idscan.StateAborted), false},
 		"failed without a reason":       {idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{}}, false},
 		"still running":                 {idscan.Status{State: idscan.StatePending}, false},
+		"ended at the photo":            {running(idscan.TaskDocumentScan), false},
+		"ended at the liveness check":   {running(idscan.TaskFaceLiveness), true},
+		"ended at the face match":       {running(idscan.TaskFaceMatch), true},
 	} {
 		t.Run(name, func(t *testing.T) { checkUnfinishedScan(t, tc) })
 	}
@@ -185,6 +193,14 @@ func TestUnfinishedDocumentScan(t *testing.T) {
 type unfinishedScanCase struct {
 	status idscan.Status
 	failed bool
+}
+
+// failedTask is the task tc's session fails at.
+func (tc unfinishedScanCase) failedTask() string {
+	if tc.status.Failure != nil {
+		return tc.status.Failure.Task
+	}
+	return tc.status.Running.Task
 }
 
 // checkUnfinishedScan reports a scan ended without a result whose transaction
@@ -208,8 +224,8 @@ func checkUnfinishedScan(t *testing.T, tc unfinishedScanCase) {
 			t.Errorf("FinishDocumentScan = %v, failures %+v, audited %+v; want ErrDocumentScanFailed and no failure",
 				err, f.ips.scanFailures, f.requests.scanFailures)
 		}
-	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.status.Failure.Task:
-		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.status.Failure.Task)
+	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.failedTask():
+		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.failedTask())
 	case len(f.requests.scanFailures) != 1 || f.requests.scanFailures[0] != f.ips.scanFailures[0]:
 		t.Errorf("audited %+v, want the failure %+v", f.requests.scanFailures, f.ips.scanFailures[0])
 	}
@@ -461,9 +477,11 @@ func TestPollFailsSpentDocumentScan(t *testing.T) {
 	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "nl"); err != nil {
 		t.Fatalf("StartDocumentScan: %v", err)
 	}
-	scanner.status = idscan.Status{State: idscan.StatePending}
-	if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
-		t.Fatalf("poll while scanning: %v, failures %+v", err, f.ips.scanFailures)
+	for _, task := range []string{idscan.TaskDocumentScan, idscan.TaskFaceLiveness} {
+		scanner.status = idscan.Status{State: idscan.StatePending, Running: &idscan.Running{Task: task, Attempts: 4}}
+		if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
+			t.Fatalf("poll while scanning at %s: %v, failures %+v", task, err, f.ips.scanFailures)
+		}
 	}
 	scanner.status = idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{
 		Task: idscan.TaskFaceMatch, State: idscan.StateMaximumAttemptsExceeded, Attempts: 3,
