@@ -57,13 +57,15 @@ type Failure struct {
 type statusResponse struct {
 	State string `json:"state"`
 	Tasks []struct {
-		Type          string `json:"type"`
-		State         string `json:"state"`
-		Attempts      int    `json:"attempts"`
-		DocumentScans []struct {
-			Code *string `json:"code"`
-		} `json:"documentScans"`
+		Type          string         `json:"type"`
+		State         string         `json:"state"`
+		Attempts      int            `json:"attempts"`
+		DocumentScans []documentScan `json:"documentScans"`
 	} `json:"tasks"`
+}
+
+type documentScan struct {
+	Code *string `json:"code"`
 }
 
 // TransactionStatus reads transactionID's state, which needs no result id: a
@@ -144,12 +146,7 @@ func spentLiveness(out statusResponse) *Failure {
 	for _, task := range out.Tasks {
 		switch {
 		case task.Type == taskDocumentScan && task.State == stateCompleted:
-			photoDone = true
-			for _, scan := range task.DocumentScans {
-				if scan.Code != nil && *scan.Code != codeBackSideRequired {
-					failedPhotos++
-				}
-			}
+			photoDone, failedPhotos = true, countFailedPhotos(task.DocumentScans)
 		case task.Type == taskFaceLiveness && task.State == StatePending && photoDone:
 			if task.Attempts >= attemptsLimit-failedPhotos {
 				return &Failure{Task: taskFaceLiveness, State: StateMaximumAttemptsExceeded, Attempts: task.Attempts}
@@ -157,4 +154,15 @@ func spentLiveness(out statusResponse) *Failure {
 		}
 	}
 	return nil
+}
+
+// countFailedPhotos is the photos of scans that failed.
+func countFailedPhotos(scans []documentScan) int {
+	failed := 0
+	for _, scan := range scans {
+		if scan.Code != nil && *scan.Code != codeBackSideRequired {
+			failed++
+		}
+	}
+	return failed
 }

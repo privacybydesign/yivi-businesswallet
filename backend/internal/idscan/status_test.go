@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+// transactionStatus reads a transaction's status from a server answering body.
+func transactionStatus(t *testing.T, body string) Status {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		checkToken(t, r)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	got, err := New(testKeyID, testSecret, srv.URL, srv.Client()).TransactionStatus(context.Background(), "trx-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 // The task a pending transaction is at, as ID Scan answered on 2026-11-04:
 // it leaves a pending face_match out once the liveness check passed.
 func TestTransactionStatusRunning(t *testing.T) {
@@ -36,15 +51,7 @@ func TestTransactionStatusRunning(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				checkToken(t, r)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			t.Cleanup(srv.Close)
-			got, err := New(testKeyID, testSecret, srv.URL, srv.Client()).TransactionStatus(context.Background(), "trx-1")
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := transactionStatus(t, tc.body)
 			if !reflect.DeepEqual(got.Running, tc.want) {
 				t.Errorf("running = %+v, want %+v", got.Running, tc.want)
 			}
@@ -91,20 +98,22 @@ func TestTransactionStatusSpentLiveness(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				checkToken(t, r)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			t.Cleanup(srv.Close)
-			got, err := New(testKeyID, testSecret, srv.URL, srv.Client()).TransactionStatus(context.Background(), "trx-1")
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := transactionStatus(t, tc.body)
 			spent := got.State == StateFailed && got.Failure != nil &&
 				got.Failure.Task == TaskFaceLiveness && got.Failure.State == StateMaximumAttemptsExceeded
 			if spent != tc.spent {
 				t.Errorf("status = %+v (failure %+v), want spent %v", got, got.Failure, tc.spent)
 			}
 		})
+	}
+}
+
+// A failed transaction names the task that ended without passing, and for the
+// document scan its last attempt's error code.
+func TestTransactionStatusFailed(t *testing.T) {
+	got := transactionStatus(t, `{"state":"failed","tasks":[{"type":"document_scan","state":"maximum_attempts_exceeded","attempts":10,"documentScans":[{"code":"unknown_type_front"}]},{"type":"face_liveness","state":"pending","attempts":0}]}`)
+	want := Failure{Task: TaskDocumentScan, State: StateMaximumAttemptsExceeded, Attempts: 10, Code: "unknown_type_front"}
+	if got.State != StateFailed || got.Failure == nil || *got.Failure != want {
+		t.Errorf("status = %+v (failure %+v), want failed at %+v", got, got.Failure, want)
 	}
 }
