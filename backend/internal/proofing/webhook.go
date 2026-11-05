@@ -159,6 +159,7 @@ func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawM
 func sessionEventData(req Request, status Status) map[string]any {
 	data := map[string]any{
 		"sessionId": publicSessionID(req.ID), "status": string(status), "flowId": req.FlowID,
+		"flowKind": string(req.FlowKind),
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,

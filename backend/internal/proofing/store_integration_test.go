@@ -1544,9 +1544,9 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 	got := keys()
 	slices.SortFunc(got, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
 	want := [][]string{
-		{DeliveryDelivered, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
+		{DeliveryDelivered, "flowId", "flowKind", "sessionId", "status"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deliveries = %v, want %v", got, want)
