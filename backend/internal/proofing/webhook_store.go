@@ -320,11 +320,17 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 	}
 
 	// A delivery whose endpoint is gone is never claimed; Remove drops it.
-	// The ranking counts rows another worker holds too, so across replicas
-	// an endpoint still has at most perEndpoint in flight.
-	rows, err := s.db.Query(ctx, `WITH ranked AS (
-			SELECT d.id, row_number() OVER (PARTITION BY d.organization_id ORDER BY d.next_attempt_at) AS n
+	// The ranking starts after the org's leased deliveries, and counts rows a
+	// concurrent claim has locked, so across replicas an endpoint still has at
+	// most perEndpoint in flight.
+	rows, err := s.db.Query(ctx, `WITH held AS (
+			SELECT organization_id, count(*) AS n FROM identity_proofing_webhook_deliveries
+			WHERE status = $1 AND leased_until > now()
+			GROUP BY organization_id
+		), ranked AS (
+			SELECT d.id, COALESCE(h.n, 0) + row_number() OVER (PARTITION BY d.organization_id ORDER BY d.next_attempt_at) AS n
 			FROM identity_proofing_webhook_deliveries d
+			LEFT JOIN held h ON h.organization_id = d.organization_id
 			WHERE d.status = $1 AND d.next_attempt_at <= now()
 		), due AS (
 			SELECT d.id, w.url, w.secret_ciphertext,
@@ -336,7 +342,8 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 			ORDER BY d.next_attempt_at LIMIT $2 FOR UPDATE OF d SKIP LOCKED
 		)
 		UPDATE identity_proofing_webhook_deliveries d
-		SET next_attempt_at = now() + make_interval(secs => $3), endpoint_url = due.url
+		SET next_attempt_at = now() + make_interval(secs => $3), leased_until = now() + make_interval(secs => $3),
+			endpoint_url = due.url
 		FROM due
 		WHERE d.id = due.id
 		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
@@ -440,6 +447,7 @@ func (s *WebhookStore) recordAttempt(ctx context.Context, d dueDelivery, statusC
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
 		SET status = $2, attempts = $3, next_attempt_at = now() + make_interval(secs => $4), last_attempt_at = now(),
+			leased_until = NULL,
 			first_attempt_at = COALESCE(first_attempt_at, now()),
 			last_status_code = $5, last_error = NULLIF($6, ''),
 			delivered_at = CASE WHEN $2 = $7 THEN now() END,

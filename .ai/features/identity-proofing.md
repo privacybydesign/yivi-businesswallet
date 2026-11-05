@@ -999,8 +999,9 @@ post-review outcome stay the system's.
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
   - Per batch (`deliveryBatch` 20) `claimDue` takes at most `endpointWorkers`
-    (2) of one endpoint's deliveries, its oldest (a `row_number()` per
-    org over everything due, held rows counted, so across replicas too).
+    (2) of one endpoint's deliveries, its oldest, counting the ones still
+    leased (`leased_until`, cleared by `recordAttempt`) and the ones a
+    concurrent claim has locked, so across replicas too.
     `deliveryWorkers` (10) send at once, `sendFair` keeping to 2 per URL. The
     next batch waits for the last, so an endpoint that never answers costs
     every other org one `safehttp.RequestTimeout` per batch, not its backlog.

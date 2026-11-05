@@ -16,8 +16,8 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
-// A batch takes at most perEndpoint of one endpoint's deliveries, its oldest,
-// so another org's delivery is claimed alongside a backlog.
+// An endpoint has at most perEndpoint deliveries in flight, its oldest, across
+// claims, so another org's delivery is claimed alongside a backlog.
 func TestClaimCapsEachEndpoint(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
@@ -46,6 +46,24 @@ func TestClaimCapsEachEndpoint(t *testing.T) {
 	}
 	if per["https://hooks.example.org/busy"] != endpointWorkers || per["https://hooks.example.org/quiet"] != 1 {
 		t.Errorf("claimed per endpoint = %v, want %d of the backlog and the other one", per, endpointWorkers)
+	}
+
+	// Another replica claiming while those are leased takes none of the
+	// backlog; once one is recorded, it takes one in its place.
+	if again, err := webhooks.claimDue(ctx, deliveryBatch, endpointWorkers); err != nil || len(again) != 0 {
+		t.Fatalf("claimDue while leased = %d, %v; want none", len(again), err)
+	}
+	ok := http.StatusOK
+	for _, d := range due {
+		if d.URL == "https://hooks.example.org/busy" {
+			if err := webhooks.recordAttempt(ctx, d, &ok, ""); err != nil {
+				t.Fatalf("recordAttempt: %v", err)
+			}
+			break
+		}
+	}
+	if next, err := webhooks.claimDue(ctx, deliveryBatch, endpointWorkers); err != nil || len(next) != 1 {
+		t.Fatalf("claimDue after one was recorded = %d, %v; want one", len(next), err)
 	}
 }
 

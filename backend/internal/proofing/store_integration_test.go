@@ -1450,7 +1450,7 @@ func TestWebhookLeaseFence(t *testing.T) {
 		t.Fatalf("claimDue = %d, %v", len(late), err)
 	}
 	// The lease lapses and another worker claims and delivers it.
-	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now(), leased_until = now()`); err != nil {
 		t.Fatal(err)
 	}
 	current, err := webhooks.claimDue(ctx, 1, 1)
