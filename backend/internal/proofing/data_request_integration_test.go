@@ -446,16 +446,9 @@ func TestIdentityMatchKey(t *testing.T) {
 // Every session event carries its flow's kind, so an endpoint tells an
 // erasure request going to review apart from an identity check.
 func TestSessionEventsCarryFlowKind(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newWebhookFixture(t, WebhookEvents)
+	requests, orgID, sam := f.requests, f.orgID, f.sam
 	ctx := context.Background()
-	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", WebhookEvents); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
 	check := newDataRequest(t, requests, orgID, sam, FlowIdentity, "s1")
 	if err := requests.RecordOutcome(ctx, check, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
@@ -467,7 +460,7 @@ func TestSessionEventsCarryFlowKind(t *testing.T) {
 		t.Fatalf("RecordOutcome erasure: %v", err)
 	}
 
-	rows, err := pool.Query(ctx, `SELECT event || ' ' || COALESCE(payload->>'flowKind', '')
+	rows, err := f.pool.Query(ctx, `SELECT event || ' ' || COALESCE(payload->>'flowKind', '')
 		FROM identity_proofing_webhook_deliveries ORDER BY created_at, id`)
 	if err != nil {
 		t.Fatalf("read deliveries: %v", err)

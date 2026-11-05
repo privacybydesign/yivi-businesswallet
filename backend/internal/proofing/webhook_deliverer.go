@@ -122,7 +122,7 @@ func (d *Deliverer) Run(ctx context.Context) (time.Time, error) {
 			break
 		}
 	}
-	return d.store.nextDue(ctx)
+	return d.store.nextDue(ctx, endpointWorkers)
 }
 
 var errNon2xx = errors.New("endpoint answered with a non-2xx status")

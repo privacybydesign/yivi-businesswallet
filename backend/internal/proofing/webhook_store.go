@@ -408,12 +408,20 @@ func (s *WebhookStore) openSecrets(sealed, previous []byte) ([]string, error) {
 }
 
 // nextDue is when the earliest pending delivery falls due; zero when none is.
-func (s *WebhookStore) nextDue(ctx context.Context) (time.Time, error) {
+// An org with perEndpoint deliveries leased is due when the first lease ends,
+// as claimDue takes none of its backlog before.
+func (s *WebhookStore) nextDue(ctx context.Context, perEndpoint int) (time.Time, error) {
 	var next *time.Time
 	// Joined like claimDue: a delivery it cannot claim must not wake the job at once, forever.
-	if err := s.db.QueryRow(ctx, `SELECT min(d.next_attempt_at) FROM identity_proofing_webhook_deliveries d
-		JOIN identity_proofing_webhooks w ON w.organization_id = d.organization_id
-		WHERE d.status = $1`, DeliveryPending).Scan(&next); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT min(CASE WHEN o.held >= $2 THEN o.lease_ends ELSE o.next END) FROM (
+			SELECT count(*) FILTER (WHERE d.leased_until > now()) AS held,
+				min(d.leased_until) FILTER (WHERE d.leased_until > now()) AS lease_ends,
+				min(d.next_attempt_at) AS next
+			FROM identity_proofing_webhook_deliveries d
+			JOIN identity_proofing_webhooks w ON w.organization_id = d.organization_id
+			WHERE d.status = $1
+			GROUP BY d.organization_id
+		) o`, DeliveryPending, perEndpoint).Scan(&next); err != nil {
 		return time.Time{}, fmt.Errorf("proofing: next delivery: %w", err)
 	}
 	if next == nil {

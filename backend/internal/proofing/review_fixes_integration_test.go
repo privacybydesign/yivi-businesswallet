@@ -48,6 +48,12 @@ func TestClaimCapsEachEndpoint(t *testing.T) {
 		t.Errorf("claimed per endpoint = %v, want %d of the backlog and the other one", per, endpointWorkers)
 	}
 
+	// With the endpoint at its cap, the next wake is when a lease ends, not
+	// the backlog's past due time: a replica that cannot claim must not spin.
+	if next, err := webhooks.nextDue(ctx, endpointWorkers); err != nil || !next.After(time.Now()) {
+		t.Errorf("nextDue at the cap = %v, %v; want a lease's end, in the future", next, err)
+	}
+
 	// Another replica claiming while those are leased takes none of the
 	// backlog; once one is recorded, it takes one in its place.
 	if again, err := webhooks.claimDue(ctx, deliveryBatch, endpointWorkers); err != nil || len(again) != 0 {

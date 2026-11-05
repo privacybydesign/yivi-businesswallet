@@ -1338,26 +1338,43 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	}
 }
 
+// webhookFixture is an org whose endpoint subscribes to some events, and a
+// user who sends its requests.
+type webhookFixture struct {
+	pool     *pgxpool.Pool
+	requests *RequestStore
+	webhooks *WebhookStore
+	orgID    uuid.UUID
+	sam      uuid.UUID
+}
+
+func newWebhookFixture(t *testing.T, events []string) webhookFixture {
+	t.Helper()
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	f := webhookFixture{
+		pool: pool, requests: NewRequestStore(pool, audit.NopRecorder{}, cipher),
+		webhooks: NewWebhookStore(pool, audit.NopRecorder{}, cipher),
+		orgID:    makeOrg(t, pool, "acme"), sam: makeUser(t, pool, "sam@example.org"),
+	}
+	if _, _, err := f.webhooks.Save(context.Background(), f.orgID, "https://hooks.example.org/x", events); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return f
+}
+
 // An outcome the engine reports before any poll saw the app join still says
 // which app decided it, as the session does.
 func TestOutcomeWebhookCarriesReportedMethod(t *testing.T) {
-	pool, _ := testdb.Fresh(t)
-	cipher := newTestCipher(t)
-	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
-	webhooks := NewWebhookStore(pool, audit.NopRecorder{}, cipher)
-	orgID := makeOrg(t, pool, "acme")
-	sam := makeUser(t, pool, "sam@example.org")
+	f := newWebhookFixture(t, []string{EventSessionVerified})
 	ctx := context.Background()
-	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/x", []string{EventSessionVerified}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	req := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
-	if err := requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+	req := createStarted(t, f.requests, newStoredRequest(f.orgID, f.sam, externalSubject("a@example.org")), "s1")
+	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Method: proofingprovider.MethodIdem}); err != nil {
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	var method string
-	if err := pool.QueryRow(ctx, `SELECT payload->>'method' FROM identity_proofing_webhook_deliveries
+	if err := f.pool.QueryRow(ctx, `SELECT payload->>'method' FROM identity_proofing_webhook_deliveries
 		WHERE event = $1`, EventSessionVerified).Scan(&method); err != nil || method != string(proofingprovider.MethodIdem) {
 		t.Errorf("session.verified method = %q, %v; want %q", method, err, proofingprovider.MethodIdem)
 	}
