@@ -53,8 +53,23 @@ export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
 
 // Where an address that waits for a reviewer stands: a self-declared one, or
 // one other than the registered address. An unknown state reads as none.
-export const ADDRESS_REVIEWS = ["pending", "confirmed", "rejected"] as const;
+export const ADDRESS_REVIEWS = [
+  "pending",
+  "confirmed",
+  "rejected",
+  "lapsed",
+] as const;
 export type AddressReviewState = (typeof ADDRESS_REVIEWS)[number];
+
+// The parts of a session a reviewer decides on: the identity as a whole, a
+// data request, or an extra step.
+export const REVIEW_KINDS = [
+  "identity",
+  "address",
+  "employment",
+  "data_request",
+] as const;
+export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 // A reviewer's decision on a request: its session's review or its address,
 // the outcome, why, by whom and when.
@@ -916,7 +931,8 @@ export function getProofingRequests(
     flowId?: string;
     status?: ListedStatus;
     flowKind?: "data_request";
-    addressReview?: AddressReviewState;
+    reviewKind?: ReviewKind;
+    reviewState?: AddressReviewState;
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -926,7 +942,8 @@ export function getProofingRequests(
   if (filter.flowId) params.set("flowId", filter.flowId);
   if (filter.status) params.set("status", filter.status);
   if (filter.flowKind) params.set("flowKind", filter.flowKind);
-  if (filter.addressReview) params.set("addressReview", filter.addressReview);
+  if (filter.reviewKind) params.set("reviewKind", filter.reviewKind);
+  if (filter.reviewState) params.set("reviewState", filter.reviewState);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
     schema: z.array(proofingRequestSchema),
@@ -1794,14 +1811,15 @@ export interface AddressReviewInput {
   reason: string;
 }
 
-export function decideAddressReview(
+export function decideReviewItem(
   slug: string,
   requestId: string,
+  kind: ReviewKind,
   input: AddressReviewInput,
   signal?: AbortSignal,
 ): Promise<ProofingRequest> {
   return request(
-    `${base(slug)}/requests/${encodeURIComponent(requestId)}/address/review`,
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/review-items/${kind}`,
     {
       schema: proofingRequestSchema,
       method: "POST",
@@ -1809,6 +1827,28 @@ export function decideAddressReview(
       signal,
     },
   );
+}
+
+const reviewItemCountsSchema = z.object({
+  counts: z.object({
+    identity: z.number(),
+    address: z.number(),
+    employment: z.number(),
+    data_request: z.number(),
+  }),
+});
+export type ReviewItemCounts = z.infer<typeof reviewItemCountsSchema>["counts"];
+
+// How many items of each kind wait for a decision.
+export async function getReviewItemCounts(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ReviewItemCounts> {
+  const out = await request(`${base(slug)}/review-items/counts`, {
+    schema: reviewItemCountsSchema,
+    signal,
+  });
+  return out.counts;
 }
 
 export function decideProofingReview(

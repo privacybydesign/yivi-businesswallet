@@ -82,6 +82,9 @@ type ReviewInput struct {
 	// (ErrorOrgPaused).
 	ErrorCode string
 	Reason    string
+	// Kind, when set, is the review item decided: one the request's own review
+	// is not of is ErrNotUnderReview.
+	Kind ReviewKind
 	// RequestIDs are the matched sessions approving a data request takes; nil
 	// takes those approvedMatches takes without a tick. Only for a data request.
 	RequestIDs []uuid.UUID
@@ -143,7 +146,8 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 	if !in.Scope.reaches(req) {
 		return Request{}, ErrRequestNotFound
 	}
-	if req.Status != StatusNeedsReview || req.session == nil || req.PurgedAt != nil {
+	if req.Status != StatusNeedsReview || req.session == nil || req.PurgedAt != nil ||
+		(in.Kind != "" && in.Kind != req.reviewKind()) {
 		return Request{}, ErrNotUnderReview
 	}
 	if ownReview(req, in.ReviewerID) && !in.OwnAllowed {

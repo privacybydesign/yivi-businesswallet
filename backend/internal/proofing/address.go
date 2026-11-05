@@ -246,8 +246,8 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 
 // AddAddress seals addr on req, audited identity_proofing.address_added
 // (with its verification, without the address), and sends session.address_added.
-// One the registered address did not confirm waits for a reviewer
-// (AddressReviewPending). It is false, and changes nothing, when the request
+// One the registered address did not confirm waits for a reviewer: a pending
+// address review item. It is false, and changes nothing, when the request
 // holds an address already or was erased.
 func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address) (bool, error) {
 	if s.cipher == nil {
@@ -266,9 +266,8 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 	added := false
 	err = database.InTx(ctx, s.db, func(q database.Querier) error {
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL,
-				address_review = $3, updated_at = now()
-			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed, addressReviewOf(addr))
+			SET address_ciphertext = $2, address_added_at = now(), registered_address_ciphertext = NULL, updated_at = now()
+			WHERE id = $1 AND purged_at IS NULL AND address_ciphertext IS NULL`, req.ID, sealed)
 		if err != nil {
 			return fmt.Errorf("proofing: add address request %s: %w", req.ID, err)
 		}
@@ -276,6 +275,11 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 			return nil
 		}
 		added = true
+		if addressReviewOf(addr) != nil {
+			if err := openReviewItem(ctx, q, req, ReviewKindAddress); err != nil {
+				return err
+			}
+		}
 
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingAddressAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},

@@ -164,6 +164,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   },
   "identity_proofing.address_added": { icon: "add", tone: "green" },
   "identity_proofing.address_reviewed": { icon: "valid", tone: "blue" },
+  "identity_proofing.review_item_decided": { icon: "valid", tone: "blue" },
   "identity_proofing.flow_employment_configured": {
     icon: "settings",
     tone: "blue",
@@ -527,6 +528,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingAddressAdded");
     case "identity_proofing.address_reviewed":
       return t("auditLog.actions.identityProofingAddressReviewed");
+    case "identity_proofing.review_item_decided":
+      return t("auditLog.actions.identityProofingReviewItemDecided");
     case "identity_proofing.flow_employment_configured":
       return t("auditLog.actions.identityProofingFlowEmploymentConfigured");
     case "identity_proofing.employment_added":

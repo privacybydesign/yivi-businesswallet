@@ -402,7 +402,7 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 		t.Fatalf("enter the address = %d, want 204", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
-	review := one + "/address/review"
+	review := one + "/review-items/address"
 	wantProofingError(t, "the sender deciding their own check's address", env.postJSON(review,
 		map[string]any{"decision": "confirm", "reason": "looks right"}), http.StatusForbidden, "own_review")
 
@@ -423,6 +423,16 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 	env.loginAs("member@acme.test")
 	assertReviewerReachesOnlyAddress(t, env, base, one)
 
+	wantProofingError(t, "an address decision with an error code", env.postJSON(review,
+		map[string]any{"decision": "reject", "reason": "elsewhere", "errorCode": "DOCUMENT_INVALID"}), http.StatusBadRequest, "invalid_input")
+	wantProofingError(t, "a reviewer deciding the identity of a check not in review", env.postJSON(one+"/review-items/identity",
+		map[string]any{"decision": "confirm", "reason": "looks right"}), http.StatusNotFound, "session_not_found")
+	counts := decodeJSON[struct {
+		Counts map[string]int `json:"counts"`
+	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/review-items/counts", nil))
+	if counts.Counts["address"] != 1 || counts.Counts["identity"] != 0 || len(counts.Counts) != 4 {
+		t.Errorf("counts = %v, want one address of four kinds", counts.Counts)
+	}
 	wantProofingError(t, "an address decision without a reason", env.postJSON(review,
 		map[string]any{"decision": "confirm", "reason": " "}), http.StatusBadRequest, "invalid_input")
 	decided := decodeJSON[addressReviewResp](t, env.postJSON(review, map[string]any{"decision": "confirm", "reason": "matches the rental contract"}))
@@ -432,7 +442,7 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 	if decided.AddressReviewedAt == "" {
 		t.Error("decided carries no addressReviewedAt")
 	}
-	closed := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?addressReview=confirmed", nil))
+	closed := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?reviewKind=address&reviewState=confirmed", nil))
 	if len(closed) != 1 || closed[0].ID != decided.ID || closed[0].ProofedName != "" || len(closed[0].Diplomas) != 0 {
 		t.Errorf("confirmed addresses for a reviewer = %+v, want the one, without proofed name or diplomas", closed)
 	}
@@ -453,9 +463,11 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 // name or diplomas, and never its result.
 func assertReviewerReachesOnlyAddress(t *testing.T, env *testEnv, base, one string) {
 	t.Helper()
-	wantProofingError(t, "an unknown address review filter", env.do(http.MethodGet, base+"?addressReview=bogus", nil),
+	wantProofingError(t, "an unknown review kind filter", env.do(http.MethodGet, base+"?reviewKind=bogus", nil),
 		http.StatusBadRequest, "invalid_input")
-	list := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?addressReview=pending", nil))
+	wantProofingError(t, "a review state filter without a kind", env.do(http.MethodGet, base+"?reviewState=pending", nil),
+		http.StatusBadRequest, "invalid_input")
+	list := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?reviewKind=address", nil))
 	if len(list) != 1 || list[0].AddressReview != "pending" || list[0].ProofedName != "" || len(list[0].Diplomas) != 0 {
 		t.Errorf("pending addresses for a reviewer = %+v, want the one, without proofed name or diplomas", list)
 	}

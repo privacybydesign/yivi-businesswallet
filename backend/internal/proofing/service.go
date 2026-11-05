@@ -108,6 +108,9 @@ type requestStore interface {
 	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
 	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (*time.Time, error)
+	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
+	NextReviewItemDue(ctx context.Context) (time.Time, error)
+	ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[ReviewKind]int, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 

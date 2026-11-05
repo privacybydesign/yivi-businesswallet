@@ -223,6 +223,9 @@ func TestRegisteredAddressSealedUntilAddressOrPurge(t *testing.T) {
 	}
 }
 
+// addressKind narrows a list to address review items.
+var addressKind = ReviewKindAddress
+
 func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
@@ -237,7 +240,7 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 	}
 	pending := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
 	review := AddressReviewPending
-	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 1 {
+	if listed, err := requests.List(ctx, orgID, RequestFilter{ReviewKind: &addressKind, ReviewState: &review}); err != nil || len(listed) != 1 {
 		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
 	}
 
@@ -254,7 +257,7 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 		t.Errorf("Get = %s %q at %v, %v; want approved, address confirmed at %v", got.Status, got.AddressReview, got.AddressReviewedAt, err, reviewedAt)
 	}
 	confirmed := AddressReviewConfirmed
-	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &confirmed}); err != nil || len(listed) != 1 {
+	if listed, err := requests.List(ctx, orgID, RequestFilter{ReviewKind: &addressKind, ReviewState: &confirmed}); err != nil || len(listed) != 1 {
 		t.Errorf("List confirmed addresses = %d, %v; want the one", len(listed), err)
 	}
 	assertAddressReviewReported(t, pool, webhooks, orgID)
@@ -266,13 +269,13 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 func assertAddressReviewReported(t *testing.T, pool *pgxpool.Pool, webhooks *WebhookStore, orgID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	if auditCount(t, pool, audit.IdentityProofingAddressReviewed) != 1 {
-		t.Error("want one address_reviewed event")
+	if auditCount(t, pool, audit.IdentityProofingReviewItemDecided) != 1 {
+		t.Error("want one review_item_decided event")
 	}
 	var reasoned bool
 	if err := pool.QueryRow(ctx, `SELECT metadata::text LIKE '%Matches the rental contract%' FROM audit_events
-		WHERE action = $1`, audit.IdentityProofingAddressReviewed).Scan(&reasoned); err != nil || !reasoned {
-		t.Errorf("address_reviewed does not audit the reason (%v)", err)
+		WHERE action = $1`, audit.IdentityProofingReviewItemDecided).Scan(&reasoned); err != nil || !reasoned {
+		t.Errorf("review_item_decided does not audit the reason (%v)", err)
 	}
 	deliveries, err := webhooks.Deliveries(ctx, orgID)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionAddressReviewed {
@@ -298,7 +301,7 @@ func TestPurgedAddressNotListedForReview(t *testing.T) {
 		t.Fatalf("Purge: %v", err)
 	}
 	review := AddressReviewPending
-	if listed, err := requests.List(ctx, orgID, RequestFilter{AddressReview: &review}); err != nil || len(listed) != 0 {
+	if listed, err := requests.List(ctx, orgID, RequestFilter{ReviewKind: &addressKind, ReviewState: &review}); err != nil || len(listed) != 0 {
 		t.Errorf("List pending addresses = %d, %v; want none", len(listed), err)
 	}
 	if got, err := requests.Get(ctx, orgID, purged.ID); err != nil || got.AddressReview != "" {

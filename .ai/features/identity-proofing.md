@@ -1381,6 +1381,33 @@ A session in review (`needs_review`) waits for a decision (or for the engine to
 end it, §3). An admin, or a member with the reviewer right (below), decides it on
 Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and the
 overview count what waits).
+
+**Review items** (`review_items.go`): one item per part of a session a reviewer
+decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
+`state` (`pending`, `confirmed`, `rejected`, `lapsed`).
+- **Stored** in `identity_proofing_review_items` (migration `20261105120000`):
+  only the address today (§16). At most one pending item per request and kind.
+  - `due_at` is the request's retention (`NameRetention`) from when it opened.
+    `ReconcileDue` lapses a pending one past it (`LapseReviewItems`, wakes at
+    `NextReviewItemDue`): `lapsed`, `REVIEW_LAPSED`, audited with no actor.
+    The session keeps its outcome; settling it is YIV-503.
+  - `Purge` deletes the pending items and the reasons of the decided ones.
+- **A request's own review** (`needs_review`) is an item too, read from the
+  request, never stored (`sessionReviewKindColumn`, `Request.reviewKind`):
+  `employment` with a `reviewReason`, `data_request` for a data request,
+  `identity` otherwise. It waits while the request reads `needs_review` and is
+  not erased (`sessionReviewWaits`).
+- `POST .../requests/{id}/review-items/{kind}` `{decision: confirm|reject,
+  reason, errorCode?}` (`DecideReviewItem`): an address goes to
+  `DecideAddressReview` (no `errorCode`); the other kinds to `DecideReview`
+  with `ReviewInput.Kind`, 409 `not_under_review` when the request's review is
+  of another kind. `.../review` still decides a request's own review.
+- `GET .../review-items/counts` (`ReviewCounts`): every kind's waiting items,
+  0 for none. The sidebar and the tabs read it (`useReviewItemCountsQuery`), so
+  a count is never capped.
+- `GET .../requests?reviewKind=&reviewState=` (`pending` by default, a state
+  needs a kind) lists the requests with such an item: waiting ones the longest
+  waiting first, decided ones the latest decision first.
 The page lists what waits, oldest first (waiting since = `completed_at`, when it
 went to review), under All, Identity checks and Data requests, and beside them
 the addresses waiting for review (§16). Closed lists:
@@ -1396,14 +1423,13 @@ A decided identity check is not listed: it is closed to a reviewer. A data
 request shows "Answer by" = `purge_at`, a calendar month after it went to review
 (`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
 The list is two reads, `GET .../requests?status=needs_review` and
-`?addressReview=pending` (`useWaitingReviewsQuery`): each filter is applied
+`?reviewKind=address` (`useWaitingReviewsQuery`): each filter is applied
 before its read's cap of 200, and each read is the longest waiting first, so the
-cap leaves out the newest, never the most overdue. A count shows "200+" when
-either read hit its cap (`capped`, returned with the joined list), on the tabs
-and the sidebar. Closed reads
-`?flowKind=data_request&status=approved`, `...&status=rejected`,
-`?addressReview=confirmed` and `...=rejected` (`useClosedReviewsQuery`), each
-narrowed before its cap.
+cap leaves out the newest, never the most overdue. The counts on the tabs and
+the sidebar come from `.../review-items/counts`, not from these lists. Closed reads
+`?flowKind=data_request&status=approved`, `...&status=rejected`, and
+`?reviewKind=address&reviewState=` `confirmed`, `rejected` and `lapsed`
+(`useClosedReviewsQuery`), each narrowed before its cap.
 
 **Always send to review (`alwaysReview` on a flow version).**
 - Set in the flow editor's Review section. The engine sends a session it would
@@ -1419,8 +1445,8 @@ narrowed before its cap.
 **Live updates, no polling.**
 - A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
   `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
-  `address_review`, `purged_at` or `ips_session_ended_at` changes, whoever writes
-  the row.
+  `purged_at` or `ips_session_ended_at` changes, whoever writes the row. One on
+  `identity_proofing_review_items` sends it on every insert, update and delete.
 - `proofing.ReviewFeed` holds one LISTEN per API process (`database.Listen`) and
   tells that org's subscribers. Each (re)connect of the LISTEN tells all of them.
 - `GET .../identity-proofing/reviews/events` (reviewer route) is a Server-Sent
@@ -1472,15 +1498,15 @@ right is a member's: a PUT on an admin is 409 `admin_reviews`, a role change
 clears it (audited too), so an admin made a member again has to be given it
 anew, and `memberships_can_review_member` holds every row to that.
 `organization.MayReview` is an admin whose mandate is not withdrawn, or a member
-with the right, and `organization.RequireReviewer` gates the five `reviewer(...)`
-routes in `proofing/handler.go`: `review`, `address/review`, `result`,
-`data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
+with the right, and `organization.RequireReviewer` gates the `reviewer(...)`
+routes in `proofing/handler.go`: `review`, `review-items/{kind}`,
+`review-items/counts`, `result`, `data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
 reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
 request waiting for review, and a data request (`data_access`, `data_erasure`)
 in any status. An identity check that is not waiting holds a person's identity
 and photos the right was never given for. So `GET .../requests` lists every
-request in the org only for `?status=needs_review` and `?addressReview=` (Waiting
-reads `pending`, Closed `confirmed` and `rejected`) and for
+request in the org only for `?status=needs_review` and `?reviewKind=` (Waiting
+reads `pending`, Closed `confirmed`, `rejected` and `lapsed`) and for
 `?flowKind=data_request` (Closed reads it with `status=approved` and
 `rejected`); any other list is the requests they sent. So
 are the stats, All people and the member routes.
@@ -2165,40 +2191,44 @@ instead, and asks none.
     Idem request is always self-declared. `address_added` audits the result
     as `verification`, never the address.
 - **Address review**: any address but `registered` waits for a reviewer
-  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`),
-  `registered_mismatch` included: the person may have moved.
+  (a pending `address` review item, §9, opened by `AddAddress`,
+  `addressReviewOf`), `registered_mismatch` included: the person may have moved.
+  Migration `20261105120100` moved the `address_review*` columns onto items.
   - Only the address is reviewed: the session keeps its outcome, and the
     engine's session review is untouched (`address_review.go`).
-  - `POST .../requests/{id}/address/review` `{decision: confirm|reject,
+  - `POST .../requests/{id}/review-items/address` `{decision: confirm|reject,
     reason}`, reviewer route. The reason is required (at most 500
     characters) and audited.
     - `ownReview` applies to everyone in a deployment, a platform admin too.
       On a dev stack (`DEV_MODE`) a platform admin may decide their own
       checks, session and address, to test a review alone (`auth.SelfReview`,
       `reviewsOwn` on `GET /me`, which drops the "another reviewer decides" note).
-    - A decided or erased one is 409 `address_not_under_review`.
+    - A decided, lapsed or erased one is 409 `address_not_under_review`.
     - The page leaves for Reviews after a decision, with a toast.
-    - `addressReviewedAt` (`address_reviewed_at`, returned by the update) is
-      when it was decided.
+    - `addressReviewedAt` (the item's `decided_at`) is when it was decided or
+      lapsed.
+  - Nobody deciding it within the request's retention lapses it (§9):
+    "Address review lapsed", listed under Closed. The session keeps its outcome.
   - A reviewer reaches a reviewed address, pending or decided, through
     `ReviewScope.reachesAddress` (the request and this decision), never
     `reaches`: that one opens the result, data-matches and export, so the
     check's identity and photos. A decided one stays listed under Closed and
     opens read-only, still without `proofedName`, `employment` and diplomas.
-  - `Purge` clears a pending review (`NULLIF(address_review, 'pending')`),
-    keeping a decided one, so no reader masks it; migration
-    `20261028150000` clears the ones purged before.
-  - Audited `address_reviewed`, webhook `session.address_reviewed`
-    (`addressReview` in its data).
+  - `Purge` deletes a pending item, keeping a decided one without its reason,
+    so no reader masks it; migration `20261028150000` cleared the ones purged
+    before.
+  - Audited `review_item_decided` (`kind`, `state`, `reason`; `address_reviewed`
+    before review items), webhook `session.address_reviewed` (`addressReview`
+    in its data). A lapse sends no webhook.
   - Decided on the Reviews page, never on the Sessions page:
-    - The waiting list reads `?addressReview=pending` beside
+    - The waiting list reads `?reviewKind=address` beside
       `?status=needs_review` (`useWaitingReviewsQuery`); a reviewer lists it
       org-wide (`listsEveryRequest`). It counts under "Identity checks".
     - `isAddressReview` sends its page to `routes/address-review.tsx`: the
       address, the approved check, Confirm / Reject.
     - The Sessions page shows where it stands, next to the session's status,
-      which is the identity's: "Address in review", "Address confirmed" or
-      "Address rejected" (`AddressNote`). The expanded row adds a link to the
+      which is the identity's: "Address in review", "Address confirmed",
+      "Address rejected" or "Address review lapsed" (`AddressNote`). The expanded row adds a link to the
       review while it waits.
     - The session's timeline says an entered address goes to a reviewer, and
       what a reviewer decided, the address or the session review, with the
@@ -2208,7 +2238,8 @@ instead, and asks none.
       `audit.StripFields` does on a purge.
   - **Decisions with their reasons.** `GET .../requests/{id}` returns
     `decisions` (`RequestDecisions`, read from the request's
-    `review_decided` and `address_reviewed` events, oldest first): kind,
+    `review_decided`, `address_reviewed` and address `review_item_decided`
+    events, oldest first): kind,
     outcome, reason, reviewer, time.
     - Only for an admin or a reviewer (`decisionsFor`); one who reaches the
       check only for its address gets the address decisions alone.

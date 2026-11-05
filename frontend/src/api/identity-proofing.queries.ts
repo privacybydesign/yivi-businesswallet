@@ -31,7 +31,8 @@ import {
   getProofingRequest,
   getProofingApp,
   getHostedProofing,
-  decideAddressReview,
+  decideReviewItem,
+  getReviewItemCounts,
   decideProofingReview,
   getProofingDataMatches,
   getDataRequestFlows,
@@ -63,6 +64,7 @@ import {
 } from "./identity-proofing";
 import type {
   AddressReviewInput,
+  ReviewItemCounts,
   ProofingSettings,
   ProofingSettingsUpdate,
   ProofingFlow,
@@ -507,7 +509,7 @@ export function useWaitingReviewsQuery(
     queryFn: async ({ signal }) => {
       const [inReview, addresses] = await Promise.all([
         getProofingRequests(slug, { status: "needs_review" }, signal),
-        getProofingRequests(slug, { addressReview: "pending" }, signal),
+        getProofingRequests(slug, { reviewKind: "address" }, signal),
       ]);
       return {
         requests: [...inReview, ...addresses],
@@ -518,9 +520,23 @@ export function useWaitingReviewsQuery(
   });
 }
 
+// How many items of each kind wait, counted by the backend, so nothing is
+// capped. Under the requests key, so a decision, and the review stream
+// (useReviewEvents), refresh it.
+export function useReviewItemCountsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ReviewItemCounts, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "review-counts"],
+    queryFn: ({ signal }) => getReviewItemCounts(slug, signal),
+    enabled: options.enabled && slug !== "",
+  });
+}
+
 // What was closed: the data requests that ended, approved or rejected, and the
-// addresses a reviewer confirmed or rejected. Four reads, each narrowed by the
-// backend before its cap, so a busy org's identity checks never push them
+// addresses a reviewer confirmed or rejected, or that lapsed. Five reads, each
+// narrowed by the backend before its cap, so a busy org's identity checks never push them
 // off. Under the requests key, so a decision refreshes it.
 export function useClosedReviewsQuery(
   slug: string,
@@ -537,8 +553,12 @@ export function useClosedReviewsQuery(
             signal,
           ),
         ),
-        ...(["confirmed", "rejected"] as const).map((addressReview) =>
-          getProofingRequests(slug, { addressReview }, signal),
+        ...(["confirmed", "rejected", "lapsed"] as const).map((reviewState) =>
+          getProofingRequests(
+            slug,
+            { reviewKind: "address", reviewState },
+            signal,
+          ),
         ),
       ]);
       return reads.flat();
@@ -1160,7 +1180,7 @@ export function useDecideAddressReviewMutation(
 ): UseMutationResult<ProofingRequest, Error, AddressReviewInput> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input) => decideAddressReview(slug, requestId, input),
+    mutationFn: (input) => decideReviewItem(slug, requestId, "address", input),
     meta: { suppressErrorToast: true },
     onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });

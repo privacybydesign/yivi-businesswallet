@@ -107,9 +107,13 @@ describe("review tabs", () => {
   const erasure = request({ id: "erasure", flowKind: "data_erasure" });
   const waiting = [check, access, erasure];
 
-  it("counts checks and data requests apart", () => {
-    expect(reviewCounts(waiting)).toEqual({ all: 3, checks: 1, data: 2 });
-    expect(reviewCounts([])).toEqual({ all: 0, checks: 0, data: 0 });
+  it("counts checks and their steps apart from data requests", () => {
+    expect(
+      reviewCounts({ identity: 1, address: 2, employment: 1, data_request: 2 }),
+    ).toEqual({ all: 6, checks: 4, data: 2 });
+    expect(
+      reviewCounts({ identity: 0, address: 0, employment: 0, data_request: 0 }),
+    ).toEqual({ all: 0, checks: 0, data: 0 });
   });
 
   it("lists each kind under its own tab, and none under closed", () => {

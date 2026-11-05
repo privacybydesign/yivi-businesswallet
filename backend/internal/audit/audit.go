@@ -250,6 +250,10 @@ const (
 	IdentityProofingAddressAdded          = "identity_proofing.address_added"
 	IdentityProofingAddressReviewed       = "identity_proofing.address_reviewed"
 
+	// a decision on one part of a session a reviewer reviews on its own (a
+	// review item): by a reviewer, or lapsed past its due time
+	IdentityProofingReviewItemDecided = "identity_proofing.review_item_decided"
+
 	// whether a flow asks for the UWV Verzekeringsbericht, and a statement a
 	// subject uploaded: kept (never its relations), or refused with its reason
 	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"

@@ -648,9 +648,18 @@ type RequestFilter struct {
 	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
 	// the list's cap then counts only those.
 	DataRequests bool
-	// AddressReview narrows to the requests whose address stands so with a
-	// reviewer; pending ones are listed the longest waiting first.
-	AddressReview *AddressReview
+	// ReviewKind narrows to the requests with a review item of that kind in
+	// ReviewState (pending when nil): waiting ones the longest waiting first,
+	// decided ones the latest decision first.
+	ReviewKind  *ReviewKind
+	ReviewState *ReviewState
+}
+
+func (f RequestFilter) reviewState() ReviewState {
+	if f.ReviewState == nil {
+		return ReviewPending
+	}
+	return *f.ReviewState
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member

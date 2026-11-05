@@ -1104,12 +1104,15 @@ export const nl: Translation<typeof en> = {
           confirmed: "Een beoordelaar heeft het adres bevestigd.",
           rejected:
             "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het adres op tijd beoordeeld. De identiteitscontrole verandert niet.",
         },
         openReview: "Open de beoordeling",
         tag: {
           pending: "Adres in beoordeling",
           confirmed: "Adres bevestigd",
           rejected: "Adres afgewezen",
+          lapsed: "Adresbeoordeling verlopen",
         },
         toReview: "Gaat naar een beoordelaar",
       },
@@ -1337,6 +1340,7 @@ export const nl: Translation<typeof en> = {
         reject: "Adres afwijzen",
         confirmed: "Het adres is bevestigd.",
         rejected: "Het adres is afgewezen.",
+        lapsed: "Niemand heeft het adres op tijd beoordeeld.",
       },
       requestedBy: "Aangevraagd door {{name}}",
       provenWith: {
@@ -1367,6 +1371,7 @@ export const nl: Translation<typeof en> = {
         rejected: "Afgewezen",
         confirmed: "Adres bevestigd",
         addressRejected: "Adres afgewezen",
+        addressLapsed: "Adresbeoordeling verlopen",
       },
       footer:
         "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
@@ -2569,6 +2574,7 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om het adres vraagt",
       identityProofingAddressAdded: "Adres ingevuld",
       identityProofingAddressReviewed: "Adres beoordeeld",
+      identityProofingReviewItemDecided: "Beoordeling afgerond",
       identityProofingFlowEmploymentConfigured:
         "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
       identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",

@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useClosedReviewsQuery,
+  useReviewItemCountsQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -58,10 +59,8 @@ export default function ProofingReviews(): React.JSX.Element {
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
   const waitingNow = waitingOldestFirst(waiting.data?.requests ?? []);
-  const counts = reviewCounts(waitingNow);
-  // The backend lists at most the 200 longest in review: past that the counts
-  // are lower bounds.
-  const capped = waiting.data?.capped === true;
+  const itemCounts = useReviewItemCountsQuery(slug, { enabled: canReview });
+  const counts = itemCounts.data && reviewCounts(itemCounts.data);
   // What shows instead of the reviews to anyone without the right, and until
   // the org is known.
   const notice = org.isPending
@@ -76,7 +75,7 @@ export default function ProofingReviews(): React.JSX.Element {
       />
       {canReview ? (
         <>
-          <ReviewTabs active={tab} counts={counts} capped={capped} />
+          <ReviewTabs active={tab} counts={counts} />
           <div className="flex flex-col gap-4 p-4 sm:p-8">
             <Card className="overflow-hidden">
               {tab === "closed" ? (
@@ -122,17 +121,16 @@ export default function ProofingReviews(): React.JSX.Element {
 function ReviewTabs({
   active,
   counts,
-  capped,
 }: Readonly<{
   active: ReviewTab;
-  counts: ReturnType<typeof reviewCounts>;
-  capped: boolean;
+  // Absent until the backend counted.
+  counts: ReturnType<typeof reviewCounts> | undefined;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const countOf: Record<ReviewTab, number | undefined> = {
-    all: counts.all,
-    checks: counts.checks,
-    data: counts.data,
+    all: counts?.all,
+    checks: counts?.checks,
+    data: counts?.data,
     closed: undefined,
   };
   return (
@@ -159,7 +157,7 @@ function ReviewTabs({
             {t(`identityProofing.reviews.tabs.${tab}`)}
             {countOf[tab] !== undefined && (
               <span className="text-ink-soft font-normal">
-                {listedCount(countOf[tab], capped, t)}
+                {listedCount(countOf[tab], false, t)}
               </span>
             )}
           </Link>
@@ -438,6 +436,13 @@ function AddressOutcome({
   request: ProofingRequest;
 }>): React.JSX.Element {
   const { t } = useTranslation();
+  if (request.addressReview === "lapsed") {
+    return (
+      <StatusText tone="amber">
+        {t("identityProofing.reviews.outcome.addressLapsed")}
+      </StatusText>
+    );
+  }
   const confirmed = request.addressReview === "confirmed";
   return (
     <StatusText tone={confirmed ? "green" : "red"}>

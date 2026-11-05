@@ -4,6 +4,7 @@ import type {
   ProofingRequest,
   ProofingResult,
   ProofingReviewInput,
+  ReviewItemCounts,
 } from "../api/identity-proofing";
 import type { TFunction } from "i18next";
 import {
@@ -103,11 +104,20 @@ interface ReviewCounts {
   data: number;
 }
 
-export function reviewCounts(
-  waiting: readonly ProofingRequest[],
-): ReviewCounts {
-  const data = waiting.filter((r) => isDataRequest(r.flowKind)).length;
-  return { all: waiting.length, checks: waiting.length - data, data };
+// The tabs' counts from the items waiting per kind: data requests apart from
+// the checks and their steps.
+export function reviewCounts(waiting: ReviewItemCounts): ReviewCounts {
+  const checks = waiting.identity + waiting.address + waiting.employment;
+  return {
+    all: checks + waiting.data_request,
+    checks,
+    data: waiting.data_request,
+  };
+}
+
+// How many items wait, of every kind.
+export function waitingCount(waiting: ReviewItemCounts): number {
+  return reviewCounts(waiting).all;
 }
 
 // The requests a tab lists; Closed has its own list, so no waiting ones.
@@ -127,15 +137,17 @@ export function waitingOfTab(
   }
 }
 
-// Whether a reviewer confirmed or rejected the request's address.
+// Whether a reviewer confirmed or rejected the request's address, or nobody
+// did in time.
 export function isDecidedAddress(request: ProofingRequest): boolean {
   return (
     request.addressReview === "confirmed" ||
-    request.addressReview === "rejected"
+    request.addressReview === "rejected" ||
+    request.addressReview === "lapsed"
   );
 }
 
-// When a closed request closed: its address was decided, or it ended.
+// When a closed request closed: its address was decided or lapsed, or it ended.
 export function closedAt(request: ProofingRequest): string {
   if (isDecidedAddress(request) && request.addressReviewedAt) {
     return request.addressReviewedAt;

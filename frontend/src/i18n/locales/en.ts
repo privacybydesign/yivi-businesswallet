@@ -1075,12 +1075,15 @@ export const en = {
           confirmed: "A reviewer confirmed the address.",
           rejected:
             "A reviewer rejected the address. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the address in time. The identity check is not affected.",
         },
         openReview: "Open the review",
         tag: {
           pending: "Address in review",
           confirmed: "Address confirmed",
           rejected: "Address rejected",
+          lapsed: "Address review lapsed",
         },
         toReview: "Goes to a reviewer",
       },
@@ -1305,6 +1308,7 @@ export const en = {
         reject: "Reject address",
         confirmed: "The address was confirmed.",
         rejected: "The address was rejected.",
+        lapsed: "Nobody reviewed the address in time.",
       },
       requestedBy: "Requested by {{name}}",
       provenWith: {
@@ -1331,6 +1335,7 @@ export const en = {
         rejected: "Rejected",
         confirmed: "Address confirmed",
         addressRejected: "Address rejected",
+        addressLapsed: "Address review lapsed",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",
@@ -2506,6 +2511,7 @@ export const en = {
         "Changed whether a flow asks for the address",
       identityProofingAddressAdded: "Entered an address",
       identityProofingAddressReviewed: "Reviewed an address",
+      identityProofingReviewItemDecided: "Decided a review",
       identityProofingFlowEmploymentConfigured:
         "Changed whether a flow asks for the Verzekeringsbericht",
       identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
