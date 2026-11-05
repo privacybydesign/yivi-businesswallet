@@ -143,7 +143,7 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 		return nil
 	}
 	if resultID == "" {
-		if err := s.documentScanUnfinished(ctx, req, sess, transactionID); err != nil {
+		if err := s.documentScanUnfinished(ctx, req, sess, transactionID, true); err != nil {
 			return err
 		}
 		s.reconcile(ctx, requestTenant(req), req)
@@ -196,20 +196,26 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	return nil
 }
 
-// documentScanUnfinished is a scan the page reports ended without a result.
-// One that used up the scan service's own attempts fails the session, as a new
-// transaction would give the person new ones; any other the person may try
-// again (ErrDocumentScanFailed).
-func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess *ipsSession, transactionID string) error {
+// documentScanUnfinished is a scan that ended without a result. One that used
+// up the scan service's own attempts fails the session, as a new transaction
+// would give the person new ones. So does one the scan service's page reports
+// (reported) ended at a face check: its page posts only once a task is over,
+// but its API leaves a face check out of attempts pending. Any other the
+// person may try again (ErrDocumentScanFailed).
+func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess *ipsSession, transactionID string, reported bool) error {
 	status, err := s.documentScanner.TransactionStatus(ctx, transactionID)
 	if err != nil {
 		return fmt.Errorf("proofing: document scan status request %s: %w", req.ID, err)
 	}
-	f := status.Failure
-	if f == nil || f.State != idscan.StateMaximumAttemptsExceeded {
+	var failure proofingprovider.DocumentScanFailure
+	switch f, running := status.Failure, status.Running; {
+	case f != nil && f.State == idscan.StateMaximumAttemptsExceeded:
+		failure = proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
+	case reported && running != nil && slices.Contains(faceScanTasks, running.Task):
+		failure = proofingprovider.DocumentScanFailure{Task: running.Task, Attempts: running.Attempts}
+	default:
 		return ErrDocumentScanFailed
 	}
-	failure := proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
 	if err := s.ips.FailDocumentScan(ctx, requestTenant(req), sess.ID, sess.Token, failure); err != nil {
 		return documentScanStepError(err)
 	}
@@ -235,7 +241,7 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 		// No scan to watch: not asked, no scanner, or the session is over.
 		return req
 	}
-	switch err := s.documentScanUnfinished(ctx, req, sess, req.documentScanTransactionID); {
+	switch err := s.documentScanUnfinished(ctx, req, sess, req.documentScanTransactionID, false); {
 	case err == nil:
 		return s.reconcile(ctx, requestTenant(req), req)
 	case errors.Is(err, ErrDocumentScanFailed), errors.Is(err, ErrSessionOver):
@@ -247,6 +253,9 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 	}
 	return req
 }
+
+// faceScanTasks are the scan service's face checks.
+var faceScanTasks = []string{idscan.TaskFaceLiveness, idscan.TaskFaceMatch}
 
 // documentScanOptions are the rules of flow f the scan service enforces: the
 // BSN blacked out when f says so, and f's age check.

@@ -4,68 +4,106 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
-// statusServer answers every transaction status read with body.
-func statusServer(t *testing.T, body string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		checkToken(t, r)
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-// faceStatus is a transaction in state whose document scan passed, with the
-// face check task at attempts in taskState.
-func faceStatus(state, task, taskState string, attempts int) string {
-	liveness, match := `{"type":"face_liveness","state":"completed","attempts":1}`, `{"type":"face_match","state":"pending","attempts":0}`
-	current := `{"type":"` + task + `","state":"` + taskState + `","attempts":` + strconv.Itoa(attempts) + `}`
-	if task == TaskFaceLiveness {
-		liveness = current
-	} else {
-		match = current
-	}
-	return `{"state":"` + state + `","tasks":[{"type":"document_scan","state":"completed","attempts":2},` + liveness + `,` + match + `]}`
-}
-
-func TestTransactionStatus(t *testing.T) {
-	spent := &Failure{Task: TaskFaceLiveness, State: StateMaximumAttemptsExceeded, Attempts: faceAttemptsLimit}
+// The task a pending transaction is at, as ID Scan answered on 2026-11-04:
+// it leaves a pending face_match out once the liveness check passed.
+func TestTransactionStatusRunning(t *testing.T) {
 	tests := map[string]struct {
 		body string
-		want Status
+		want *Running
 	}{
-		"face check still trying": {
-			faceStatus(StatePending, TaskFaceLiveness, StatePending, faceAttemptsLimit-1), Status{State: StatePending},
+		"at the photo": {
+			`{"state":"pending","tasks":[{"type":"document_scan","state":"pending","attempts":3},{"type":"face_liveness","state":"pending","attempts":0}]}`,
+			&Running{Task: TaskDocumentScan, Attempts: 3},
 		},
-		"liveness out of attempts while pending": {
-			faceStatus(StatePending, TaskFaceLiveness, StatePending, faceAttemptsLimit), Status{State: StateFailed, Failure: spent},
+		"at the liveness check": {
+			`{"state":"pending","tasks":[{"type":"document_scan","state":"completed","attempts":2},{"type":"face_liveness","state":"pending","attempts":4}]}`,
+			&Running{Task: TaskFaceLiveness, Attempts: 4},
 		},
-		"match out of attempts while pending": {
-			faceStatus(StatePending, TaskFaceMatch, StatePending, faceAttemptsLimit),
-			Status{State: StateFailed, Failure: &Failure{Task: TaskFaceMatch, State: StateMaximumAttemptsExceeded, Attempts: faceAttemptsLimit}},
-		},
-		"document out of attempts": {
-			`{"state":"failed","tasks":[{"type":"document_scan","state":"maximum_attempts_exceeded","attempts":10,"documentScans":[{"code":"unknown_type_front"}]},{"type":"face_liveness","state":"pending","attempts":0}]}`,
-			Status{State: StateFailed, Failure: &Failure{Task: TaskDocumentScan, State: StateMaximumAttemptsExceeded, Attempts: 10, Code: "unknown_type_front"}},
+		"at the face match": {
+			`{"state":"pending","tasks":[{"type":"document_scan","state":"completed","attempts":2},{"type":"face_liveness","state":"completed","attempts":1}]}`,
+			&Running{Task: TaskFaceMatch},
 		},
 		"completed": {
-			faceStatus(StateCompleted, TaskFaceMatch, StateCompleted, 1), Status{State: StateCompleted},
+			`{"state":"completed","tasks":[{"type":"document_scan","state":"completed","attempts":2}]}`,
+			nil,
 		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			srv := statusServer(t, tc.body)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				checkToken(t, r)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
 			got, err := New(testKeyID, testSecret, srv.URL, srv.Client()).TransactionStatus(context.Background(), "trx-1")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.State != tc.want.State || (got.Failure == nil) != (tc.want.Failure == nil) ||
-				(got.Failure != nil && *got.Failure != *tc.want.Failure) {
-				t.Errorf("status = %+v (failure %+v), want %+v (failure %+v)", got, got.Failure, tc.want, tc.want.Failure)
+			if !reflect.DeepEqual(got.Running, tc.want) {
+				t.Errorf("running = %+v, want %+v", got.Running, tc.want)
+			}
+		})
+	}
+}
+
+// A liveness check that used the tries the photo left fails the
+// transaction, as ID Scan's page then shows an error while its API leaves it
+// pending. A good front of a two-sided document is no failed photo. The
+// photos are those of tests of 2026-11-04 and 2026-11-05.
+func TestTransactionStatusSpentLiveness(t *testing.T) {
+	const (
+		back         = `"front_side_provided_back_side_required"`
+		good         = `null`
+		unknownBack  = `"unknown_type_back"`
+		unknownFront = `"unknown_type_front"`
+		quality      = `"image_quality_requirements_not_met"`
+	)
+	status := func(liveness int, photos ...string) string {
+		scans := make([]string, len(photos))
+		for i, code := range photos {
+			scans[i] = `{"code":` + code + `}`
+		}
+		return `{"state":"pending","tasks":[` +
+			`{"type":"document_scan","state":"completed","attempts":` + strconv.Itoa(len(photos)) +
+			`,"documentScans":[` + strings.Join(scans, ",") + `]},` +
+			`{"type":"face_liveness","state":"pending","attempts":` + strconv.Itoa(liveness) + `}]}`
+	}
+	tests := map[string]struct {
+		body  string
+		spent bool
+	}{
+		"both sides at first try, liveness at 9":  {status(9, back, good), false},
+		"both sides at first try, liveness at 10": {status(10, back, good), true},
+		"2 failed backs, liveness at 7":           {status(7, back, unknownBack, back, unknownBack, good), false},
+		"2 failed backs, liveness at 8":           {status(8, back, unknownBack, back, unknownBack, good), true},
+		"3 failed photos, liveness at 7":          {status(7, unknownBack, quality, back, unknownBack, back, good), true},
+		"2 failed fronts, liveness at 4":          {status(4, unknownFront, good, unknownFront, back), false},
+		"one-sided at first try, liveness at 10":  {status(10, good), true},
+		"photo still running": {
+			`{"state":"pending","tasks":[{"type":"document_scan","state":"pending","attempts":9},{"type":"face_liveness","state":"pending","attempts":0}]}`, false,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				checkToken(t, r)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			got, err := New(testKeyID, testSecret, srv.URL, srv.Client()).TransactionStatus(context.Background(), "trx-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			spent := got.State == StateFailed && got.Failure != nil &&
+				got.Failure.Task == TaskFaceLiveness && got.Failure.State == StateMaximumAttemptsExceeded
+			if spent != tc.spent {
+				t.Errorf("status = %+v (failure %+v), want spent %v", got, got.Failure, tc.spent)
 			}
 		})
 	}

@@ -2524,13 +2524,28 @@ step runs with the Idem app or the Yivi app alike.
     asks CM too while a scan runs (`withSpentDocumentScan`, one status call
     per poll) and fails the session the same way, and the page moves to the
     outcome on its own.
-  - A face task out of attempts is different: CM's page says it cannot go
-    on, but CM leaves the task and the transaction `pending`, even past its
-    expiry (seen on staging, 2026-11-04).
-    - `TransactionStatus` therefore reads a `face_liveness` or `face_match`
-      task at 4 attempts or more (`faceAttemptsLimit`, CM's own limit) as
-      `maximum_attempts_exceeded`.
-    - The poll then fails the session as above.
+  - Liveness out of attempts is different (seen 2026-11-04).
+    - CM's page hands liveness the tries the photo left: 10 (its
+      `maximumAttemptsDocumentScan`) minus one per failed photo. A photo
+      that passes first time leaves all 10.
+    - A good front of a two-sided document is no failed photo, though CM
+      counts it as a photo attempt (code
+      `front_side_provided_back_side_required`). Seen 2026-11-05: front and
+      back at first try left liveness all 10.
+    - Once those are used it shows "Process Cannot Be Completed", posts
+      nothing, and CM's API leaves the task and the transaction `pending`,
+      even past expiry.
+    - So `TransactionStatus` reads a pending liveness check whose attempts
+      reached 10 minus the failed photos in its `documentScans` as
+      `maximum_attempts_exceeded`
+      (`spentLiveness`), and the poll fails the session as above, on any
+      device.
+    - CM's API also counts liveness tries that ended on an error, which its
+      page does not, so this can end a try early. It never leaves the person
+      on CM's error page.
+    - CM's page posts its parent only once a task is over. A reported scan
+      at a face check (`idscan.Status.Running`) fails the session too. One
+      at the photo can be tried again.
   - A hosted page framed by a customer's own page reaches the camera only
     when the customer's iframe has `allow="camera"` too.
 - **BSN**: only under the flow's BlurBSN the transaction asks CM to black
@@ -2553,7 +2568,7 @@ step runs with the Idem app or the Yivi app alike.
 
   | CM gives | Engine | Error code |
   |---|---|---|
-  | `face_liveness` state: `completed` passes; `aborted`, `maximum_attempts_exceeded` or 4 attempts still `pending` fails | the face step's liveness (`SelfieStepEvidence`, provider `idscan`) | `LIVENESS_FAILED` |
+  | `face_liveness` state: `completed` passes; `aborted` or `maximum_attempts_exceeded` fails | the face step's liveness (`SelfieStepEvidence`, provider `idscan`) | `LIVENESS_FAILED` |
   | `face_match` score, 0 to 1 | a match from 0.90 (CM's authentic range), or the flow's own `face.match` threshold | `FACE_NO_MATCH` |
   | the liveness image (its video is never fetched) | the session's selfie, under `keepFacePhotos` | |
 
