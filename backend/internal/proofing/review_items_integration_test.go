@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
@@ -38,7 +41,16 @@ func TestAddressReviewItemLapses(t *testing.T) {
 		t.Fatalf("LapseReviewItems when due = %d, %v; want one", n, err)
 	}
 
-	got, err := requests.Get(ctx, orgID, pending.ID)
+	assertAddressItemLapsed(t, pool, requests, pending, sam)
+}
+
+// assertAddressItemLapsed checks that pending's address item lapsed: the
+// session kept its outcome, the lapse is audited, and a late decision by
+// reviewer is refused.
+func assertAddressItemLapsed(t *testing.T, pool *pgxpool.Pool, requests *RequestStore, pending Request, reviewer uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	got, err := requests.Get(ctx, pending.OrganizationID, pending.ID)
 	if err != nil || got.AddressReview != AddressReviewLapsed || got.AddressReviewedAt == nil || got.Status != StatusApproved {
 		t.Errorf("Get = %s %q at %v, %v; want approved, address lapsed", got.Status, got.AddressReview, got.AddressReviewedAt, err)
 	}
@@ -47,14 +59,14 @@ func TestAddressReviewItemLapses(t *testing.T) {
 		audit.IdentityProofingReviewItemDecided).Scan(&lapsedCode); err != nil || lapsedCode != errorReviewLapsed {
 		t.Errorf("review_item_decided errorCode = %q, %v; want %s", lapsedCode, err, errorReviewLapsed)
 	}
-	if at, err := requests.DecideAddressReview(ctx, pending, sam, AddressReviewConfirmed, "Too late"); err != nil || at != nil {
+	if at, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Too late"); err != nil || at != nil {
 		t.Errorf("DecideAddressReview after the lapse = %v, %v; want refused", at, err)
 	}
 	if next, err := requests.NextReviewItemDue(ctx); err != nil || !next.IsZero() {
 		t.Errorf("NextReviewItemDue after the lapse = %v, %v; want none", next, err)
 	}
 	lapsed := AddressReviewLapsed
-	if listed, err := requests.List(ctx, orgID, RequestFilter{ReviewKind: &addressKind, ReviewState: &lapsed}); err != nil || len(listed) != 1 {
+	if listed, err := requests.List(ctx, pending.OrganizationID, RequestFilter{ReviewKind: &addressKind, ReviewState: &lapsed}); err != nil || len(listed) != 1 {
 		t.Errorf("List lapsed addresses = %d, %v; want the one", len(listed), err)
 	}
 }

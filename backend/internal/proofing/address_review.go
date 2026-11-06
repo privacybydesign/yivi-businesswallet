@@ -108,7 +108,7 @@ func (s *Service) DecideAddressReview(ctx context.Context, orgID, id uuid.UUID, 
 func (s *RequestStore) DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (*time.Time, error) {
 	var reviewedAt *time.Time
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		at, err := decideReviewItem(ctx, q, s.audit, req, ReviewKindAddress, reviewerID, decided, reason)
+		at, err := s.decideReviewItem(ctx, q, req, ReviewKindAddress, reviewerID, decided, reason)
 		if err != nil || at == nil {
 			return err
 		}

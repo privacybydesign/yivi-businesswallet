@@ -442,8 +442,17 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 	if decided.AddressReviewedAt == "" {
 		t.Error("decided carries no addressReviewedAt")
 	}
+	assertReviewerReachesDecidedAddress(t, env, base, review, decided.ID)
+}
+
+// assertReviewerReachesDecidedAddress checks that the reviewer, the caller,
+// still lists and opens the check id whose address they confirmed, the same
+// way, and cannot decide it again.
+func assertReviewerReachesDecidedAddress(t *testing.T, env *testEnv, base, review, id string) {
+	t.Helper()
+	one := base + "/" + id
 	closed := decodeJSON[[]addressReviewResp](t, env.do(http.MethodGet, base+"?reviewKind=address&reviewState=confirmed", nil))
-	if len(closed) != 1 || closed[0].ID != decided.ID || closed[0].ProofedName != "" || len(closed[0].Diplomas) != 0 {
+	if len(closed) != 1 || closed[0].ID != id || closed[0].ProofedName != "" || len(closed[0].Diplomas) != 0 {
 		t.Errorf("confirmed addresses for a reviewer = %+v, want the one, without proofed name or diplomas", closed)
 	}
 	reopened := decodeJSON[addressReviewResp](t, env.do(http.MethodGet, one, nil))

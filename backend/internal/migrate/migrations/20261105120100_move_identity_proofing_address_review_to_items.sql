@@ -40,12 +40,14 @@ ALTER TABLE identity_proofing_requests
     ADD COLUMN address_reviewed_at TIMESTAMPTZ;
 
 -- A lapsed review has no column value: it reads as none.
+WITH moved AS (
+    DELETE FROM identity_proofing_review_items WHERE kind = 'address'
+    RETURNING request_id, state, decided_by, decided_at
+)
 UPDATE identity_proofing_requests r
 SET address_review = i.state, address_reviewed_by = i.decided_by, address_reviewed_at = i.decided_at
-FROM identity_proofing_review_items i
-WHERE i.request_id = r.id AND i.kind = 'address' AND i.state <> 'lapsed';
-
-DELETE FROM identity_proofing_review_items WHERE kind = 'address';
+FROM moved i
+WHERE i.request_id = r.id AND i.state <> 'lapsed';
 
 DROP TRIGGER identity_proofing_requests_notify_reviews ON identity_proofing_requests;
 CREATE TRIGGER identity_proofing_requests_notify_reviews

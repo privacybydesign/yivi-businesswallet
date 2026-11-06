@@ -120,7 +120,7 @@ func openReviewItem(ctx context.Context, q database.Querier, req Request, kind R
 // decideReviewItem records a reviewer's decision on req's pending item of
 // kind, audited identity_proofing.review_item_decided with reason. It returns
 // when it was decided: nil, and changes nothing, when none waits.
-func decideReviewItem(ctx context.Context, q database.Querier, recorder audit.Recorder, req Request, kind ReviewKind,
+func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier, req Request, kind ReviewKind,
 	reviewerID uuid.UUID, decided ReviewState, reason string,
 ) (*time.Time, error) {
 	var at time.Time
@@ -136,7 +136,7 @@ func decideReviewItem(ctx context.Context, q database.Querier, recorder audit.Re
 	if err != nil {
 		return nil, fmt.Errorf("proofing: decide %s review request %s: %w", kind, req.ID, err)
 	}
-	if err := recorder.Record(ctx, q, audit.IdentityProofingReviewItemDecided,
+	if err := s.audit.Record(ctx, q, audit.IdentityProofingReviewItemDecided,
 		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 		audit.Updated(req.auditFields(map[string]any{"kind": string(kind), "state": string(ReviewPending)}),
 			req.auditFields(map[string]any{"kind": string(kind), "state": string(decided), "reason": reason}))); err != nil {
