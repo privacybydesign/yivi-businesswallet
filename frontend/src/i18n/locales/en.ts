@@ -1311,9 +1311,14 @@ export const en = {
         "Checks and data requests that wait for a person's decision. Oldest first.",
       notAllowed: "Only admins and members with the reviewer right can review.",
       tabsLabel: "Show",
+      alsoDecided: "Already decided in this session",
+      decidedAutomatically:
+        "Decided automatically by the check, without a reviewer.",
+      nextPart: "Next: {{part}}",
       tabs: {
         all: "All",
         checks: "Identity checks",
+        steps: "Extra steps",
         data: "Data requests",
         closed: "Closed",
       },
@@ -1338,9 +1343,6 @@ export const en = {
       employment: {
         title: "Review a Verzekeringsbericht",
         whyTitle: "Why this waits for you",
-        checkTitle: "Identity check",
-        checkHint:
-          "The identity check itself is approved. Your decision only concerns the Verzekeringsbericht.",
         decisionTitle: "Decision",
         confirm: "Accept Verzekeringsbericht",
         reject: "Reject Verzekeringsbericht",
@@ -1354,9 +1356,6 @@ export const en = {
         why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
         whyMismatch:
           "This address differs from the registered address (BRP) the person shared from the Yivi app. They may have moved recently, so a reviewer decides.",
-        checkTitle: "Identity check",
-        checkHint:
-          "The identity check itself is approved. Your decision only concerns the address.",
         method: "Checked with",
         level: "Assurance level",
         decisionTitle: "Decision",
@@ -1412,6 +1411,7 @@ export const en = {
         other: "This request no longer waits for a decision.",
       },
       check: {
+        photosTitle: "Photos",
         title: "Review an identity check",
         why: {
           title: "Why this waits for you",

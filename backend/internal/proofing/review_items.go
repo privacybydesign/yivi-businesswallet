@@ -77,12 +77,31 @@ const sessionReviewKindColumn = `CASE WHEN r.flow_kind IN ('data_access', 'data_
 // are the request's status, not rows of identity_proofing_review_items.
 const sessionReviewWaits = `r.purged_at IS NULL AND ` + effectiveStatusColumn + ` = 'needs_review'`
 
+// closedReview is a request r the Reviews page lists as closed: a data request
+// that ended, or a session a reviewer decided something of and nothing of
+// which waits.
+const closedReview = `((r.flow_kind IN ('data_access', 'data_erasure') AND r.status IN ('approved', 'rejected'))
+	OR (r.flow_kind = 'identity' AND r.purged_at IS NULL AND NOT (` + sessionReviewWaits + `)
+		AND NOT EXISTS (SELECT 1 FROM identity_proofing_review_items i WHERE i.request_id = r.id AND i.state = 'pending')
+		AND (EXISTS (SELECT 1 FROM identity_proofing_review_items i WHERE i.request_id = r.id)
+			OR EXISTS (SELECT 1 ` + identityReviewDecided + `))))`
+
+// closedReviewOrder lists closed reviews by when they closed, the latest first:
+// the last decision, else the end of the data request.
+const closedReviewOrder = `COALESCE(GREATEST(
+		(SELECT max(i.decided_at) FROM identity_proofing_review_items i WHERE i.request_id = r.id),
+		(SELECT max(a.occurred_at) ` + identityReviewDecided + `)),
+	r.completed_at, r.created_at) DESC, r.created_at DESC`
+
 // reviewItemMatches is a request r with a review item of kind $k in state $s,
 // stored or its own review: the filter of RequestFilter.ReviewKind.
 func reviewItemMatches(k, s string) string {
 	return `(EXISTS (SELECT 1 FROM identity_proofing_review_items i
 			WHERE i.request_id = r.id AND i.kind = ` + k + ` AND i.state = ` + s + `)
-		OR (` + s + ` = 'pending' AND ` + sessionReviewWaits + ` AND ` + sessionReviewKindColumn + ` = ` + k + `))`
+		OR (` + s + ` = 'pending' AND ` + sessionReviewWaits + ` AND ` + sessionReviewKindColumn + ` = ` + k + `)
+		OR (` + k + ` = 'identity' AND r.flow_kind = 'identity' AND r.purged_at IS NULL
+			AND r.status = CASE ` + s + ` WHEN 'confirmed' THEN 'approved' WHEN 'rejected' THEN 'rejected' END
+			AND EXISTS (SELECT 1 ` + identityReviewDecided + `)))`
 }
 
 // reviewItemOrder orders a list narrowed to review items of kind $k: waiting
@@ -106,11 +125,21 @@ const (
 )
 
 // stepReviewColumns are the state of r's address and employment items and
-// when each was decided, for Request's step reviews.
+// when each was decided, when the first waiting one lapses, and when a
+// reviewer decided its identity, for Request's reviews.
 const stepReviewColumns = `COALESCE((SELECT i.state ` + latestAddressItem + `), ''),
 	(SELECT i.decided_at ` + latestAddressItem + `),
 	COALESCE((SELECT i.state ` + latestEmploymentItem + `), ''),
-	(SELECT i.decided_at ` + latestEmploymentItem + `)`
+	(SELECT i.decided_at ` + latestEmploymentItem + `),
+	(SELECT min(i.due_at) FROM identity_proofing_review_items i
+		WHERE i.request_id = r.id AND i.kind IN ('address', 'employment') AND i.state = 'pending'),
+	CASE WHEN r.flow_kind = 'identity' THEN (SELECT max(a.occurred_at) ` + identityReviewDecided + `) END`
+
+// identityReviewDecided is r's identity_proofing.review_decided audit events:
+// a reviewer decided its identity, which the request keeps no column of.
+const identityReviewDecided = `FROM audit_events a
+		WHERE a.organization_id = r.organization_id AND a.target_type = 'identity_proofing_request'
+			AND a.target_id = r.id::text AND a.action = 'identity_proofing.review_decided'`
 
 // openReviewItem opens a pending item of kind on req, due its retention
 // (Request.NameRetention) from now: by then nothing of the session would be
@@ -249,37 +278,47 @@ func (s *RequestStore) NextReviewItemDue(ctx context.Context) (time.Time, error)
 	return *due, nil
 }
 
-// ReviewCounts is how many items of each kind wait in org: stored ones and
-// the requests whose own review waits. Every kind is in it, 0 when none waits.
-func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[ReviewKind]int, error) {
-	rows, err := s.db.Query(ctx, `SELECT kind, count(*) FROM (
-			SELECT i.kind FROM identity_proofing_review_items i
-			JOIN identity_proofing_requests r ON r.id = i.request_id
-			WHERE i.organization_id = $1 AND i.state = 'pending' AND r.purged_at IS NULL
-			UNION ALL
-			SELECT `+sessionReviewKindColumn+` FROM identity_proofing_requests r
-			WHERE r.organization_id = $1 AND `+sessionReviewWaits+`
-		) waiting GROUP BY kind`, orgID)
+// ReviewTally is what waits for a reviewer in an org.
+type ReviewTally struct {
+	// Kinds is how many sessions wait with a review of each kind; every kind
+	// is in it, 0 when none waits. A session waiting for its identity and its
+	// address counts under both.
+	Kinds map[ReviewKind]int
+	// Sessions is how many sessions wait, each once.
+	Sessions int
+	// StepSessions is how many of them wait for a step (an address, a
+	// Verzekeringsbericht), each once.
+	StepSessions int
+}
+
+// ReviewCounts is what waits in org: per kind, in all, and for a step.
+func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (ReviewTally, error) {
+	const stepWaits = `EXISTS (SELECT 1 FROM identity_proofing_review_items i
+		WHERE i.request_id = r.id AND i.kind = %s AND i.state = 'pending')`
+	address, employment := fmt.Sprintf(stepWaits, "$2"), fmt.Sprintf(stepWaits, "$3")
+	var identity, dataRequest, addresses, statements, sessions, steps int
+	err := s.db.QueryRow(ctx, `WITH waiting AS (
+			SELECT `+sessionReviewWaits+` AS own, `+sessionReviewKindColumn+` AS own_kind,
+				`+address+` AS address, `+employment+` AS employment
+			FROM identity_proofing_requests r
+			WHERE r.organization_id = $1 AND r.purged_at IS NULL
+		)
+		SELECT count(*) FILTER (WHERE own AND own_kind = $4), count(*) FILTER (WHERE own AND own_kind = $5),
+			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment),
+			count(*) FILTER (WHERE own OR address OR employment), count(*) FILTER (WHERE address OR employment)
+		FROM waiting`, orgID, string(ReviewKindAddress), string(ReviewKindEmployment),
+		string(ReviewKindIdentity), string(ReviewKindDataRequest)).
+		Scan(&identity, &dataRequest, &addresses, &statements, &sessions, &steps)
 	if err != nil {
-		return nil, fmt.Errorf("proofing: count reviews org %s: %w", orgID, err)
+		return ReviewTally{}, fmt.Errorf("proofing: count reviews org %s: %w", orgID, err)
 	}
-	defer rows.Close()
-	out := make(map[ReviewKind]int, len(ReviewKinds))
-	for _, k := range ReviewKinds {
-		out[k] = 0
-	}
-	for rows.Next() {
-		var kind string
-		var n int
-		if err := rows.Scan(&kind, &n); err != nil {
-			return nil, fmt.Errorf("proofing: count reviews org %s: %w", orgID, err)
-		}
-		out[ReviewKind(kind)] = n
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("proofing: count reviews org %s: %w", orgID, err)
-	}
-	return out, nil
+	return ReviewTally{
+		Kinds: map[ReviewKind]int{
+			ReviewKindIdentity: identity, ReviewKindAddress: addresses,
+			ReviewKindEmployment: statements, ReviewKindDataRequest: dataRequest,
+		},
+		Sessions: sessions, StepSessions: steps,
+	}, nil
 }
 
 // ReviewItemInput is a reviewer's decision on a review item: confirm or
@@ -317,7 +356,7 @@ func (s *Service) DecideReviewItem(ctx context.Context, orgID, id uuid.UUID, kin
 	})
 }
 
-// ReviewCounts is how many items of each kind wait in org (RequestStore.ReviewCounts).
-func (s *Service) ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[ReviewKind]int, error) {
+// ReviewCounts is what waits in org (RequestStore.ReviewCounts).
+func (s *Service) ReviewCounts(ctx context.Context, orgID uuid.UUID) (ReviewTally, error) {
 	return s.requests.ReviewCounts(ctx, orgID)
 }

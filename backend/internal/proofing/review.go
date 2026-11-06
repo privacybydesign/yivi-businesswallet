@@ -67,11 +67,12 @@ func (sc ReviewScope) reaches(req Request) bool {
 }
 
 // reachesStepReview reports whether the scope reaches req's request and its
-// steps' reviews: what reaches does, and a step a reviewer reviews (the
-// address, the Verzekeringsbericht), waiting or decided. Never the result of a
+// reviews: what reaches does, a step a reviewer reviews (the address, the
+// Verzekeringsbericht), waiting or decided, and an identity a reviewer
+// decided, which the Reviews page lists as closed. Never the result of a
 // check it holds.
 func (sc ReviewScope) reachesStepReview(req Request) bool {
-	return sc.reaches(req) || req.AddressReview != "" || req.EmploymentReview != ""
+	return sc.reaches(req) || req.AddressReview != "" || req.EmploymentReview != "" || req.IdentityReviewedAt != nil
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with

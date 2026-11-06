@@ -3,11 +3,7 @@ import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
-import {
-  assuranceLevelLabel,
-  proofingMethodLabel,
-  requestSubject,
-} from "../lib/identity-proofing";
+import { proofingMethodLabel, requestSubject } from "../lib/identity-proofing";
 import {
   ownReview,
   reviewPath,
@@ -19,8 +15,8 @@ import { StepDecision } from "./address-review";
 import {
   BackToReviews,
   DecisionReasons,
-  ReviewFacts,
   ReviewSection,
+  SessionDecisions,
 } from "./proofing-review-parts";
 import { SessionEmployment } from "./proofing-people";
 
@@ -67,26 +63,7 @@ export function EmploymentReview({
         >
           <SessionEmployment request={request} />
         </ReviewSection>
-        <ReviewSection
-          id="employment-review-check"
-          title={t("identityProofing.reviews.employment.checkTitle")}
-          hint={t("identityProofing.reviews.employment.checkHint")}
-        >
-          <ReviewFacts
-            rows={[
-              {
-                label: t("identityProofing.reviews.address.method"),
-                value: proofingMethodLabel(request.method, t),
-              },
-              {
-                label: t("identityProofing.reviews.address.level"),
-                value: request.eidasLevel
-                  ? assuranceLevelLabel(request.eidasLevel, t)
-                  : "—",
-              },
-            ]}
-          />
-        </ReviewSection>
+        <SessionDecisions request={request} except="employment" />
         <ReviewSection
           id="employment-review-decision"
           title={t("identityProofing.reviews.employment.decisionTitle")}
@@ -97,11 +74,7 @@ export function EmploymentReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <StepDecision
-                slug={slug}
-                requestId={request.id}
-                kind="employment"
-              />
+              <StepDecision slug={slug} request={request} kind="employment" />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">

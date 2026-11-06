@@ -9,7 +9,7 @@ import { DataRequestReview } from "./data-request-review";
 import { IdentityCheckReview } from "./identity-check-review";
 import { AddressReview } from "./address-review";
 import { EmploymentReview } from "./employment-review";
-import { stepReviewOf } from "../lib/proofing-reviews";
+import { stepReviewOf, waitingParts } from "../lib/proofing-reviews";
 
 // One thing that waits for a decision, or was decided: the page of an identity
 // check, of one of its steps (a self-declared address, a Verzekeringsbericht),
@@ -25,7 +25,13 @@ export default function ProofingReview(): React.JSX.Element {
   const request = useProofingRequestQuery(slug, id, { enabled: canReview });
 
   const { data } = request;
-  const step = data && stepReviewOf(data);
+  // A closed session whose identity a reviewer decided opens as that check,
+  // with every decision of its review.
+  const closedCheck =
+    data !== undefined &&
+    data.identityReviewedAt !== undefined &&
+    waitingParts(data).length === 0;
+  const step = data && !closedCheck ? stepReviewOf(data) : undefined;
   if (data && step === "employment") {
     return <EmploymentReview slug={slug} request={data} />;
   }

@@ -229,8 +229,10 @@ func assertReviewerLosesDecided(t *testing.T, env *testEnv, orgID uuid.UUID, clo
 			t.Errorf("GET %s for a reviewer = %+v, want only the ones they sent", path, list)
 		}
 	}
-	wantProofingError(t, "a reviewer opening an approved check", env.do(http.MethodGet, one, nil),
-		http.StatusNotFound, "session_not_found")
+	// It stays on the Reviews page as closed: its decision, never the person's name.
+	if opened := decodeJSON[addressReviewResp](t, env.do(http.MethodGet, one, nil)); opened.ProofedName != "" {
+		t.Errorf("a reviewer opening the check they decided = %+v, want it without the proofed name", opened)
+	}
 	for _, route := range []string{"/result", "/data-matches", "/data-export"} {
 		wantProofingError(t, "a reviewer reading "+route+" of an approved check", env.do(http.MethodGet, one+route, nil),
 			http.StatusNotFound, "session_not_found")

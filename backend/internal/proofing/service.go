@@ -108,7 +108,7 @@ type requestStore interface {
 	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
 	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
 	NextReviewItemDue(ctx context.Context) (time.Time, error)
-	ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[ReviewKind]int, error)
+	ReviewCounts(ctx context.Context, orgID uuid.UUID) (ReviewTally, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 

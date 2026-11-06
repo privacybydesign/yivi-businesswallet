@@ -10,6 +10,9 @@ import {
 import {
   REJECT_REASONS,
   answerBy,
+  nextPart,
+  decidedParts,
+  isClosedSession,
   askedAt,
   askedLine,
   automaticChecks,
@@ -23,6 +26,7 @@ import {
   provenWithParts,
   reviewCounts,
   reviewTabFrom,
+  waitingParts,
   waitingOfTab,
   reasonProblem,
   waitingOldestFirst,
@@ -105,20 +109,35 @@ describe("review tabs", () => {
   const check = request({ id: "check" });
   const access = request({ id: "access", flowKind: "data_access" });
   const erasure = request({ id: "erasure", flowKind: "data_erasure" });
-  const waiting = [check, access, erasure];
+  const address = request({
+    id: "address",
+    status: "approved",
+    addressReview: "pending",
+  });
+  const waiting = [check, address, access, erasure];
 
-  it("counts checks and their steps apart from data requests", () => {
+  it("counts every session once, and each tab its own", () => {
     expect(
-      reviewCounts({ identity: 1, address: 2, employment: 1, data_request: 2 }),
-    ).toEqual({ all: 6, checks: 4, data: 2 });
-    expect(
-      reviewCounts({ identity: 0, address: 0, employment: 0, data_request: 0 }),
-    ).toEqual({ all: 0, checks: 0, data: 0 });
+      reviewCounts({
+        counts: { identity: 2, address: 2, employment: 1, data_request: 2 },
+        sessions: 5,
+        stepSessions: 2,
+      }),
+    ).toEqual({ all: 5, checks: 2, steps: 2, data: 2 });
+  });
+
+  it("lists a session with its identity and a step in both tabs", () => {
+    const both = request({ id: "both", addressReview: "pending" });
+    expect(waitingOfTab("checks", [both]).map((r) => r.id)).toEqual(["both"]);
+    expect(waitingOfTab("steps", [both]).map((r) => r.id)).toEqual(["both"]);
   });
 
   it("lists each kind under its own tab, and none under closed", () => {
-    expect(waitingOfTab("all", waiting)).toHaveLength(3);
+    expect(waitingOfTab("all", waiting)).toHaveLength(4);
     expect(waitingOfTab("checks", waiting).map((r) => r.id)).toEqual(["check"]);
+    expect(waitingOfTab("steps", waiting).map((r) => r.id)).toEqual([
+      "address",
+    ]);
     expect(waitingOfTab("data", waiting).map((r) => r.id)).toEqual([
       "access",
       "erasure",
@@ -274,6 +293,19 @@ describe("answerBy", () => {
     expect(answerBy(request({ flowKind: "data_erasure", purgeAt }))).toBe(
       purgeAt,
     );
+  });
+
+  it("is when a waiting step review lapses", () => {
+    const due = "2026-11-13T10:00:00Z";
+    expect(
+      answerBy(
+        request({
+          status: "approved",
+          employmentReview: "pending",
+          stepReviewDueAt: due,
+        }),
+      ),
+    ).toBe(due);
   });
 
   it("is absent for a check, and for a request already decided", () => {
@@ -485,5 +517,46 @@ describe("checkReviewReason", () => {
         true,
       );
     }
+  });
+});
+
+describe("waitingParts", () => {
+  it("walks a session's waiting parts: identity, Verzekeringsbericht, address", () => {
+    const all = request({
+      employmentReview: "pending",
+      addressReview: "pending",
+    });
+    expect(waitingParts(all)).toEqual(["identity", "employment", "address"]);
+    expect(nextPart(all, "identity")).toBe("employment");
+    expect(
+      nextPart(
+        request({ status: "approved", addressReview: "pending" }),
+        "address",
+      ),
+    ).toBeUndefined();
+    expect(waitingParts(request({ flowKind: "data_access" }))).toEqual([]);
+  });
+});
+
+describe("a closed session", () => {
+  it("is one row once every part is decided, closed at the last decision", () => {
+    const both = request({
+      status: "approved",
+      identityReviewedAt: "2026-11-06T10:00:00Z",
+      addressReview: "confirmed",
+      addressReviewedAt: "2026-11-06T10:05:00Z",
+    });
+    expect(decidedParts(both)).toEqual(["identity", "address"]);
+    expect(isClosedSession(both)).toBe(true);
+    expect(closedAt(both)).toBe("2026-11-06T10:05:00Z");
+  });
+
+  it("is not closed while a part still waits", () => {
+    const halfway = request({
+      status: "approved",
+      identityReviewedAt: "2026-11-06T10:00:00Z",
+      addressReview: "pending",
+    });
+    expect(isClosedSession(halfway)).toBe(false);
   });
 });

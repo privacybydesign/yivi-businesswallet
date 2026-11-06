@@ -13,6 +13,7 @@ import {
   getProofingFlowVersions,
   getProofingFlows,
   getProofingOverview,
+  getClosedReviews,
   getProofingRequests,
   getProofingStats,
   setProofingFlowSelection,
@@ -539,34 +540,15 @@ export function useReviewItemCountsQuery(
   });
 }
 
-// What was closed: the data requests that ended, approved or rejected, and the
-// addresses and Verzekeringsberichten a reviewer confirmed or rejected, or
-// that lapsed. Eight reads, each
-// narrowed by the backend before its cap, so a busy org's identity checks never push them
-// off. Under the requests key, so a decision refreshes it.
+// What was closed: the sessions whose review is over and the data requests
+// that ended, in one read. Under the requests key, so a decision refreshes it.
 export function useClosedReviewsQuery(
   slug: string,
   options: { enabled: boolean },
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "closed"],
-    queryFn: async ({ signal }) => {
-      const reads = await Promise.all([
-        ...(["approved", "rejected"] as const).map((status) =>
-          getProofingRequests(
-            slug,
-            { status, flowKind: "data_request" },
-            signal,
-          ),
-        ),
-        ...(["address", "employment"] as const).flatMap((reviewKind) =>
-          (["confirmed", "rejected", "lapsed"] as const).map((reviewState) =>
-            getProofingRequests(slug, { reviewKind, reviewState }, signal),
-          ),
-        ),
-      ]);
-      return [...new Map(reads.flat().map((r) => [r.id, r])).values()];
-    },
+    queryFn: ({ signal }) => getClosedReviews(slug, signal),
     enabled: options.enabled && slug !== "",
   });
 }
