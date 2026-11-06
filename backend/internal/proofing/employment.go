@@ -280,7 +280,8 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 		}
 
 		kept := req
-		kept.SubjectEmployment = &emp
+		now := time.Now()
+		kept.SubjectEmployment, kept.EmploymentAddedAt = &emp, &now
 		if reason := emp.reviewReason(); reason != "" {
 			if _, err := q.Exec(ctx, `UPDATE identity_proofing_requests SET review_reason = $2 WHERE id = $1`,
 				req.ID, reason); err != nil {

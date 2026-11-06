@@ -13,12 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
 
 // stepsFixture is an org with an endpoint for every event, and an approved
-// external request that asks for the address and diplomas.
+// external request that asks for the address, diplomas and Verzekeringsbericht.
 type stepsFixture struct {
 	pool     *pgxpool.Pool
 	requests *RequestStore
@@ -45,7 +46,7 @@ func newStepsFixture(t *testing.T) stepsFixture {
 		t.Fatalf("Save webhook: %v", err)
 	}
 	in := newStoredRequest(f.orgID, makeUser(t, pool, "sam@example.org"), externalSubject("anna@example.org"))
-	in.Address, in.Diplomas = AddressRequired, DiplomasRequired
+	in.Address, in.Diplomas, in.Employment = AddressRequired, DiplomasRequired, EmploymentRequired
 	req := createStarted(t, f.requests, in, "s1")
 	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
@@ -229,6 +230,27 @@ func TestDiplomaStepPaths(t *testing.T) {
 			f.closeWindows(t)
 			f.assertStep(t, StepDiplomas, tc.state, tc.code, false)
 			f.assertSent(t, StepDiplomas, want)
+		})
+	}
+}
+
+func TestEmploymentStepPaths(t *testing.T) {
+	job := EmploymentRelation{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01"}
+	for _, tc := range []struct {
+		name  string
+		emp   Employment
+		state StepState
+	}{
+		{"a current job", Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{job}}, StepDone},
+		{"no current job", Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{}}, StepInReview},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newStepsFixture(t)
+			if added, err := f.requests.AddEmployment(context.Background(), f.req, tc.emp); err != nil || !added {
+				t.Fatalf("AddEmployment = %v, %v; want added", added, err)
+			}
+			f.assertStep(t, StepEmployment, tc.state, "", false)
+			f.assertSent(t, StepEmployment, append(slices.Clone(approvedEvents), sentEvent{EventSessionEmploymentAdded, tc.state}))
 		})
 	}
 }
