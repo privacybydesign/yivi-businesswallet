@@ -1344,9 +1344,14 @@ export const nl: Translation<typeof en> = {
       notAllowed:
         "Alleen beheerders en leden met het recht om te beoordelen kunnen beoordelen.",
       tabsLabel: "Toon",
+      alsoDecided: "Al beoordeeld in deze sessie",
+      decidedAutomatically:
+        "Automatisch beslist door de controle, zonder beoordelaar.",
+      nextPart: "Volgende: {{part}}",
       tabs: {
         all: "Alles",
         checks: "Identiteitscontroles",
+        steps: "Extra stappen",
         data: "Gegevensverzoeken",
         closed: "Afgehandeld",
       },
@@ -1371,9 +1376,6 @@ export const nl: Translation<typeof en> = {
       employment: {
         title: "Verzekeringsbericht beoordelen",
         whyTitle: "Waarom dit op jou wacht",
-        checkTitle: "Identiteitscontrole",
-        checkHint:
-          "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het Verzekeringsbericht.",
         decisionTitle: "Besluit",
         confirm: "Verzekeringsbericht accepteren",
         reject: "Verzekeringsbericht afwijzen",
@@ -1387,9 +1389,6 @@ export const nl: Translation<typeof en> = {
         why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
         whyMismatch:
           "Dit adres wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. Misschien is diegene net verhuisd, dus een beoordelaar beslist.",
-        checkTitle: "Identiteitscontrole",
-        checkHint:
-          "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het adres.",
         method: "Gecontroleerd met",
         level: "Betrouwbaarheidsniveau",
         decisionTitle: "Besluit",
@@ -1450,6 +1449,7 @@ export const nl: Translation<typeof en> = {
         other: "Dit verzoek wacht niet meer op een besluit.",
       },
       check: {
+        photosTitle: "Foto's",
         title: "Een identiteitscontrole beoordelen",
         why: {
           title: "Waarom dit op jou wacht",

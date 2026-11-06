@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
@@ -12,7 +11,6 @@ import { useDecideStepReviewMutation } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   addressVerificationNote,
-  assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
   requestSubject,
@@ -20,6 +18,7 @@ import {
 } from "../lib/identity-proofing";
 import { toast } from "../lib/toast";
 import {
+  nextPart,
   ownReview,
   reasonProblem,
   reviewPath,
@@ -33,9 +32,10 @@ import {
   REVIEW_FIELD_LABEL,
   REVIEW_HINT,
   REVIEW_TEXTAREA,
-  ReviewFacts,
   ReviewSection,
+  SessionDecisions,
 } from "./proofing-review-parts";
+import { useAfterDecision } from "../lib/use-after-decision";
 import { PostalAddress } from "./proofing-ui";
 
 // An address that waits for a person, or was decided: the address (and the
@@ -100,26 +100,7 @@ export function AddressReview({
             </>
           )}
         </ReviewSection>
-        <ReviewSection
-          id="address-review-check"
-          title={t("identityProofing.reviews.address.checkTitle")}
-          hint={t("identityProofing.reviews.address.checkHint")}
-        >
-          <ReviewFacts
-            rows={[
-              {
-                label: t("identityProofing.reviews.address.method"),
-                value: proofingMethodLabel(request.method, t),
-              },
-              {
-                label: t("identityProofing.reviews.address.level"),
-                value: request.eidasLevel
-                  ? assuranceLevelLabel(request.eidasLevel, t)
-                  : "—",
-              },
-            ]}
-          />
-        </ReviewSection>
+        <SessionDecisions request={request} except="address" />
         <ReviewSection
           id="address-review-decision"
           title={t("identityProofing.reviews.address.decisionTitle")}
@@ -130,7 +111,7 @@ export function AddressReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <StepDecision slug={slug} requestId={request.id} kind="address" />
+              <StepDecision slug={slug} request={request} kind="address" />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
@@ -148,19 +129,20 @@ export function AddressReview({
 }
 
 // Confirm or reject a step (the address, the Verzekeringsbericht), with a
-// reason the audit log keeps. A decided step leaves the reader's reach, so the
-// page goes back to the Reviews page.
+// reason the audit log keeps. The review then goes on to the session's next
+// part waiting, else back to the Reviews page.
 export function StepDecision({
   slug,
-  requestId,
+  request,
   kind,
 }: Readonly<{
   slug: string;
-  requestId: string;
+  request: ProofingRequest;
   kind: StepReviewKind;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const afterDecision = useAfterDecision(slug);
+  const requestId = request.id;
   const decide = useDecideStepReviewMutation(slug, requestId, kind);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
@@ -181,7 +163,7 @@ export function StepDecision({
                 : `identityProofing.reviews.${kind}.rejected`,
             ),
           );
-          void navigate(reviewPath(slug));
+          afterDecision(nextPart(request, kind));
         },
       },
     );

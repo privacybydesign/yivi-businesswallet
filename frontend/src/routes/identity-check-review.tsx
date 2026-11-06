@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
+import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useDecideReviewMutation,
   useProofingRequestResultQuery,
 } from "../api/identity-proofing.queries";
-import type { ProofingRequest } from "../api/identity-proofing";
+import type { ProofingRequest, ProofingResult } from "../api/identity-proofing";
 import { usePercentFormatter } from "../lib/format-percent";
 import { useWhenFormatter } from "../lib/format-when";
 import {
@@ -22,15 +22,16 @@ import { issuingCountryName } from "../lib/issuing-countries";
 import { blockingError } from "../lib/query-state";
 import { toast } from "../lib/toast";
 import {
-  DEFAULT_REJECT_REASON,
-  REJECT_REASONS,
   automaticChecks,
   checkDecisionInput,
   checkDecisionProblems,
-  evidenceDocumentLabel,
-  ownReview,
-  reviewPath,
   checkReviewReason,
+  DEFAULT_REJECT_REASON,
+  evidenceDocumentLabel,
+  nextPart,
+  ownReview,
+  REJECT_REASONS,
+  reviewPath,
 } from "../lib/proofing-reviews";
 import type {
   AutomaticCheck,
@@ -40,10 +41,11 @@ import type {
   CheckReviewReason,
 } from "../lib/proofing-reviews";
 import { Button, Icon, Select, StatusText, TopBar } from "../ui";
-import { SessionEmployment } from "./proofing-people";
+import { IdentityPhotos, SessionEmployment } from "./proofing-people";
 import {
   BackToReviews,
   ClosedNote,
+  SessionDecisions,
   REVIEW_ERROR,
   REVIEW_FIELD_LABEL,
   REVIEW_HINT,
@@ -51,6 +53,7 @@ import {
   ReviewFacts,
   ReviewSection,
 } from "./proofing-review-parts";
+import { useAfterDecision } from "../lib/use-after-decision";
 
 const WARNING_ICON_SIZE = 18;
 // The colour of an automatic check's outcome.
@@ -80,9 +83,13 @@ export function IdentityCheckReview({
   const waiting = request.status === "needs_review";
   // A check the reader sent or that is about them is another reviewer's.
   const own = ownReview(request, me.data);
+  // Once decided, the result and photos are an admin's: the review is over.
+  const isAdmin = useOrganizationQuery(slug).data?.role === "admin";
   const readable =
     request.purgedAt === undefined &&
-    (waiting || request.status === "approved" || request.status === "rejected");
+    (waiting ||
+      (isAdmin &&
+        (request.status === "approved" || request.status === "rejected")));
   const result = useProofingRequestResultQuery(slug, request.id, readable);
   const subject = requestSubject(request);
   const subtitle = [
@@ -109,10 +116,14 @@ export function IdentityCheckReview({
           {waiting ? (
             <WhyItWaits reason={checkReviewReason(request)} />
           ) : (
-            <ClosedNote request={request} />
+            <>
+              <ClosedNote request={request} />
+            </>
           )}
           <AutomaticChecks result={result} />
+          <SessionDecisions request={request} except="identity" />
           <ChipData request={request} result={result} />
+          {result.data && <PhotosSection result={result.data} />}
           {request.employmentMode !== "off" && (
             <SessionEmployment request={request} />
           )}
@@ -125,6 +136,31 @@ export function IdentityCheckReview({
           ))}
       </div>
     </>
+  );
+}
+
+// The photos the flow captured, blurred until revealed: the reviewer compares
+// the face and the document themselves.
+function PhotosSection({
+  result,
+}: Readonly<{ result: ProofingResult }>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (
+    !result.photo &&
+    !result.referencePhoto &&
+    !result.selfie &&
+    !result.documentImage &&
+    !result.documentImageBack
+  ) {
+    return null;
+  }
+  return (
+    <ReviewSection
+      id="check-review-photos"
+      title={t("identityProofing.reviews.check.photosTitle")}
+    >
+      <IdentityPhotos result={result} />
+    </ReviewSection>
   );
 }
 
@@ -326,7 +362,7 @@ function CheckDecision({
   name: string;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const afterDecision = useAfterDecision(slug);
   const decide = useDecideReviewMutation(slug, request.id);
   const [draft, setDraft] = useState<CheckDecisionDraft>({
     choice: undefined,
@@ -352,7 +388,7 @@ function CheckDecision({
               : "identityProofing.reviews.check.decision.rejected",
           ),
         );
-        void navigate(reviewPath(slug));
+        afterDecision(nextPart(request, "identity"));
       },
     });
   }

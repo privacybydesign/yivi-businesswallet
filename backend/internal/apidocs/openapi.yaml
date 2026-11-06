@@ -5728,10 +5728,11 @@ paths:
             type: string
             enum: [identity, address, employment, data_request]
           description: >-
-            Only the requests with a review item of this kind in `reviewState`. An `address` item
-            is listed in any state; the others are a request's own review, listed only while it
-            waits. A member with the reviewer right lists each of them for the whole organisation,
-            an address one without `proofedName`, `employment` and diplomas.
+            Only the requests with a review item of this kind in `reviewState`. An `address` or
+            `employment` item is listed in any state; an `identity` review while it waits, and once
+            a reviewer approved (`confirmed`) or rejected it; a `data_request` only while it waits.
+            A member with the reviewer right lists each of them for the whole organisation, a step
+            or a decided identity without `proofedName` and diplomas.
         - name: reviewState
           in: query
           required: false
@@ -7385,12 +7386,13 @@ paths:
         description: Organisation slug.
     get:
       tags: [identity-proofing]
-      summary: Count the review items that wait, per kind
+      summary: Count what waits for review
       description: >-
-        Requires an administrator role in the organisation, or the reviewer right. How many items
-        of each kind wait for a decision: an address waiting for review, and each request in
-        review that is not erased, by the kind of its review. Every kind is in `counts`, 0 when
-        none waits.
+        Requires an administrator role in the organisation, or the reviewer right. How many
+        sessions that are not erased wait for a decision: per kind of review in `counts` (a
+        session waiting for its identity and its address counts under both), each once in
+        `sessions`, and those waiting for a step (an address, a Verzekeringsbericht) in
+        `stepSessions`. Every kind is in `counts`, 0 when none waits.
       responses:
         '200':
           description: The counts.
@@ -7398,7 +7400,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [counts]
+                required: [counts, sessions, stepSessions]
                 properties:
                   counts:
                     type: object
@@ -7412,15 +7414,53 @@ paths:
                         type: integer
                       data_request:
                         type: integer
+                  sessions:
+                    type: integer
+                    description: The sessions that wait, each once.
+                  stepSessions:
+                    type: integer
+                    description: The sessions waiting for a step, each once.
               examples:
                 counts:
-                  summary: Two checks and an address
+                  summary: Two checks, one of them also with its address
                   value:
                     counts:
                       identity: 2
                       address: 1
                       employment: 0
                       data_request: 0
+                    sessions: 2
+                    stepSessions: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/review-items/closed:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [identity-proofing]
+      summary: List the closed reviews
+      description: >-
+        Requires an administrator role in the organisation, or the reviewer right. What the
+        Reviews page lists as closed, in one read: the sessions a reviewer decided something of
+        (the identity, an address, a Verzekeringsbericht) and nothing of which still waits, and
+        the data requests that ended. The latest closed first, under the list's cap. A member with
+        the reviewer right reads a session without `proofedName` and diplomas.
+      responses:
+        '200':
+          description: The closed reviews.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingRequestList'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -12989,6 +13029,16 @@ components:
           format: date-time
           readOnly: true
           description: When a reviewer confirmed or rejected the address, or it lapsed; absent while it waits.
+        identityReviewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When a reviewer last approved or rejected the identity check in review; absent when none did.
+        stepReviewDueAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the first waiting step review (address, Verzekeringsbericht) lapses unanswered (`REVIEW_LAPSED`); absent while none waits.
         decisions:
           type: array
           readOnly: true

@@ -297,8 +297,8 @@ func (f *fakeRequests) NextReviewItemDue(context.Context) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-func (f *fakeRequests) ReviewCounts(context.Context, uuid.UUID) (map[ReviewKind]int, error) {
-	return nil, nil
+func (f *fakeRequests) ReviewCounts(context.Context, uuid.UUID) (ReviewTally, error) {
+	return ReviewTally{}, nil
 }
 
 func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {

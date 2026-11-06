@@ -243,7 +243,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
 		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
@@ -888,6 +888,10 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 		reviewKind, reviewState = &kind, &state
 		order = reviewItemOrder(filter.reviewState(), "$11")
 	}
+	closed := "TRUE"
+	if filter.ClosedReviews {
+		closed, order = closedReview, closedReviewOrder
+	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
 			AND ($4::uuid IS NULL OR r.subject_user_id = $4)
@@ -896,6 +900,7 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
 			AND ($11::text IS NULL OR ` + reviewItemMatches("$11", "$12") + `)
+			AND ` + closed + `
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
 		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), reviewKind, reviewState)

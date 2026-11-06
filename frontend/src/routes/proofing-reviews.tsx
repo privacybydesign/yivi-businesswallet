@@ -21,24 +21,25 @@ import {
 } from "../lib/identity-proofing";
 import {
   DEFAULT_REVIEW_TAB,
+  REVIEW_PART_KEYS,
   REVIEW_TABS,
   answerBy,
   closedAt,
   closedRequests,
-  isDecidedStep,
   stepReviewOf,
-  stepReviewState,
   walletReviewReason,
   personName,
   reviewCounts,
   reviewPath,
   reviewTabFrom,
   waitingOfTab,
+  waitingParts,
+  decidedParts,
   waitingOldestFirst,
   waitingSince,
   checkReviewReason,
 } from "../lib/proofing-reviews";
-import type { ReviewTab } from "../lib/proofing-reviews";
+import type { ReviewPart, ReviewTab } from "../lib/proofing-reviews";
 import { blockingError } from "../lib/query-state";
 import { Card, StatusText, Table, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
@@ -132,6 +133,7 @@ function ReviewTabs({
   const countOf: Record<ReviewTab, number | undefined> = {
     all: counts?.all,
     checks: counts?.checks,
+    steps: counts?.steps,
     data: counts?.data,
     closed: undefined,
   };
@@ -287,6 +289,31 @@ function WhatCell({
       </Table.Cell>
     );
   }
+  const waiting = waitingParts(request);
+  const decided = decidedParts(request);
+  const parts = waiting.length > 0 ? waiting : decided;
+  if (waiting.length > 0 && decided.length > 0) {
+    return (
+      <Table.Cell>
+        {waiting.map((part) => t(REVIEW_PART_KEYS[part])).join(" + ")}
+        {decided.map((part) => (
+          <div key={part} className={SUB_LINE}>
+            {t(REVIEW_PART_KEYS[part])} ·{" "}
+            <PartOutcome request={request} part={part} />
+          </div>
+        ))}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
+  if (parts.length > 1) {
+    return (
+      <Table.Cell>
+        {parts.map((part) => t(REVIEW_PART_KEYS[part])).join(" + ")}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
   const step = stepReviewOf(request);
   if (step !== undefined) {
     return (
@@ -421,10 +448,10 @@ function ClosedRow({
       </PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        {isDecidedStep(request) ? (
-          <StepOutcome request={request} />
-        ) : (
+        {isDataRequest(request.flowKind) ? (
           <DataRequestOutcome request={request} />
+        ) : (
+          <SessionOutcome request={request} />
         )}
       </Table.Cell>
       <Table.Cell className="whitespace-nowrap">
@@ -463,21 +490,55 @@ const STEP_OUTCOME_TONES = {
   lapsed: "amber",
 } as const;
 
-// What a reviewer decided on the step, or that nobody did in time.
-function StepOutcome({
+// What a reviewer decided on each part of the session, or that nobody did in
+// time; with more than one part, each named.
+function SessionOutcome({
   request,
 }: Readonly<{
   request: ProofingRequest;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const parts = decidedParts(request);
+  return (
+    <div className="flex flex-col gap-0.5">
+      {parts.map((part) => (
+        <span key={part}>
+          {parts.length > 1 && <>{t(REVIEW_PART_KEYS[part])} · </>}
+          <PartOutcome request={request} part={part} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PartOutcome({
+  request,
+  part,
+}: Readonly<{
+  request: ProofingRequest;
+  part: ReviewPart;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
-  const step = stepReviewOf(request);
-  const state = stepReviewState(request);
-  if (step === undefined || state === undefined || state === "pending") {
+  if (part === "identity") {
+    const approved = request.status === "approved";
+    return (
+      <StatusText tone={approved ? "green" : "red"}>
+        {t(
+          approved
+            ? "identityProofing.reviews.outcome.approved"
+            : "identityProofing.reviews.outcome.rejected",
+        )}
+      </StatusText>
+    );
+  }
+  const state =
+    part === "employment" ? request.employmentReview : request.addressReview;
+  if (state === undefined || state === "pending") {
     return null;
   }
   return (
     <StatusText tone={STEP_OUTCOME_TONES[state]}>
-      {t(STEP_OUTCOME_KEYS[step][state])}
+      {t(STEP_OUTCOME_KEYS[part][state])}
     </StatusText>
   );
 }

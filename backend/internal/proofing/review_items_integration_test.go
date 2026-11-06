@@ -86,7 +86,8 @@ func TestReviewItemsCountedAndListedPerKind(t *testing.T) {
 	dataIn.FlowKind = FlowDataAccess
 	data := storeInReview(t, requests, dataIn, "s3")
 
-	counts, err := requests.ReviewCounts(ctx, orgID)
+	tally, err := requests.ReviewCounts(ctx, orgID)
+	counts := tally.Kinds
 	want := map[ReviewKind]int{ReviewKindIdentity: 1, ReviewKindAddress: 1, ReviewKindEmployment: 0, ReviewKindDataRequest: 1}
 	if err != nil || len(counts) != len(want) {
 		t.Fatalf("ReviewCounts = %v, %v; want %v", counts, err, want)
@@ -150,4 +151,137 @@ func storeInReview(t *testing.T, requests *RequestStore, in NewStoredRequest, se
 		t.Fatalf("RecordOutcome: %v", err)
 	}
 	return req
+}
+
+// A request carries when its waiting step review lapses, and none once decided.
+func TestStepReviewDueAtRead(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	pending := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
+
+	due, err := requests.NextReviewItemDue(ctx)
+	if err != nil {
+		t.Fatalf("NextReviewItemDue: %v", err)
+	}
+	got, err := requests.Get(ctx, orgID, pending.ID)
+	if err != nil || got.StepReviewDueAt == nil || !got.StepReviewDueAt.Equal(due) {
+		t.Fatalf("StepReviewDueAt = %v, %v; want %v", got.StepReviewDueAt, err, due)
+	}
+	if at, err := requests.DecideStepReview(ctx, got, ReviewKindAddress, sam, AddressReviewConfirmed, "Checked"); err != nil || at == nil {
+		t.Fatalf("DecideStepReview = %v, %v; want decided", at, err)
+	}
+	if got, err = requests.Get(ctx, orgID, pending.ID); err != nil || got.StepReviewDueAt != nil {
+		t.Errorf("StepReviewDueAt once decided = %v, %v; want none", got.StepReviewDueAt, err)
+	}
+}
+
+// A session waiting for its identity and its address counts under both
+// kinds, and once in all and among those waiting for a step.
+func TestReviewCountsEachSessionOnce(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	in := newStoredRequest(orgID, sam, externalSubject("bo@example.org"))
+	in.Address = AddressRequired
+	inReview := storeInReview(t, requests, in, "s1")
+	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
+	if added, err := requests.AddAddress(ctx, inReview, addr); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v; want added", added, err)
+	}
+
+	if got, err := requests.Get(ctx, orgID, inReview.ID); err != nil || got.AddressReview != AddressReviewPending {
+		t.Fatalf("address review = %q, %v; want pending beside the identity", got.AddressReview, err)
+	}
+	tally, err := requests.ReviewCounts(ctx, orgID)
+	if err != nil || tally.Kinds[ReviewKindIdentity] != 1 || tally.Kinds[ReviewKindAddress] != 1 ||
+		tally.Sessions != 1 || tally.StepSessions != 1 {
+		t.Errorf("ReviewCounts = %+v, %v; want the one session under both kinds, once in all", tally, err)
+	}
+}
+
+// A reviewer's decision on the identity is read from its audit event: the
+// request carries when, and lists under the identity kind's decided state.
+func TestIdentityReviewDecidedListed(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+	inReview := storeInReview(t, requests, newStoredRequest(orgID, sam, externalSubject("bo@example.org")), "s1")
+	if got, err := requests.Get(ctx, orgID, inReview.ID); err != nil || got.IdentityReviewedAt != nil {
+		t.Fatalf("IdentityReviewedAt while waiting = %v, %v; want none", got.IdentityReviewedAt, err)
+	}
+
+	if err := requests.RecordReviewDecision(ctx, inReview, StatusApproved, "Matches", ""); err != nil {
+		t.Fatalf("RecordReviewDecision: %v", err)
+	}
+	waiting, err := requests.Get(ctx, orgID, inReview.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if err := requests.RecordOutcome(ctx, waiting, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	got, err := requests.Get(ctx, orgID, inReview.ID)
+	if err != nil || got.IdentityReviewedAt == nil || !ReviewScopeReviews.reachesStepReview(got) {
+		t.Errorf("Get = %v, %v; want reviewed, reached as a closed review", got.IdentityReviewedAt, err)
+	}
+	identity := ReviewKindIdentity
+	for state, want := range map[ReviewState]int{ReviewConfirmed: 1, ReviewRejected: 0} {
+		listed, err := requests.List(ctx, orgID, RequestFilter{ReviewKind: &identity, ReviewState: &state})
+		if err != nil || len(listed) != want {
+			t.Errorf("List identity %s = %d, %v; want %d", state, len(listed), err, want)
+		}
+	}
+}
+
+// The closed reviews are the sessions with something decided and nothing
+// waiting, and the data requests that ended; a session still waiting is not.
+func TestClosedReviewsListed(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	requests := NewRequestStore(pool, audit.NewDBRecorder(), newTestCipher(t))
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	decided := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
+	if at, err := requests.DecideStepReview(ctx, decided, ReviewKindAddress, sam, AddressReviewConfirmed, "Checked"); err != nil || at == nil {
+		t.Fatalf("DecideStepReview = %v, %v; want decided", at, err)
+	}
+	stillWaiting := newStoredRequest(orgID, sam, externalSubject("bo@example.org"))
+	stillWaiting.Address = AddressRequired
+	identityWaits := storeInReview(t, requests, stillWaiting, "s2")
+	addr := Address{Street: "Kerkstraat", HouseNumber: "12A", PostalCode: "6511 AB", City: "Nijmegen", Country: "Nederland", Verification: AddressVerified}
+	if added, err := requests.AddAddress(ctx, identityWaits, addr); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v; want added", added, err)
+	}
+	dataIn := newStoredRequest(orgID, sam, externalSubject("cas@example.org"))
+	dataIn.FlowKind = FlowDataAccess
+	data := storeInReview(t, requests, dataIn, "s3")
+	waiting, err := requests.Get(ctx, orgID, data.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if err := requests.RecordOutcome(ctx, waiting, "s3", StatusRejected,
+		proofingprovider.Result{Status: proofingprovider.StatusRejected}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+
+	listed, err := requests.List(ctx, orgID, RequestFilter{ClosedReviews: true})
+	if err != nil {
+		t.Fatalf("List closed: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range listed {
+		got[r.ID.String()] = true
+	}
+	if len(listed) != 2 || !got[decided.ID.String()] || !got[data.ID.String()] {
+		t.Errorf("List closed = %v; want the decided address and the ended data request only", got)
+	}
 }

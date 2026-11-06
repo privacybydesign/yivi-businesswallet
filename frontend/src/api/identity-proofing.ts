@@ -353,6 +353,10 @@ const proofingRequestSchema = z.object({
   addressReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
   // When a reviewer decided it.
   addressReviewedAt: z.string().optional(),
+  // When the first waiting step review lapses unanswered.
+  stepReviewDueAt: z.string().optional(),
+  // When a reviewer last decided the identity.
+  identityReviewedAt: z.string().optional(),
   // What reviewers decided, with their reasons, oldest first: only on the
   // single request, for an admin or a reviewer.
   decisions: z.array(proofingDecisionSchema).optional(),
@@ -964,6 +968,18 @@ export function getProofingRequests(
   if (filter.reviewState) params.set("reviewState", filter.reviewState);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
+    schema: z.array(proofingRequestSchema),
+    signal,
+  });
+}
+
+// What the Reviews page lists as closed, in one read: the sessions whose
+// review is over and the data requests that ended, the latest first.
+export function getClosedReviews(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingRequest[]> {
+  return request(`${base(slug)}/review-items/closed`, {
     schema: z.array(proofingRequestSchema),
     signal,
   });
@@ -1851,25 +1867,29 @@ export function decideReviewItem(
 }
 
 const reviewItemCountsSchema = z.object({
+  // Sessions waiting per kind: one waiting for its identity and its address
+  // counts under both.
   counts: z.object({
     identity: z.number(),
     address: z.number(),
     employment: z.number(),
     data_request: z.number(),
   }),
+  // The sessions that wait, and those waiting for a step, each once.
+  sessions: z.number(),
+  stepSessions: z.number(),
 });
-export type ReviewItemCounts = z.infer<typeof reviewItemCountsSchema>["counts"];
+export type ReviewItemCounts = z.infer<typeof reviewItemCountsSchema>;
 
-// How many items of each kind wait for a decision.
-export async function getReviewItemCounts(
+// What waits for a decision.
+export function getReviewItemCounts(
   slug: string,
   signal?: AbortSignal,
 ): Promise<ReviewItemCounts> {
-  const out = await request(`${base(slug)}/review-items/counts`, {
+  return request(`${base(slug)}/review-items/counts`, {
     schema: reviewItemCountsSchema,
     signal,
   });
-  return out.counts;
 }
 
 export function decideProofingReview(
