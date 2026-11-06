@@ -14082,8 +14082,7 @@ components:
           nullable: true
           items:
             type: string
-            enum: [mrz.parse, mrz.checkdigits, viz.ocr, viz.mrz.crossmatch, document.template, document.tamper,
-              document.screen_replay, nfc.passive_auth, nfc.chip_auth, face.match, face.liveness, chip.viz.crossmatch]
+            enum: [nfc.passive_auth, nfc.chip_auth, face.match, face.liveness]
         completedSteps:
           type: array
           items:
