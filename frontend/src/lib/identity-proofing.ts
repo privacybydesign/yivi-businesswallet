@@ -19,6 +19,7 @@ import type {
   FlowKind,
   ProofingBranding,
   ProofingChannel,
+  ProofingDataMatch,
   ProofingEmployment,
   ProofingFlow,
   ProofingFlowBranding,
@@ -1193,6 +1194,18 @@ export function matchTickedByDefault(kind: FlowKind, level: string): boolean {
   return (
     level === "strong" || (kind === "data_erasure" && level === "probable")
   );
+}
+
+// The sure matches an automatic erasure deleted already: with any, a refusal
+// keeps the rest instead (proofing.refusesPartlyErased).
+export function erasedSureMatches(
+  kind: FlowKind,
+  matches: readonly ProofingDataMatch[],
+): number {
+  if (kind !== "data_erasure") return 0;
+  return matches.filter(
+    (m) => m.purgedAt !== undefined && matchTickedByDefault(kind, m.level),
+  ).length;
 }
 
 // The backend's own message for an error whose text is meant for the reader:

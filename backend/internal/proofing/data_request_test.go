@@ -436,6 +436,25 @@ func erasureInReview(t *testing.T, handling ErasureHandling, unsure bool) (fixtu
 	return f, data, f.reconcile(t)
 }
 
+// markSurePurged stamps the sure matches purged, as the store reads them back
+// after an automatic erasure, and returns them.
+func markSurePurged(data *fakeDataRequests) []uuid.UUID {
+	now := time.Now()
+	var erased []uuid.UUID
+	for i, m := range data.matches {
+		if sureMatch(m.Level) {
+			data.matches[i].PurgedAt = &now
+			erased = append(erased, m.RequestID)
+		}
+	}
+	for i, r := range data.matched {
+		if slices.Contains(erased, r.ID) {
+			data.matched[i].PurgedAt = &now
+		}
+	}
+	return erased
+}
+
 // An org can have its erasures decided without a reviewer: erased at once
 // when every match is sure, the unsure ones left to a reviewer.
 func TestErasureHandling(t *testing.T) {
@@ -455,6 +474,38 @@ func TestErasureHandling(t *testing.T) {
 		}
 		if got := f.ips.deletes; got != 2 {
 			t.Errorf("sessions erased = %d; want the two sure matches now", got)
+		}
+	})
+	t.Run("automatic, one unsure, refused", func(t *testing.T) {
+		f, data, _ := erasureInReview(t, ErasureAutomatic, true)
+		erased := markSurePurged(data)
+		deletes := f.ips.deletes
+		req, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, "reviewer@example.org",
+			ReviewInput{Reason: "not the same person", ErrorCode: errorReviewNotHolder})
+		if err != nil {
+			t.Fatalf("DecideReview: %v", err)
+		}
+		if req.Status != StatusApproved || req.ErrorCode != "" || !slices.Equal(data.approved, erased) {
+			t.Errorf("decision %q %q, approved %v; want approved, the erased matches only", req.Status, req.ErrorCode, data.approved)
+		}
+		if data.kept == nil || *data.kept != 1 {
+			t.Errorf("kept = %v; want the unsure match", data.kept)
+		}
+		// Only the request's own data goes: the unsure match stays.
+		if got := f.ips.deletes - deletes; got != 1 {
+			t.Errorf("sessions erased = %d; want 1", got)
+		}
+	})
+	t.Run("automatic, one unsure, paused", func(t *testing.T) {
+		f, data, _ := erasureInReview(t, ErasureAutomatic, true)
+		markSurePurged(data)
+		req, err := f.svc.DecideReview(context.Background(), testOrg.ID, f.requests.stored.ID, orgPausedReviewer,
+			ReviewInput{Reason: orgPausedReason, ErrorCode: ErrorOrgPaused})
+		if err != nil {
+			t.Fatalf("DecideReview: %v", err)
+		}
+		if req.Status != StatusRejected || req.ErrorCode != ErrorOrgPaused {
+			t.Errorf("decision %q %q; want the pause's own rejection", req.Status, req.ErrorCode)
 		}
 	})
 	t.Run("keep is gone", func(t *testing.T) {

@@ -1498,6 +1498,10 @@ export const en = {
           data_access_other: "Open the data of {{count}} checks for download.",
           kept_one: "The other {{count}} stays.",
           kept_other: "The other {{count}} stay.",
+          erasedAlready_one:
+            "{{count}} check was already deleted automatically. Refusing keeps the rest.",
+          erasedAlready_other:
+            "{{count}} checks were already deleted automatically. Refusing keeps the rest.",
           reason: "Reason",
           reasonHint: "Required. Kept in the audit log with your name.",
           approve_data_erasure_one: "Delete {{count}} check",
@@ -1511,6 +1515,7 @@ export const en = {
             "The personal data in the checks you ticked, and in this request, is deleted at once and cannot be restored. The checks stay as a record without it.",
           approved: "The request is approved.",
           rejected: "The request is refused.",
+          restKept: "The rest is kept.",
         },
       },
     },
@@ -2008,9 +2013,9 @@ export const en = {
       },
       erased: "Your data was deleted.",
       erasedPartly_one:
-        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{organization}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept. Its data is deleted when {{organization}}'s retention period ends.",
       erasedPartly_other:
-        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{organization}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept. Their data is deleted when {{organization}}'s retention period ends.",
       keptByLaw_one:
         "{{count}} identity check is kept until {{date}}, because the law requires {{organization}} to keep it. It is deleted then.",
       keptByLaw_other:

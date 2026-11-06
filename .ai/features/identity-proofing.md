@@ -2058,6 +2058,9 @@ hosted page.
     request is approved and purged then (reviewer `automatic`); with them it
     waits for a reviewer, who decides only those (the erased ones show
     "Erased" and stay ticked).
+    - A reviewer's refusal there is recorded as an approval that keeps the
+      rest (`refusesPartlyErased`), so the person's page shows what was erased
+      and what was kept. A pause or legal retention refusal keeps its own code.
   What the law makes an org keep (Art. 17(3)(b)) is its legal retention, not a
   handling: `keep`, which refused every erasure, is gone. A failure there
   leaves the request in review. An approved erasure stores how
