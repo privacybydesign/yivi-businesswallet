@@ -412,6 +412,9 @@ type Request struct {
 	// Diplomas is whether the request asks for DUO diploma extracts once the
 	// identity check finished: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
+	// DiplomasAddedAt is when the first extract was kept; nil for none, and
+	// once purged.
+	DiplomasAddedAt *time.Time
 	// Address is whether the request asks for the subject's postal address
 	// once the identity check finished: its flow's AddressMode when it was sent.
 	// SubjectAddress is the address they entered, decrypted, at
@@ -430,10 +433,13 @@ type Request struct {
 	Employment        EmploymentMode
 	SubjectEmployment *Employment
 	EmploymentAddedAt *time.Time
-	// ReviewReason is why the wallet itself put the request in review after
-	// the engine approved it (Employment.reviewReason); "" for a review the
-	// engine opened, and for none. Such a review is decided in the wallet.
+	// ReviewReason is why the kept statement went to review
+	// (Employment.reviewReason); "" for none.
 	ReviewReason string
+	// EmploymentReview is the statement's review item; empty for none.
+	EmploymentReview ReviewState
+	// EmploymentReviewedAt is when it was decided or lapsed; nil while it waits.
+	EmploymentReviewedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool

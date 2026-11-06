@@ -43,9 +43,10 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
+	(SELECT min(d.created_at) FROM identity_proofing_request_diplomas d WHERE d.request_id = r.id),
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	` + addressReviewColumns + `,
+	` + stepReviewColumns + `,
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''),
 	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn
 
@@ -240,9 +241,9 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
+		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
 		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}
@@ -1422,29 +1423,8 @@ func scanMember(row pgx.Row) (Member, error) {
 // sealed and kept until proofedNameRetention has passed; it is never audited. A
 // decision (approved, rejected) drops the expected birth date: the match is
 // made. It is a no-op when the row already holds that outcome or moved to another
-// session, so concurrent pollers record a decision once, and for a request the
-// wallet put in review itself (Request.ReviewReason): the engine's outcome no
-// longer decides it, RecordWalletOutcome does.
+// session, so concurrent pollers record a decision once.
 func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByEngine)
-}
-
-// RecordWalletOutcome is RecordOutcome for the decision on a review the
-// wallet opened: the reviewer's, or its lapse.
-func (s *RequestStore) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByWallet)
-}
-
-// outcomeOrigin is who decides an outcome: the engine, or the wallet on a
-// review it opened itself. Each records only on its own kind of request.
-type outcomeOrigin string
-
-const (
-	outcomeByEngine outcomeOrigin = "engine"
-	outcomeByWallet outcomeOrigin = "wallet"
-)
-
-func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, origin outcomeOrigin) error {
 	action, ok := outcomeActions[status]
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
@@ -1464,12 +1444,10 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 					ELSE expected_birth_date_ciphertext END
 			WHERE id = $1 AND ips_session_id = $2 AND purged_at IS NULL
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
-				AND (review_reason IS NOT NULL) = $11
-			RETURNING employment_ciphertext`
-		var employmentCT []byte
+			RETURNING checked_at`
+		var checkedAt *time.Time
 		err := q.QueryRow(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), origin == outcomeByWallet).
-			Scan(&employmentCT)
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method)).Scan(&checkedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -1492,30 +1470,10 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
 		decided.Method = methodOr(res.Method, req.Method)
-		if err := enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status)); err != nil {
-			return err
-		}
-		if status != StatusApproved || origin != outcomeByEngine || employmentCT == nil {
-			return nil
-		}
-		decided.Status = StatusApproved
-		return s.reviewKeptEmployment(ctx, q, decided, employmentCT)
+		// The steps open with the check: the event says so.
+		decided.Status, decided.CheckedAt = status, checkedAt
+		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
 	})
-}
-
-// reviewKeptEmployment opens the wallet's review on req, just approved by the
-// engine, when the statement kept while the engine reviewed the identity calls
-// for one, as it would have on an approved request.
-func (s *RequestStore) reviewKeptEmployment(ctx context.Context, q database.Querier, req Request, employmentCT []byte) error {
-	emp, err := s.decryptEmployment(req.ID, employmentCT)
-	if err != nil {
-		return err
-	}
-	reason := emp.reviewReason()
-	if reason == "" {
-		return nil
-	}
-	return openWalletReview(audit.WithoutActor(ctx), q, s.audit, req, reason)
 }
 
 // sealProofedName seals the name a session proofed for req, with retainSecs

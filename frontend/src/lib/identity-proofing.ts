@@ -66,36 +66,29 @@ export function isProofingLive(status: string): boolean {
 // (403), or it is gone (404). Polling on would only repeat the refusal.
 const FINAL_POLL_STATUSES: ReadonlySet<number> = new Set([403, 404]);
 
-// Whether a verify page keeps polling its progress: until the first read,
-// while the session is live, and while an approved session still owes its
-// Verzekeringsbericht past the window, until the backend rejects it for that
-// (EMPLOYMENT_NOT_PROVIDED); unless a read was refused for good.
+// Whether a verify page keeps polling its progress: until the first read, and
+// while the session is live; unless a read was refused for good.
 export function progressPollContinues(
-  progress: { status: string; employmentUntil?: string } | undefined,
+  progress: { status: string } | undefined,
   error: Error | null,
-  now: number = Date.now(),
 ): boolean {
   if (refusedForGood(error)) {
     return false;
   }
-  return (
-    progress === undefined ||
-    isProofingLive(progress.status) ||
-    (employmentOwed(progress) &&
-      Date.parse(progress.employmentUntil ?? "") <= now)
-  );
+  return progress === undefined || isProofingLive(progress.status);
 }
 
-// Whether the backend still waits for an approved session's
-// Verzekeringsbericht: it settles once one is kept (approved or to review) or
-// the window passed without one (rejected), and only that read may be handed
-// back as the outcome.
-export function employmentOwed(progress: {
-  status: string;
-  employmentUntil?: string;
-}): boolean {
+// Whether an approved session's Verzekeringsbericht can still be given: its
+// window is open and none was kept. The step's outcome is its own, so the
+// session's never waits on it.
+export function employmentOwed(
+  progress: { status: string; employmentUntil?: string },
+  now: number = Date.now(),
+): boolean {
   return (
-    progress.status === "approved" && progress.employmentUntil !== undefined
+    progress.status === "approved" &&
+    progress.employmentUntil !== undefined &&
+    Date.parse(progress.employmentUntil) > now
   );
 }
 
@@ -2539,6 +2532,13 @@ export function sessionEventDetail(
   return [...parts, ...decisionEventDetail(fields, t)];
 }
 
+// What an employment review's decision reads as, per state.
+const EMPLOYMENT_OUTCOME_KEYS = {
+  confirmed: "employmentConfirmed",
+  rejected: "employmentRejected",
+  lapsed: "employmentLapsed",
+} as const;
+
 // What a review or address event adds: that an entered address goes to a
 // reviewer, what a reviewer decided, and why. The backend leaves the reason
 // out for a reader who may not see it.
@@ -2565,12 +2565,18 @@ function decisionEventDetail(
     );
   }
   if (
-    fields.kind === "address" &&
+    (fields.kind === "address" || fields.kind === "employment") &&
     (fields.state === "confirmed" ||
       fields.state === "rejected" ||
       fields.state === "lapsed")
   ) {
-    parts.push(t(`identityProofing.sessions.address.tag.${fields.state}`));
+    parts.push(
+      fields.kind === "address"
+        ? t(`identityProofing.sessions.address.tag.${fields.state}`)
+        : t(
+            `identityProofing.reviews.outcome.${EMPLOYMENT_OUTCOME_KEYS[fields.state]}`,
+          ),
+    );
   }
   if (typeof fields.reason === "string" && fields.reason !== "") {
     parts.push(
@@ -2690,19 +2696,28 @@ export function timelineActor(
   return detail.length > 0 ? null : t("auditLog.system");
 }
 
-// The last decision on a session's address in its timeline: who decided, when
-// and why (absent for a reader the backend leaves the reason out for).
-export interface AddressDecision {
+// The last decision on a session's step (its address, its Verzekeringsbericht)
+// in its timeline: who decided, when and why (absent for a reader the backend
+// leaves the reason out for).
+export interface StepReviewDecision {
   by: string | null;
   at: string;
   reason?: string;
 }
 
-export function latestAddressDecision(
+export function latestStepDecision(
   events: readonly AuditEvent[],
-): AddressDecision | undefined {
+  kind: "address" | "employment",
+): StepReviewDecision | undefined {
   const event = events.findLast(
-    (e) => e.action === "identity_proofing.address_reviewed",
+    (e) =>
+      (e.action === "identity_proofing.review_item_decided" &&
+        typeof e.metadata.after === "object" &&
+        e.metadata.after !== null &&
+        "kind" in e.metadata.after &&
+        e.metadata.after.kind === kind) ||
+      // An address decided before review items.
+      (kind === "address" && e.action === "identity_proofing.address_reviewed"),
   );
   if (event === undefined) {
     return undefined;

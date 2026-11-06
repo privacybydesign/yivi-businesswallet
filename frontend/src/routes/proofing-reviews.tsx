@@ -25,8 +25,10 @@ import {
   answerBy,
   closedAt,
   closedRequests,
-  isAddressReview,
-  isDecidedAddress,
+  isDecidedStep,
+  stepReviewOf,
+  stepReviewState,
+  walletReviewReason,
   personName,
   reviewCounts,
   reviewPath,
@@ -220,9 +222,16 @@ function WaitingTable({
   );
 }
 
-// Why a row waits: its address, or what put the session in review.
+// Why a row waits: its step (the address, the Verzekeringsbericht), or what
+// put the session in review.
 function reviewWhy(request: ProofingRequest, t: TFunction): string {
-  if (!isAddressReview(request)) {
+  const step = stepReviewOf(request);
+  if (step === "employment") {
+    return t(
+      `identityProofing.reviews.why.${walletReviewReason(request) ?? "no_current_employment"}`,
+    );
+  }
+  if (step !== "address") {
     return t(
       `identityProofing.reviews.why.${checkReviewReason(request) ?? request.flowKind}`,
     );
@@ -278,10 +287,15 @@ function WhatCell({
       </Table.Cell>
     );
   }
-  if (isAddressReview(request)) {
+  const step = stepReviewOf(request);
+  if (step !== undefined) {
     return (
       <Table.Cell>
-        {t("identityProofing.reviews.addressCheck")}
+        {t(
+          step === "address"
+            ? "identityProofing.reviews.addressCheck"
+            : "identityProofing.reviews.employmentCheck",
+        )}
         <div className={SUB_LINE}>{request.flowName}</div>
       </Table.Cell>
     );
@@ -407,8 +421,8 @@ function ClosedRow({
       </PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        {isDecidedAddress(request) ? (
-          <AddressOutcome request={request} />
+        {isDecidedStep(request) ? (
+          <StepOutcome request={request} />
         ) : (
           <DataRequestOutcome request={request} />
         )}
@@ -429,28 +443,41 @@ function ClosedRow({
   );
 }
 
-// What a reviewer decided on the address.
-function AddressOutcome({
+// The outcome text of a decided step, per step and state.
+const STEP_OUTCOME_KEYS = {
+  address: {
+    confirmed: "identityProofing.reviews.outcome.confirmed",
+    rejected: "identityProofing.reviews.outcome.addressRejected",
+    lapsed: "identityProofing.reviews.outcome.addressLapsed",
+  },
+  employment: {
+    confirmed: "identityProofing.reviews.outcome.employmentConfirmed",
+    rejected: "identityProofing.reviews.outcome.employmentRejected",
+    lapsed: "identityProofing.reviews.outcome.employmentLapsed",
+  },
+} as const;
+
+const STEP_OUTCOME_TONES = {
+  confirmed: "green",
+  rejected: "red",
+  lapsed: "amber",
+} as const;
+
+// What a reviewer decided on the step, or that nobody did in time.
+function StepOutcome({
   request,
 }: Readonly<{
   request: ProofingRequest;
-}>): React.JSX.Element {
+}>): React.JSX.Element | null {
   const { t } = useTranslation();
-  if (request.addressReview === "lapsed") {
-    return (
-      <StatusText tone="amber">
-        {t("identityProofing.reviews.outcome.addressLapsed")}
-      </StatusText>
-    );
+  const step = stepReviewOf(request);
+  const state = stepReviewState(request);
+  if (step === undefined || state === undefined || state === "pending") {
+    return null;
   }
-  const confirmed = request.addressReview === "confirmed";
   return (
-    <StatusText tone={confirmed ? "green" : "red"}>
-      {t(
-        confirmed
-          ? "identityProofing.reviews.outcome.confirmed"
-          : "identityProofing.reviews.outcome.addressRejected",
-      )}
+    <StatusText tone={STEP_OUTCOME_TONES[state]}>
+      {t(STEP_OUTCOME_KEYS[step][state])}
     </StatusText>
   );
 }

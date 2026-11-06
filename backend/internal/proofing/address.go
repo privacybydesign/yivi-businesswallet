@@ -162,6 +162,10 @@ const webhookAddressKey = "address"
 // carries the decision.
 const webhookAddressReviewKey = "addressReview"
 
+// webhookStepKey is where a session.step_reviewed delivery carries the step's
+// kind and its decided state.
+const webhookStepKey = "step"
+
 type flowAddressStore interface {
 	Get(ctx context.Context, orgID uuid.UUID, flowID string) (AddressMode, error)
 	All(ctx context.Context, orgID uuid.UUID) (map[string]AddressMode, error)
@@ -275,10 +279,13 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 			return nil
 		}
 		added = true
-		if addressReviewOf(addr) != nil {
+		now := time.Now()
+		req.AddressAddedAt = &now
+		if review := addressReviewOf(addr); review != nil {
 			if err := openReviewItem(ctx, q, req, ReviewKindAddress); err != nil {
 				return err
 			}
+			req.AddressReview = *review
 		}
 
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingAddressAdded,
@@ -467,6 +474,7 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
 	if review := addressReviewOf(addr); review != nil {
 		req.AddressReview = *review
+		s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
 	}
 	return req, nil
 }

@@ -467,13 +467,16 @@ type apiResultResponse struct {
 	AssuranceLevel string `json:"assuranceLevel,omitempty"`
 	EIDASLevel     string `json:"eidasLevel,omitempty"`
 	ErrorCode      string `json:"errorCode,omitempty"`
-	// ReviewReason is why the session went to review after its identity was
-	// approved (no_current_employment, current_benefit, current_other_income);
-	// absent otherwise.
-	ReviewReason string             `json:"reviewReason,omitempty"`
-	VerifiedAt   *time.Time         `json:"verifiedAt,omitempty"`
-	Identity     *apiIdentity       `json:"identity,omitempty"`
-	Evidence     []apiEvidenceEntry `json:"evidence"`
+	// ReviewReason is why the kept Verzekeringsbericht went to review
+	// (no_current_employment, current_benefit, current_other_income); absent
+	// otherwise.
+	ReviewReason string `json:"reviewReason,omitempty"`
+	// Steps are the extra steps the flow asks for, each with its own outcome
+	// beside the identity's.
+	Steps      []StepOutcome      `json:"steps"`
+	VerifiedAt *time.Time         `json:"verifiedAt,omitempty"`
+	Identity   *apiIdentity       `json:"identity,omitempty"`
+	Evidence   []apiEvidenceEntry `json:"evidence"`
 	// Diplomas are the DUO diploma extracts the subject added, each checked
 	// against DUO's signature and the proofed identity.
 	Diplomas []diplomaResponse `json:"diplomas"`
@@ -638,8 +641,8 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	out := apiResultResponse{
 		ID: publicSessionID(req.ID), Status: req.EffectiveStatus(now), Method: string(identity.Method),
 		AssuranceLevel: identity.AssuranceLevel, EIDASLevel: identity.EIDASLevel, ErrorCode: identity.ErrorCode,
-		ReviewReason: req.ReviewReason,
-		Evidence:     []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, AddressReview: req.AddressReview,
+		ReviewReason: req.ReviewReason, Steps: req.Steps(now),
+		Evidence: []apiEvidenceEntry{}, Diplomas: []diplomaResponse{}, AddressReview: req.AddressReview,
 		Employment: req.SubjectEmployment,
 	}
 	if req.SubjectAddress != nil {

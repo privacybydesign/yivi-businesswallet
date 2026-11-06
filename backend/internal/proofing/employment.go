@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma/verify"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/employment"
 )
 
@@ -42,16 +40,6 @@ func (m EmploymentMode) asked() bool { return m == EmploymentRequired }
 // can still upload their statement, on the page that ran the session.
 const EmploymentWindow = time.Hour
 
-// uwvRevocationLookups is how many certificates of a UWV seal's chain have
-// their revocation asked online, one after the other: the seal and its
-// issuing CA.
-const uwvRevocationLookups = 2
-
-// employmentSweepGrace is how long past EmploymentWindow RejectMissingEmployment
-// waits: the longest check of an upload let in just before the window closed
-// (each revocation lookup, then the parse), so that upload is kept first.
-const employmentSweepGrace = uwvRevocationLookups*verify.OCSPTimeout + diploma.PDFiumMaxDuration
-
 var (
 	// ErrEmploymentNotAsked is an upload on a request whose flow asks for no
 	// statement.
@@ -75,8 +63,8 @@ type Employment struct {
 	// StatementDate is the day UWV made the statement (YYYY-MM-DD).
 	StatementDate string `json:"statementDate"`
 	// Employed is a current relation that is not a benefit
-	// (employment.Statement.Employed). Without one the request goes to review
-	// (reviewReason).
+	// (employment.Statement.Employed). Without one the statement goes to
+	// review (reviewReason).
 	Employed bool `json:"employed"`
 	// Relations are the current ones; empty when none is.
 	Relations []EmploymentRelation `json:"relations"`
@@ -111,16 +99,15 @@ func newEmployment(st *employment.Statement) Employment {
 	return out
 }
 
-// Why the wallet puts an approved request in review itself, from its kept
-// Verzekeringsbericht: it lists no current job, a current UWV benefit, or
-// other current income without hours worked.
+// Why a kept Verzekeringsbericht goes to review: it lists no current job, a
+// current UWV benefit, or other current income without hours worked.
 const (
 	ReviewNoCurrentEmployment = "no_current_employment"
 	ReviewCurrentBenefit      = "current_benefit"
 	ReviewCurrentOtherIncome  = "current_other_income"
 )
 
-// reviewReason is why emp sends an approved request to review; "" for none.
+// reviewReason is why emp goes to review; "" for none.
 // No current job weighs most, then a UWV benefit, then other income.
 func (e Employment) reviewReason() string {
 	if !e.Employed {
@@ -139,9 +126,9 @@ func (e Employment) hasKind(kind employment.Kind) bool {
 	return slices.ContainsFunc(e.Relations, func(r EmploymentRelation) bool { return r.Kind == string(kind) })
 }
 
-// ErrorEmploymentNotProvided is the error code of an approved request whose
-// subject kept no Verzekeringsbericht within EmploymentWindow: a flow that
-// requires one is not passed without it (RejectMissingEmployment).
+// ErrorEmploymentNotProvided is the code of an employment step whose subject
+// kept no Verzekeringsbericht within EmploymentWindow. Sessions rejected for
+// it before the step had its own outcome keep it as their error code.
 const ErrorEmploymentNotProvided = "EMPLOYMENT_NOT_PROVIDED"
 
 // webhookEmploymentKey is where a session.employment_added delivery carries
@@ -254,12 +241,10 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 // AddEmployment seals emp on req, audited identity_proofing.employment_added
 // (without the relations), and sends session.employment_added. A statement
 // without a current job, or with a current benefit or other income, also
-// moves the approved request to needs_review (reviewReason), audited
-// identity_proofing.needs_review, and sends session.review_opened: the
-// identity is proven, the rest is for a reviewer. On a request the engine
-// still reviews, that review opens once the engine approves (recordOutcome).
-// It is false, and changes nothing, when the request holds a statement
-// already, is neither approved nor in review, or was erased or cancelled.
+// opens an employment review item, with its reason (reviewReason): the session
+// keeps its outcome. It is false, and changes nothing, when the request holds
+// a statement already, is neither approved nor in review, or was erased or
+// cancelled.
 func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error) {
 	if s.cipher == nil {
 		return false, ErrNoEncryptionKey
@@ -294,149 +279,27 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 			return err
 		}
 
-		data := sessionEventData(req, req.Status)
+		kept := req
+		now := time.Now()
+		kept.SubjectEmployment, kept.EmploymentAddedAt = &emp, &now
+		if reason := emp.reviewReason(); reason != "" {
+			if _, err := q.Exec(ctx, `UPDATE identity_proofing_requests SET review_reason = $2 WHERE id = $1`,
+				req.ID, reason); err != nil {
+				return fmt.Errorf("proofing: review employment request %s: %w", req.ID, err)
+			}
+			if err := openReviewItem(ctx, q, req, ReviewKindEmployment); err != nil {
+				return err
+			}
+			kept.ReviewReason, kept.EmploymentReview = reason, ReviewPending
+		}
+		data := sessionEventData(kept, req.Status)
 		data[webhookEmploymentKey] = emp
-		if err := enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data); err != nil {
-			return err
-		}
-
-		reason := emp.reviewReason()
-		if reason == "" {
-			return nil
-		}
-		return openWalletReview(ctx, q, s.audit, req, reason)
+		return enqueueRequestWebhook(ctx, q, req, EventSessionEmploymentAdded, data)
 	})
 	if err != nil {
 		return false, err
 	}
 	return added, nil
-}
-
-// openWalletReview moves an approved req to needs_review for reason, which the
-// engine never sees: its session stays decided, and a reviewer decides the
-// request in the wallet (decideWalletReview).
-func openWalletReview(ctx context.Context, q database.Querier, recorder audit.Recorder, req Request, reason string) error {
-	tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-		SET status = 'needs_review', review_reason = $2, updated_at = now()
-		WHERE id = $1 AND status = 'approved' AND purged_at IS NULL`, req.ID, reason)
-	if err != nil {
-		return fmt.Errorf("proofing: open review request %s: %w", req.ID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil
-	}
-	if err := refreshPurgeAt(ctx, q, req.ID); err != nil {
-		return err
-	}
-	if err := recorder.Record(ctx, q, audit.IdentityProofingNeedsReview,
-		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-		audit.Updated(req.auditFields(map[string]any{"status": string(StatusApproved)}),
-			req.auditFields(map[string]any{"status": string(StatusNeedsReview), "reviewReason": reason}))); err != nil {
-		return err
-	}
-
-	inReview := req
-	inReview.ReviewReason = reason
-	return enqueueRequestWebhook(ctx, q, req, EventSessionReviewOpened, sessionEventData(inReview, StatusNeedsReview))
-}
-
-// missingEmploymentWhere is an approved request r that asks for a
-// Verzekeringsbericht and holds none, not erased or cancelled; it is due
-// EmploymentWindow and employmentSweepGrace ($2, in seconds) after its
-// identity check finished. One still in the engine's review is due once it
-// is approved.
-const missingEmploymentWhere = `r.employment = 'required' AND r.status = 'approved'
-	AND r.employment_ciphertext IS NULL AND r.purged_at IS NULL AND r.cancelled_at IS NULL
-	AND r.checked_at IS NOT NULL`
-
-// missingEmploymentDue is how long after the check finished a request
-// without a statement is rejected.
-const missingEmploymentDue = EmploymentWindow + employmentSweepGrace
-
-// RejectMissingEmployment rejects up to limit approved requests whose subject
-// kept no Verzekeringsbericht within missingEmploymentDue, with
-// ErrorEmploymentNotProvided: audited identity_proofing.rejected, webhook
-// session.failed. The engine approved the identity and keeps saying so; the
-// rejection is the wallet's, and reconcile leaves it (tryReconcile). It
-// returns how many it rejected.
-func (s *RequestStore) RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error) {
-	rejected := 0
-	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		reqs, err := s.rejectDueWithoutEmployment(ctx, q, now, limit)
-		if err != nil {
-			return err
-		}
-		for _, req := range reqs {
-			if err := s.recordEmploymentNotProvided(ctx, q, req); err != nil {
-				return err
-			}
-		}
-		rejected = len(reqs)
-		return nil
-	})
-	return rejected, err
-}
-
-// rejectDueWithoutEmployment marks up to limit due requests without a
-// Verzekeringsbericht rejected, and returns them as they now are.
-func (s *RequestStore) rejectDueWithoutEmployment(ctx context.Context, q database.Querier, now time.Time, limit int) ([]Request, error) {
-	idRows, err := q.Query(ctx, `WITH due AS (
-			SELECT r.id FROM identity_proofing_requests r
-			WHERE `+missingEmploymentWhere+` AND r.checked_at + make_interval(secs => $2) <= $1
-			ORDER BY r.checked_at LIMIT $3 FOR UPDATE SKIP LOCKED
-		)
-		UPDATE identity_proofing_requests e SET status = 'rejected', error_code = $4, updated_at = now()
-		FROM due WHERE e.id = due.id RETURNING e.id`, now, missingEmploymentDue.Seconds(), limit, ErrorEmploymentNotProvided)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
-	}
-	ids, err := pgx.CollectRows(idRows, pgx.RowTo[uuid.UUID])
-	if err != nil {
-		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	if err := refreshPurgeAt(ctx, q, ids...); err != nil {
-		return nil, err
-	}
-
-	rows, err := q.Query(ctx, `SELECT `+requestColumns+requestFrom+` WHERE r.id = ANY($1)`, ids)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
-	}
-	reqs, err := s.collectRequests(rows)
-	if err != nil {
-		return nil, fmt.Errorf("proofing: reject missing employment: %w", err)
-	}
-	return reqs, nil
-}
-
-// recordEmploymentNotProvided audits and sends the rejection of req for
-// ErrorEmploymentNotProvided.
-func (s *RequestStore) recordEmploymentNotProvided(ctx context.Context, q database.Querier, req Request) error {
-	if err := s.audit.Record(ctx, q, audit.IdentityProofingRejected,
-		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-		audit.Updated(req.auditFields(map[string]any{"status": string(StatusApproved)}),
-			req.auditFields(map[string]any{"status": string(StatusRejected), "errorCode": ErrorEmploymentNotProvided}))); err != nil {
-		return err
-	}
-	return enqueueRequestWebhook(ctx, q, req, EventSessionFailed, sessionEventData(req, StatusRejected))
-}
-
-// NextMissingEmployment is when the next approved request without a
-// Verzekeringsbericht is due for RejectMissingEmployment; zero for none.
-func (s *RequestStore) NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error) {
-	var next *time.Time
-	if err := s.db.QueryRow(ctx, `SELECT min(r.checked_at + make_interval(secs => $2))
-		FROM identity_proofing_requests r WHERE `+missingEmploymentWhere+`
-			AND r.checked_at + make_interval(secs => $2) > $1`, now, missingEmploymentDue.Seconds()).Scan(&next); err != nil {
-		return time.Time{}, fmt.Errorf("proofing: next missing employment: %w", err)
-	}
-	if next == nil {
-		return time.Time{}, nil
-	}
-	return *next, nil
 }
 
 // RecordEmploymentRejected audits identity_proofing.employment_rejected: why
@@ -611,14 +474,8 @@ func (s *Service) addEmployment(ctx context.Context, req Request, f DiplomaFile)
 		return EmploymentVerdict{}, ErrEmploymentClosed
 	}
 	verdict.Employment = &emp
-	// A paused org can decide nothing, so a review the statement opened is
-	// rejected at once, by the wallet rather than the uploader; one that fails
-	// is left to the paused orgs' sweep.
-	if emp.reviewReason() != "" && req.Status == StatusApproved {
-		if _, err := s.rejectIfPaused(audit.WithoutActor(ctx), req); err != nil {
-			slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
-				slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		}
+	if emp.reviewReason() != "" {
+		s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
 	}
 	return verdict, nil
 }

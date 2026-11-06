@@ -77,7 +77,6 @@ type requestStore interface {
 	Purge(ctx context.Context, req Request, endSession func(context.Context) error) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
-	RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
@@ -104,10 +103,9 @@ type requestStore interface {
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
-	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
-	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (*time.Time, error)
+	DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error)
+	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
 	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
 	NextReviewItemDue(ctx context.Context) (time.Time, error)
 	ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[ReviewKind]int, error)
@@ -1267,10 +1265,10 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	// What the engine reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
-	// A review the wallet opened after the engine approved, its decision, and
-	// a rejection for a missing Verzekeringsbericht are the wallet's alone:
-	// the engine still reports the approval.
-	if req.ReviewReason != "" || req.ErrorCode == ErrorEmploymentNotProvided {
+	// A rejection for a missing Verzekeringsbericht, from before the step had
+	// its own outcome, is the wallet's alone: the engine still reports the
+	// approval.
+	if req.ErrorCode == ErrorEmploymentNotProvided {
 		return req, nil
 	}
 	req, res, ok, err := s.readSession(ctx, tenant, req)
@@ -1297,11 +1295,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	if next == req.Status {
 		return req, nil
 	}
-	reviewed := req.Status == StatusNeedsReview
 	req, err = s.recordDecision(ctx, tenant, req, next, res)
-	if err == nil && reviewed && next == StatusApproved && req.Employment.asked() {
-		return s.reviewKeptEmployment(ctx, req)
-	}
 	if err != nil || next != StatusNeedsReview {
 		return req, err
 	}
@@ -1519,28 +1513,6 @@ func (s *Service) recordDecision(ctx context.Context, tenant proofingprovider.Te
 		req.CheckedAt = &completedAt
 	}
 	return req, nil
-}
-
-// reviewKeptEmployment reads req again once the engine approved it after its
-// review: a statement kept during that review opened the wallet's own then
-// (recordOutcome), which a paused org cannot decide either.
-func (s *Service) reviewKeptEmployment(ctx context.Context, req Request) (Request, error) {
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
-	if err != nil {
-		slog.WarnContext(ctx, "identity proofing: read the approved request again failed",
-			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return req, err
-	}
-	if fresh.Status != StatusNeedsReview {
-		return fresh, nil
-	}
-	decided, err := s.rejectIfPaused(audit.WithoutActor(ctx), fresh)
-	if err != nil {
-		slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
-			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return fresh, err
-	}
-	return decided, nil
 }
 
 // settleReview decides at once a review its org cannot: a paused org's is
@@ -1790,14 +1762,9 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 // approval the wallet rejected (errorAssuranceNotMet, errorIdentityMismatch)
 // is read as that rejection, without the person or their images. A mismatch
 // is someone other than the expected person, whose identity is never shown.
-// An approval in a review the wallet opened is read as that review.
 func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
 	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved ||
 		(req.FlowKind.dataRequest() && req.Status == StatusNeedsReview) {
-		return identity
-	}
-	if req.Status == StatusNeedsReview && req.ReviewReason != "" {
-		identity.Status = proofingprovider.StatusNeedsReview
 		return identity
 	}
 	return proofingprovider.Identity{
@@ -1897,11 +1864,7 @@ func (s *Service) lapseReview(ctx context.Context, req Request) error {
 	if req.Status != StatusNeedsReview || req.session == nil {
 		return nil
 	}
-	record := s.requests.RecordOutcome
-	if req.ReviewReason != "" {
-		record = s.requests.RecordWalletOutcome
-	}
-	return record(ctx, req, req.session.ID, StatusRejected,
+	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
 }
 

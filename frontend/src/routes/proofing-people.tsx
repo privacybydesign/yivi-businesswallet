@@ -11,7 +11,6 @@ import {
   useProofingSettingsQuery,
 } from "../api/identity-proofing.queries";
 import type {
-  AddressReviewState,
   ProofingFlow,
   ProofingImage,
   ProofingRequest,
@@ -32,6 +31,14 @@ import {
   useWhenFormatter,
 } from "../lib/format-when";
 import { reviewPath } from "../lib/proofing-reviews";
+import {
+  PART_TONES,
+  SUMMARY_TONES,
+  isPartKind,
+  partState,
+  sessionSummary,
+  summaryKinds,
+} from "../lib/session-parts";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
   isDocumentVerdict,
@@ -43,7 +50,7 @@ import {
   proofingMethodLabel,
   proofingRejectionReason,
   requestSubject,
-  latestAddressDecision,
+  latestStepDecision,
   sessionEventDetail,
   SESSION_FILTERS,
   formatDuration,
@@ -85,14 +92,6 @@ const LABEL = "text-ink text-[13px] font-semibold";
 const BASE_COLUMNS = 5;
 const OPEN_ICON_SIZE = 18;
 const TIMELINE_ICON_SIZE = 14;
-// How an address's review reads beside the session's status: waiting is not
-// done yet.
-const ADDRESS_REVIEW_TONES = {
-  pending: "amber",
-  confirmed: "green",
-  rejected: "red",
-  lapsed: "amber",
-} as const satisfies Record<AddressReviewState, string>;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;
 
@@ -408,9 +407,7 @@ function SessionRow({
         {scope === "all" && <Table.Cell>{request.flowName}</Table.Cell>}
         <Table.Cell>
           <ResultText request={request} compact />
-          <AddressNote request={request} />
-          <DiplomaNote request={request} />
-          <EmploymentNote request={request} />
+          <SessionSummaryLine request={request} />
           <DataRequestNote request={request} />
         </Table.Cell>
         <Table.Cell className="text-ink-soft whitespace-nowrap">
@@ -449,6 +446,12 @@ function SessionRow({
           >
             <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
               <div className="flex min-w-0 flex-col gap-4">
+                {(request.steps ?? []).length > 0 && (
+                  <SessionParts
+                    request={request}
+                    review={isAdmin ? reviewPath(slug, request.id) : undefined}
+                  />
+                )}
                 <dl className="grid content-start gap-x-8 gap-y-2 text-[13px] sm:grid-cols-[auto_1fr]">
                   <dt className="text-muted">
                     {t("identityProofing.sessions.method")}
@@ -564,7 +567,14 @@ function SessionRow({
                   <SessionDiplomas request={request} />
                 )}
                 {request.employmentMode !== "off" && (
-                  <SessionEmployment request={request} />
+                  <div className="flex flex-col gap-2">
+                    <SessionEmployment request={request} />
+                    <EmploymentReviewNote
+                      slug={slug}
+                      request={request}
+                      isAdmin={isAdmin}
+                    />
+                  </div>
                 )}
               </div>
               <SessionTimeline slug={slug} request={request} />
@@ -594,40 +604,86 @@ function SessionRow({
   );
 }
 
-// For an approved session that requires the address, that none was entered.
-function AddressNote({
+// Where a session with steps stands as a whole, in one line under its
+// identity's status, naming only the steps that make it so.
+function SessionSummaryLine({
   request,
 }: Readonly<{
   request: ProofingRequest;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
-  if (
-    request.addressMode === "required" &&
-    request.status === "approved" &&
-    request.address === undefined &&
-    request.purgedAt === undefined
-  ) {
-    return (
-      <div className="text-[12px]">
-        <StatusText tone="amber">
-          {t("identityProofing.sessions.address.missing")}
-        </StatusText>
-      </div>
-    );
+  const summary = sessionSummary(request);
+  if (summary === undefined) {
+    return null;
   }
-  // The identity's status says nothing of the address: until a reviewer
-  // decides it, the session is not done.
-  const review = request.addressReview;
-  if (review !== undefined) {
-    return (
-      <div className="text-[12px]">
-        <StatusText tone={ADDRESS_REVIEW_TONES[review]}>
-          {t(`identityProofing.sessions.address.tag.${review}`)}
-        </StatusText>
-      </div>
-    );
+  const kinds = summaryKinds(request, summary).map((kind) =>
+    isPartKind(kind)
+      ? t(`identityProofing.sessions.parts.kinds.${kind}`)
+      : kind,
+  );
+  return (
+    <div className="text-[12px]">
+      <StatusText tone={SUMMARY_TONES[summary]}>
+        {t(`identityProofing.sessions.parts.summary.${summary}`)}
+      </StatusText>
+      {kinds.length > 0 && (
+        <span className="text-ink-soft"> · {kinds.join(", ")}</span>
+      )}
+    </div>
+  );
+}
+
+// The session's identity and each step its flow asks for, in the same words
+// for every step, under where the session stands as a whole. review links a
+// step that waits to its review.
+function SessionParts({
+  request,
+  review,
+}: Readonly<{
+  request: ProofingRequest;
+  review?: string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  const steps = request.steps ?? [];
+  if (steps.length === 0) {
+    return <ResultText request={request} compact />;
   }
-  return null;
+  const summary = sessionSummary(request);
+  return (
+    <div className="flex flex-col items-start gap-1 text-[12.5px]">
+      {summary && (
+        <StatusText tone={SUMMARY_TONES[summary]}>
+          {t(`identityProofing.sessions.parts.summary.${summary}`)}
+        </StatusText>
+      )}
+      <span>
+        {t("identityProofing.sessions.parts.identity")} ·{" "}
+        <ResultText request={request} compact />
+      </span>
+      {steps.map((step) => {
+        const state = partState(step);
+        return (
+          <span key={step.kind}>
+            {isPartKind(step.kind)
+              ? t(`identityProofing.sessions.parts.kinds.${step.kind}`)
+              : step.kind}{" "}
+            ·{" "}
+            <StatusText tone={PART_TONES[state]}>
+              {t(`identityProofing.sessions.parts.state.${state}`)}
+            </StatusText>
+            {review && state === "to_review" && (
+              <>
+                {" "}
+                <Link to={review} className="text-link underline">
+                  {t("identityProofing.sessions.address.openReview")}
+                </Link>
+              </>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 // The postal address the subject entered, how it was checked, and where a
@@ -702,25 +758,66 @@ function AddressReviewNote({
         )}
       </p>
       {review !== "pending" && (
-        <AddressDecisionNote slug={slug} request={request} />
+        <StepDecisionNote slug={slug} request={request} kind="address" />
       )}
     </div>
   );
 }
 
-// Who decided the address, when and why, from the session's timeline, which
-// the open row reads anyway.
-function AddressDecisionNote({
+// Where a Verzekeringsbericht waiting for a reviewer stands, as the address's
+// note does.
+function EmploymentReviewNote({
   slug,
   request,
+  isAdmin,
 }: Readonly<{
   slug: string;
   request: ProofingRequest;
+  isAdmin: boolean;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const review = request.employmentReview;
+  if (review === undefined) {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <p className={HINT}>
+        {t(`identityProofing.sessions.employment.review.${review}`)}
+        {isAdmin && review === "pending" && (
+          <>
+            {" "}
+            <Link
+              to={reviewPath(slug, request.id)}
+              className="text-link underline"
+            >
+              {t("identityProofing.sessions.address.openReview")}
+            </Link>
+          </>
+        )}
+      </p>
+      {review !== "pending" && (
+        <StepDecisionNote slug={slug} request={request} kind="employment" />
+      )}
+    </div>
+  );
+}
+
+// Who decided a step, when and why, from the session's timeline, which the
+// open row reads anyway.
+function StepDecisionNote({
+  slug,
+  request,
+  kind,
+}: Readonly<{
+  slug: string;
+  request: ProofingRequest;
+  kind: "address" | "employment";
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
   const events = useProofingRequestEventsQuery(slug, request);
-  const decision = latestAddressDecision(events.data ?? []);
+  const decision = latestStepDecision(events.data ?? [], kind);
   if (decision === undefined) {
     return null;
   }
@@ -745,35 +842,6 @@ function AddressDecisionNote({
       )}
     </>
   );
-}
-
-// Whether a session that asks for diplomas holds any: how many, or, for an
-// approved one that requires them, that none came.
-function DiplomaNote({
-  request,
-}: Readonly<{
-  request: ProofingRequest;
-}>): React.JSX.Element | null {
-  const { t } = useTranslation();
-  if (request.diplomas.length > 0) {
-    return (
-      <div className={HINT}>
-        {t("identityProofing.sessions.diplomas.tag", {
-          count: request.diplomas.length,
-        })}
-      </div>
-    );
-  }
-  if (request.diplomaMode === "required" && request.status === "approved") {
-    return (
-      <div className="text-[12px]">
-        <StatusText tone="amber">
-          {t("identityProofing.sessions.diplomas.missing")}
-        </StatusText>
-      </div>
-    );
-  }
-  return null;
 }
 
 // The DUO diploma extracts a session holds, each as DUO printed it, with the
@@ -826,31 +894,6 @@ function SessionDiplomas({
       )}
     </div>
   );
-}
-
-// For an approved session that requires the Verzekeringsbericht, that none
-// was kept.
-function EmploymentNote({
-  request,
-}: Readonly<{
-  request: ProofingRequest;
-}>): React.JSX.Element | null {
-  const { t } = useTranslation();
-  if (
-    request.employmentMode === "required" &&
-    request.status === "approved" &&
-    request.employment === undefined &&
-    request.purgedAt === undefined
-  ) {
-    return (
-      <div className="text-[12px]">
-        <StatusText tone="amber">
-          {t("identityProofing.sessions.employment.missing")}
-        </StatusText>
-      </div>
-    );
-  }
-  return null;
 }
 
 // The employment relations UWV's Verzekeringsbericht lists, as of the date

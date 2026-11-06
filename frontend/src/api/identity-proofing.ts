@@ -70,11 +70,25 @@ export const REVIEW_KINDS = [
   "data_request",
 ] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
+// The kinds a step's own review is of, beside the session's outcome.
+export type StepReviewKind = Extract<ReviewKind, "address" | "employment">;
 
-// A reviewer's decision on a request: its session's review or its address,
-// the outcome, why, by whom and when.
+// An extra step of a session: where it stands, until when it takes input
+// while open, and why one did not pass.
+const proofingStepSchema = z.object({
+  kind: z.string(),
+  state: z.string(),
+  until: z.string().optional(),
+  code: z.string().optional(),
+  reviewed: z.boolean().optional(),
+});
+
+export type ProofingStep = z.infer<typeof proofingStepSchema>;
+
+// A reviewer's decision on a request: its session's review or a step's (its
+// address, its Verzekeringsbericht), the outcome, why, by whom and when.
 const proofingDecisionSchema = z.object({
-  kind: z.enum(["review", "address"]),
+  kind: z.enum(["review", "address", "employment"]),
   outcome: z.string(),
   reason: z.string().optional(),
   errorCode: z.string().optional(),
@@ -353,10 +367,14 @@ const proofingRequestSchema = z.object({
   documentScan: documentScanSchema,
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone: z.boolean().optional(),
-  // Why the wallet put the session in review after the identity was
-  // approved (no_current_employment, current_benefit,
-  // current_other_income); absent otherwise.
+  // Why the kept Verzekeringsbericht went to review (no_current_employment,
+  // current_benefit, current_other_income); absent otherwise. Its review
+  // waits or was decided as employmentReview, beside the session's outcome.
   reviewReason: z.string().optional(),
+  employmentReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  employmentReviewedAt: z.string().optional(),
+  // The extra steps the flow asks for, each with its own outcome.
+  steps: z.array(proofingStepSchema).optional(),
   // A request in review whose flow version sends every session to review.
   flowAlwaysReview: z.boolean().optional(),
   // A request for one known person: only subjectName, born on the date it

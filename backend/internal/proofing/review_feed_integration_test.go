@@ -36,7 +36,7 @@ func TestReviewFeedHearsAnAddressDecision(t *testing.T) {
 	waitTold(t, changed, "LISTEN holding")
 	waitTold(t, otherChanged, "LISTEN holding")
 
-	if at, err := requests.DecideAddressReview(ctx, pending, makeUser(t, pool, "rita@example.org"), AddressReviewConfirmed, "Matches"); err != nil || at == nil {
+	if at, err := requests.DecideStepReview(ctx, pending, ReviewKindAddress, makeUser(t, pool, "rita@example.org"), AddressReviewConfirmed, "Matches"); err != nil || at == nil {
 		t.Fatalf("DecideAddressReview = %v, %v; want decided", at, err)
 	}
 	waitTold(t, changed, "the address decision")

@@ -393,10 +393,16 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
-	// ReviewReason is why the wallet put the request in review after the
-	// identity was approved (no_current_employment, current_benefit,
-	// current_other_income); absent otherwise.
-	ReviewReason string `json:"reviewReason,omitempty"`
+	// ReviewReason is why the kept Verzekeringsbericht went to review
+	// (no_current_employment, current_benefit, current_other_income); absent
+	// otherwise. EmploymentReview is where that review stands, and
+	// EmploymentReviewedAt when it was decided or lapsed.
+	ReviewReason         string      `json:"reviewReason,omitempty"`
+	EmploymentReview     ReviewState `json:"employmentReview,omitempty"`
+	EmploymentReviewedAt *time.Time  `json:"employmentReviewedAt,omitempty"`
+	// Steps are the extra steps the flow asks for, each with its own outcome
+	// beside the identity's.
+	Steps []StepOutcome `json:"steps"`
 	// FlowAlwaysReview is a request in review whose flow version sends every
 	// session to review.
 	FlowAlwaysReview bool `json:"flowAlwaysReview,omitempty"`
@@ -433,8 +439,9 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
-		ReviewReason: req.ReviewReason,
-		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
+		Steps:    req.Steps(now),
+		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
@@ -497,22 +504,25 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 }
 
 // requestResponseFor is req's response as the caller sees it: a member who
-// reaches it only for its reviewed address (onlyAddress) gets it
-// without its diplomas, proofed name and employment, which deciding the
-// address does not need.
+// reaches it only for its steps' reviews (onlyStepReviews) gets it without
+// its diplomas and proofed name, and without its employment unless they
+// review that: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
-	if onlyAddress(ctx, req) {
-		out.ProofedName, out.Employment = "", nil
+	if onlyStepReviews(ctx, req) {
+		out.ProofedName = ""
+		if req.EmploymentReview == "" {
+			out.Employment = nil
+		}
 		return out
 	}
 	return out.withDiplomas(diplomas)
 }
 
-// onlyAddress reports whether the caller reaches req only for its reviewed
-// address: not an admin, not its sender, and not on the Reviews page for the
+// onlyStepReviews reports whether the caller reaches req only for its steps'
+// reviews: not an admin, not its sender, and not on the Reviews page for the
 // request itself.
-func onlyAddress(ctx context.Context, req Request) bool {
+func onlyStepReviews(ctx context.Context, req Request) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return false
 	}
@@ -641,7 +651,7 @@ func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
 	if req.RequestedBy != nil && *req.RequestedBy == caller {
 		return true
 	}
-	return organization.MayReview(ctx) && ReviewScopeReviews.reachesAddress(req)
+	return organization.MayReview(ctx) && ReviewScopeReviews.reachesStepReview(req)
 }
 
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
@@ -686,8 +696,8 @@ type decisionResponse struct {
 // decisionsFor is what reviewers decided on req, with their reasons, for an
 // admin or a reviewer: those who read the reasons in its timeline and on the
 // Reviews page. A member who only sent it gets none, as their timeline leaves
-// the reasons out. One reached only for its address (onlyAddress) gets the
-// address decisions alone.
+// the reasons out. One reached only for its steps' reviews (onlyStepReviews)
+// gets the steps' decisions alone.
 func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
 	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
 		return nil, nil
@@ -696,10 +706,10 @@ func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResp
 	if err != nil {
 		return nil, err
 	}
-	addressOnly := onlyAddress(ctx, req)
+	stepsOnly := onlyStepReviews(ctx, req)
 	out := []decisionResponse{}
 	for _, d := range decisions {
-		if addressOnly && d.Kind != DecisionAddress {
+		if stepsOnly && d.Kind == DecisionReview {
 			continue
 		}
 		out = append(out, decisionResponse(d))

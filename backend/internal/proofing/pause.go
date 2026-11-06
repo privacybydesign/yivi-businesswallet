@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -195,7 +196,8 @@ func (s *Service) ProofingPauses(ctx context.Context) ([]OrgPause, error) {
 // while it is paused.
 //
 // A pause leaves no review open, since a paused org can decide none: every
-// open review is rejected with ErrorOrgPaused before the pause is set, and a
+// open review, a step's review item too, is rejected with ErrorOrgPaused
+// before the pause is set, and a
 // failure there refuses the pause. Those that reach review meanwhile are
 // rejected again once it holds; from then on a review is rejected as it
 // arrives (rejectIfPaused), and PurgeDue's sweep (rejectPausedReviews) takes
@@ -238,7 +240,27 @@ func (s *Service) rejectOpenReviews(ctx context.Context, orgID uuid.UUID) error 
 			errs = append(errs, err)
 		}
 	}
+	if err := s.requests.RejectPendingReviewItems(audit.WithoutActor(ctx), orgID, ErrorOrgPaused, orgPausedReason); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// rejectStepReviewsIfPaused rejects the org's pending step review items when
+// it is paused: an item opened after the pause listed them. One whose
+// rejection fails is left to PurgeDue's sweep (rejectPausedReviews).
+func (s *Service) rejectStepReviewsIfPaused(ctx context.Context, orgID uuid.UUID) {
+	if s.pauses == nil {
+		return
+	}
+	p, err := s.pauses.Get(ctx, orgID)
+	if err == nil && p.Paused() {
+		err = s.requests.RejectPendingReviewItems(audit.WithoutActor(ctx), orgID, ErrorOrgPaused, orgPausedReason)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "identity proofing: reject the step reviews of a paused org failed",
+			slog.String("organization_id", orgID.String()), slog.Any("error", err))
+	}
 }
 
 // rejectPausedReview rejects req's open review with ErrorOrgPaused and

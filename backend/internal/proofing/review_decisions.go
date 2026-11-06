@@ -13,13 +13,14 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 )
 
-// DecisionKind is what a reviewer decided on: the session's review or its
-// address's.
+// DecisionKind is what a reviewer decided on: the session's review, or a
+// step's (its ReviewKind).
 type DecisionKind string
 
 const (
-	DecisionReview  DecisionKind = "review"
-	DecisionAddress DecisionKind = "address"
+	DecisionReview     DecisionKind = "review"
+	DecisionAddress    DecisionKind = "address"
+	DecisionEmployment DecisionKind = "employment"
 )
 
 // Decision is a reviewer's decision on a request, as its audit event keeps
@@ -78,10 +79,10 @@ func (s *Service) RequestDecisions(ctx context.Context, orgID, id uuid.UUID) ([]
 		}
 		outcome := meta.After.Decision
 		switch {
-		case e.Action == audit.IdentityProofingReviewItemDecided && meta.After.Kind != string(ReviewKindAddress):
+		case e.Action == audit.IdentityProofingReviewItemDecided && !ReviewKind(meta.After.Kind).stepReview():
 			continue
 		case e.Action == audit.IdentityProofingReviewItemDecided:
-			outcome = meta.After.State
+			kind, outcome = DecisionKind(meta.After.Kind), meta.After.State
 		case kind == DecisionAddress:
 			outcome = meta.After.AddressReview
 		}

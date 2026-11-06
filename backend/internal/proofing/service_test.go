@@ -250,13 +250,26 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (*time.Time, error) {
-	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
+func (f *fakeRequests) DecideStepReview(_ context.Context, req Request, kind ReviewKind, _ uuid.UUID, decided ReviewState, _ string) (*time.Time, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.stepReview(kind) != ReviewPending {
 		return nil, nil
 	}
 	now := time.Now()
-	f.stored.AddressReview, f.stored.AddressReviewedAt = decided, &now
+	f.stored.setStepReview(kind, decided, &now)
 	return &now, nil
+}
+
+func (f *fakeRequests) RejectPendingReviewItems(context.Context, uuid.UUID, string, string) error {
+	if f.stored == nil {
+		return nil
+	}
+	for _, kind := range []ReviewKind{ReviewKindAddress, ReviewKindEmployment} {
+		if f.stored.stepReview(kind) == ReviewPending {
+			now := time.Now()
+			f.stored.setStepReview(kind, ReviewRejected, &now)
+		}
+	}
+	return nil
 }
 
 func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
@@ -264,25 +277,12 @@ func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employm
 		(f.stored.Status != StatusApproved && f.stored.Status != StatusNeedsReview) {
 		return false, nil
 	}
-	f.stored.SubjectEmployment = &emp
-	if reason := emp.reviewReason(); reason != "" && f.stored.Status == StatusApproved {
-		f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+	now := time.Now()
+	f.stored.SubjectEmployment, f.stored.EmploymentAddedAt = &emp, &now
+	if reason := emp.reviewReason(); reason != "" {
+		f.stored.ReviewReason, f.stored.EmploymentReview = reason, ReviewPending
 	}
 	return true, nil
-}
-
-func (f *fakeRequests) RejectMissingEmployment(_ context.Context, now time.Time, _ int) (int, error) {
-	r := f.stored
-	if r == nil || r.Employment != EmploymentRequired || r.Status != StatusApproved || r.SubjectEmployment != nil ||
-		r.CheckedAt == nil || now.Before(r.CheckedAt.Add(missingEmploymentDue)) {
-		return 0, nil
-	}
-	r.Status, r.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
-	return 1, nil
-}
-
-func (f *fakeRequests) NextMissingEmployment(context.Context, time.Time) (time.Time, error) {
-	return time.Time{}, nil
 }
 
 func (f *fakeRequests) LapseReviewItems(context.Context, time.Time, int) (int, error) {
@@ -384,10 +384,6 @@ func (f *fakeRequests) GetExternal(_ context.Context, _, id uuid.UUID) (Request,
 		return Request{}, ErrRequestNotFound
 	}
 	return *f.stored, nil
-}
-
-func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
-	return f.recordOutcome(ctx, status, res)
 }
 
 func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {
@@ -2279,13 +2275,13 @@ func TestReviewScopeReachesAddress(t *testing.T) {
 	if ReviewScopeReviews.reaches(pending) || ReviewScopeReviews.reaches(decided) {
 		t.Error("a reviewer reaches the result of an approved check whose address is reviewed")
 	}
-	if !ReviewScopeReviews.reachesAddress(pending) {
+	if !ReviewScopeReviews.reachesStepReview(pending) {
 		t.Error("a reviewer does not reach an address that waits")
 	}
-	if !ReviewScopeReviews.reachesAddress(decided) {
+	if !ReviewScopeReviews.reachesStepReview(decided) {
 		t.Error("a reviewer does not reach an address that was decided")
 	}
-	if ReviewScopeReviews.reachesAddress(unreviewed) {
+	if ReviewScopeReviews.reachesStepReview(unreviewed) {
 		t.Error("a reviewer reaches an approved check whose address was never reviewed")
 	}
 }

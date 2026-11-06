@@ -102,3 +102,57 @@ func TestUpMovesAddressReviewsToItems(t *testing.T) {
 		t.Errorf("%d address_review columns left; want none", columns)
 	}
 }
+
+// employmentItemsVersion is the migration that moves the Verzekeringsbericht's
+// review onto review items.
+const employmentItemsVersion int64 = 20261106090000
+
+// TestUpMovesEmploymentReviewsToItems fills a session the wallet held in
+// review for its statement, and one the engine reviews, then checks that only
+// the first went back to approved with a pending employment item.
+func TestUpMovesEmploymentReviewsToItems(t *testing.T) {
+	ctx := context.Background()
+	dsn := testdb.Bare(t)
+	if err := migrate.UpTo(ctx, dsn, employmentItemsVersion-1); err != nil {
+		t.Fatalf("migrate up to before the employment items: %v", err)
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	var orgID string
+	seedScan(t, conn, &orgID, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+		VALUES ('acme', 'acme', 'acme', 'acme', 'acme@qerds.test') RETURNING id`)
+	request := func(reason *string) string {
+		t.Helper()
+		var id string
+		seedScan(t, conn, &id, `INSERT INTO identity_proofing_requests
+				(organization_id, subject_kind, subject_name, subject_email, flow_id, flow_name, link_expires_at,
+				 status, completed_at, checked_at, review_reason)
+			VALUES ($1, 'external', 'Anna', 'anna@example.org', 'f', 'F', now(), 'needs_review', now(), now(), $2)
+			RETURNING id`, orgID, reason)
+		return id
+	}
+	noJob := "no_current_employment"
+	wallet, engine := request(&noJob), request(nil)
+
+	if err := migrate.UpTo(ctx, dsn, employmentItemsVersion); err != nil {
+		t.Fatalf("migrate up to the employment items: %v", err)
+	}
+	read := func(id string) (status string, items int, purgeSet bool) {
+		t.Helper()
+		seedScan(t, conn, &status, `SELECT status FROM identity_proofing_requests WHERE id = $1`, id)
+		seedScan(t, conn, &items, `SELECT count(*) FROM identity_proofing_review_items
+			WHERE request_id = $1 AND kind = 'employment' AND state = 'pending'`, id)
+		seedScan(t, conn, &purgeSet, `SELECT purge_at IS NOT NULL FROM identity_proofing_requests WHERE id = $1`, id)
+		return status, items, purgeSet
+	}
+	if status, items, purgeSet := read(wallet); status != "approved" || items != 1 || !purgeSet {
+		t.Errorf("wallet review = %s with %d pending items, purge time set %v; want approved, one, set", status, items, purgeSet)
+	}
+	if status, items, _ := read(engine); status != "needs_review" || items != 0 {
+		t.Errorf("engine review = %s with %d items; want needs_review, none", status, items)
+	}
+}

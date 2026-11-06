@@ -290,6 +290,7 @@ func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma
 			return fmt.Errorf("proofing: add diploma request %s: %w", req.ID, err)
 		}
 		added = true
+		req.DiplomasAddedAt = cmp.Or(req.DiplomasAddedAt, &d.CreatedAt)
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingDiplomaAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(d.auditFields()))); err != nil {

@@ -244,11 +244,11 @@ func TestSelfDeclaredAddressReviewStored(t *testing.T) {
 		t.Errorf("List pending addresses = %d, %v; want the one", len(listed), err)
 	}
 
-	reviewedAt, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Matches the rental contract")
+	reviewedAt, err := requests.DecideStepReview(ctx, pending, ReviewKindAddress, reviewer, AddressReviewConfirmed, "Matches the rental contract")
 	if err != nil || reviewedAt == nil {
 		t.Fatalf("DecideAddressReview = %v, %v; want decided", reviewedAt, err)
 	}
-	if again, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewRejected, "Another address"); err != nil || again != nil {
+	if again, err := requests.DecideStepReview(ctx, pending, ReviewKindAddress, reviewer, AddressReviewRejected, "Another address"); err != nil || again != nil {
 		t.Errorf("DecideAddressReview again = %v, %v; want refused", again, err)
 	}
 	got, err := requests.Get(ctx, orgID, pending.ID)
