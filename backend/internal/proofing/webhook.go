@@ -51,7 +51,10 @@ const (
 	// EventSessionEmploymentAdded is sent when the subject's UWV
 	// Verzekeringsbericht was kept after their identity check.
 	EventSessionEmploymentAdded = "session.employment_added"
-	EventTest                   = "test"
+	// EventSessionStepReviewed is sent when a reviewer confirmed or rejected
+	// an extra step's review item other than the address's.
+	EventSessionStepReviewed = "session.step_reviewed"
+	EventTest                = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
@@ -60,7 +63,7 @@ var WebhookEvents = []string{
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
 	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
 	EventSessionAddressReviewed,
-	EventSessionEmploymentAdded,
+	EventSessionEmploymentAdded, EventSessionStepReviewed,
 }
 
 // webhookPersonalKeys are the payload keys that carry what the subject added
@@ -171,6 +174,9 @@ func sessionEventData(req Request, status Status) map[string]any {
 	}
 	if req.ExpectsSubject {
 		data["expectedSubject"] = true
+	}
+	if steps := req.Steps(time.Now()); len(steps) > 0 {
+		data["steps"] = steps
 	}
 	return data
 }

@@ -432,15 +432,15 @@ func TestSelfDeclaredAddressReviewed(t *testing.T) {
 		t.Fatalf("after AddAddress = %s, %s; want approved, address pending", got.Status, got.AddressReview)
 	}
 
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: false}); !errors.Is(err, ErrOwnReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, StepReviewInput{Confirm: true, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: false}); !errors.Is(err, ErrOwnReview) {
 		t.Errorf("subject deciding = %v; want ErrOwnReview", err)
 	}
 	// The subject may when SelfReview allows it (a platform admin on a dev stack).
-	decided, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: false, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: true})
+	decided, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, StepReviewInput{Confirm: false, Reason: testReason, ReviewerID: alex.UserID, Scope: ReviewScopeReviews, OwnAllowed: true})
 	if err != nil || decided.AddressReview != AddressReviewRejected || decided.Status != StatusApproved {
 		t.Fatalf("DecideAddressReview = %s, %s, %v; want approved, address rejected", decided.Status, decided.AddressReview, err)
 	}
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, StepReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("deciding again = %v; want ErrAddressNotUnderReview", err)
 	}
 }
@@ -461,7 +461,7 @@ func TestYiviRegisteredAddressKept(t *testing.T) {
 	if _, err := f.svc.AddAddress(ctx, testOrg.ID, got.ID, nil, testAddress); !errors.Is(err, ErrAddressClosed) {
 		t.Errorf("AddAddress after = %v; want ErrAddressClosed", err)
 	}
-	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, AddressReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
+	if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, got.ID, StepReviewInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrAddressNotUnderReview) {
 		t.Errorf("DecideAddressReview = %v; want ErrAddressNotUnderReview", err)
 	}
 }
@@ -485,7 +485,7 @@ func TestAddressReviewNeedsReason(t *testing.T) {
 		t.Fatalf("AddAddress: %v", err)
 	}
 	for _, reason := range []string{"", "  ", strings.Repeat("x", maxReviewReasonLength+1)} {
-		if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, AddressReviewInput{Confirm: true, Reason: reason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrInvalidInput) {
+		if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, StepReviewInput{Confirm: true, Reason: reason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("reason %q: DecideAddressReview = %v; want ErrInvalidInput", reason, err)
 		}
 	}

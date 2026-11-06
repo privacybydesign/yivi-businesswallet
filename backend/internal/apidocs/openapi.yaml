@@ -114,7 +114,8 @@ tags:
 
       `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
       sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`,
-      `ORG_PAUSED`, `LEGAL_RETENTION` and `EMPLOYMENT_NOT_PROVIDED`; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
+      `ORG_PAUSED` and `LEGAL_RETENTION`, and `EMPLOYMENT_NOT_PROVIDED` on sessions from before
+      the Verzekeringsbericht had its own outcome; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
       (it looks altered), `EVIDENCE_NOT_AS_REQUESTED` (it is not what was asked for) or
       `MANUAL_REVIEW_REJECTED` (something else); the session itself is rejected for `FACE_NO_MATCH`,
       `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
@@ -7308,15 +7309,19 @@ paths:
           as webhook `session.address_reviewed`. An address that waits for no review, decided
           already, lapsed or erased, is 409 `address_not_under_review`.
 
-        - `identity`, `employment` and `data_request`: the request's own review
-          (`status: needs_review`), decided as `.../review` decides it (`confirm` approves, and
-          `errorCode` names a rejection). `employment` is the review a kept Verzekeringsbericht
-          opened (`reviewReason`), `data_request` a data request's, `identity` any other. A
-          request whose review is of another kind, or that is not in review, is 409
-          `not_under_review`.
+        - `employment`: a kept Verzekeringsbericht with no current job, or a current benefit or
+          other income beside one (`reviewReason`), waits as `employmentReview: pending`. As for
+          the address, only the step is decided and the session keeps its outcome; no
+          `errorCode`. Audited `identity_proofing.review_item_decided`, sent as webhook
+          `session.step_reviewed`. One that waits for no review is 409 `not_under_review`.
+
+        - `identity` and `data_request`: the request's own review (`status: needs_review`),
+          decided as `.../review` decides it (`confirm` approves, and `errorCode` names a
+          rejection). A request whose review is of another kind, or that is not in review, is
+          409 `not_under_review`.
 
         The answer is the request; to a reviewer who is not an administrator, without
-        `proofedName`, `employment` and diplomas. A reviewer who is not an administrator does
+        `proofedName` and diplomas, and without `employment` unless it is reviewed. A reviewer who is not an administrator does
         not reach a request outside the Reviews page: 404 `session_not_found`. One on a request
         the caller sent, or about the caller, is 403 `own_review`.
       requestBody:
@@ -7539,11 +7544,11 @@ paths:
         hours or the wages.
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
         refused one `identity_proofing.employment_rejected`. A kept statement with no current
-        job (`employed: false`) moves the approved session to `needs_review` with
-        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
-        with `current_benefit`, and one with other current income paid without hours worked
-        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
-        administrator through the review endpoint.
+        job (`employed: false`) goes to review with `reviewReason` `no_current_employment`, one
+        with a current UWV benefit beside a job with `current_benefit`, and one with other
+        current income paid without hours worked beside a job with `current_other_income`: an
+        `employment` review item (`employmentReview: pending`), decided through
+        `.../review-items/employment`. The session keeps the identity's outcome.
       requestBody:
         required: true
         content:
@@ -8189,7 +8194,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed]
                     maxAttempts: 8
                 none:
                   summary: No endpoint
@@ -8199,7 +8204,7 @@ paths:
                     health:
                       state: not_configured
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed]
                     maxAttempts: 8
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -8213,8 +8218,8 @@ paths:
         must resolve to a public address when an event is sent) and `events`, at least one
         of `session.created`, `session.started`, `session.handover`, `session.verified`, `session.failed`,
         `session.review_opened`, `session.expired`, `session.cancelled`, `session.purged`,
-        `session.diploma_added`, `session.address_added`, `session.address_reviewed` and
-        `session.employment_added`. An
+        `session.diploma_added`, `session.address_added`, `session.address_reviewed`,
+        `session.employment_added` and `session.step_reviewed`. An
         endpoint is sent only the events it was saved with: save it again to add a new one. A
         new endpoint's answer carries its signing `secret` (`whsec_…`), the one time it is
         readable. Each event is a POST of `{id, type, createdAt, data}`; `data` holds
@@ -8223,7 +8228,9 @@ paths:
         and `expectedSubject: true`; never the person's name or photo. Only what the person added
         after their identity check carries their data: `session.diploma_added` the diploma
         (`diploma`), `session.address_added` the address they entered (`address`, never the
-        registered (BRP) one) and `session.employment_added` the statement (`employment`). `session.address_reviewed` carries the decision as `addressReview`. It is signed in the
+        registered (BRP) one) and `session.employment_added` the statement (`employment`). `session.address_reviewed` carries the decision as `addressReview`, and
+        `session.step_reviewed` another step's as `step`. `steps` lists the flow's extra steps,
+        each with its own outcome. It is signed in the
         `Yivi-Signature` header as `t=<unix>,v1=<hex HMAC-SHA256 of "<t>.<body>">`, with
         `Yivi-Event` and `Yivi-Delivery`; for 24 hours after a secret rotation it carries a
         second `v1` under the previous secret. An organisation without an endpoint is sent no
@@ -8260,7 +8267,7 @@ paths:
                       state: delivering
                       lastStatusCode: 200
                       pendingRetries: 0
-                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added]
+                    availableEvents: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed]
                     maxAttempts: 8
                     secret: whsec_4tY8mK2qN6vB1xC9zR3wP7sL5dF0gH8jA2eU6iO4x9Qa
         '400':
@@ -9194,11 +9201,11 @@ paths:
         hours or the wages.
         Audited `identity_proofing.employment_added` (webhook `session.employment_added`), a
         refused one `identity_proofing.employment_rejected`. A kept statement with no current
-        job (`employed: false`) moves the approved session to `needs_review` with
-        `reviewReason` `no_current_employment`, one with a current UWV benefit beside a job
-        with `current_benefit`, and one with other current income paid without hours worked
-        beside a job with `current_other_income` (webhook `session.review_opened`), decided by an
-        administrator through the review endpoint.
+        job (`employed: false`) goes to review with `reviewReason` `no_current_employment`, one
+        with a current UWV benefit beside a job with `current_benefit`, and one with other
+        current income paid without hours worked beside a job with `current_other_income`: an
+        `employment` review item (`employmentReview: pending`), decided through
+        `.../review-items/employment`. The session keeps the identity's outcome.
       requestBody:
         required: true
         content:
@@ -9527,9 +9534,10 @@ paths:
         retention), `LEGAL_RETENTION` (an
         erasure refused because the organisation is bound by law to keep the data: its legal
         retention holds every identity check found),
-        `ORG_PAUSED` (a review left open when a platform admin paused the organisation's proofing) and
-        `EMPLOYMENT_NOT_PROVIDED` (an approved session on a flow that requires the
-        Verzekeringsbericht, without one kept within an hour of the identity check). A
+        `ORG_PAUSED` (a review left open when a platform admin paused the organisation's proofing) and,
+        on sessions from before the Verzekeringsbericht had its own outcome,
+        `EMPLOYMENT_NOT_PROVIDED` (no statement kept within an hour of the identity check;
+        `steps` says that now). A
         reviewer's rejection names `REVIEW_NOT_HOLDER`, `REVIEW_ALTERED`,
         `EVIDENCE_NOT_AS_REQUESTED` or `MANUAL_REVIEW_REJECTED`. The session itself is rejected, on any flow, for a face that did not match (`FACE_NO_MATCH`)
         or failed liveness (`LIVENESS_FAILED`), `DOC_EXPIRED`, `DOC_TAMPERED`, and for an
@@ -11827,9 +11835,9 @@ components:
             document is not the expected person's), `ASSURANCE_NOT_MET` (the checks fell
             short of the flow's level), `REVIEW_LAPSED` (a review nobody decided in time),
             `LEGAL_RETENTION` (an erasure refused because the organisation must keep the data by law: its legal
-            retention holds every identity check found) and
-            `EMPLOYMENT_NOT_PROVIDED` (no Verzekeringsbericht kept in time on a flow that
-            requires one); a reviewer
+            retention holds every identity check found) and, on sessions from before the
+            Verzekeringsbericht had its own outcome, `EMPLOYMENT_NOT_PROVIDED` (no statement kept
+            in time; `steps` says that now); a reviewer
             `REVIEW_NOT_HOLDER`, `REVIEW_ALTERED`, `EVIDENCE_NOT_AS_REQUESTED` or
             `MANUAL_REVIEW_REJECTED`; others come from
             the session itself
@@ -11874,6 +11882,36 @@ components:
             until a reviewer confirms or rejects it, `lapsed` when nobody did within the request's
             data retention. Absent on a registered address and without an address.
       required: [id, status, flowId, flowName, subjectEmail, expiresAt, createdAt, expectedSubject]
+    ProofingStep:
+      type: object
+      required: [kind, state]
+      properties:
+        kind:
+          type: string
+          enum: [address, diplomas, employment]
+          description: The steps the session's flow asks for, in the order the person does them.
+        state:
+          type: string
+          enum: [not_started, open, done, in_review, rejected, not_provided]
+          description: >-
+            `not_started` until the identity check finished (approved or in review); `open` while
+            it takes the person's input (until `until`); `done`; `in_review` while a reviewer
+            decides it; `rejected` by a reviewer or lapsed; `not_provided` once the window closed
+            without the input.
+        until:
+          type: string
+          format: date-time
+          description: When an open step closes.
+        code:
+          type: string
+          example: EMPLOYMENT_NOT_PROVIDED
+          description: >-
+            Why a step did not pass: `ADDRESS_NOT_PROVIDED`, `ADDRESS_REJECTED`,
+            `DIPLOMA_NOT_PROVIDED`, `EMPLOYMENT_NOT_PROVIDED`, `EMPLOYMENT_REJECTED` or
+            `REVIEW_LAPSED`.
+        reviewed:
+          type: boolean
+          description: A `done` step a reviewer accepted.
     ProofingApiCreatedSession:
       allOf:
         - $ref: '#/components/schemas/ProofingApiSession'
@@ -11925,7 +11963,14 @@ components:
         reviewReason:
           type: string
           enum: [no_current_employment, current_benefit, current_other_income]
-          description: Why the session went to review after its identity was approved. `no_current_employment` is a Verzekeringsbericht that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job, `current_other_income` one that lists other current income paid without hours worked beside a job; a reviewer decides it in the wallet. Absent otherwise.
+          description: Why the kept Verzekeringsbericht went to review. `no_current_employment` is one that lists no current job, `current_benefit` one that lists a current UWV benefit beside a job, `current_other_income` one that lists other current income paid without hours worked beside a job; a reviewer decides it as the employment step's review. Absent otherwise.
+        steps:
+          type: array
+          description: >-
+            The extra steps the flow asks for (today the Verzekeringsbericht), each with its own
+            outcome beside the identity's: a step never changes the session's `status`.
+          items:
+            $ref: '#/components/schemas/ProofingStep'
         verifiedAt:
           type: string
           format: date-time
@@ -12083,7 +12128,7 @@ components:
           description: The delivery's id; the same on every retry.
         type:
           type: string
-          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, test]
+          enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed, test]
         createdAt:
           type: string
           format: date-time
@@ -12140,6 +12185,21 @@ components:
               type: string
               enum: [confirmed, rejected]
               description: Only on `session.address_reviewed`, the reviewer's decision.
+            step:
+              type: object
+              description: Only on `session.step_reviewed`, the step and the reviewer's decision.
+              properties:
+                kind:
+                  type: string
+                  enum: [employment]
+                state:
+                  type: string
+                  enum: [confirmed, rejected]
+            steps:
+              type: array
+              description: The flow's extra steps, each with its own outcome, when it asks for any; none once purged.
+              items:
+                $ref: '#/components/schemas/ProofingStep'
             diploma:
               type: object
               description: Only on `session.diploma_added`.
@@ -12970,7 +13030,25 @@ components:
         reviewReason:
           type: string
           enum: [no_current_employment, current_benefit, current_other_income]
-          description: Why the wallet put the session in review after the identity was approved (no current job, a current UWV benefit, or other current income paid without hours worked, on the Verzekeringsbericht). A reviewer's decision settles it in the wallet. Absent otherwise.
+          description: Why the kept Verzekeringsbericht went to review (no current job, a current UWV benefit, or other current income paid without hours worked). A reviewer's decision settles the employment step, never the session. Absent otherwise.
+        employmentReview:
+          type: string
+          readOnly: true
+          enum: [pending, confirmed, rejected, lapsed]
+          description: The review of the kept Verzekeringsbericht, when it went to one.
+        employmentReviewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When a reviewer decided the statement's review, or it lapsed.
+        steps:
+          type: array
+          readOnly: true
+          description: >-
+            The extra steps the flow asks for (today the Verzekeringsbericht), each with its own
+            outcome beside the identity's: a step never changes the session's `status`.
+          items:
+            $ref: '#/components/schemas/ProofingStep'
         flowAlwaysReview:
           type: boolean
           description: Set on a request in `needs_review` whose flow version sends every session to review. Absent otherwise.
@@ -13618,7 +13696,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added]
+            enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed]
       required: [url, events]
     ProofingWebhookDeliveryList:
       type: array

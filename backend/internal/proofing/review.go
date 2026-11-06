@@ -66,11 +66,12 @@ func (sc ReviewScope) reaches(req Request) bool {
 	return sc == ReviewScopeAll || req.Status == StatusNeedsReview || req.FlowKind.dataRequest()
 }
 
-// reachesAddress reports whether the scope reaches req's request and address:
-// what reaches does, and an address a reviewer reviews, waiting or decided.
-// Never the result of a check it holds.
-func (sc ReviewScope) reachesAddress(req Request) bool {
-	return sc.reaches(req) || req.AddressReview != ""
+// reachesStepReview reports whether the scope reaches req's request and its
+// steps' reviews: what reaches does, and a step a reviewer reviews (the
+// address, the Verzekeringsbericht), waiting or decided. Never the result of a
+// check it holds.
+func (sc ReviewScope) reachesStepReview(req Request) bool {
+	return sc.reaches(req) || req.AddressReview != "" || req.EmploymentReview != ""
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with
@@ -154,8 +155,6 @@ func (s *Service) DecideReview(ctx context.Context, orgID, id uuid.UUID, reviewe
 		return Request{}, ErrOwnReview
 	}
 	switch {
-	case req.ReviewReason != "":
-		return s.decideWalletReview(ctx, req, in)
 	case req.session.EndedAt != nil:
 		return Request{}, ErrNotUnderReview
 	case req.FlowKind.dataRequest() && s.dataRequests != nil:
@@ -197,32 +196,4 @@ func (s *Service) decideEngineReview(ctx context.Context, req Request, reviewer 
 	// A failed read is logged; the engine's notice or the next read records the outcome.
 	req, _ = s.tryReconcile(ctx, tenant, req)
 	return req, nil
-}
-
-// decideWalletReview decides a review the wallet opened (Request.ReviewReason)
-// in the wallet alone: the engine approved the session before, and holds no
-// review to decide. A rejection without a code is ErrorReviewRejected.
-func (s *Service) decideWalletReview(ctx context.Context, req Request, in ReviewInput) (Request, error) {
-	if in.RequestIDs != nil {
-		return Request{}, fmt.Errorf("%w: sessions are chosen only on a data request", ErrInvalidInput)
-	}
-	decided, code := StatusApproved, ""
-	if !in.Approve {
-		decided, code = StatusRejected, in.ErrorCode
-		if code == "" {
-			code = ErrorReviewRejected
-		}
-	}
-	// Who decided and why is recorded even if the caller has gone.
-	ctx = context.WithoutCancel(ctx)
-	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code); err != nil {
-		return Request{}, err
-	}
-	if err := s.requests.RecordWalletOutcome(ctx, req, req.session.ID, decided, proofingprovider.Result{
-		Method: req.Method, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: code,
-		Name: req.ProofedName,
-	}); err != nil {
-		return Request{}, err
-	}
-	return s.requests.Get(ctx, req.OrganizationID, req.ID)
 }

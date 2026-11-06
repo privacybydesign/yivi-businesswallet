@@ -6,8 +6,9 @@ import { useMeQuery } from "../api/auth.queries";
 import type {
   AddressReviewInput,
   ProofingRequest,
+  StepReviewKind,
 } from "../api/identity-proofing";
-import { useDecideAddressReviewMutation } from "../api/identity-proofing.queries";
+import { useDecideStepReviewMutation } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   addressVerificationNote,
@@ -18,7 +19,12 @@ import {
   REVIEW_REASON_MAX_CHARS,
 } from "../lib/identity-proofing";
 import { toast } from "../lib/toast";
-import { ownReview, reasonProblem, reviewPath } from "../lib/proofing-reviews";
+import {
+  ownReview,
+  reasonProblem,
+  reviewPath,
+  STEP_DECIDED_KEYS,
+} from "../lib/proofing-reviews";
 import { Button, TopBar } from "../ui";
 import {
   BackToReviews,
@@ -31,12 +37,6 @@ import {
   ReviewSection,
 } from "./proofing-review-parts";
 import { PostalAddress } from "./proofing-ui";
-
-const DECIDED_KEYS = {
-  confirmed: "confirmed",
-  rejected: "rejected",
-  lapsed: "lapsed",
-} as const;
 
 // An address that waits for a person, or was decided: the address (and the
 // registered one it differs from), the identity check it came with (decided
@@ -130,11 +130,13 @@ export function AddressReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <AddressDecision slug={slug} requestId={request.id} />
+              <StepDecision slug={slug} requestId={request.id} kind="address" />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
-              {t(`identityProofing.reviews.address.${DECIDED_KEYS[review]}`)}
+              {t(
+                `identityProofing.reviews.address.${STEP_DECIDED_KEYS[review]}`,
+              )}
               <DecisionReasons request={request} kind="address" />
             </output>
           )}
@@ -145,22 +147,25 @@ export function AddressReview({
   );
 }
 
-// Confirm or reject, with a reason the audit log keeps. A decided address
-// leaves the reader's reach, so the page goes back to the Reviews page.
-function AddressDecision({
+// Confirm or reject a step (the address, the Verzekeringsbericht), with a
+// reason the audit log keeps. A decided step leaves the reader's reach, so the
+// page goes back to the Reviews page.
+export function StepDecision({
   slug,
   requestId,
+  kind,
 }: Readonly<{
   slug: string;
   requestId: string;
+  kind: StepReviewKind;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const decide = useDecideAddressReviewMutation(slug, requestId);
+  const decide = useDecideStepReviewMutation(slug, requestId, kind);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const problem = reasonProblem(reason);
-  const idPrefix = `address-review-${requestId}`;
+  const idPrefix = `${kind}-review-${requestId}`;
 
   function submit(decision: AddressReviewInput["decision"]): void {
     setTouched(true);
@@ -172,8 +177,8 @@ function AddressDecision({
           toast.success(
             t(
               decision === "confirm"
-                ? "identityProofing.reviews.address.confirmed"
-                : "identityProofing.reviews.address.rejected",
+                ? `identityProofing.reviews.${kind}.confirmed`
+                : `identityProofing.reviews.${kind}.rejected`,
             ),
           );
           void navigate(reviewPath(slug));
@@ -218,7 +223,7 @@ function AddressDecision({
           disabled={decide.isPending}
           onClick={() => submit("confirm")}
         >
-          {t("identityProofing.reviews.address.confirm")}
+          {t(`identityProofing.reviews.${kind}.confirm`)}
         </Button>
         <Button
           variant="secondary"
@@ -226,7 +231,7 @@ function AddressDecision({
           disabled={decide.isPending}
           onClick={() => submit("reject")}
         >
-          {t("identityProofing.reviews.address.reject")}
+          {t(`identityProofing.reviews.${kind}.reject`)}
         </Button>
       </div>
       {decide.isError && (

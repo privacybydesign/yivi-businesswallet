@@ -128,10 +128,11 @@ func approvedRequest(t *testing.T, requests *RequestStore, in NewStoredRequest, 
 	return approved
 }
 
-// A kept statement without a current job puts the approved request in review,
-// in the same transaction, and it lists as an open review.
+// A kept statement without a current job opens its own review item, in the
+// same transaction: the session stays approved, the item lists and counts as
+// an employment review, and its decision settles only the step.
 func TestNoJobOpensReview(t *testing.T) {
-	f := newSealedFixture(t, EventSessionReviewOpened)
+	f := newSealedFixture(t, EventSessionStepReviewed)
 	ctx := context.Background()
 	f.in.Employment = EmploymentRequired
 	approved := approvedRequest(t, f.requests, f.in, "s1")
@@ -143,43 +144,35 @@ func TestNoJobOpensReview(t *testing.T) {
 		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
 	}
 	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-	if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
-		t.Fatalf("Get = %s (%q), %v; want needs_review for no current employment", got.Status, got.ReviewReason, err)
+	if err != nil || got.Status != StatusApproved || got.ReviewReason != ReviewNoCurrentEmployment || got.EmploymentReview != ReviewPending {
+		t.Fatalf("Get = %s (%q, review %q), %v; want approved with the statement in review", got.Status, got.ReviewReason, got.EmploymentReview, err)
 	}
-	if auditCount(t, f.pool, audit.IdentityProofingNeedsReview) != 1 {
-		t.Error("want one needs_review event")
+	kind := ReviewKindEmployment
+	if listed, err := f.requests.List(ctx, f.orgID, RequestFilter{ReviewKind: &kind}); err != nil || len(listed) != 1 {
+		t.Errorf("List employment reviews = %d, %v; want the one", len(listed), err)
 	}
-	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
-	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionReviewOpened {
-		t.Errorf("deliveries = %+v, %v; want one session.review_opened", deliveries, err)
+	if counts, err := f.requests.ReviewCounts(ctx, f.orgID); err != nil || counts[ReviewKindEmployment] != 1 || counts[ReviewKindIdentity] != 0 {
+		t.Errorf("ReviewCounts = %v, %v; want one employment review, no identity review", counts, err)
 	}
-	open, err := f.requests.ListOpenReviews(ctx, f.orgID)
-	if err != nil || len(open) != 1 || open[0].ID != approved.ID {
-		t.Errorf("open reviews = %d, %v; want the request", len(open), err)
-	}
-	checkWalletDecidesReview(t, f.requests, got)
-}
 
-// checkWalletDecidesReview checks that the engine's approval, read again, does
-// not take the wallet's review of got out of review, and the wallet's
-// decision does.
-func checkWalletDecidesReview(t *testing.T, requests *RequestStore, got Request) {
-	t.Helper()
-	ctx := context.Background()
-	if err := requests.RecordOutcome(ctx, got, "s1", StatusApproved,
+	// The engine's approval, read again, changes nothing.
+	if err := f.requests.RecordOutcome(ctx, got, "s1", StatusApproved,
 		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
 		t.Fatal(err)
 	}
-	if still, err := requests.Get(ctx, got.OrganizationID, got.ID); err != nil || still.Status != StatusNeedsReview {
-		t.Fatalf("after the engine's outcome = %s, %v; want still in review", still.Status, err)
+	at, err := f.requests.DecideStepReview(ctx, got, ReviewKindEmployment, makeUser(t, f.pool, "rita@example.org"), ReviewRejected, "No job")
+	if err != nil || at == nil {
+		t.Fatalf("DecideStepReview = %v, %v; want decided", at, err)
 	}
-
-	if err := requests.RecordWalletOutcome(ctx, got, "s1", StatusApproved,
-		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
-		t.Fatal(err)
+	decided, err := f.requests.Get(ctx, f.orgID, approved.ID)
+	steps := decided.Steps(time.Now())
+	if err != nil || decided.Status != StatusApproved || len(steps) != 1 || steps[0].State != StepRejected || steps[0].Code != ErrorEmploymentRejected {
+		t.Errorf("after the decision = %s, steps %+v, %v; want approved, the step rejected", decided.Status, steps, err)
 	}
-	if decided, err := requests.Get(ctx, got.OrganizationID, got.ID); err != nil || decided.Status != StatusApproved {
-		t.Errorf("after the wallet's decision = %s, %v; want approved", decided.Status, err)
+	var step string
+	if err := f.pool.QueryRow(ctx, `SELECT payload->'step'->>'state' FROM identity_proofing_webhook_deliveries
+		WHERE organization_id = $1 AND event = $2`, f.orgID, EventSessionStepReviewed).Scan(&step); err != nil || step != string(ReviewRejected) {
+		t.Errorf("session.step_reviewed step.state = %q, %v; want rejected", step, err)
 	}
 }
 
@@ -217,50 +210,32 @@ func approvedSince(t *testing.T, f sealedFixture, session string, approvedAgo ti
 	return got
 }
 
-// An approved request without a Verzekeringsbericht is rejected once the
-// window passed, audited and sent; one that holds a statement, or is still in
-// its window, is left.
-func TestRejectMissingEmployment(t *testing.T) {
+// An approved request without a Verzekeringsbericht past its window reads the
+// step as not provided and stays approved; one in its window reads it open,
+// and one that holds a statement done.
+func TestMissingEmploymentNotProvidedStored(t *testing.T) {
 	f := newSealedFixture(t, EventSessionFailed)
 	ctx := context.Background()
-	missed := approvedSince(t, f, "s1", missingEmploymentDue+time.Minute)
+	missed := approvedSince(t, f, "s1", EmploymentWindow+time.Minute)
 	inWindow := approvedSince(t, f, "s2", time.Minute)
-	// An upload let in at the window's end may still be checked.
-	inGrace := approvedSince(t, f, "s4", EmploymentWindow+time.Minute)
-	held := approvedSince(t, f, "s3", missingEmploymentDue+time.Minute)
+	held := approvedSince(t, f, "s3", EmploymentWindow+time.Minute)
 	if added, err := f.requests.AddEmployment(ctx, held, Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{}}); err != nil || !added {
 		t.Fatalf("AddEmployment = %v, %v", added, err)
 	}
-
-	next, err := f.requests.NextMissingEmployment(ctx, time.Now())
-	if err != nil || next.IsZero() || next.After(time.Now().Add(employmentSweepGrace)) {
-		t.Errorf("NextMissingEmployment = %s, %v; want the grace's end after the window that just closed", next, err)
+	for req, want := range map[*Request]StepState{&missed: StepNotProvided, &inWindow: StepOpen, &held: StepDone} {
+		got, err := f.requests.Get(ctx, f.orgID, req.ID)
+		steps := got.Steps(time.Now())
+		if err != nil || got.Status != StatusApproved || len(steps) != 1 || steps[0].State != want {
+			t.Errorf("request %s = %s, steps %+v, %v; want approved, the step %s", req.SubjectEmail, got.Status, steps, err, want)
+		}
 	}
-	n, err := f.requests.RejectMissingEmployment(ctx, time.Now(), 10)
-	if err != nil || n != 1 {
-		t.Fatalf("RejectMissingEmployment = %d, %v; want 1", n, err)
-	}
-	checkStatuses(t, f.requests, map[*Request]Status{
-		&missed: StatusRejected, &inWindow: StatusApproved, &inGrace: StatusApproved, &held: StatusApproved,
-	})
-	if auditCount(t, f.pool, audit.IdentityProofingRejected) != 1 {
-		t.Error("want one rejected event")
-	}
-	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
-	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionFailed {
-		t.Errorf("deliveries = %+v, %v; want one session.failed", deliveries, err)
-	}
-	if n, err := f.requests.RejectMissingEmployment(ctx, time.Now(), 10); err != nil || n != 0 {
-		t.Errorf("a second run = %d, %v; want nothing left", n, err)
-	}
-	// An upload that lands after the rejection keeps nothing.
-	if added, err := f.requests.AddEmployment(ctx, missed, Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{}}); err != nil || added {
-		t.Errorf("AddEmployment on the rejected request = %v, %v; want refused", added, err)
+	if deliveries, err := f.webhooks.Deliveries(ctx, f.orgID); err != nil || len(deliveries) != 0 {
+		t.Errorf("deliveries = %+v, %v; want no session.failed", deliveries, err)
 	}
 }
 
-// A statement kept while the engine reviews the identity opens the wallet's
-// review once the engine approves, without the subject asked again.
+// A statement kept while the engine reviews the identity opens its own review
+// at once; the engine's approval then settles the identity beside it.
 func TestEmploymentKeptDuringEngineReview(t *testing.T) {
 	f := newSealedFixture(t, EventSessionReviewOpened)
 	ctx := context.Background()
@@ -291,8 +266,8 @@ func TestEmploymentKeptDuringEngineReview(t *testing.T) {
 	if added, err := f.requests.AddEmployment(ctx, inReview, noJob); err != nil || !added {
 		t.Fatalf("AddEmployment in review = %v, %v; want added", added, err)
 	}
-	if got, err := f.requests.Get(ctx, f.orgID, req.ID); err != nil || got.Status != StatusNeedsReview || got.ReviewReason != "" {
-		t.Fatalf("after the statement = %s (%q), %v; want still the engine's review", got.Status, got.ReviewReason, err)
+	if got, err := f.requests.Get(ctx, f.orgID, req.ID); err != nil || got.Status != StatusNeedsReview || got.EmploymentReview != ReviewPending {
+		t.Fatalf("after the statement = %s, review %q, %v; want the engine's review, the statement's pending", got.Status, got.EmploymentReview, err)
 	}
 
 	if err := f.requests.RecordOutcome(ctx, inReview, "s1", StatusApproved,
@@ -300,25 +275,22 @@ func TestEmploymentKeptDuringEngineReview(t *testing.T) {
 		t.Fatalf("RecordOutcome approve: %v", err)
 	}
 	got, err := f.requests.Get(ctx, f.orgID, req.ID)
-	if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
-		t.Fatalf("after the engine's approval = %s (%q), %v; want the wallet's review", got.Status, got.ReviewReason, err)
+	if err != nil || got.Status != StatusApproved || got.EmploymentReview != ReviewPending {
+		t.Fatalf("after the engine's approval = %s, review %q, %v; want approved, the statement's still pending", got.Status, got.EmploymentReview, err)
 	}
 	if !got.CheckedAt.Equal(*inReview.CheckedAt) {
 		t.Errorf("checked at = %v, want it kept from the review's start %v", got.CheckedAt, inReview.CheckedAt)
 	}
-	if n, err := f.requests.RejectMissingEmployment(ctx, time.Now().Add(missingEmploymentDue+time.Minute), 10); err != nil || n != 0 {
-		t.Errorf("RejectMissingEmployment = %d, %v; want nothing missing", n, err)
-	}
-	// One session.review_opened for the engine's review, one for the wallet's.
+	// Only the engine's review opened one.
 	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
-	if err != nil || len(deliveries) != 2 {
-		t.Errorf("deliveries = %+v, %v; want two session.review_opened", deliveries, err)
+	if err != nil || len(deliveries) != 1 {
+		t.Errorf("deliveries = %+v, %v; want one session.review_opened", deliveries, err)
 	}
 }
 
-// A wallet review nobody decided before its purge ends rejected
-// REVIEW_LAPSED, audited and sent, before the purge erases it.
-func TestWalletReviewLapses(t *testing.T) {
+// A statement's review nobody decided in time lapses: the step reads rejected
+// REVIEW_LAPSED, the session stays approved.
+func TestEmploymentReviewLapses(t *testing.T) {
 	f := newSealedFixture(t, EventSessionFailed)
 	ctx := context.Background()
 	f.in.Employment = EmploymentRequired
@@ -326,51 +298,27 @@ func TestWalletReviewLapses(t *testing.T) {
 	if added, err := f.requests.AddEmployment(ctx, approved, Employment{StatementDate: "2026-10-15", Relations: []EmploymentRelation{}}); err != nil || !added {
 		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
 	}
-	// A raw write: the review waited past its purge time.
-	if _, err := f.pool.Exec(ctx, `UPDATE identity_proofing_requests SET purge_at = now() - interval '1 minute'
-		WHERE id = $1`, approved.ID); err != nil {
-		t.Fatal(err)
+	due, err := f.requests.NextReviewItemDue(ctx)
+	if err != nil || due.IsZero() {
+		t.Fatalf("NextReviewItemDue = %v, %v; want the item's", due, err)
 	}
-	due, err := f.requests.ListPurgeDue(ctx, 10)
-	if err != nil || len(due) != 1 || due[0].Status != StatusNeedsReview || due[0].ReviewReason == "" {
-		t.Fatalf("purge due = %+v, %v; want the wallet review", due, err)
-	}
-	before := auditCount(t, f.pool, audit.IdentityProofingRejected)
-
-	svc := NewService(Stores{Requests: f.requests}, nil, nil, nil)
-	if err := svc.lapseReview(ctx, due[0]); err != nil {
-		t.Fatalf("lapseReview: %v", err)
+	if n, err := f.requests.LapseReviewItems(ctx, due, maxReconcilePerRound); err != nil || n != 1 {
+		t.Fatalf("LapseReviewItems = %d, %v; want one", n, err)
 	}
 	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-	if err != nil || got.Status != StatusRejected || got.ErrorCode != errorReviewLapsed {
-		t.Fatalf("after the lapse = %s %q, %v; want rejected %s", got.Status, got.ErrorCode, err, errorReviewLapsed)
+	steps := got.Steps(time.Now())
+	if err != nil || got.Status != StatusApproved || got.EmploymentReview != ReviewLapsed || len(steps) != 1 ||
+		steps[0].State != StepRejected || steps[0].Code != errorReviewLapsed {
+		t.Fatalf("after the lapse = %s, review %q, steps %+v, %v; want approved, the step rejected %s",
+			got.Status, got.EmploymentReview, steps, err, errorReviewLapsed)
 	}
-	if auditCount(t, f.pool, audit.IdentityProofingRejected) != before+1 {
-		t.Error("want one rejected event")
-	}
-	deliveries, err := f.webhooks.Deliveries(ctx, f.orgID)
-	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionFailed {
-		t.Errorf("deliveries = %+v, %v; want one session.failed", deliveries, err)
-	}
-}
-
-// checkStatuses checks each request is stored with its status, and a rejected
-// one with ErrorEmploymentNotProvided.
-func checkStatuses(t *testing.T, requests *RequestStore, want map[*Request]Status) {
-	t.Helper()
-	for req, status := range want {
-		got, err := requests.Get(context.Background(), req.OrganizationID, req.ID)
-		if err != nil || got.Status != status {
-			t.Errorf("request %s = %s, %v; want %s", req.SubjectEmail, got.Status, err, status)
-		}
-		if status == StatusRejected && got.ErrorCode != ErrorEmploymentNotProvided {
-			t.Errorf("error code = %q, want %s", got.ErrorCode, ErrorEmploymentNotProvided)
-		}
+	if deliveries, err := f.webhooks.Deliveries(ctx, f.orgID); err != nil || len(deliveries) != 0 {
+		t.Errorf("deliveries = %+v, %v; want no session.failed", deliveries, err)
 	}
 }
 
-// A current benefit, or other income, beside a job also puts the approved
-// request in review.
+// A current benefit, or other income, beside a job also sends the statement
+// to review.
 func TestIncomeBesideJobReview(t *testing.T) {
 	for _, tc := range []struct {
 		kind, employer, number, want string
@@ -391,8 +339,9 @@ func TestIncomeBesideJobReview(t *testing.T) {
 			t.Fatalf("%s: AddEmployment = %v, %v; want added", tc.kind, added, err)
 		}
 		got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-		if err != nil || got.Status != StatusNeedsReview || got.ReviewReason != tc.want {
-			t.Fatalf("%s: Get = %s (%q), %v; want needs_review for %s", tc.kind, got.Status, got.ReviewReason, err, tc.want)
+		if err != nil || got.Status != StatusApproved || got.ReviewReason != tc.want || got.EmploymentReview != ReviewPending {
+			t.Fatalf("%s: Get = %s (%q, review %q), %v; want approved, the statement in review for %s",
+				tc.kind, got.Status, got.ReviewReason, got.EmploymentReview, err, tc.want)
 		}
 	}
 }

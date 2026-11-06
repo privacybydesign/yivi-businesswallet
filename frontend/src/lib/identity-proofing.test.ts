@@ -125,7 +125,7 @@ import {
   ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
-  latestAddressDecision,
+  latestStepDecision,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -2983,30 +2983,16 @@ describe("progress poll", () => {
     expect(progressPollContinues({ status: "approved" }, null)).toBe(false);
   });
 
-  it("polls an approved session owing its Verzekeringsbericht once the window passed", () => {
+  it("owes the statement only while approved, asked and in its window", () => {
     const until = "2026-10-12T12:00:00Z";
-    const owing = { status: "approved", employmentUntil: until };
     const before = Date.parse(until) - 1000;
     const after = Date.parse(until) + 1000;
-    expect(progressPollContinues(owing, null, before)).toBe(false);
-    expect(progressPollContinues(owing, null, after)).toBe(true);
-    expect(progressPollContinues({ status: "rejected" }, null, after)).toBe(
-      false,
-    );
     expect(
-      progressPollContinues(
-        { status: "needs_review", employmentUntil: until },
-        null,
-        after,
-      ),
+      employmentOwed({ status: "approved", employmentUntil: until }, before),
+    ).toBe(true);
+    expect(
+      employmentOwed({ status: "approved", employmentUntil: until }, after),
     ).toBe(false);
-  });
-
-  it("owes the statement only while approved and asked", () => {
-    const until = "2026-10-12T12:00:00Z";
-    expect(employmentOwed({ status: "approved", employmentUntil: until })).toBe(
-      true,
-    );
     expect(employmentOwed({ status: "approved" })).toBe(false);
     expect(
       employmentOwed({ status: "needs_review", employmentUntil: until }),
@@ -3331,7 +3317,7 @@ describe("hosted page languages", () => {
   });
 });
 
-describe("latestAddressDecision", () => {
+describe("latestStepDecision", () => {
   const event = (over: Partial<AuditEvent>): AuditEvent => ({
     id: "e",
     occurredAt: "2026-10-29T10:00:00Z",
@@ -3345,15 +3331,18 @@ describe("latestAddressDecision", () => {
   });
 
   it("is the last address decision, with its reason", () => {
-    const got = latestAddressDecision([
-      event({ id: "a", metadata: { after: { reason: "first" } } }),
-      event({ id: "x", action: "identity_proofing.result_read" }),
-      event({
-        id: "b",
-        occurredAt: "2026-10-29T11:00:00Z",
-        metadata: { after: { addressReview: "rejected", reason: "moved" } },
-      }),
-    ]);
+    const got = latestStepDecision(
+      [
+        event({ id: "a", metadata: { after: { reason: "first" } } }),
+        event({ id: "x", action: "identity_proofing.result_read" }),
+        event({
+          id: "b",
+          occurredAt: "2026-10-29T11:00:00Z",
+          metadata: { after: { addressReview: "rejected", reason: "moved" } },
+        }),
+      ],
+      "address",
+    );
     expect(got).toEqual({
       by: null,
       at: "2026-10-29T11:00:00Z",
@@ -3363,9 +3352,21 @@ describe("latestAddressDecision", () => {
 
   it("has no reason where the backend left it out, and none without a decision", () => {
     expect(
-      latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
+      latestStepDecision([event({ metadata: { after: {} } })], "address")
+        ?.reason,
     ).toBeUndefined();
-    expect(latestAddressDecision([])).toBeUndefined();
+    expect(latestStepDecision([], "address")).toBeUndefined();
+  });
+
+  it("is the step's own review item decision", () => {
+    const item = (kind: string, reason: string): AuditEvent =>
+      event({
+        action: "identity_proofing.review_item_decided",
+        metadata: { after: { kind, state: "rejected", reason } },
+      });
+    const events = [item("employment", "benefit"), item("address", "moved")];
+    expect(latestStepDecision(events, "employment")?.reason).toBe("benefit");
+    expect(latestStepDecision(events, "address")?.reason).toBe("moved");
   });
 });
 

@@ -157,47 +157,54 @@ func TestAddEmploymentKeepsOnce(t *testing.T) {
 	}
 }
 
-// No current job sends the approved request to review, which the wallet
-// decides itself: the engine approved the session and holds no review.
+// No current job opens the statement's own review: the session stays
+// approved, and the reviewer's decision settles only the step.
 func TestNoJobGoesToReview(t *testing.T) {
-	for _, want := range []Status{StatusApproved, StatusRejected} {
-		checkNoJobReviewDecided(t, want)
+	for _, confirm := range []bool{true, false} {
+		checkNoJobReviewDecided(t, confirm)
 	}
 }
 
 // checkNoJobReviewDecided keeps a statement without a job, then decides the
-// review it opens to want, in the wallet alone.
-func checkNoJobReviewDecided(t *testing.T, want Status) {
+// review item it opens, confirming it or not.
+func checkNoJobReviewDecided(t *testing.T, confirm bool) {
 	t.Helper()
-	approve := want == StatusApproved
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
 	verdict, err := e.upload(req, "no job")
 	if err != nil || verdict.Employment == nil || verdict.Employment.Employed {
 		t.Fatalf("a statement without a job = %+v, %v; want it kept, not employed", verdict, err)
 	}
-	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != ReviewNoCurrentEmployment {
-		t.Fatalf("request = %s (%q), want needs_review for no current employment", got.Status, got.ReviewReason)
+	got := e.requests.stored
+	if got.Status != StatusApproved || got.ReviewReason != ReviewNoCurrentEmployment || got.EmploymentReview != ReviewPending {
+		t.Fatalf("request = %s (%q, review %q), want approved with the statement in review", got.Status, got.ReviewReason, got.EmploymentReview)
 	}
-	if got := e.requests.stored.SubjectEmployment.Relations; len(got) != 1 || got[0].Kind != string(employment.KindBenefit) {
-		t.Errorf("kept relations = %+v, want the WW benefit", got)
+	if steps := got.Steps(time.Now()); len(steps) != 1 || steps[0].State != StepInReview {
+		t.Errorf("steps = %+v, want the employment step in review", steps)
+	}
+	if rel := got.SubjectEmployment.Relations; len(rel) != 1 || rel[0].Kind != string(employment.KindBenefit) {
+		t.Errorf("kept relations = %+v, want the WW benefit", rel)
 	}
 
-	decided, err := e.svc.DecideReview(context.Background(), testOrg.ID, req.ID, "admin@example.org",
-		ReviewInput{Approve: approve, Reason: "checked the player's income"})
+	decided, err := e.svc.DecideReviewItem(context.Background(), testOrg.ID, req.ID, ReviewKindEmployment, "admin@example.org",
+		ReviewItemInput{Confirm: confirm, Reason: "checked the player's income", ReviewerID: uuid.New(), Scope: ReviewScopeAll})
 	if err != nil {
-		t.Fatalf("DecideReview to %s: %v", want, err)
+		t.Fatalf("DecideReviewItem confirm=%v: %v", confirm, err)
 	}
-	if decided.Status != want || len(e.ips.decisions) != 0 {
-		t.Errorf("decided %s with %d engine decisions, want %s decided in the wallet alone", decided.Status, len(e.ips.decisions), want)
+	wantStep, wantCode := StepDone, ""
+	if !confirm {
+		wantStep, wantCode = StepRejected, ErrorEmploymentRejected
 	}
-	if !approve && decided.ErrorCode != ErrorReviewRejected {
-		t.Errorf("a rejection without a code = %q, want %s", decided.ErrorCode, ErrorReviewRejected)
+	steps := decided.Steps(time.Now())
+	if decided.Status != StatusApproved || len(e.ips.decisions) != 0 || len(steps) != 1 ||
+		steps[0].State != wantStep || steps[0].Code != wantCode {
+		t.Errorf("decided %s, steps %+v, %d engine decisions; want approved, the step %s %s, none to the engine",
+			decided.Status, steps, len(e.ips.decisions), wantStep, wantCode)
 	}
 }
 
 // In a paused org nobody can decide the review a statement opens, so it is
-// rejected at once, as an engine review is.
+// rejected at once; the session keeps its outcome.
 func TestNoJobReviewRejectedPaused(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	pauses := withPauses(e.fixture)
@@ -210,16 +217,12 @@ func TestNoJobReviewRejectedPaused(t *testing.T) {
 	if err != nil || verdict.Employment == nil {
 		t.Fatalf("a statement without a job = %+v, %v; want it kept", verdict, err)
 	}
-	if got := e.requests.stored; got.Status != StatusRejected || got.ErrorCode != ErrorOrgPaused {
-		t.Errorf("request = %s (%q), want rejected %s", got.Status, got.ErrorCode, ErrorOrgPaused)
-	}
-	// The wallet rejects it because the org is paused, not the uploader.
-	if got := e.requests.actors; len(got) != 1 || got[0] != "" {
-		t.Errorf("rejection actors = %q, want the wallet's (none)", got)
+	if got := e.requests.stored; got.Status != StatusApproved || got.EmploymentReview != ReviewRejected {
+		t.Errorf("request = %s, review %q; want approved with the statement's review rejected", got.Status, got.EmploymentReview)
 	}
 }
 
-// A current benefit beside a job sends the approved request to review too.
+// A current benefit beside a job sends the statement to review too.
 func TestBenefitGoesToReview(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
@@ -227,8 +230,9 @@ func TestBenefitGoesToReview(t *testing.T) {
 	if err != nil || verdict.Employment == nil || !verdict.Employment.Employed {
 		t.Fatalf("a statement with a job and a benefit = %+v, %v; want it kept, employed", verdict, err)
 	}
-	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != ReviewCurrentBenefit {
-		t.Fatalf("request = %s (%q), want needs_review for a current benefit", got.Status, got.ReviewReason)
+	if got := e.requests.stored; got.Status != StatusApproved || got.ReviewReason != ReviewCurrentBenefit || got.EmploymentReview != ReviewPending {
+		t.Fatalf("request = %s (%q, review %q), want approved with the statement in review for a current benefit",
+			got.Status, got.ReviewReason, got.EmploymentReview)
 	}
 }
 
@@ -255,24 +259,9 @@ func TestEmploymentReviewReason(t *testing.T) {
 	}
 }
 
-// The engine still reports the approval of a session the wallet put in
-// review: reading it must not flip the request back.
-func TestWalletReviewNotReconciled(t *testing.T) {
-	e := newEmploymentFixture(EmploymentRequired)
-	req := sendApprovedAddress(t, e.fixture, time.Minute)
-	if _, err := e.upload(req, "no job"); err != nil {
-		t.Fatal(err)
-	}
-	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
-	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
-	if err != nil || got.Status != StatusNeedsReview || e.requests.stored.Status != StatusNeedsReview {
-		t.Errorf("after a reconcile the request is %s (stored %s), %v; want it still in review", got.Status, e.requests.stored.Status, err)
-	}
-}
-
-// The review a statement opens is an employment review item: decided as one,
-// and refused as the identity's.
-func TestWalletReviewDecidedAsEmploymentItem(t *testing.T) {
+// The statement's review is no review of the session: deciding the identity
+// is refused, deciding the item leaves the session approved.
+func TestEmploymentReviewIsTheStepsOwn(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
 	if _, err := e.upload(req, "no job"); err != nil {
@@ -284,54 +273,55 @@ func TestWalletReviewDecidedAsEmploymentItem(t *testing.T) {
 		t.Fatalf("DecideReviewItem identity = %v; want ErrNotUnderReview", err)
 	}
 	got, err := e.svc.DecideReviewItem(ctx, testOrg.ID, req.ID, ReviewKindEmployment, "rita", in)
-	if err != nil || got.Status != StatusApproved {
-		t.Errorf("DecideReviewItem employment = %s, %v; want approved", got.Status, err)
+	if err != nil || got.Status != StatusApproved || got.EmploymentReview != ReviewConfirmed {
+		t.Errorf("DecideReviewItem employment = %s, review %q, %v; want approved, confirmed", got.Status, got.EmploymentReview, err)
+	}
+	if _, err := e.svc.DecideReviewItem(ctx, testOrg.ID, req.ID, ReviewKindEmployment, "rita", in); !errors.Is(err, ErrNotUnderReview) {
+		t.Errorf("DecideReviewItem again = %v; want ErrNotUnderReview", err)
 	}
 }
 
-// No statement within the window rejects the session: a flow that requires
-// one does not pass without it.
-func TestMissingEmploymentRejects(t *testing.T) {
+// No statement within the window leaves the step not provided: the session
+// keeps the identity's approval.
+func TestMissingEmploymentNotProvided(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		completedAgo time.Duration
 		kept         bool
-		want         Status
+		want         StepState
 	}{
-		{"window still open", EmploymentWindow - time.Minute, false, StatusApproved},
-		// An upload let in at the window's end may still be checked.
-		{"within the grace", EmploymentWindow + employmentSweepGrace - time.Minute, false, StatusApproved},
-		{"grace passed", missingEmploymentDue + time.Minute, false, StatusRejected},
-		{"kept in time", missingEmploymentDue + time.Minute, true, StatusApproved},
+		{"window still open", EmploymentWindow - time.Minute, false, StepOpen},
+		{"window passed", EmploymentWindow + time.Minute, false, StepNotProvided},
+		{"kept in time", EmploymentWindow + time.Minute, true, StepDone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEmploymentFixture(EmploymentRequired)
 			sendApprovedAddress(t, e.fixture, tc.completedAgo)
 			if tc.kept {
-				e.requests.stored.SubjectEmployment = &Employment{Employed: true}
+				added := time.Now().Add(-tc.completedAgo)
+				e.requests.stored.SubjectEmployment, e.requests.stored.EmploymentAddedAt = &Employment{Employed: true}, &added
 			}
 			if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
 				t.Fatalf("ReconcileDue: %v", err)
 			}
 			got := e.requests.stored
-			if got.Status != tc.want {
-				t.Errorf("status = %s, want %s", got.Status, tc.want)
+			steps := got.Steps(time.Now())
+			if got.Status != StatusApproved || len(steps) != 1 || steps[0].State != tc.want {
+				t.Fatalf("status %s, steps %+v; want approved with the step %s", got.Status, steps, tc.want)
 			}
-			if tc.want == StatusRejected && got.ErrorCode != ErrorEmploymentNotProvided {
-				t.Errorf("error code = %q, want %s", got.ErrorCode, ErrorEmploymentNotProvided)
+			if tc.want == StepNotProvided && steps[0].Code != ErrorEmploymentNotProvided {
+				t.Errorf("code = %q, want %s", steps[0].Code, ErrorEmploymentNotProvided)
 			}
 		})
 	}
 }
 
-// A rejection for a missing statement is the wallet's: the engine's approval,
-// read again, leaves it.
-func TestNoStatementNotReconciled(t *testing.T) {
+// A session rejected for a missing statement before the step had its own
+// outcome keeps that rejection: the engine's approval, read again, leaves it.
+func TestNoStatementRejectionNotReconciled(t *testing.T) {
 	e := newEmploymentFixture(EmploymentRequired)
-	sendApprovedAddress(t, e.fixture, missingEmploymentDue+time.Minute)
-	if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	sendApprovedAddress(t, e.fixture, EmploymentWindow+time.Minute)
+	e.requests.stored.Status, e.requests.stored.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
 	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
 	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
 	if err != nil || got.Status != StatusRejected {
@@ -411,25 +401,24 @@ func TestEmploymentRequestNeedsChecker(t *testing.T) {
 }
 
 // The subject gives the statement while the engine reviews their identity,
-// and is not asked again: the engine's approval then settles the request, or
-// opens the wallet's review of the statement right after.
+// and is not asked again: the statement's own review opens at once, and the
+// engine's approval settles the identity beside it.
 func TestEmploymentDuringEngineReview(t *testing.T) {
 	for _, tc := range []struct {
 		statement string
-		want      Status
-		reason    string
+		review    ReviewState
 	}{
-		{"statement", StatusApproved, ""},
-		{"no job", StatusNeedsReview, ReviewNoCurrentEmployment},
+		{"statement", ""},
+		{"no job", ReviewPending},
 	} {
-		t.Run(tc.statement, func(t *testing.T) { checkEmploymentDuringEngineReview(t, tc.statement, tc.want, tc.reason) })
+		t.Run(tc.statement, func(t *testing.T) { checkEmploymentDuringEngineReview(t, tc.statement, tc.review) })
 	}
 }
 
 // checkEmploymentDuringEngineReview keeps statement while the engine reviews
-// the identity, then has the engine approve: the request ends want, for
-// reason, and the sweep finds nothing missing.
-func checkEmploymentDuringEngineReview(t *testing.T, statement string, want Status, reason string) {
+// the identity, then has the engine approve: the request is approved, with
+// the statement's review at review.
+func checkEmploymentDuringEngineReview(t *testing.T, statement string, review ReviewState) {
 	t.Helper()
 	e := newEmploymentFixture(EmploymentRequired)
 	req := sendApprovedAddress(t, e.fixture, time.Minute)
@@ -440,24 +429,14 @@ func checkEmploymentDuringEngineReview(t *testing.T, statement string, want Stat
 	if err != nil || verdict.Employment == nil {
 		t.Fatalf("a statement in the engine's review = %+v, %v; want it kept", verdict, err)
 	}
-	if got := e.requests.stored; got.Status != StatusNeedsReview || got.ReviewReason != "" {
-		t.Fatalf("request = %s (%q), want still the engine's review", got.Status, got.ReviewReason)
+	if got := e.requests.stored; got.Status != StatusNeedsReview || got.EmploymentReview != review {
+		t.Fatalf("request = %s, review %q; want still the engine's review, the statement's %q", got.Status, got.EmploymentReview, review)
 	}
 
 	e.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved, EIDASLevel: eidasSubstantial}
 	got, err := e.svc.tryReconcile(context.Background(), requestTenant(*e.requests.stored), *e.requests.stored)
-	if err != nil || got.Status != want || got.ReviewReason != reason {
-		t.Fatalf("after the engine's approval = %s (%q), %v; want %s (%q)", got.Status, got.ReviewReason, err, want, reason)
-	}
-
-	// The window long past, nothing is missing.
-	past := time.Now().Add(-missingEmploymentDue - time.Minute)
-	e.requests.stored.CheckedAt = &past
-	if _, err := e.svc.ReconcileDue(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if e.requests.stored.Status != want {
-		t.Errorf("after the sweep = %s, want %s", e.requests.stored.Status, want)
+	if err != nil || got.Status != StatusApproved || got.EmploymentReview != review {
+		t.Fatalf("after the engine's approval = %s, review %q, %v; want approved, %q", got.Status, got.EmploymentReview, err, review)
 	}
 }
 

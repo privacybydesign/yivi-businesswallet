@@ -54,22 +54,23 @@ func (s ReviewState) known() bool {
 	return false
 }
 
-// reviewKind is the kind of req's own review (needs_review): the
-// Verzekeringsbericht's when the wallet opened it, a data request's, else the
-// identity's.
+// stepReview is whether kind is an extra step's review, stored as its own
+// item beside the session's outcome.
+func (k ReviewKind) stepReview() bool {
+	return k == ReviewKindAddress || k == ReviewKindEmployment
+}
+
+// reviewKind is the kind of req's own review (needs_review): a data
+// request's, else the identity's.
 func (r Request) reviewKind() ReviewKind {
-	switch {
-	case r.ReviewReason != "":
-		return ReviewKindEmployment
-	case r.FlowKind.dataRequest():
+	if r.FlowKind.dataRequest() {
 		return ReviewKindDataRequest
 	}
 	return ReviewKindIdentity
 }
 
 // sessionReviewKindColumn is Request.reviewKind in SQL.
-const sessionReviewKindColumn = `CASE WHEN r.review_reason IS NOT NULL THEN 'employment'
-		WHEN r.flow_kind IN ('data_access', 'data_erasure') THEN 'data_request' ELSE 'identity' END`
+const sessionReviewKindColumn = `CASE WHEN r.flow_kind IN ('data_access', 'data_erasure') THEN 'data_request' ELSE 'identity' END`
 
 // sessionReviewWaits is a request r whose own review waits, as the Reviews
 // page lists it: it reads needs_review and is not erased. Those review items
@@ -96,12 +97,20 @@ func reviewItemOrder(state ReviewState, k string) string {
 			WHERE i.request_id = r.id AND i.kind = ` + k + `) DESC NULLS LAST, r.created_at DESC`
 }
 
-// addressReviewColumns are the state of r's address item and when it was
-// decided, for Request.AddressReview and AddressReviewedAt.
-const addressReviewColumns = `COALESCE((SELECT i.state FROM identity_proofing_review_items i
-		WHERE i.request_id = r.id AND i.kind = 'address' ORDER BY i.created_at DESC LIMIT 1), ''),
-	(SELECT i.decided_at FROM identity_proofing_review_items i
-		WHERE i.request_id = r.id AND i.kind = 'address' ORDER BY i.created_at DESC LIMIT 1)`
+// latestAddressItem and latestEmploymentItem pick r's latest item of a step.
+const (
+	latestAddressItem = `FROM identity_proofing_review_items i
+		WHERE i.request_id = r.id AND i.kind = 'address' ORDER BY i.created_at DESC LIMIT 1`
+	latestEmploymentItem = `FROM identity_proofing_review_items i
+		WHERE i.request_id = r.id AND i.kind = 'employment' ORDER BY i.created_at DESC LIMIT 1`
+)
+
+// stepReviewColumns are the state of r's address and employment items and
+// when each was decided, for Request's step reviews.
+const stepReviewColumns = `COALESCE((SELECT i.state ` + latestAddressItem + `), ''),
+	(SELECT i.decided_at ` + latestAddressItem + `),
+	COALESCE((SELECT i.state ` + latestEmploymentItem + `), ''),
+	(SELECT i.decided_at ` + latestEmploymentItem + `)`
 
 // openReviewItem opens a pending item of kind on req, due its retention
 // (Request.NameRetention) from now: by then nothing of the session would be
@@ -119,7 +128,8 @@ func openReviewItem(ctx context.Context, q database.Querier, req Request, kind R
 
 // decideReviewItem records a reviewer's decision on req's pending item of
 // kind, audited identity_proofing.review_item_decided with reason. It returns
-// when it was decided: nil, and changes nothing, when none waits.
+// when it was decided: nil, and changes nothing, when none waits. The session
+// keeps its outcome.
 func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier, req Request, kind ReviewKind,
 	reviewerID uuid.UUID, decided ReviewState, reason string,
 ) (*time.Time, error) {
@@ -163,51 +173,66 @@ func clearReviewItems(ctx context.Context, q database.Querier, id uuid.UUID) err
 // audited identity_proofing.review_item_decided with errorReviewLapsed and no
 // actor. The session keeps its outcome. It returns how many it lapsed.
 func (s *RequestStore) LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error) {
-	lapsed := 0
+	return s.closeReviewItems(ctx, `state = 'pending' AND due_at <= $4 ORDER BY due_at LIMIT $5`,
+		ReviewLapsed, errorReviewLapsed, "", now, limit)
+}
+
+// RejectPendingReviewItems rejects every pending item of org with code and
+// reason, as nobody may decide them (a paused org), audited with no actor.
+// The session keeps its outcome.
+func (s *RequestStore) RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error {
+	_, err := s.closeReviewItems(ctx, `state = 'pending' AND organization_id = $4`,
+		ReviewRejected, code, reason, orgID)
+	return err
+}
+
+// closeReviewItems moves the items where (over $4 on) selects to state with
+// code and reason, each audited identity_proofing.review_item_decided, and
+// returns how many it moved.
+func (s *RequestStore) closeReviewItems(ctx context.Context, where string, state ReviewState, code, reason string, args ...any) (int, error) {
+	closed := 0
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		rows, err := q.Query(ctx, `UPDATE identity_proofing_review_items i
-			SET state = 'lapsed', decided_at = now(), error_code = $3
+			SET state = $1, decided_at = now(), error_code = $2, reason = NULLIF($3, '')
 			FROM identity_proofing_requests r
 			WHERE r.id = i.request_id AND i.id IN (
-				SELECT id FROM identity_proofing_review_items
-				WHERE state = 'pending' AND due_at <= $1
-				ORDER BY due_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+				SELECT id FROM identity_proofing_review_items WHERE `+where+` FOR UPDATE SKIP LOCKED)
 			RETURNING i.request_id, i.organization_id, i.kind, r.subject_name, r.subject_email`,
-			now, limit, errorReviewLapsed)
+			append([]any{string(state), code, reason}, args...)...)
 		if err != nil {
-			return fmt.Errorf("proofing: lapse reviews: %w", err)
+			return fmt.Errorf("proofing: close reviews: %w", err)
 		}
-		type lapsedItem struct {
+		type closedItem struct {
 			req  Request
 			kind string
 		}
-		var items []lapsedItem
-		for rows.Next() {
-			var it lapsedItem
-			if err := rows.Scan(&it.req.ID, &it.req.OrganizationID, &it.kind, &it.req.SubjectName, &it.req.SubjectEmail); err != nil {
-				rows.Close()
-				return fmt.Errorf("proofing: scan lapsed review: %w", err)
-			}
-			items = append(items, it)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("proofing: lapse reviews: %w", err)
+		items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (closedItem, error) {
+			var it closedItem
+			err := row.Scan(&it.req.ID, &it.req.OrganizationID, &it.kind, &it.req.SubjectName, &it.req.SubjectEmail)
+			return it, err
+		})
+		if err != nil {
+			return fmt.Errorf("proofing: close reviews: %w", err)
 		}
 		for _, it := range items {
+			after := map[string]any{"kind": it.kind, "state": string(state), "errorCode": code}
+			if reason != "" {
+				after["reason"] = reason
+			}
 			if err := s.audit.Record(ctx, q, audit.IdentityProofingReviewItemDecided,
 				audit.Target{Type: audit.TargetIdentityProofingRequest, ID: it.req.ID.String(), OrgID: &it.req.OrganizationID},
 				audit.Updated(it.req.auditFields(map[string]any{"kind": it.kind, "state": string(ReviewPending)}),
-					it.req.auditFields(map[string]any{"kind": it.kind, "state": string(ReviewLapsed), "errorCode": errorReviewLapsed}))); err != nil {
+					it.req.auditFields(after))); err != nil {
 				return err
 			}
 		}
-		lapsed = len(items)
+		closed = len(items)
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
-	return lapsed, nil
+	return closed, nil
 }
 
 // NextReviewItemDue is when the next pending item is due for
@@ -259,7 +284,7 @@ func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (map[R
 
 // ReviewItemInput is a reviewer's decision on a review item: confirm or
 // reject, for Reason, which is required and audited. ErrorCode is only for
-// rejecting a session's own review (ReviewInput.ErrorCode).
+// rejecting a session's own review (ReviewInput.ErrorCode), never a step's.
 type ReviewItemInput struct {
 	Confirm   bool
 	Reason    string
@@ -273,16 +298,16 @@ type ReviewItemInput struct {
 	OwnAllowed bool
 }
 
-// DecideReviewItem decides request id's waiting item of kind: an address
-// item (DecideAddressReview), or the request's own review of that kind
+// DecideReviewItem decides request id's waiting item of kind: a step's item
+// (decideStepReview), or the request's own review of that kind
 // (DecideReview), so the identity is still decided by the engine. reviewer is
 // the reviewer's name as the engine records it.
 func (s *Service) DecideReviewItem(ctx context.Context, orgID, id uuid.UUID, kind ReviewKind, reviewer string, in ReviewItemInput) (Request, error) {
-	if kind == ReviewKindAddress {
+	if kind.stepReview() {
 		if in.ErrorCode != "" {
-			return Request{}, fmt.Errorf("%w: an address decision takes no error code", ErrInvalidInput)
+			return Request{}, fmt.Errorf("%w: a step's decision takes no error code", ErrInvalidInput)
 		}
-		return s.DecideAddressReview(ctx, orgID, id, AddressReviewInput{
+		return s.decideStepReview(ctx, orgID, id, kind, StepReviewInput{
 			Confirm: in.Confirm, Reason: in.Reason, ReviewerID: in.ReviewerID, Scope: in.Scope, OwnAllowed: in.OwnAllowed,
 		})
 	}

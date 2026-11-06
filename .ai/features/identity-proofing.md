@@ -1386,22 +1386,28 @@ overview count what waits).
 decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 `state` (`pending`, `confirmed`, `rejected`, `lapsed`).
 - **Stored** in `identity_proofing_review_items` (migration `20261105120000`):
-  only the address today (§16). At most one pending item per request and kind.
+  the extra steps' reviews, the address (§16) and the Verzekeringsbericht
+  (§17). At most one pending item per request and kind.
   - `due_at` is the request's retention (`NameRetention`) from when it opened.
     `ReconcileDue` lapses a pending one past it (`LapseReviewItems`, wakes at
     `NextReviewItemDue`): `lapsed`, `REVIEW_LAPSED`, audited with no actor.
-    The session keeps its outcome; settling it is YIV-503.
+    The session keeps its outcome.
+  - A paused org rejects its pending items with `ORG_PAUSED`
+    (`RejectPendingReviewItems`, from `rejectOpenReviews`), and one opened
+    while it is paused at once (`rejectStepReviewsIfPaused`), so no review
+    stays open under a pause (§8).
   - `Purge` deletes the pending items and the reasons of the decided ones.
 - **A request's own review** (`needs_review`) is an item too, read from the
   request, never stored (`sessionReviewKindColumn`, `Request.reviewKind`):
-  `employment` with a `reviewReason`, `data_request` for a data request,
-  `identity` otherwise. It waits while the request reads `needs_review` and is
+  `data_request` for a data request, `identity` otherwise. It waits while the request reads `needs_review` and is
   not erased (`sessionReviewWaits`).
 - `POST .../requests/{id}/review-items/{kind}` `{decision: confirm|reject,
-  reason, errorCode?}` (`DecideReviewItem`): an address goes to
-  `DecideAddressReview` (no `errorCode`); the other kinds to `DecideReview`
-  with `ReviewInput.Kind`, 409 `not_under_review` when the request's review is
-  of another kind. `.../review` still decides a request's own review.
+  reason, errorCode?}` (`DecideReviewItem`): a step's item goes to
+  `decideStepReview` (no `errorCode`; webhook `session.address_reviewed` for
+  the address, `session.step_reviewed` for another step); `identity` and
+  `data_request` to `DecideReview` with `ReviewInput.Kind`, 409
+  `not_under_review` when the request's review is of another kind.
+  `.../review` still decides a request's own review.
 - `GET .../review-items/counts` (`ReviewCounts`): every kind's waiting items,
   0 for none. The sidebar and the tabs read it (`useReviewItemCountsQuery`), so
   a count is never capped.
@@ -2381,40 +2387,53 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   would have their June job read as current.
   - `employed` (`Statement.Employed`): a current relation that is not a
     benefit.
-- **No current job, a current benefit, or other income goes to review.** A kept statement
-  moves the approved request to `needs_review` in the same transaction
-  (`openWalletReview`), audited `identity_proofing.needs_review` and webhook
-  `session.review_opened`, with `review_reason` (`Employment.reviewReason`):
+- **No current job, a current benefit, or other income goes to review**, as
+  the step's own: an `employment` review item (§9), opened with the statement
+  in the same transaction, with `review_reason` (`Employment.reviewReason`).
+  The session keeps the identity's outcome (migration `20261106090000` moved
+  the sessions the wallet still held in `needs_review` for it back to
+  `approved`, each with a pending item).
   - `no_current_employment`: `employed: false`;
   - `current_benefit`: a job, and a current `benefit` relation beside it;
   - `current_other_income`: a job, and a current `other_income` relation
     beside it (no `benefit`).
-  - A statement kept while the engine still reviews the identity opens no
-    review then: `recordOutcome` opens it once the engine approves, in the
-    same transaction (`reviewKeptEmployment` then rejects it at once in a
-    paused org).
-  - In a paused org a review the statement opens is rejected at once, as the
-    wallet's decision (no actor), not the uploader's.
-  - The engine approved and still reports the approval, so the review is the
-    wallet's alone: `tryReconcile` skips such a request, `RecordOutcome`
-    refuses it (`review_reason IS NOT NULL`), and `DecideReview` decides it
-    in the wallet (`decideWalletReview`, `RecordWalletOutcome`) without the
-    engine. A rejection without a code is `MANUAL_REVIEW_REJECTED`.
-    `lapseReview` rejects an undecided one the same way.
-  - The org's webhook gets `session.verified`, then `session.review_opened`,
-    then the decision. `reviewReason` is in the request responses and the
-    public API result; the review panel names it.
-- **No statement in time is a rejection.** An approved request on a flow that
-  requires the step, with no statement kept within `EmploymentWindow` of the
-  check, is rejected `EMPLOYMENT_NOT_PROVIDED` (`RejectMissingEmployment`, run
-  by `ReconcileDue`, which wakes at `NextMissingEmployment`), audited
-  `identity_proofing.rejected`, webhook `session.failed`.
-  - It is due `employmentSweepGrace` after the window: the longest check (two
-    OCSP lookups, then a PDFium read) of an upload let in at the window's end,
-    so that upload is kept first.
-  - One still in the engine's review is due once the engine approves it.
-  - A refused upload does not count. Reconcile leaves the rejection: the
-    engine still reports the approval.
+  - A statement kept while the engine still reviews the identity opens its
+    item at once; the engine's approval settles only the identity.
+  - Decided on the Reviews page (`routes/employment-review.tsx`) through
+    `.../review-items/employment`: audited `review_item_decided`, webhook
+    `session.step_reviewed`. Confirmed is done, rejected is
+    `EMPLOYMENT_REJECTED`, a lapse `REVIEW_LAPSED`; none changes the session.
+  - A reviewer who reaches the request only for it sees the employment, never
+    the proofed name or diplomas (`onlyStepReviews`).
+- **No statement in time is the step's, not the session's.** Once
+  `EmploymentWindow` passed without a statement kept, the step reads
+  `not_provided` (`EMPLOYMENT_NOT_PROVIDED`), read from the request, nothing
+  written. Sessions rejected `EMPLOYMENT_NOT_PROVIDED` before the step had
+  its own outcome keep it, and reconcile leaves them.
+- **Steps** (`steps.go`): `Request.Steps` reads each extra step's outcome
+  (`not_started`, `open`, `done`, `in_review`, `rejected`, `not_provided`,
+  with `until`, `code` and `reviewed` for one a reviewer accepted) from its
+  data and its review item.
+  - Registered (`extraSteps`), in page order: address (`AddressAddedAt`),
+    diplomas (`DiplomasAddedAt`, the first extract's `created_at`, read),
+    Verzekeringsbericht.
+  - None once purged: the purge erased what they read.
+  - Sent as `steps` in the request responses, the public API result and
+    every webhook's data.
+    `session.verified` and `session.review_opened` carry them `open`: the
+    event's copy takes the new status and `checked_at` (`RecordOutcome`).
+  - `steps_integration_test.go` holds a test per address and diploma path.
+- **Sessions page** (`SessionParts`, `lib/session-parts.ts`): the row shows the
+  identity status and one summary line naming only the steps it is about
+  (`SessionSummaryLine`); the opened session lists every step. A session with
+  steps shows its identity and each step in the same words (To review,
+  Done, Accepted, Rejected, Review lapsed, Not provided, Waiting for the
+  person), under one summary:
+  - Needs review: the identity or any step waits;
+  - In progress / Incomplete / Complete for an approved identity.
+  - Plain text, not chips (`ui/status-text.test.ts`). An admin's detail
+    links a step to review.
+- **Stored** of a kept statement:
   - Per current relation the employer (`UWV` for a benefit), payroll tax
     number (none for a benefit), contract form, since when (its first month)
     and its newest month, blocks of one relation across
@@ -2438,8 +2457,7 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     - `SaveFlowEmployment` to `required`;
     - an upload;
     - a request on a flow already set to `required` (`CreateRequest`), before
-      its subject starts: they could not upload, and the sweep would reject
-      them an hour later.
+      its subject starts: they could not upload.
   - `off` is the way to run `DIPLOMA_TRUST_SOURCE=pinned`; `uwv` with it is
     refused at startup.
 - **The page** runs the steps once the identity check finished (approved, or
@@ -2448,13 +2466,10 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - An accepted statement stays on screen (date, seal valid, each employer and
     its months) until the subject continues, as the diploma step does; the
     upload does not refetch the progress, which would skip past it.
-  - On continuing, the page re-reads the progress and settles and hands back
-    only what that read returns (`employmentOwed`): a kept statement may have
-    opened a review.
-  - Once the window closed without one, the progress keeps polling until the
-    sweep's rejection lands (`progressPollContinues`), and the step holds its
-    Continue until then, so `approved` is never handed back for a session
-    about to be rejected.
+  - On continuing, the page re-reads the progress and hands back what that
+    read returns. The step is owed only while its window is open
+    (`employmentOwed`); once it closed, Continue goes to the outcome, which the
+    statement never changes.
 
 ## 18. Document photo (ID scan)
 

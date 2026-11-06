@@ -706,7 +706,7 @@ export const nl: Translation<typeof en> = {
     },
     employment: {
       overview: {
-        label: "Arbeidsverleden",
+        label: "Verzekeringsbericht",
         detail:
           "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
       },
@@ -735,11 +735,11 @@ export const nl: Translation<typeof en> = {
       benefit: "(uitkering)",
       otherIncome: "(ander inkomen)",
       review:
-        "Er staat geen huidige baan in. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat geen huidige baan in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reviewBenefit:
-        "Er staat een lopende uitkering in. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat een lopende uitkering in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reviewOtherIncome:
-        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reasons: {
         notAStatement:
           "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
@@ -845,7 +845,7 @@ export const nl: Translation<typeof en> = {
         session: "Scan de QR-code",
         address: "Adres",
         diplomas: "Diploma",
-        employment: "Arbeidsverleden",
+        employment: "Verzekeringsbericht",
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
@@ -1084,7 +1084,6 @@ export const nl: Translation<typeof en> = {
       address: {
         title: "Adres",
         none: "Geen adres ingevuld.",
-        missing: "Geen adres",
         declared:
           "Zelf opgegeven: zoals de persoon het invulde, niet gecontroleerd tegen een document.",
         verified:
@@ -1119,15 +1118,11 @@ export const nl: Translation<typeof en> = {
       diplomas: {
         title: "Diploma's",
         none: "Geen diploma toegevoegd.",
-        tag_one: "{{count}} diploma",
-        tag_other: "{{count}} diploma's",
-        missing: "Geen diploma",
         number: "DUO-nummer {{number}}",
       },
       employment: {
-        title: "Huidig dienstverband",
+        title: "Verzekeringsbericht",
         none: "Geen Verzekeringsbericht geüpload.",
-        missing: "Geen arbeidsverleden",
         statementDate: "Verzekeringsbericht van {{date}}",
         noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
         employed: "Heeft nu werk: ja",
@@ -1138,6 +1133,40 @@ export const nl: Translation<typeof en> = {
         period: "sinds {{from}}, laatst aangegeven {{to}}",
         source:
           "Uit het Verzekeringsbericht van UWV, gecontroleerd op het zegel van UWV en op de geverifieerde naam en geboortedatum. Alleen het dienstverband dat op de datum van het bericht loopt wordt bewaard.",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over het Verzekeringsbericht beslist. De identiteitscontrole verandert niet.",
+          confirmed:
+            "Een beoordelaar heeft het Verzekeringsbericht geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft het Verzekeringsbericht afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het Verzekeringsbericht op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
+      },
+      parts: {
+        identity: "Identiteit",
+        kinds: {
+          address: "Adres",
+          diplomas: "Diploma",
+          employment: "Verzekeringsbericht",
+        },
+        state: {
+          not_started: "Niet gestart",
+          open: "Wacht op de persoon",
+          to_review: "Te beoordelen",
+          done: "Klaar",
+          accepted: "Geaccepteerd",
+          rejected: "Afgewezen",
+          lapsed: "Beoordeling verlopen",
+          not_provided: "Niet aangeleverd",
+        },
+        summary: {
+          needs_review: "Beoordeling nodig",
+          in_progress: "Bezig",
+          incomplete: "Onvolledig",
+          complete: "Compleet",
+        },
       },
       purged: "Persoonsgegevens gewist",
       purgedSubject: "Gewist",
@@ -1324,6 +1353,20 @@ export const nl: Translation<typeof en> = {
       emptyClosed: "Er is nog niets afgehandeld.",
       identityCheck: "Identiteitscontrole",
       addressCheck: "Adres",
+      employmentCheck: "Verzekeringsbericht",
+      employment: {
+        title: "Verzekeringsbericht beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        checkTitle: "Identiteitscontrole",
+        checkHint:
+          "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het Verzekeringsbericht.",
+        decisionTitle: "Besluit",
+        confirm: "Verzekeringsbericht accepteren",
+        reject: "Verzekeringsbericht afwijzen",
+        confirmed: "Het Verzekeringsbericht is geaccepteerd.",
+        rejected: "Het Verzekeringsbericht is afgewezen.",
+        lapsed: "Niemand heeft het Verzekeringsbericht op tijd beoordeeld.",
+      },
       address: {
         title: "Adres beoordelen",
         whyTitle: "Waarom dit op jou wacht",
@@ -1372,6 +1415,9 @@ export const nl: Translation<typeof en> = {
         confirmed: "Adres bevestigd",
         addressRejected: "Adres afgewezen",
         addressLapsed: "Adresbeoordeling verlopen",
+        employmentConfirmed: "Verzekeringsbericht geaccepteerd",
+        employmentRejected: "Verzekeringsbericht afgewezen",
+        employmentLapsed: "Beoordeling Verzekeringsbericht verlopen",
       },
       footer:
         "Beheerders en leden met het recht om te beoordelen zien deze pagina.",

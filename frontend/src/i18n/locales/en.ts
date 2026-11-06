@@ -683,7 +683,7 @@ export const en = {
     },
     employment: {
       overview: {
-        label: "Employment history",
+        label: "Verzekeringsbericht",
         detail:
           "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
       },
@@ -712,11 +712,11 @@ export const en = {
       benefit: "(benefit)",
       otherIncome: "(other income)",
       review:
-        "It lists no current job. The organisation reviews your check before a decision.",
+        "It lists no current job. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reviewBenefit:
-        "It lists a current benefit. The organisation reviews your check before a decision.",
+        "It lists a current benefit. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reviewOtherIncome:
-        "It lists other current income, paid without hours worked. The organisation reviews your check before a decision.",
+        "It lists other current income, paid without hours worked. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reasons: {
         notAStatement:
           "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
@@ -821,7 +821,7 @@ export const en = {
         session: "Scan the QR code",
         address: "Address",
         diplomas: "Diploma",
-        employment: "Employment",
+        employment: "Verzekeringsbericht",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -1055,7 +1055,6 @@ export const en = {
       address: {
         title: "Address",
         none: "No address entered.",
-        missing: "No address",
         declared:
           "Self-declared: as the person entered it, not checked against a document.",
         verified:
@@ -1090,15 +1089,11 @@ export const en = {
       diplomas: {
         title: "Diplomas",
         none: "No diploma added.",
-        tag_one: "{{count}} diploma",
-        tag_other: "{{count}} diplomas",
-        missing: "No diploma",
         number: "DUO number {{number}}",
       },
       employment: {
-        title: "Current employment",
+        title: "Verzekeringsbericht",
         none: "No Verzekeringsbericht uploaded.",
-        missing: "No employment history",
         statementDate: "Verzekeringsbericht of {{date}}",
         noRelations: "No current employment or benefit in UWV's records",
         employed: "Currently employed: yes",
@@ -1109,6 +1104,39 @@ export const en = {
         period: "since {{from}}, last reported {{to}}",
         source:
           "From UWV's Verzekeringsbericht, checked against UWV's seal and the verified name and date of birth. Only the employment current on the statement's date is kept.",
+        review: {
+          pending:
+            "Waiting for a reviewer to decide on the Verzekeringsbericht. The identity check is not affected.",
+          confirmed: "A reviewer accepted the Verzekeringsbericht.",
+          rejected:
+            "A reviewer rejected the Verzekeringsbericht. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the Verzekeringsbericht in time. The identity check is not affected.",
+        },
+      },
+      parts: {
+        identity: "Identity",
+        kinds: {
+          address: "Address",
+          diplomas: "Diploma",
+          employment: "Verzekeringsbericht",
+        },
+        state: {
+          not_started: "Not started",
+          open: "Waiting for the person",
+          to_review: "To review",
+          done: "Done",
+          accepted: "Accepted",
+          rejected: "Rejected",
+          lapsed: "Review lapsed",
+          not_provided: "Not provided",
+        },
+        summary: {
+          needs_review: "Needs review",
+          in_progress: "In progress",
+          incomplete: "Incomplete",
+          complete: "Complete",
+        },
       },
       purged: "Personal data purged",
       purgedSubject: "Purged",
@@ -1292,6 +1320,20 @@ export const en = {
       emptyClosed: "Nothing has been closed yet.",
       identityCheck: "Identity check",
       addressCheck: "Address",
+      employmentCheck: "Verzekeringsbericht",
+      employment: {
+        title: "Review a Verzekeringsbericht",
+        whyTitle: "Why this waits for you",
+        checkTitle: "Identity check",
+        checkHint:
+          "The identity check itself is approved. Your decision only concerns the Verzekeringsbericht.",
+        decisionTitle: "Decision",
+        confirm: "Accept Verzekeringsbericht",
+        reject: "Reject Verzekeringsbericht",
+        confirmed: "The Verzekeringsbericht was accepted.",
+        rejected: "The Verzekeringsbericht was rejected.",
+        lapsed: "Nobody reviewed the Verzekeringsbericht in time.",
+      },
       address: {
         title: "Review an address",
         whyTitle: "Why this waits for you",
@@ -1336,6 +1378,9 @@ export const en = {
         confirmed: "Address confirmed",
         addressRejected: "Address rejected",
         addressLapsed: "Address review lapsed",
+        employmentConfirmed: "Verzekeringsbericht accepted",
+        employmentRejected: "Verzekeringsbericht rejected",
+        employmentLapsed: "Verzekeringsbericht review lapsed",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",

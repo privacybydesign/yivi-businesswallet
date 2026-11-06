@@ -472,13 +472,7 @@ describe("wallet review reasons mirror the backend", () => {
 });
 
 describe("checkReviewReason", () => {
-  it("prefers the wallet's reason, then the flow's, else the engine's", () => {
-    expect(
-      checkReviewReason({
-        reviewReason: "current_benefit",
-        flowAlwaysReview: true,
-      }),
-    ).toBe("current_benefit");
+  it("reads the flow's reason, else the engine's", () => {
     expect(checkReviewReason({ flowAlwaysReview: true })).toBe("alwaysReview");
     expect(checkReviewReason({ flowAlwaysReview: false })).toBeUndefined();
     expect(checkReviewReason({})).toBeUndefined();

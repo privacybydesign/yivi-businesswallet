@@ -59,7 +59,7 @@ func assertAddressItemLapsed(t *testing.T, pool *pgxpool.Pool, requests *Request
 		audit.IdentityProofingReviewItemDecided).Scan(&lapsedCode); err != nil || lapsedCode != errorReviewLapsed {
 		t.Errorf("review_item_decided errorCode = %q, %v; want %s", lapsedCode, err, errorReviewLapsed)
 	}
-	if at, err := requests.DecideAddressReview(ctx, pending, reviewer, AddressReviewConfirmed, "Too late"); err != nil || at != nil {
+	if at, err := requests.DecideStepReview(ctx, pending, ReviewKindAddress, reviewer, AddressReviewConfirmed, "Too late"); err != nil || at != nil {
 		t.Errorf("DecideAddressReview after the lapse = %v, %v; want refused", at, err)
 	}
 	if next, err := requests.NextReviewItemDue(ctx); err != nil || !next.IsZero() {
@@ -117,7 +117,7 @@ func TestPurgeClearsReviewItems(t *testing.T) {
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
 	decided := storeSelfDeclaredAddress(t, requests, orgID, sam, "s1")
-	if at, err := requests.DecideAddressReview(ctx, decided, sam, AddressReviewRejected, "Anna lives elsewhere"); err != nil || at == nil {
+	if at, err := requests.DecideStepReview(ctx, decided, ReviewKindAddress, sam, AddressReviewRejected, "Anna lives elsewhere"); err != nil || at == nil {
 		t.Fatalf("DecideAddressReview = %v, %v; want decided", at, err)
 	}
 	if err := requests.Purge(ctx, decided, nil); err != nil {
