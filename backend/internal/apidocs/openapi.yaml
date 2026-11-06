@@ -13776,6 +13776,11 @@ components:
         employmentGiven:
           type: boolean
           description: A Verzekeringsbericht of the subject was kept.
+        steps:
+          type: array
+          description: Where each of the flow's extra steps stands, which the end screen tells the person. Empty for a flow without them.
+          items:
+            $ref: '#/components/schemas/ProofingStep'
         documentScan:
           type: string
           enum: [pending, done]

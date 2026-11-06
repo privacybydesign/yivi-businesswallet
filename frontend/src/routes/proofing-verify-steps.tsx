@@ -42,6 +42,7 @@ import type {
   ProofingAppMethod,
   ProofingMethod,
   ProofingProgress,
+  ProofingStep,
   ProofingYiviStart,
   VerifyTarget,
 } from "../api/identity-proofing";
@@ -79,11 +80,23 @@ import { useDateFormatter, useMonthFormatter } from "../lib/format-when";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { legalReasonIn } from "../lib/legal-retention";
 import {
+  PERSON_STEP_TONES,
+  isPartKind,
+  personStepState,
+} from "../lib/session-parts";
+import {
   YIVI_APP_STORE_URL,
   YIVI_PLAY_STORE_URL,
   yiviUniversalLink,
 } from "../lib/yivi-universal-link";
-import { Button, DataDisclosure, Icon, Input, Outcome } from "../ui";
+import {
+  Button,
+  DataDisclosure,
+  Icon,
+  Input,
+  Outcome,
+  StatusText,
+} from "../ui";
 import type { DataDisclosureItem, IconName } from "../ui";
 
 // The steps an external person goes through to be verified, shared by the
@@ -2007,6 +2020,34 @@ function LegalRetentionOutcome({
   );
 }
 
+// Each extra step on the person's end screen, as whether the org has it.
+function PersonSteps({
+  steps,
+}: Readonly<{ steps?: ProofingStep[] }>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (!steps?.length) {
+    return null;
+  }
+  return (
+    <ul className="mt-4 flex flex-col gap-1 text-[13.5px]">
+      {steps.map((step) => {
+        const state = personStepState(step);
+        return (
+          <li key={step.kind}>
+            {isPartKind(step.kind)
+              ? t(`identityProofing.onScreen.outcome.steps.kinds.${step.kind}`)
+              : step.kind}{" "}
+            ·{" "}
+            <StatusText tone={PERSON_STEP_TONES[state]}>
+              {t(`identityProofing.onScreen.outcome.steps.state.${state}`)}
+            </StatusText>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function SessionOutcome({
   progress,
   actions,
@@ -2052,6 +2093,7 @@ function SessionOutcome({
           icon="valid"
           title={t("identityProofing.onScreen.outcome.approved.title")}
           message={t("identityProofing.onScreen.outcome.approved.message")}
+          details={<PersonSteps steps={progress.steps} />}
           action={actions}
         />
       );
@@ -2078,6 +2120,7 @@ function SessionOutcome({
           icon="time"
           title={t("identityProofing.onScreen.outcome.review.title")}
           message={t("identityProofing.onScreen.outcome.review.message")}
+          details={<PersonSteps steps={progress.steps} />}
           action={actions}
         />
       );

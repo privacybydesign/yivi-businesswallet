@@ -1414,6 +1414,8 @@ export interface ProofingProgress {
   documentScan?: "pending" | "done";
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone?: boolean;
+  // Where each of the flow's extra steps stands.
+  steps?: ProofingStep[];
 }
 
 export function startProofingYivi(
@@ -1588,6 +1590,7 @@ const hostedProgressSchema = z.object({
   documentScan: documentScanSchema,
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone: z.boolean().optional(),
+  steps: z.array(proofingStepSchema).optional(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.

@@ -2436,6 +2436,13 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - In progress / Incomplete / Complete for an approved identity.
   - Plain text, not chips (`ui/status-text.test.ts`). An admin's detail
     links a step to review.
+- **Overview page:** a finished session shows the same summary line under its
+  result (`SessionSummaryLine`, in `proofing-ui.tsx`).
+- **The person's end screen** (`PersonSteps`, approved or in review): a line
+  per step, read by `personStepState`:
+  - Received (done, accepted, or a review that lapsed);
+  - Being checked, Not accepted, Not received, Still to do.
+  - The hosted status carries `steps` for it.
 - **Stored** of a kept statement:
   - Per current relation the employer (`UWV` for a benefit), payroll tax
     number (none for a benefit), contract form, since when (its first month)

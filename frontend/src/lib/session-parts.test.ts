@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { partState, sessionSummary, summaryKinds } from "./session-parts";
+import {
+  partState,
+  personStepState,
+  sessionSummary,
+  summaryKinds,
+} from "./session-parts";
 
 describe("partState", () => {
   it("reads every step in the same words", () => {
@@ -76,5 +81,29 @@ describe("summaryKinds", () => {
     expect(summaryKinds({ steps }, "needs_review")).toEqual(["employment"]);
     expect(summaryKinds({ steps }, "incomplete")).toEqual(["diplomas"]);
     expect(summaryKinds({ steps }, "complete")).toEqual([]);
+  });
+});
+
+describe("personStepState", () => {
+  it("tells the person whether the org has each step", () => {
+    const cases = [
+      [{ kind: "address", state: "done" }, "received"],
+      [{ kind: "employment", state: "done", reviewed: true }, "received"],
+      [
+        { kind: "address", state: "rejected", code: "REVIEW_LAPSED" },
+        "received",
+      ],
+      [{ kind: "address", state: "in_review" }, "checking"],
+      [
+        { kind: "address", state: "rejected", code: "ADDRESS_REJECTED" },
+        "rejected",
+      ],
+      [{ kind: "diplomas", state: "not_provided" }, "missing"],
+      [{ kind: "diplomas", state: "open" }, "open"],
+      [{ kind: "diplomas", state: "not_started" }, "open"],
+    ] as const;
+    for (const [step, want] of cases) {
+      expect(personStepState(step)).toBe(want);
+    }
   });
 });
