@@ -218,11 +218,15 @@ func (f *fakeRequests) RecordResultRead(context.Context, Request) error {
 	return nil
 }
 
-func (f *fakeRequests) Purge(ctx context.Context, _ Request, endSession func(context.Context) error) error {
+func (f *fakeRequests) Purge(ctx context.Context, req Request, endSession func(context.Context) error) error {
 	if endSession != nil {
 		if err := endSession(ctx); err != nil {
 			return err
 		}
+	}
+	// A matched session's purge leaves the stored request alone.
+	if f.stored == nil || f.stored.ID != req.ID {
+		return nil
 	}
 	now := time.Now()
 	f.stored.PurgedAt, f.stored.ProofedName = &now, ""

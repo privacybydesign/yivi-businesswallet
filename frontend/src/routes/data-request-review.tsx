@@ -209,6 +209,7 @@ function ReviewBody({
           request={request}
           ticked={ticked}
           kept={matches.length - ticked.length}
+          erased={matches.filter((m) => m.purgedAt !== undefined).length}
         />
       ) : (
         <ClosedAside slug={slug} request={request} />
@@ -468,12 +469,14 @@ function DataDecision({
   request,
   ticked,
   kept,
+  erased,
 }: Readonly<{
   slug: string;
   kind: DataRequestKind;
   request: ProofingRequest;
   ticked: string[];
   kept: number;
+  erased: number;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -511,7 +514,9 @@ function DataDecision({
             t(
               decision === "approve"
                 ? "identityProofing.reviews.dataRequest.decision.approved"
-                : "identityProofing.reviews.dataRequest.decision.rejected",
+                : erased > 0
+                  ? "identityProofing.reviews.dataRequest.decision.restKept"
+                  : "identityProofing.reviews.dataRequest.decision.rejected",
             ),
           );
           void navigate(reviewPath(slug));
@@ -552,6 +557,13 @@ function DataDecision({
               count: kept,
             })}
         </p>
+        {erased > 0 && (
+          <p className="text-[13.5px]">
+            {t("identityProofing.reviews.dataRequest.decision.erasedAlready", {
+              count: erased,
+            })}
+          </p>
+        )}
         <div className="flex flex-col gap-1.5">
           <label htmlFor={fieldId} className={REVIEW_FIELD_LABEL}>
             {t("identityProofing.reviews.dataRequest.decision.reason")}

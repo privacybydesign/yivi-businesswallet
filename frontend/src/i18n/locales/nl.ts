@@ -1540,6 +1540,10 @@ export const nl: Translation<typeof en> = {
             "Open de gegevens van {{count}} controles om te downloaden.",
           kept_one: "De andere {{count}} blijft.",
           kept_other: "De andere {{count}} blijven.",
+          erasedAlready_one:
+            "{{count}} controle is al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
+          erasedAlready_other:
+            "{{count}} controles zijn al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
           reason: "Reden",
           reasonHint:
             "Verplicht. Wordt met jouw naam in het auditlogboek bewaard.",
@@ -1554,6 +1558,7 @@ export const nl: Translation<typeof en> = {
             "De persoonsgegevens in de controles die je hebt aangevinkt, en in dit verzoek, worden direct verwijderd en kunnen niet worden hersteld. De controles blijven als vastlegging zonder die gegevens.",
           approved: "Het verzoek is goedgekeurd.",
           rejected: "Het verzoek is afgewezen.",
+          restKept: "De rest blijft bewaard.",
         },
       },
     },
@@ -2057,9 +2062,9 @@ export const nl: Translation<typeof en> = {
       },
       erased: "Je gegevens zijn verwijderd.",
       erasedPartly_one:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen. Dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       erasedPartly_other:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen. Die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       keptByLaw_one:
         "{{count}} identiteitscontrole wordt bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna wordt ze verwijderd.",
       keptByLaw_other:

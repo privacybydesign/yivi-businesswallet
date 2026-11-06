@@ -386,6 +386,11 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 	if err != nil {
 		return Request{}, err
 	}
+	if refusesPartlyErased(req.FlowKind, in, matches) {
+		// The sure matches are gone already: the person must hear that, so a
+		// reviewer's refusal keeps the rest instead.
+		in = ReviewInput{Approve: true, RequestIDs: []uuid.UUID{}, Reason: in.Reason}
+	}
 
 	approved := []uuid.UUID{}
 	if in.Approve {
@@ -653,6 +658,16 @@ func withPurgedMatches(approved []uuid.UUID, matches []DataMatch) []uuid.UUID {
 		}
 	}
 	return approved
+}
+
+// refusesPartlyErased reports a reviewer's refusal of an erasure whose sure
+// matches an automatic erasure purged already. A refusal the wallet makes on
+// its own (a pause, the legal retention) keeps its code.
+func refusesPartlyErased(kind FlowKind, in ReviewInput, matches []DataMatch) bool {
+	if kind != FlowDataErasure || in.Approve || (in.ErrorCode != "" && !slices.Contains(reviewerRejectCodes, in.ErrorCode)) {
+		return false
+	}
+	return slices.ContainsFunc(matches, func(m DataMatch) bool { return m.PurgedAt != nil && sureMatch(m.Level) })
 }
 
 // sureMatch reports a match level that is the requester's for certain: the
