@@ -154,8 +154,8 @@ func checkItems(fd *flow.FlowDefinition, check flow.Check, req appResultRequest,
 		}
 		return []assuranceItem{{State: checkStateFail}}
 	default:
-		// A check nothing here computes (mrz.parse, viz.ocr, ...) scores as failed,
-		// so listing one never overstates assurance.
+		// A check nothing here computes (one a flow saved before it was removed
+		// still lists) scores as failed, so listing one never overstates assurance.
 		return []assuranceItem{{State: checkStateFail}}
 	}
 }

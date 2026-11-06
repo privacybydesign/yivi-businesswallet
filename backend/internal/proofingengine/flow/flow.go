@@ -173,25 +173,14 @@ func ValidFaceProvider(p FaceProvider) bool {
 type Check string
 
 const (
-	CheckMRZParse             Check = "mrz.parse"
-	CheckMRZCheckdigits       Check = "mrz.checkdigits"
-	CheckVIZOCR               Check = "viz.ocr" // VIZ is not done, we do capture whole document
-	CheckVIZMRZCrossmatch     Check = "viz.mrz.crossmatch"
-	CheckDocumentTemplate     Check = "document.template"
-	CheckDocumentTamper       Check = "document.tamper"
-	CheckDocumentScreenReplay Check = "document.screen_replay"
-	CheckNFCPassiveAuth       Check = "nfc.passive_auth"
-	CheckNFCChipAuth          Check = "nfc.chip_auth"
-	CheckFaceMatch            Check = "face.match"
-	CheckFaceLiveness         Check = "face.liveness"
-	CheckChipVIZCrossmatch    Check = "chip.viz.crossmatch"
+	CheckNFCPassiveAuth Check = "nfc.passive_auth"
+	CheckNFCChipAuth    Check = "nfc.chip_auth"
+	CheckFaceMatch      Check = "face.match"
+	CheckFaceLiveness   Check = "face.liveness"
 )
 
 var validChecks = map[Check]bool{
-	CheckMRZParse: true, CheckMRZCheckdigits: true, CheckVIZOCR: true, CheckVIZMRZCrossmatch: true,
-	CheckDocumentTemplate: true, CheckDocumentTamper: true, CheckDocumentScreenReplay: true,
 	CheckNFCPassiveAuth: true, CheckNFCChipAuth: true, CheckFaceMatch: true, CheckFaceLiveness: true,
-	CheckChipVIZCrossmatch: true,
 }
 
 // ValidCheck reports whether c is a known Check.
