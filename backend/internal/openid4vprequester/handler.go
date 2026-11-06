@@ -1,6 +1,7 @@
 package openid4vprequester
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
@@ -29,18 +31,25 @@ const (
 	msgRequestNotFound = "unknown presentation request"
 )
 
+// credentialCatalog lists the credential types issuers on this deployment
+// designed — the trust scheme's catalogue an admin picks a request from.
+type credentialCatalog interface {
+	ListSchemaCatalog(ctx context.Context) ([]attestation.CatalogEntry, error)
+}
+
 // Handler serves two audiences. An organization's admins send and read their
 // outbound requests on the tenant seam. The receiving wallet — software, with
 // no session — fetches the Request Object and posts its answer on the public
 // routes, authenticated by the request's one-time fetch and its state.
 type Handler struct {
 	svc         *Service
+	catalog     credentialCatalog
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(svc *Service, requireUser, authorize func(http.Handler) http.Handler) *Handler {
-	return &Handler{svc: svc, requireUser: requireUser, authorize: authorize}
+func NewHandler(svc *Service, catalog credentialCatalog, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+	return &Handler{svc: svc, catalog: catalog, requireUser: requireUser, authorize: authorize}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -50,6 +59,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/openid4vp/outbound", admin(respond.HandlerFunc(h.send)))
 	mux.Handle("GET /orgs/{slug}/openid4vp/outbound", admin(respond.HandlerFunc(h.list)))
 	mux.Handle("GET /orgs/{slug}/openid4vp/outbound/{id}", admin(respond.HandlerFunc(h.get)))
+	mux.Handle("GET /orgs/{slug}/openid4vp/credential-types", admin(respond.HandlerFunc(h.credentialTypes)))
 
 	mux.Handle("GET /openid4vp/outbound/{id}/request-object", respond.HandlerFunc(h.requestObject))
 	mux.Handle("POST /openid4vp/outbound/{id}/response", respond.HandlerFunc(h.response))
@@ -148,6 +158,37 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, h.view(req))
+	return nil
+}
+
+// credentialTypeView is one entry of the catalogue: what to ask for (vct and
+// attribute keys) and how to show it (names, labels, issuer).
+type credentialTypeView struct {
+	VCT        string                    `json:"vct"`
+	Name       string                    `json:"name"`
+	Issuer     string                    `json:"issuer"`
+	Attributes []credentialTypeAttribute `json:"attributes"`
+}
+
+type credentialTypeAttribute struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+func (h *Handler) credentialTypes(w http.ResponseWriter, r *http.Request) error {
+	entries, err := h.catalog.ListSchemaCatalog(r.Context())
+	if err != nil {
+		return fmt.Errorf("listing the credential catalogue: %w", err)
+	}
+	out := make([]credentialTypeView, 0, len(entries))
+	for _, e := range entries {
+		attrs := make([]credentialTypeAttribute, 0, len(e.Attributes))
+		for _, a := range e.Attributes {
+			attrs = append(attrs, credentialTypeAttribute{Key: a.Key, Label: a.Label})
+		}
+		out = append(out, credentialTypeView{VCT: e.VCT, Name: e.DisplayName, Issuer: e.IssuerName, Attributes: attrs})
+	}
+	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
 
