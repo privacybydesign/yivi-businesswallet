@@ -2564,6 +2564,14 @@ function decisionEventDetail(
       t(`identityProofing.sessions.address.tag.${fields.addressReview}`),
     );
   }
+  if (
+    fields.kind === "address" &&
+    (fields.state === "confirmed" ||
+      fields.state === "rejected" ||
+      fields.state === "lapsed")
+  ) {
+    parts.push(t(`identityProofing.sessions.address.tag.${fields.state}`));
+  }
   if (typeof fields.reason === "string" && fields.reason !== "") {
     parts.push(
       t("identityProofing.reviews.decided.reason", { reason: fields.reason }),

@@ -45,7 +45,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	COALESCE(r.address_review, ''), r.address_reviewed_at,
+	` + addressReviewColumns + `,
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''),
 	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn
 
@@ -881,11 +881,11 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 		// When it went to review (completed_at), as waitingSince on the page.
 		order = `COALESCE(r.completed_at, r.created_at), r.created_at`
 	}
-	if filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending {
-		order = `r.address_added_at, r.created_at`
-	} else if filter.AddressReview != nil {
-		// A decided one, the latest decision first, as the Closed tab shows it.
-		order = `r.address_reviewed_at DESC, r.created_at DESC`
+	var reviewKind, reviewState *string
+	if filter.ReviewKind != nil {
+		kind, state := string(*filter.ReviewKind), string(filter.reviewState())
+		reviewKind, reviewState = &kind, &state
+		order = reviewItemOrder(filter.reviewState(), "$11")
 	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
@@ -894,10 +894,10 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
-			AND ($11::text IS NULL OR r.address_review = $11)
+			AND ($11::text IS NULL OR ` + reviewItemMatches("$11", "$12") + `)
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
-		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), filter.AddressReview)
+		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), reviewKind, reviewState)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
@@ -1292,7 +1292,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 				redirect_url = NULL, yivi_transaction_id = NULL, document_scan_transaction_id = NULL,
 				identity_match_key = NULL, address_ciphertext = NULL,
 				employment_ciphertext = NULL,
-				registered_address_ciphertext = NULL, address_review = NULLIF(address_review, 'pending'),
+				registered_address_ciphertext = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {
@@ -1328,6 +1328,9 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 
 // purgeRequestRecords erases what other tables hold of req's personal data.
 func purgeRequestRecords(ctx context.Context, q database.Querier, req Request) error {
+	if err := clearReviewItems(ctx, q, req.ID); err != nil {
+		return err
+	}
 	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
 		return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
 	}

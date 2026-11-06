@@ -91,6 +91,7 @@ const ADDRESS_REVIEW_TONES = {
   pending: "amber",
   confirmed: "green",
   rejected: "red",
+  lapsed: "amber",
 } as const satisfies Record<AddressReviewState, string>;
 // A face match score is 0 to 1; shown as a percentage.
 const PERCENT = 100;

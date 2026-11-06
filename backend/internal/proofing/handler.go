@@ -140,7 +140,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address/review", reviewer(respond.HandlerFunc(h.decideAddressReview)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
@@ -553,31 +554,39 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 		}
 		filter.DataRequests = true
 	}
-	review, err := addressReviewFilterFrom(query.Get("addressReview"))
-	if err != nil {
+	if err := reviewFilterFrom(query, &filter); err != nil {
 		return RequestFilter{}, err
 	}
-	filter.AddressReview = review
 	return filter, nil
 }
 
-// addressReviewFilterFrom reads ?addressReview: nil when absent.
-func addressReviewFilterFrom(raw string) (*AddressReview, error) {
-	if raw == "" {
-		return nil, nil
+// reviewFilterFrom reads ?reviewKind and ?reviewState, which needs a kind.
+func reviewFilterFrom(query url.Values, filter *RequestFilter) error {
+	if raw := query.Get("reviewKind"); raw != "" {
+		kind := ReviewKind(raw)
+		if !kind.known() {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewKind must be identity, address, employment or data_request"}
+		}
+		filter.ReviewKind = &kind
 	}
-	review := AddressReview(raw)
-	if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
+	if raw := query.Get("reviewState"); raw != "" {
+		state := ReviewState(raw)
+		if !state.known() {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewState must be pending, confirmed, rejected or lapsed"}
+		}
+		if filter.ReviewKind == nil {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewState needs a reviewKind"}
+		}
+		filter.ReviewState = &state
 	}
-	return &review, nil
+	return nil
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request), or the addresses a reviewer reviews,
-// waiting or decided (?addressReview=). Any other list is the ones they sent.
+// requests (?flowKind=data_request), or the review items of a kind, waiting
+// or decided (?reviewKind=). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -586,7 +595,7 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 		return false
 	}
 	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
-		filter.AddressReview != nil
+		filter.ReviewKind != nil
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -735,19 +744,25 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// addressReviewRequest is a reviewer's decision on an address waiting for
-// review: decision "confirm" or "reject", and the required reason.
-type addressReviewRequest struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason"`
+// reviewItemRequest is a reviewer's decision on a review item: decision
+// "confirm" or "reject", the required reason, and for rejecting a session's
+// own review an optional errorCode.
+type reviewItemRequest struct {
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	ErrorCode string `json:"errorCode"`
 }
 
-func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
+func (h *Handler) decideReviewItem(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
-	var body addressReviewRequest
+	kind := ReviewKind(r.PathValue("kind"))
+	if !kind.known() {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no such review item kind"}
+	}
+	var body reviewItemRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
@@ -755,14 +770,28 @@ func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) er
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is confirm or reject"}
 	}
 	caller := auth.UserFromContext(r.Context())
-	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, AddressReviewInput{
-		Confirm: body.Decision == "confirm", Reason: body.Reason, ReviewerID: caller.ID,
+	req, err := h.service.DecideReviewItem(r.Context(), orgFromRequest(r).ID, id, kind, string(caller.Email), ReviewItemInput{
+		Confirm: body.Decision == "confirm", Reason: body.Reason, ErrorCode: body.ErrorCode, ReviewerID: caller.ID,
 		Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
 	})
 	if err != nil {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
+	return nil
+}
+
+// reviewItemCountsResponse is how many items of each kind wait.
+type reviewItemCountsResponse struct {
+	Counts map[ReviewKind]int `json:"counts"`
+}
+
+func (h *Handler) reviewItemCounts(w http.ResponseWriter, r *http.Request) error {
+	counts, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{Counts: counts})
 	return nil
 }
 

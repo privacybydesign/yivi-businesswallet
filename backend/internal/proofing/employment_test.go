@@ -270,6 +270,25 @@ func TestWalletReviewNotReconciled(t *testing.T) {
 	}
 }
 
+// The review a statement opens is an employment review item: decided as one,
+// and refused as the identity's.
+func TestWalletReviewDecidedAsEmploymentItem(t *testing.T) {
+	e := newEmploymentFixture(EmploymentRequired)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	if _, err := e.upload(req, "no job"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	in := ReviewItemInput{Confirm: true, Reason: testReason, ReviewerID: uuid.New(), Scope: ReviewScopeAll}
+	if _, err := e.svc.DecideReviewItem(ctx, testOrg.ID, req.ID, ReviewKindIdentity, "rita", in); !errors.Is(err, ErrNotUnderReview) {
+		t.Fatalf("DecideReviewItem identity = %v; want ErrNotUnderReview", err)
+	}
+	got, err := e.svc.DecideReviewItem(ctx, testOrg.ID, req.ID, ReviewKindEmployment, "rita", in)
+	if err != nil || got.Status != StatusApproved {
+		t.Errorf("DecideReviewItem employment = %s, %v; want approved", got.Status, err)
+	}
+}
+
 // No statement within the window rejects the session: a flow that requires
 // one does not pass without it.
 func TestMissingEmploymentRejects(t *testing.T) {

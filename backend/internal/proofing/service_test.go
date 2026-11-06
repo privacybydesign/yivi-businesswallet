@@ -285,6 +285,18 @@ func (f *fakeRequests) NextMissingEmployment(context.Context, time.Time) (time.T
 	return time.Time{}, nil
 }
 
+func (f *fakeRequests) LapseReviewItems(context.Context, time.Time, int) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRequests) NextReviewItemDue(context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (f *fakeRequests) ReviewCounts(context.Context, uuid.UUID) (map[ReviewKind]int, error) {
+	return nil, nil
+}
+
 func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {
 	f.employmentRejections = append(f.employmentRejections, reason)
 	return nil

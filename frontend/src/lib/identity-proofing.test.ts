@@ -13,6 +13,7 @@ import type {
 } from "../api/identity-proofing";
 import {
   ADDRESS_REVIEWS,
+  REVIEW_KINDS,
   ADDRESS_VERIFICATIONS,
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
@@ -2203,19 +2204,27 @@ describe("address reviews mirror backend/internal/proofing", () => {
   const source = readFileSync(
     fileURLToPath(
       new URL(
-        "../../../backend/internal/proofing/address_review.go",
+        "../../../backend/internal/proofing/review_items.go",
         import.meta.url,
       ),
     ),
     "utf8",
   );
   const backend = [
-    ...source.matchAll(/AddressReview\w+\s+AddressReview = "(\w+)"/g),
+    ...source.matchAll(/Review\w+\s+ReviewState = "(\w+)"/g),
+  ].map((m) => m[1]);
+  const kinds = [
+    ...source.matchAll(/ReviewKind\w+\s+ReviewKind = "(\w+)"/g),
   ].map((m) => m[1]);
 
   it("has every backend review state and no other", () => {
     expect(backend.length).toBeGreaterThan(0);
     expect([...ADDRESS_REVIEWS].sort()).toEqual([...backend].sort());
+  });
+
+  it("has every backend review kind and no other", () => {
+    expect(kinds.length).toBeGreaterThan(0);
+    expect([...REVIEW_KINDS].sort()).toEqual([...kinds].sort());
   });
 });
 

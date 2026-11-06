@@ -35,6 +35,7 @@ import { PostalAddress } from "./proofing-ui";
 const DECIDED_KEYS = {
   confirmed: "confirmed",
   rejected: "rejected",
+  lapsed: "lapsed",
 } as const;
 
 // An address that waits for a person, or was decided: the address (and the
