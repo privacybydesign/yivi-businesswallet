@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/verification"
 )
 
 // fakerSeed is fixed so generated demo data is identical on every run, which
@@ -439,6 +441,9 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 	if err := seedNijmegenAttestation(ctx, pool, nijmegenOrg.ID); err != nil {
 		return err
 	}
+	if err := seedNijmegenVerification(ctx, pool, nijmegenOrg.ID); err != nil {
+		return err
+	}
 	if err := seedIssuerSettings(ctx, pool, nijmegenOrg.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
 		return err
 	}
@@ -652,6 +657,9 @@ func EnsurePartnerOrganizations(ctx context.Context, dsn, addressDomain string) 
 		}
 		if p.org.slug == "nijmegen" {
 			if err := seedNijmegenAttestation(ctx, pool, org.ID); err != nil {
+				return err
+			}
+			if err := seedNijmegenVerification(ctx, pool, org.ID); err != nil {
 				return err
 			}
 			if err := seedIssuerSettings(ctx, pool, org.ID, "nijmegen", "Gemeente Nijmegen"); err != nil {
@@ -1141,6 +1149,40 @@ func seedNijmegenAttestation(ctx context.Context, pool *pgxpool.Pool, orgID uuid
 	}
 
 	slog.Info("seeded Nijmegen APV standplaatsvergunning schema + template")
+	return nil
+}
+
+// nijmegenApvVerificationTemplate is the presentation request a Nijmegen
+// handhaver runs at a market stall (issue #245, flow B): the permit's identifying
+// and location claims, enough to compare with the stall in front of them and to
+// find the permit in Nijmegen's own issuance ledger. The conditions URL is not
+// asked for: a check needs no more than that (data minimisation).
+var nijmegenApvVerificationTemplate = verification.Template{
+	Name:    nijmegenApvTemplateName,
+	VCT:     nijmegenApvSchema.VCT,
+	Claims:  []string{"vergunningnummer", "vergunninghouder_kvk", "vergunninghouder_naam", "markt", "standplaats", "dagen", "geldig_van", "geldig_tot"},
+	Purpose: "Controle standplaatsvergunning op de markt",
+}
+
+// seedNijmegenVerification gives the Gemeente Nijmegen tenant its APV
+// verification template (issue #245). Idempotent: skips when the org already
+// has a template by that name, like ensureRequestTemplate, so a template an
+// admin added since does not stop the seed.
+func seedNijmegenVerification(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := verification.NewStore(pool, audit.NewDBRecorder())
+
+	existing, err := store.ListTemplates(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list nijmegen verification templates: %w", err)
+	}
+	if slices.ContainsFunc(existing, func(t verification.Template) bool { return t.Name == nijmegenApvVerificationTemplate.Name }) {
+		return nil
+	}
+	if _, err := store.CreateTemplate(ctx, orgID, nijmegenApvVerificationTemplate); err != nil {
+		return fmt.Errorf("seed: create nijmegen verification template: %w", err)
+	}
+
+	slog.Info("seeded Nijmegen APV verification template")
 	return nil
 }
 
