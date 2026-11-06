@@ -36,7 +36,7 @@ import {
   todoShows,
 } from "../lib/proofing-todo";
 import { Card, Icon, TaskEmpty, TaskRow, TaskSection, TopBar } from "../ui";
-import { ResultText } from "./proofing-ui";
+import { ResultText, SessionSummaryLine } from "./proofing-ui";
 import { VerifyPerson } from "./proofing-send";
 import { ProofingPausedNotice } from "./proofing-pause";
 import { PRIMARY_LINK } from "./proofing-review-parts";
@@ -340,7 +340,10 @@ function FinishedSection({
             detail={flowLine(request, t)}
             aside={
               <span className="flex items-center gap-3">
-                <ResultText request={request} compact />
+                <span className="flex flex-col items-end">
+                  <ResultText request={request} compact />
+                  <SessionSummaryLine request={request} />
+                </span>
                 <span className={WHEN}>{formatWhen(finishedOn(request))}</span>
               </span>
             }

@@ -928,6 +928,20 @@ export const en = {
         message: "It was not finished in time, so nothing was shared.",
       },
       outcome: {
+        steps: {
+          kinds: {
+            address: "Address",
+            diplomas: "Diploma",
+            employment: "Verzekeringsbericht",
+          },
+          state: {
+            received: "Received",
+            checking: "Being checked",
+            rejected: "Not accepted",
+            missing: "Not received",
+            open: "Still to do",
+          },
+        },
         approved: {
           title: "Identity verified",
           message: "The check is complete.",

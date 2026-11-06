@@ -100,3 +100,37 @@ export function summaryKinds(
     .filter((step) => states.includes(partState(step)))
     .map((step) => step.kind);
 }
+
+// How a step reads to the person on their end screen: whether it reached the
+// org, not what a reviewer decided beyond accepting or not.
+export type PersonStepState =
+  | "received"
+  | "checking"
+  | "rejected"
+  | "missing"
+  | "open";
+
+export const PERSON_STEP_TONES = {
+  received: "green",
+  checking: "amber",
+  rejected: "red",
+  missing: "default",
+  open: "default",
+} as const satisfies Record<PersonStepState, string>;
+
+export function personStepState(step: ProofingStep): PersonStepState {
+  switch (partState(step)) {
+    case "done":
+    case "accepted":
+    case "lapsed":
+      return "received";
+    case "to_review":
+      return "checking";
+    case "rejected":
+      return "rejected";
+    case "not_provided":
+      return "missing";
+    default:
+      return "open";
+  }
+}

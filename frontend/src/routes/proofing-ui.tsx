@@ -16,6 +16,12 @@ import {
   proofingStatusTone,
   readableTextOn,
 } from "../lib/identity-proofing";
+import {
+  SUMMARY_TONES,
+  isPartKind,
+  sessionSummary,
+  summaryKinds,
+} from "../lib/session-parts";
 import { Button, Modal, StatusText } from "../ui";
 
 const MARK_SIZES = {
@@ -270,5 +276,34 @@ export function PostalAddress({
       <br />
       {a.country}
     </address>
+  );
+}
+
+// Where a session with steps stands as a whole, in one line under its
+// identity's status, naming only the steps that make it so.
+export function SessionSummaryLine({
+  request,
+}: Readonly<{
+  request: ProofingRequest;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const summary = sessionSummary(request);
+  if (summary === undefined) {
+    return null;
+  }
+  const kinds = summaryKinds(request, summary).map((kind) =>
+    isPartKind(kind)
+      ? t(`identityProofing.sessions.parts.kinds.${kind}`)
+      : kind,
+  );
+  return (
+    <div className="text-[12px]">
+      <StatusText tone={SUMMARY_TONES[summary]}>
+        {t(`identityProofing.sessions.parts.summary.${summary}`)}
+      </StatusText>
+      {kinds.length > 0 && (
+        <span className="text-ink-soft"> · {kinds.join(", ")}</span>
+      )}
+    </div>
   );
 }

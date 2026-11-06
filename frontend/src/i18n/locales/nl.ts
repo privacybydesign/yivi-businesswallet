@@ -954,6 +954,20 @@ export const nl: Translation<typeof en> = {
           "De controle is niet op tijd afgerond, dus er is niets gedeeld.",
       },
       outcome: {
+        steps: {
+          kinds: {
+            address: "Adres",
+            diplomas: "Diploma",
+            employment: "Verzekeringsbericht",
+          },
+          state: {
+            received: "Ontvangen",
+            checking: "Wordt gecontroleerd",
+            rejected: "Niet geaccepteerd",
+            missing: "Niet ontvangen",
+            open: "Nog te doen",
+          },
+        },
         approved: {
           title: "Identiteit geverifieerd",
           message: "De controle is afgerond.",

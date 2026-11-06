@@ -37,7 +37,6 @@ import {
   isPartKind,
   partState,
   sessionSummary,
-  summaryKinds,
 } from "../lib/session-parts";
 import { legalPeriodLabel } from "../lib/legal-retention";
 import {
@@ -79,7 +78,7 @@ import {
   pageSlice,
 } from "../lib/paging";
 import { Card, Icon, Pager, Select, StatusText, Table, TopBar } from "../ui";
-import { PostalAddress, ResultText } from "./proofing-ui";
+import { PostalAddress, ResultText, SessionSummaryLine } from "./proofing-ui";
 import { DataRequestNote } from "./data-request-review";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
 import { VerifyPerson } from "./proofing-send";
@@ -601,35 +600,6 @@ function SessionRow({
         </tr>
       )}
     </>
-  );
-}
-
-// Where a session with steps stands as a whole, in one line under its
-// identity's status, naming only the steps that make it so.
-function SessionSummaryLine({
-  request,
-}: Readonly<{
-  request: ProofingRequest;
-}>): React.JSX.Element | null {
-  const { t } = useTranslation();
-  const summary = sessionSummary(request);
-  if (summary === undefined) {
-    return null;
-  }
-  const kinds = summaryKinds(request, summary).map((kind) =>
-    isPartKind(kind)
-      ? t(`identityProofing.sessions.parts.kinds.${kind}`)
-      : kind,
-  );
-  return (
-    <div className="text-[12px]">
-      <StatusText tone={SUMMARY_TONES[summary]}>
-        {t(`identityProofing.sessions.parts.summary.${summary}`)}
-      </StatusText>
-      {kinds.length > 0 && (
-        <span className="text-ink-soft"> · {kinds.join(", ")}</span>
-      )}
-    </div>
   );
 }
 

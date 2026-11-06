@@ -174,6 +174,9 @@ type hostedProgressResponse struct {
 	// AppDone is an Idem session whose app did its part, before the
 	// document scan.
 	AppDone bool `json:"appDone,omitempty"`
+	// Steps is where each of the flow's extra steps stands, which the end
+	// screen tells the person.
+	Steps []StepOutcome `json:"steps"`
 }
 
 // hostedLegalRetention is what the person is told about the data an erasure
@@ -214,7 +217,7 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
 		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
-		DocumentScan: documentScanState(req), AppDone: req.appDone,
+		DocumentScan: documentScanState(req), AppDone: req.appDone, Steps: req.Steps(now),
 	}
 }
 
