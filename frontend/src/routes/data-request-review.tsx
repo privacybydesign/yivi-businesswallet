@@ -21,6 +21,7 @@ import {
 } from "../lib/format-when";
 import {
   assuranceLevelLabel,
+  erasedSureMatches,
   matchTickedByDefault,
   proofingErrorMessage,
   proofingStatusLabel,
@@ -209,7 +210,7 @@ function ReviewBody({
           request={request}
           ticked={ticked}
           kept={matches.length - ticked.length}
-          erased={matches.filter((m) => m.purgedAt !== undefined).length}
+          erased={erasedSureMatches(request.flowKind, matches)}
         />
       ) : (
         <ClosedAside slug={slug} request={request} />
@@ -510,13 +511,15 @@ function DataDecision({
       },
       {
         onSuccess: () => {
+          const refused =
+            erased > 0
+              ? "identityProofing.reviews.dataRequest.decision.restKept"
+              : "identityProofing.reviews.dataRequest.decision.rejected";
           toast.success(
             t(
               decision === "approve"
                 ? "identityProofing.reviews.dataRequest.decision.approved"
-                : erased > 0
-                  ? "identityProofing.reviews.dataRequest.decision.restKept"
-                  : "identityProofing.reviews.dataRequest.decision.rejected",
+                : refused,
             ),
           );
           void navigate(reviewPath(slug));

@@ -6,6 +6,7 @@ import { ApiError, ApiValidationError } from "../api/http";
 import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
 import type {
   ProofingBranding,
+  ProofingDataMatch,
   ProofingFlow,
   ProofingFlowBranding,
   ProofingFlowHosted,
@@ -76,6 +77,7 @@ import {
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
+  erasedSureMatches,
   externalFlows,
   flowPurgeDays,
   flowStepLabels,
@@ -2907,6 +2909,18 @@ describe("data request review", () => {
       expect(matchTickedByDefault("data_erasure", level)).toBe(false);
       expect(matchTickedByDefault("data_access", level)).toBe(false);
     }
+  });
+
+  it("counts only the sure matches an erasure deleted already", () => {
+    const at = "2026-11-06T10:00:00Z";
+    const matches = [
+      { requestId: "a", level: "strong", purgedAt: at },
+      { requestId: "b", level: "probable", purgedAt: at },
+      { requestId: "c", level: "email", purgedAt: at },
+      { requestId: "d", level: "strong" },
+    ] as ProofingDataMatch[];
+    expect(erasedSureMatches("data_erasure", matches)).toBe(2);
+    expect(erasedSureMatches("data_access", matches)).toBe(0);
   });
 
   it("confirms an erasure before approving it", () => {
