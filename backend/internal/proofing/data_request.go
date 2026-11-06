@@ -222,36 +222,47 @@ func (s *Service) findDataMatches(ctx context.Context, tenant proofingprovider.T
 	if err := s.dataRequests.RecordIdentityKey(ctx, req, requester); err != nil {
 		return err
 	}
-	matches := []NewDataMatch{}
-	if requester.FamilyName != "" && requester.BirthDate != "" {
-		candidates, err := s.dataRequests.Candidates(ctx, req, requester)
-		if err != nil {
-			return err
-		}
-		checked, err := s.dataRequests.MatchChecks(ctx, req)
-		if err != nil {
-			return err
-		}
-		for _, c := range candidates {
-			if c.session == nil {
-				continue
-			}
-			level, ok := checked[c.ID]
-			if !ok {
-				if level, err = s.candidateMatch(ctx, req, requester, c); err != nil {
-					return err
-				}
-			}
-			if level != "" {
-				matches = append(matches, NewDataMatch{RequestID: c.ID, Level: level})
-			}
-		}
+	matches, err := s.identityMatches(ctx, req, requester)
+	if err != nil {
+		return err
 	}
 	unfinished, err := s.unfinishedMatches(ctx, req, requester, matches)
 	if err != nil {
 		return err
 	}
 	return s.dataRequests.SaveMatches(ctx, req, append(matches, unfinished...))
+}
+
+// identityMatches are req's matches among the sessions with the requester's
+// family name and date of birth (Candidates), none without those.
+func (s *Service) identityMatches(ctx context.Context, req Request, requester SubjectIdentity) ([]NewDataMatch, error) {
+	matches := []NewDataMatch{}
+	if requester.FamilyName == "" || requester.BirthDate == "" {
+		return matches, nil
+	}
+	candidates, err := s.dataRequests.Candidates(ctx, req, requester)
+	if err != nil {
+		return nil, err
+	}
+	checked, err := s.dataRequests.MatchChecks(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		if c.session == nil {
+			continue
+		}
+		level, ok := checked[c.ID]
+		if !ok {
+			if level, err = s.candidateMatch(ctx, req, requester, c); err != nil {
+				return nil, err
+			}
+		}
+		if level != "" {
+			matches = append(matches, NewDataMatch{RequestID: c.ID, Level: level})
+		}
+	}
+	return matches, nil
 }
 
 // candidateMatch reads candidate c's identity from the engine and keeps how it
@@ -565,21 +576,27 @@ func (s *Service) declineHeldErasure(ctx context.Context, req Request) (Request,
 	if err != nil {
 		return fresh, err
 	}
-	now, found := s.now(), 0
+	if !allHeld(matches, s.now()) {
+		return fresh, nil
+	}
+	return s.decideDataRequest(ctx, fresh, automaticReviewer,
+		ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
+}
+
+// allHeld reports matches with at least one identity check still found, each
+// held by the legal retention; earlier data requests and purged checks aside.
+func allHeld(matches []DataMatch, now time.Time) bool {
+	found := 0
 	for _, m := range matches {
 		if m.PurgedAt != nil || m.FlowKind.dataRequest() {
 			continue
 		}
 		if !m.held(now) {
-			return fresh, nil
+			return false
 		}
 		found++
 	}
-	if found == 0 {
-		return fresh, nil
-	}
-	return s.decideDataRequest(ctx, fresh, automaticReviewer,
-		ReviewInput{ErrorCode: ErrorLegalRetention, Reason: keptByLawReason})
+	return found > 0
 }
 
 // withLegalNotice sets the LegalNotice of an erasure that left sessions the
