@@ -48,10 +48,10 @@ import {
   savedLocales,
   selectedLocales,
   diplomaRejectionReason,
-  diplomaStepDone,
+  documentStepDone,
+  documentRejectionReason,
   employmentRejectionReason,
   employmentReview,
-  employmentStepDone,
   OUTCOME_ONLY,
   MAX_ATTRIBUTE_REASON_CHARS,
   collectedAttributes,
@@ -1776,7 +1776,7 @@ describe("flowStepLabels", () => {
         { steps: ["face_verification"], diplomaMode: "required" },
         t,
       ),
-    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
+    ).toEqual(["Face check", "Upload documents (DUO diploma)"]);
     expect(
       flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
     ).toEqual(["Face check"]);
@@ -1785,7 +1785,19 @@ describe("flowStepLabels", () => {
         { steps: ["face_verification"], diplomaMode: "always_review" },
         t,
       ),
-    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
+    ).toEqual(["Face check", "Upload documents (DUO diploma)"]);
+  });
+
+  it("names every document the upload step asks for", () => {
+    expect(
+      flowStepLabels(
+        { steps: [], diplomaMode: "required", employmentMode: "always_review" },
+        t,
+      ),
+    ).toEqual(["Upload documents (DUO diploma, UWV Verzekeringsbericht)"]);
+    expect(
+      flowStepLabels({ steps: [], employmentMode: "required" }, t),
+    ).toEqual(["Upload documents (UWV Verzekeringsbericht)"]);
   });
 
   it("names an always reviewed address as an asked one", () => {
@@ -1804,7 +1816,11 @@ describe("flowStepLabels", () => {
         },
         t,
       ),
-    ).toEqual(["Face check", "Enter the address", "Upload diplomas (DUO)"]);
+    ).toEqual([
+      "Face check",
+      "Enter the address",
+      "Upload documents (DUO diploma)",
+    ]);
   });
 
   it("shows a step it has no copy for as it is", () => {
@@ -2306,10 +2322,9 @@ describe("sessionView", () => {
     addressDone: false,
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
-    diplomasDone: false,
     employmentMode: "off" as const,
     employmentUntil: undefined,
-    employmentDone: false,
+    documentsDone: false,
     secondsLeft: 60,
   };
 
@@ -2336,49 +2351,71 @@ describe("sessionView", () => {
     }
   });
 
-  it("asks for diplomas after a settled session that has the step", () => {
+  it("asks for the documents after a settled session that has the step", () => {
+    const settled = { ...running, status: "approved" };
     expect(
       sessionView({
-        ...running,
-        status: "approved",
+        ...settled,
         diplomaMode: "required",
         diplomasUntil: until,
       }),
-    ).toBe("diplomas");
+    ).toBe("documents");
+    expect(
+      sessionView({
+        ...settled,
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("documents");
+    expect(
+      sessionView({
+        ...running,
+        status: "needs_review",
+        employmentMode: "always_review",
+        employmentUntil: until,
+      }),
+    ).toBe("documents");
   });
 
-  it("shows the outcome once the diplomas are done", () => {
+  it("shows the outcome once the documents are done", () => {
     expect(
       sessionView({
         ...running,
         status: "approved",
         diplomaMode: "required",
         diplomasUntil: until,
-        diplomasDone: true,
+        employmentMode: "required",
+        employmentUntil: until,
+        documentsDone: true,
       }),
     ).toBe("outcome");
   });
 
-  it("skips the diploma step without a deadline or on a flow without it", () => {
+  it("skips the document step without a deadline or on a flow without it", () => {
     expect(
       sessionView({ ...running, status: "rejected", diplomaMode: "required" }),
     ).toBe("outcome");
     expect(
       sessionView({ ...running, status: "approved", diplomasUntil: until }),
     ).toBe("outcome");
+    expect(
+      sessionView({ ...running, status: "approved", employmentUntil: until }),
+    ).toBe("outcome");
   });
 
-  it("does not ask for diplomas while the session is live", () => {
+  it("does not ask for documents while the session is live", () => {
     expect(
       sessionView({
         ...running,
         diplomaMode: "required",
         diplomasUntil: until,
+        employmentMode: "required",
+        employmentUntil: until,
       }),
     ).toBe("running");
   });
 
-  it("asks for the address before the diplomas", () => {
+  it("asks for the address before the documents", () => {
     const settled = {
       ...running,
       status: "approved",
@@ -2388,70 +2425,32 @@ describe("sessionView", () => {
       diplomasUntil: until,
     };
     expect(sessionView(settled)).toBe("address");
-    expect(sessionView({ ...settled, addressDone: true })).toBe("diplomas");
+    expect(sessionView({ ...settled, addressDone: true })).toBe("documents");
     expect(
-      sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
+      sessionView({ ...settled, addressUntil: undefined, documentsDone: true }),
     ).toBe("outcome");
   });
 
-  it("asks for the Verzekeringsbericht after the diplomas", () => {
-    const settled = {
+  // The subject continued, but what the page read still owes the statement:
+  // the outcome waits for a read after it (kept, or the window's rejection).
+  it("holds the document step while the backend still owes the statement", () => {
+    const done = {
       ...running,
       status: "approved",
       diplomaMode: "required" as const,
       diplomasUntil: until,
       employmentMode: "required" as const,
       employmentUntil: until,
+      documentsDone: true,
     };
-    expect(sessionView(settled)).toBe("diplomas");
-    expect(sessionView({ ...settled, diplomasDone: true })).toBe("employment");
-    expect(
-      sessionView({ ...settled, diplomasDone: true, employmentDone: true }),
-    ).toBe("outcome");
-    expect(
-      sessionView({
-        ...settled,
-        diplomasDone: true,
-        employmentUntil: undefined,
-      }),
-    ).toBe("outcome");
-  });
-
-  it("asks for the Verzekeringsbericht in review too", () => {
-    expect(
-      sessionView({
-        ...running,
-        status: "needs_review",
-        employmentMode: "required",
-        employmentUntil: until,
-      }),
-    ).toBe("employment");
-  });
-
-  // The subject continued, but what the page read still owes the statement:
-  // the outcome waits for a read after it (kept, or the window's rejection).
-  it("holds the Verzekeringsbericht step while the backend still owes it", () => {
-    const done = {
-      ...running,
-      status: "approved",
-      employmentMode: "required" as const,
-      employmentUntil: until,
-      employmentDone: true,
-    };
-    expect(sessionView({ ...done, employmentOwed: true })).toBe("employment");
+    expect(sessionView({ ...done, employmentOwed: true })).toBe("documents");
     expect(sessionView({ ...done, employmentOwed: false })).toBe("outcome");
-  });
-
-  it("does not ask for the Verzekeringsbericht while live or unasked", () => {
     expect(
       sessionView({
-        ...running,
-        employmentMode: "required",
-        employmentUntil: until,
+        ...done,
+        employmentUntil: undefined,
+        employmentOwed: true,
       }),
-    ).toBe("running");
-    expect(
-      sessionView({ ...running, status: "approved", employmentUntil: until }),
     ).toBe("outcome");
   });
 });
@@ -2464,7 +2463,7 @@ describe("app step", () => {
   // A flow with one app still shows the app step, with that one app to tap.
   it("offers the Idem app alone otherwise, still as a step of its own", () => {
     expect(methodChoices(false)).toEqual(["idem_app"]);
-    expect(verifyStages({ diplomas: false })).toContain("method");
+    expect(verifyStages({ documents: false })).toContain("method");
   });
 
   // One app has nothing to pick: the session starts in it, with no app step.
@@ -2484,26 +2483,26 @@ describe("app step", () => {
   });
 
   it("puts the document photo after the app's part", () => {
-    expect(verifyStages({ document: true, diplomas: false })).toEqual([
+    expect(verifyStages({ document: true, documents: false })).toEqual([
       "overview",
       "method",
       "session",
       "document",
     ]);
     expect(
-      verifyStages({ document: true, address: true, diplomas: true }),
+      verifyStages({ document: true, address: true, documents: true }),
     ).toEqual([
       "overview",
       "method",
       "session",
       "document",
       "address",
-      "diplomas",
+      "documents",
     ]);
   });
 
   it("places a done page past the last stage", () => {
-    const stages = verifyStages({ document: true, diplomas: false });
+    const stages = verifyStages({ document: true, documents: false });
     expect(stageIndex(stages, "method")).toBe(1);
     expect(stageIndex(stages, "document")).toBe(3);
     expect(stageIndex(stages, "done")).toBe(stages.length);
@@ -2511,18 +2510,13 @@ describe("app step", () => {
 
   it("stays done once the session's outcome shows", () => {
     expect(
-      currentStage({
-        step: "done",
-        inAddress: false,
-        inDiplomas: false,
-        inEmployment: false,
-      }),
+      currentStage({ step: "done", inAddress: false, inDocuments: false }),
     ).toBe("done");
   });
 
   // A flow the browser runs alone has no app to choose.
   it("leaves the app step out for a flow with no app", () => {
-    expect(verifyStages({ app: false, diplomas: false })).toEqual([
+    expect(verifyStages({ app: false, documents: false })).toEqual([
       "overview",
       "session",
     ]);
@@ -2543,28 +2537,27 @@ describe("app step", () => {
 });
 
 describe("address step", () => {
-  it("adds the address stage after the session, before the diplomas", () => {
-    expect(verifyStages({ address: true, diplomas: true })).toEqual([
+  it("adds the address stage after the session, before the documents", () => {
+    expect(verifyStages({ address: true, documents: true })).toEqual([
       "overview",
       "method",
       "session",
       "address",
-      "diplomas",
+      "documents",
     ]);
   });
 
-  it("is at the address or diploma step while it is open", () => {
+  it("is at the address or document step while it is open", () => {
     const at = {
       step: "session",
       inAddress: false,
-      inDiplomas: false,
-      inEmployment: false,
+      inDocuments: false,
     } as const;
     expect(currentStage(at)).toBe("session");
-    expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
+    expect(currentStage({ ...at, inAddress: true, inDocuments: true })).toBe(
       "address",
     );
-    expect(currentStage({ ...at, inDiplomas: true })).toBe("diplomas");
+    expect(currentStage({ ...at, inDocuments: true })).toBe("documents");
   });
 
   it("mails only a flow that takes no document photo", () => {
@@ -2588,49 +2581,6 @@ describe("address step", () => {
 });
 
 describe("employment step", () => {
-  it("adds the employment stage after the diplomas", () => {
-    expect(
-      verifyStages({ address: true, diplomas: true, employment: true }),
-    ).toEqual([
-      "overview",
-      "method",
-      "session",
-      "address",
-      "diplomas",
-      "employment",
-    ]);
-    expect(verifyStages({ diplomas: false, employment: true })).toEqual([
-      "overview",
-      "method",
-      "session",
-      "employment",
-    ]);
-  });
-
-  it("is at the employment step while it is open", () => {
-    const at = {
-      step: "session",
-      inAddress: false,
-      inDiplomas: false,
-      inEmployment: false,
-    } as const;
-    expect(currentStage({ ...at, inEmployment: true })).toBe("employment");
-    expect(currentStage({ ...at, inDiplomas: true, inEmployment: true })).toBe(
-      "diplomas",
-    );
-  });
-
-  it("ends the step once a statement is kept or the time is up", () => {
-    const kept = {
-      statementDate: "2026-10-15",
-      employed: true,
-      relations: [],
-    };
-    expect(employmentStepDone(undefined, 60)).toBe(false);
-    expect(employmentStepDone(kept, 60)).toBe(true);
-    expect(employmentStepDone(undefined, 0)).toBe(true);
-  });
-
   it("sends a statement without a job or with a benefit to review", () => {
     const relation = (kind: string) => ({
       kind,
@@ -2699,27 +2649,62 @@ describe("employment step", () => {
   });
 });
 
+describe("document step", () => {
+  it("adds one document stage after the session when the flow has it", () => {
+    expect(verifyStages({ documents: true })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "documents",
+    ]);
+    expect(verifyStages({ documents: false })).toEqual([
+      "overview",
+      "method",
+      "session",
+    ]);
+  });
+
+  it("ends once every asked document is in, or the time is up", () => {
+    const both = {
+      diplomasAsked: true,
+      diplomasHeld: 0,
+      statementAsked: true,
+      statementKept: false,
+      secondsLeft: 60,
+    };
+    expect(documentStepDone(both)).toBe(false);
+    expect(documentStepDone({ ...both, diplomasHeld: 2 })).toBe(false);
+    expect(documentStepDone({ ...both, statementKept: true })).toBe(false);
+    expect(
+      documentStepDone({ ...both, diplomasHeld: 1, statementKept: true }),
+    ).toBe(true);
+    expect(documentStepDone({ ...both, secondsLeft: 0 })).toBe(true);
+    expect(
+      documentStepDone({ ...both, statementAsked: false, diplomasHeld: 1 }),
+    ).toBe(true);
+    expect(
+      documentStepDone({ ...both, diplomasAsked: false, statementKept: true }),
+    ).toBe(true);
+  });
+
+  it("explains every refusal, by the document the file is", () => {
+    const t = i18n.getFixedT("en");
+    for (const reason of ["not_supported", "not_asked", "too_many"]) {
+      expect(documentRejectionReason({ reason }, t)).not.toBe(reason);
+    }
+    expect(
+      documentRejectionReason({ kind: "diploma", reason: "duplicate" }, t),
+    ).toBe("This diploma was added already.");
+    expect(
+      documentRejectionReason({ kind: "employment", reason: "duplicate" }, t),
+    ).toBe("A Verzekeringsbericht was added already.");
+    expect(
+      documentRejectionReason({ kind: "employment", reason: "stale" }, t),
+    ).toBe(employmentRejectionReason("stale", t));
+  });
+});
+
 describe("diploma step", () => {
-  it("adds the diploma stage after the session when the flow has it", () => {
-    expect(verifyStages({ diplomas: true })).toEqual([
-      "overview",
-      "method",
-      "session",
-      "diplomas",
-    ]);
-    expect(verifyStages({ diplomas: false })).toEqual([
-      "overview",
-      "method",
-      "session",
-    ]);
-  });
-
-  it("ends the step once an extract is held or the time is up", () => {
-    expect(diplomaStepDone(0, 60)).toBe(false);
-    expect(diplomaStepDone(1, 60)).toBe(true);
-    expect(diplomaStepDone(0, 0)).toBe(true);
-  });
-
   it("mails only a flow that asks for no diplomas", () => {
     expect(sendableByMail(undefined)).toBe(true);
     expect(sendableByMail({})).toBe(true);

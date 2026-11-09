@@ -126,8 +126,7 @@ function HostedFlow({
   const dataRequest = isDataRequest(flow.kind);
   const methods = methodChoices(flow.yiviAvailable, flow.idemAvailable);
   const [inAddress, setInAddress] = useState(false);
-  const [inDiplomas, setInDiplomas] = useState(false);
-  const [inEmployment, setInEmployment] = useState(false);
+  const [inDocuments, setInDocuments] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(() => {
     if (flow.browserOnly) return "browser";
@@ -145,8 +144,7 @@ function HostedFlow({
     document: page.documentScan !== undefined,
     // The Yivi app shares the registered address: the person enters none.
     address: stepAsked(flow.addressMode) && method !== "yivi_app",
-    diplomas: stepAsked(flow.diplomaMode),
-    employment: stepAsked(flow.employmentMode),
+    documents: stepAsked(flow.diplomaMode) || stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"
@@ -227,8 +225,7 @@ function HostedFlow({
   const stage = currentStage({
     step: step === "session" ? sessionStage : step,
     inAddress,
-    inDiplomas,
-    inEmployment,
+    inDocuments,
   });
   const showsEnded =
     step === "session" && (sessionEnded || page.status === "expired");
@@ -324,11 +321,10 @@ function HostedFlow({
               onMethod={setMethod}
               diplomaMode={flow.diplomaMode}
               diplomas={page.diplomas}
-              onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
               employmentMode={flow.employmentMode}
-              onEmploymentStep={setInEmployment}
+              onDocumentStep={setInDocuments}
               renderEnded={(progress) => (
                 <HostedCheckEnded
                   name={organization.name}

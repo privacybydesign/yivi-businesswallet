@@ -76,6 +76,8 @@ interface AdvancedSettingsProps {
   employmentMode: EmploymentMode;
   onEmployment: (mode: EmploymentMode) => void;
   employmentError: string | null;
+  // Sets both documents of the upload step at once.
+  onDocuments: (diplomas: DiplomaMode, employment: EmploymentMode) => void;
   // Whether the flow must read the name and date of birth: required diplomas
   // or employment.
   requiresIdentity: boolean;
@@ -145,19 +147,86 @@ function useLevelLock(
       : undefined;
 }
 
+// One upload step with the documents it asks for: each ticked one is
+// required. The step is on while any is ticked, a DUO diploma when turned on.
+function DocumentsOption({
+  diplomaMode,
+  diplomaError,
+  employmentMode,
+  employmentError,
+  onDocuments,
+}: Readonly<
+  Pick<
+    AdvancedSettingsProps,
+    | "diplomaMode"
+    | "diplomaError"
+    | "employmentMode"
+    | "employmentError"
+    | "onDocuments"
+  >
+>): React.JSX.Element {
+  const { t } = useTranslation();
+  const diplomas = stepAsked(diplomaMode);
+  const statement = stepAsked(employmentMode);
+  const on = diplomas || statement;
+
+  return (
+    <>
+      <OptionRow
+        id="flow-step-documents"
+        checked={on}
+        label={t("identityProofingFlows.editor.steps.documents")}
+        hint={t("identityProofingFlows.editor.steps.documentsHint")}
+        onChange={() => onDocuments(on ? "off" : "required", "off")}
+      />
+      {on && (
+        <div className={`flex flex-col gap-3 ${UNDER_OPTION}`}>
+          <OptionRow
+            id="flow-step-documents-diploma"
+            checked={diplomas}
+            label={t("identityProofingFlows.editor.steps.diploma")}
+            hint={t("identityProofingFlows.editor.steps.diplomaHint")}
+            onChange={() =>
+              onDocuments(diplomas ? "off" : "required", employmentMode)
+            }
+          />
+          <OptionRow
+            id="flow-step-documents-employment"
+            checked={statement}
+            label={t("identityProofingFlows.editor.steps.employment")}
+            hint={t("identityProofingFlows.editor.steps.employmentHint")}
+            onChange={() =>
+              onDocuments(diplomaMode, statement ? "off" : "required")
+            }
+          />
+        </div>
+      )}
+      {diplomaError && (
+        <p role="alert" className={ERROR}>
+          {diplomaError}
+        </p>
+      )}
+      {employmentError && (
+        <p role="alert" className={ERROR}>
+          {employmentError}
+        </p>
+      )}
+    </>
+  );
+}
+
 function StepsSection({
   draft,
   update,
   settings,
   diplomaMode,
-  onDiploma,
   diplomaError,
   addressMode,
   onAddress,
   addressError,
   employmentMode,
-  onEmployment,
   employmentError,
+  onDocuments,
   error,
 }: Readonly<
   Omit<AdvancedSettingsProps, "requiresIdentity" | "locales">
@@ -253,32 +322,13 @@ function StepsSection({
           {addressError}
         </p>
       )}
-      <OptionRow
-        id="flow-step-diplomas"
-        checked={diplomaMode !== "off"}
-        label={t("identityProofingFlows.steps.diploma_upload")}
-        hint={t("identityProofingFlows.editor.steps.diplomaHint")}
-        onChange={() => onDiploma(diplomaMode === "off" ? "required" : "off")}
+      <DocumentsOption
+        diplomaMode={diplomaMode}
+        diplomaError={diplomaError}
+        employmentMode={employmentMode}
+        employmentError={employmentError}
+        onDocuments={onDocuments}
       />
-      {diplomaError && (
-        <p role="alert" className={ERROR}>
-          {diplomaError}
-        </p>
-      )}
-      <OptionRow
-        id="flow-step-employment"
-        checked={employmentMode !== "off"}
-        label={t("identityProofingFlows.steps.employment_upload")}
-        hint={t("identityProofingFlows.editor.steps.employmentHint")}
-        onChange={() =>
-          onEmployment(employmentMode === "off" ? "required" : "off")
-        }
-      />
-      {employmentError && (
-        <p role="alert" className={ERROR}>
-          {employmentError}
-        </p>
-      )}
       <div className="flex max-w-md flex-col gap-1.5">
         <label htmlFor="flow-lifetime" className={LABEL}>
           {t("identityProofingFlows.editor.steps.lifetime")}

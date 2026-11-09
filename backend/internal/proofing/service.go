@@ -209,6 +209,9 @@ type Service struct {
 	dataRequests dataRequestStore
 	// addressLookup is the Dutch address register; nil checks no address.
 	addressLookup addressFinder
+	// detectDocument tells which document an upload is; nil reads its seal
+	// (sealedDocument).
+	detectDocument func(pdf []byte) DocumentKind
 }
 
 // Stores are the service's persistence, one store per concern.

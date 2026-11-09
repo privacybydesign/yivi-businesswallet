@@ -1743,63 +1743,37 @@ export function declineHostedProofing(
   });
 }
 
-// What became of one uploaded file: kept, or refused with a reason
-// (not_a_diploma, signature_invalid, holder_mismatch, duplicate).
-const diplomaVerdictSchema = z.object({
-  fileName: z.string(),
-  accepted: z.boolean(),
-  diploma: proofingDiplomaSchema.optional(),
-  reason: z.string().optional(),
-  failedCheck: z.string().optional(),
-});
-
-export type DiplomaVerdict = z.infer<typeof diplomaVerdictSchema>;
-
 // An upload checks a signature per file and may load the EU trusted lists.
 const DIPLOMA_UPLOAD_TIMEOUT_MS = 120_000;
 
-// Uploads DUO diploma extracts on a verify page, after an approved identity.
-export function uploadProofingDiplomas(
-  target: VerifyTarget,
-  files: File[],
-  signal?: AbortSignal,
-): Promise<DiplomaVerdict[]> {
-  const form = new FormData();
-  for (const file of files) {
-    form.append("file", file);
-  }
-  return request(`${verifyPath(target)}/diplomas`, {
-    schema: z.array(diplomaVerdictSchema),
-    method: "POST",
-    body: form,
-    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
-    signal,
-  });
-}
-
-// What became of an uploaded Verzekeringsbericht: kept, or refused with a
-// reason (not_a_statement, signature_invalid, holder_mismatch, stale).
-const employmentVerdictSchema = z.object({
+// What became of one file of a document upload: the document its seal names
+// (none for one the step does not take), and the diploma or statement kept,
+// or why it was refused.
+const documentVerdictSchema = z.object({
   fileName: z.string(),
+  kind: z.enum(["diploma", "employment"]).optional().catch(undefined),
   accepted: z.boolean(),
+  diploma: proofingDiplomaSchema.optional(),
   employment: proofingEmploymentSchema.optional(),
   reason: z.string().optional(),
   failedCheck: z.string().optional(),
 });
 
-export type EmploymentVerdict = z.infer<typeof employmentVerdictSchema>;
+export type DocumentVerdict = z.infer<typeof documentVerdictSchema>;
 
-// Uploads a UWV Verzekeringsbericht on a verify page, after an approved
-// identity. Its seal is checked as a diploma's signature is.
-export function uploadProofingEmployment(
+// Uploads documents on a verify page, after an approved identity: each file
+// is read as the document its seal names, and checked as that one.
+export function uploadProofingDocuments(
   target: VerifyTarget,
-  file: File,
+  files: File[],
   signal?: AbortSignal,
-): Promise<EmploymentVerdict> {
+): Promise<DocumentVerdict[]> {
   const form = new FormData();
-  form.append("file", file);
-  return request(`${verifyPath(target)}/employment`, {
-    schema: employmentVerdictSchema,
+  for (const file of files) {
+    form.append("file", file);
+  }
+  return request(`${verifyPath(target)}/documents`, {
+    schema: z.array(documentVerdictSchema),
     method: "POST",
     body: form,
     timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,

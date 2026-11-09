@@ -1369,23 +1369,21 @@ export type VerifyStage =
   | "method"
   | "session"
   | "address"
-  | "diplomas"
-  | "employment";
+  | "documents";
 
 export function verifyStages({
   app = true,
   document = false,
   address = false,
-  diplomas,
-  employment = false,
+  documents,
 }: {
   // False for a flow the browser runs alone: there is no app to choose.
   app?: boolean;
   // A flow that photographs the document, after the app's part.
   document?: boolean;
   address?: boolean;
-  diplomas: boolean;
-  employment?: boolean;
+  // A flow that asks for diplomas or the Verzekeringsbericht.
+  documents: boolean;
 }): VerifyStage[] {
   return [
     "overview",
@@ -1393,8 +1391,7 @@ export function verifyStages({
     "session",
     ...(document ? (["document"] as const) : []),
     ...(address ? (["address"] as const) : []),
-    ...(diplomas ? (["diplomas"] as const) : []),
-    ...(employment ? (["employment"] as const) : []),
+    ...(documents ? (["documents"] as const) : []),
   ];
 }
 
@@ -1431,42 +1428,36 @@ export function stageIndex(
   return stage === "done" ? stages.length : stages.indexOf(stage);
 }
 
-// The stage a verify page is at: the address, diploma or employment step
-// while it is open, else the page's own step.
+// The stage a verify page is at: the address or document step while it is
+// open, else the page's own step.
 export function currentStage({
   step,
   inAddress,
-  inDiplomas,
-  inEmployment,
+  inDocuments,
 }: {
   step: VerifyStage | "done";
   inAddress: boolean;
-  inDiplomas: boolean;
-  inEmployment: boolean;
+  inDocuments: boolean;
 }): VerifyStage | "done" {
   if (inAddress) {
     return "address";
   }
-  if (inDiplomas) {
-    return "diplomas";
-  }
-  if (inEmployment) {
-    return "employment";
+  if (inDocuments) {
+    return "documents";
   }
   return step;
 }
 
 // What a verify page's running session shows: once its identity check
-// finished (approved, or in review) and it asks for them, the address step,
-// the diploma step and then the employment step until the subject is done with
-// each, else the outcome once settled, the expiry once an unstarted session's
-// link ran out, or the session itself. The employment step stays while the
-// backend still owes it (employmentOwed): the outcome it hands back is only
-// ever the one read after the statement.
+// finished (approved, or in review) and it asks for them, the address step
+// and then the document step until the subject is done with each, else the
+// outcome once settled, the expiry once an unstarted session's link ran out,
+// or the session itself. The document step stays while the backend still
+// owes the statement (employmentOwed): the outcome it hands back is only ever
+// the one read after it.
 export type SessionView =
   | "address"
-  | "diplomas"
-  | "employment"
+  | "documents"
   | "outcome"
   | "expired"
   | "running";
@@ -1478,10 +1469,9 @@ export function sessionView({
   addressDone,
   diplomaMode,
   diplomasUntil,
-  diplomasDone,
   employmentMode,
   employmentUntil,
-  employmentDone,
+  documentsDone,
   employmentOwed = false,
   secondsLeft,
 }: {
@@ -1491,10 +1481,9 @@ export function sessionView({
   addressDone: boolean;
   diplomaMode: DiplomaMode;
   diplomasUntil: string | undefined;
-  diplomasDone: boolean;
   employmentMode: EmploymentMode;
   employmentUntil: string | undefined;
-  employmentDone: boolean;
+  documentsDone: boolean;
   employmentOwed?: boolean;
   secondsLeft: number;
 }): SessionView {
@@ -1502,13 +1491,12 @@ export function sessionView({
     if (addressMode !== "off" && addressUntil !== undefined && !addressDone) {
       return "address";
     }
-    if (diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone) {
-      return "diplomas";
-    }
-    return employmentMode !== "off" &&
-      employmentUntil !== undefined &&
-      (!employmentDone || employmentOwed)
-      ? "employment"
+    const diplomasOpen = diplomaMode !== "off" && diplomasUntil !== undefined;
+    const statementOpen =
+      employmentMode !== "off" && employmentUntil !== undefined;
+    const open = diplomasOpen || statementOpen;
+    return open && (!documentsDone || (statementOpen && employmentOwed))
+      ? "documents"
       : "outcome";
   }
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
@@ -1780,10 +1768,48 @@ export function diplomaRejectionReason(reason: string, t: TFunction): string {
   }
 }
 
-// Whether the diploma step can end: once an extract is held, or the time to
-// add one is up.
-export function diplomaStepDone(held: number, secondsLeft: number): boolean {
-  return held > 0 || secondsLeft === 0;
+// Whether the document step can end: every document the flow asks for has a
+// kept file, or the time to add them is up.
+export function documentStepDone({
+  diplomasAsked,
+  diplomasHeld,
+  statementAsked,
+  statementKept,
+  secondsLeft,
+}: {
+  diplomasAsked: boolean;
+  diplomasHeld: number;
+  statementAsked: boolean;
+  statementKept: boolean;
+  secondsLeft: number;
+}): boolean {
+  if (secondsLeft === 0) return true;
+  return (
+    (!diplomasAsked || diplomasHeld > 0) && (!statementAsked || statementKept)
+  );
+}
+
+// Why an uploaded document was not kept, from its verdict: what the step
+// refuses before a check, else that document's own reason.
+export function documentRejectionReason(
+  verdict: { kind?: string; reason?: string },
+  t: TFunction,
+): string {
+  const reason = verdict.reason ?? "";
+  switch (reason) {
+    case "not_supported":
+      return t("identityProofing.documents.reasons.notSupported");
+    case "not_asked":
+      return t("identityProofing.documents.reasons.notAsked");
+    case "too_many":
+      return t("identityProofing.documents.reasons.tooMany");
+  }
+  if (verdict.kind === "employment") {
+    return reason === "duplicate"
+      ? t("identityProofing.employment.reasons.duplicate")
+      : employmentRejectionReason(reason, t);
+  }
+  return diplomaRejectionReason(reason, t);
 }
 
 // Why an uploaded Verzekeringsbericht was not kept, from its verdict's
@@ -1804,15 +1830,6 @@ export function employmentRejectionReason(
     default:
       return reason;
   }
-}
-
-// Whether the employment step can end: once a statement is kept, or the time
-// to upload one is up.
-export function employmentStepDone(
-  kept: ProofingEmployment | undefined,
-  secondsLeft: number,
-): boolean {
-  return kept !== undefined || secondsLeft === 0;
 }
 
 // Why a kept statement sends the session to review, as the wallet decides it:
@@ -2054,6 +2071,7 @@ export function flowStepLabels(
     steps: readonly string[];
     diplomaMode?: DiplomaMode;
     addressMode?: AddressMode;
+    employmentMode?: EmploymentMode;
   },
   t: TFunction,
 ): string[] {
@@ -2064,8 +2082,20 @@ export function flowStepLabels(
   if (stepAsked(flow.addressMode)) {
     labels.push(t("identityProofingFlows.steps.address"));
   }
-  if (stepAsked(flow.diplomaMode)) {
-    labels.push(t("identityProofingFlows.steps.diploma_upload"));
+  const documents = [
+    ...(stepAsked(flow.diplomaMode)
+      ? [t("identityProofingFlows.documents.diploma")]
+      : []),
+    ...(stepAsked(flow.employmentMode)
+      ? [t("identityProofingFlows.documents.employment")]
+      : []),
+  ];
+  if (documents.length > 0) {
+    labels.push(
+      t("identityProofingFlows.steps.documents", {
+        documents: documents.join(", "),
+      }),
+    );
   }
   return labels;
 }

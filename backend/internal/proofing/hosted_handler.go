@@ -98,6 +98,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("POST /proof/{token}/employment", h.limitHosted(h.hostedAddEmployment))
+	mux.Handle("POST /proof/{token}/documents", h.limitHosted(h.hostedAddDocuments))
 	mux.Handle("GET /proof/{token}/address/lookup", h.limitHosted(h.hostedLookUpAddress))
 	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }

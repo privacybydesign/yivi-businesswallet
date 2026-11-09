@@ -139,6 +139,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/documents", member(respond.HandlerFunc(h.addDocuments)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
@@ -1111,6 +1112,7 @@ var errorResponses = []struct {
 	{ErrAddressNotAsked, respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}},
 	{ErrAddressClosed, respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}},
 	{ErrEmploymentNotAsked, respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}},
+	{ErrDocumentsNotAsked, respond.APIError{Status: http.StatusConflict, Code: "documents_not_asked", Message: "this session asks for no document"}},
 	{ErrEmploymentClosed, respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}},
 	{ErrAddressNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}},
 	{ErrAddressLookupUnavailable, respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}},
