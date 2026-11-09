@@ -526,12 +526,15 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 
 // requestResponseFor is req's response as the caller sees it: a member who
 // reaches it only for its steps' reviews (onlyStepReviews) gets it without
-// its diplomas and proofed name, and without its employment unless they
-// review that: deciding a step needs only the step.
+// its diplomas and proofed name, and without its address and employment
+// unless they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
 	if onlyStepReviews(ctx, req) {
 		out.ProofedName = ""
+		if req.AddressReview == "" {
+			out.Address = nil
+		}
 		if req.EmploymentReview == "" {
 			out.Employment = nil
 		}
@@ -718,7 +721,8 @@ type decisionResponse struct {
 // admin or a reviewer: those who read the reasons in its timeline and on the
 // Reviews page. A member who only sent it gets none, as their timeline leaves
 // the reasons out. One reached only for its steps' reviews (onlyStepReviews)
-// gets the steps' decisions alone.
+// gets the steps' decisions alone, plus the identity's once a reviewer decided
+// it, as the Reviews page lists that check as closed.
 func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
 	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
 		return nil, nil
@@ -727,7 +731,7 @@ func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResp
 	if err != nil {
 		return nil, err
 	}
-	stepsOnly := onlyStepReviews(ctx, req)
+	stepsOnly := onlyStepReviews(ctx, req) && req.IdentityReviewedAt == nil
 	out := []decisionResponse{}
 	for _, d := range decisions {
 		if stepsOnly && d.Kind == DecisionReview {

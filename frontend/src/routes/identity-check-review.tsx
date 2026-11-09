@@ -116,9 +116,7 @@ export function IdentityCheckReview({
           {waiting ? (
             <WhyItWaits reason={checkReviewReason(request)} />
           ) : (
-            <>
-              <ClosedNote request={request} />
-            </>
+            <ClosedNote request={request} />
           )}
           <AutomaticChecks result={result} />
           <SessionDecisions request={request} except="identity" />
