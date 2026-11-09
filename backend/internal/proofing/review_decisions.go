@@ -21,6 +21,7 @@ const (
 	DecisionReview     DecisionKind = "review"
 	DecisionAddress    DecisionKind = "address"
 	DecisionEmployment DecisionKind = "employment"
+	DecisionDiplomas   DecisionKind = "diplomas"
 )
 
 // Decision is a reviewer's decision on a request, as its audit event keeps

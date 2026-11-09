@@ -16,6 +16,7 @@ import type {
   ProofingRequest,
   ProofingResult,
   ProofingSettings,
+  StepReviewKind,
 } from "../api/identity-proofing";
 import { EMPLOYMENT_KIND, isDataRequest } from "../api/identity-proofing";
 import type { UseQueryResult } from "@tanstack/react-query";
@@ -30,7 +31,7 @@ import {
   useMonthFormatter,
   useWhenFormatter,
 } from "../lib/format-when";
-import { reviewPath } from "../lib/proofing-reviews";
+import { reviewOfStep, reviewPath } from "../lib/proofing-reviews";
 import {
   PART_TONES,
   SUMMARY_TONES,
@@ -563,14 +564,23 @@ function SessionRow({
                   />
                 )}
                 {request.diplomaMode !== "off" && (
-                  <SessionDiplomas request={request} />
+                  <div className="flex flex-col gap-2">
+                    <SessionDiplomas request={request} />
+                    <StepReviewNote
+                      slug={slug}
+                      request={request}
+                      kind="diplomas"
+                      isAdmin={isAdmin}
+                    />
+                  </div>
                 )}
                 {request.employmentMode !== "off" && (
                   <div className="flex flex-col gap-2">
                     <SessionEmployment request={request} />
-                    <EmploymentReviewNote
+                    <StepReviewNote
                       slug={slug}
                       request={request}
+                      kind="employment"
                       isAdmin={isAdmin}
                     />
                   </div>
@@ -734,26 +744,28 @@ function AddressReviewNote({
   );
 }
 
-// Where a Verzekeringsbericht waiting for a reviewer stands, as the address's
-// note does.
-function EmploymentReviewNote({
+// Where a Verzekeringsbericht or the diplomas waiting for a reviewer stand,
+// as the address's note does.
+function StepReviewNote({
   slug,
   request,
+  kind,
   isAdmin,
 }: Readonly<{
   slug: string;
   request: ProofingRequest;
+  kind: "employment" | "diplomas";
   isAdmin: boolean;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
-  const review = request.employmentReview;
+  const review = reviewOfStep(request, kind);
   if (review === undefined) {
     return null;
   }
   return (
     <div className="flex flex-col gap-1">
       <p className={HINT}>
-        {t(`identityProofing.sessions.employment.review.${review}`)}
+        {t(`identityProofing.sessions.${kind}.review.${review}`)}
         {isAdmin && review === "pending" && (
           <>
             {" "}
@@ -767,7 +779,7 @@ function EmploymentReviewNote({
         )}
       </p>
       {review !== "pending" && (
-        <StepDecisionNote slug={slug} request={request} kind="employment" />
+        <StepDecisionNote slug={slug} request={request} kind={kind} />
       )}
     </div>
   );
@@ -782,7 +794,7 @@ function StepDecisionNote({
 }: Readonly<{
   slug: string;
   request: ProofingRequest;
-  kind: "address" | "employment";
+  kind: StepReviewKind;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
   const formatWhen = useWhenFormatter();
@@ -816,7 +828,7 @@ function StepDecisionNote({
 
 // The DUO diploma extracts a session holds, each as DUO printed it, with the
 // number duo.nl/diplomacontrole checks.
-function SessionDiplomas({
+export function SessionDiplomas({
   request,
 }: Readonly<{
   request: ProofingRequest;

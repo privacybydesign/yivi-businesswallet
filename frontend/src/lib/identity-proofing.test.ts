@@ -1780,6 +1780,12 @@ describe("flowStepLabels", () => {
     expect(
       flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
     ).toEqual(["Face check"]);
+    expect(
+      flowStepLabels(
+        { steps: ["face_verification"], diplomaMode: "always_review" },
+        t,
+      ),
+    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
   });
 
   it("names an always reviewed address as an asked one", () => {

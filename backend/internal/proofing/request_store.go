@@ -243,7 +243,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.DiplomasReview, &r.DiplomasReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
 		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt); err != nil {
 		return Request{}, err
 	}

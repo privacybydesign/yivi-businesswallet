@@ -1133,6 +1133,15 @@ export const nl: Translation<typeof en> = {
         title: "Diploma's",
         none: "Geen diploma toegevoegd.",
         number: "DUO-nummer {{number}}",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over de diploma's beslist. De identiteitscontrole verandert niet.",
+          confirmed: "Een beoordelaar heeft de diploma's geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft de diploma's afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft de diploma's op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
       },
       employment: {
         title: "Verzekeringsbericht",
@@ -1373,6 +1382,19 @@ export const nl: Translation<typeof en> = {
       identityCheck: "Identiteitscontrole",
       addressCheck: "Adres",
       employmentCheck: "Verzekeringsbericht",
+      diplomasCheck: "Diploma's",
+      diplomas: {
+        title: "Diploma's beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat de diploma's door een beoordelaar goedkeuren. Het zegel van DUO op elk uittreksel klopt, en elk uittreksel staat op naam van de persoon.",
+        decisionTitle: "Besluit",
+        confirm: "Diploma's accepteren",
+        reject: "Diploma's afwijzen",
+        confirmed: "De diploma's zijn geaccepteerd.",
+        rejected: "De diploma's zijn afgewezen.",
+        lapsed: "Niemand heeft de diploma's op tijd beoordeeld.",
+      },
       employment: {
         title: "Verzekeringsbericht beoordelen",
         whyTitle: "Waarom dit op jou wacht",
@@ -1424,6 +1446,7 @@ export const nl: Translation<typeof en> = {
         alwaysReview: "De flow laat elk identiteitsbewijs beoordelen",
         addressAlways: "De flow laat elk adres beoordelen",
         employmentAlways: "De flow laat elk Verzekeringsbericht beoordelen",
+        diplomasAlways: "De flow laat de diploma's beoordelen",
         current_other_income:
           "In het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren",
       },
@@ -1437,6 +1460,9 @@ export const nl: Translation<typeof en> = {
         employmentConfirmed: "Verzekeringsbericht geaccepteerd",
         employmentRejected: "Verzekeringsbericht afgewezen",
         employmentLapsed: "Beoordeling Verzekeringsbericht verlopen",
+        diplomasConfirmed: "Diploma's geaccepteerd",
+        diplomasRejected: "Diploma's afgewezen",
+        diplomasLapsed: "Beoordeling diploma's verlopen",
       },
       footer:
         "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
@@ -2005,6 +2031,9 @@ export const nl: Translation<typeof en> = {
         employment: "Het Verzekeringsbericht altijd laten beoordelen",
         employmentHint:
           "Elk bewaard Verzekeringsbericht wacht op een beoordelaar, ook een bericht met alleen een huidige baan.",
+        diplomas: "De diploma's altijd laten beoordelen",
+        diplomasHint:
+          "De bewaarde diploma-uittreksels wachten op een beoordelaar, ook als het zegel van DUO klopt.",
       },
       privacy: {
         title: "Privacy",

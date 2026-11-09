@@ -110,6 +110,8 @@ export function AdvancedSettings(
         update={update}
         addressMode={props.addressMode}
         onAddress={props.onAddress}
+        diplomaMode={props.diplomaMode}
+        onDiploma={props.onDiploma}
         employmentMode={props.employmentMode}
         onEmployment={props.onEmployment}
       />
@@ -853,6 +855,8 @@ function ReviewSection({
   update,
   addressMode,
   onAddress,
+  diplomaMode,
+  onDiploma,
   employmentMode,
   onEmployment,
 }: Readonly<
@@ -861,7 +865,12 @@ function ReviewSection({
     update: (patch: Partial<ProofingFlowDraft>) => void;
   } & Pick<
     AdvancedSettingsProps,
-    "addressMode" | "onAddress" | "employmentMode" | "onEmployment"
+    | "addressMode"
+    | "onAddress"
+    | "diplomaMode"
+    | "onDiploma"
+    | "employmentMode"
+    | "onEmployment"
   >
 >): React.JSX.Element {
   const { t } = useTranslation();
@@ -887,6 +896,19 @@ function ReviewSection({
           onChange={() =>
             onAddress(
               addressMode === "always_review" ? "required" : "always_review",
+            )
+          }
+        />
+      )}
+      {stepAsked(diplomaMode) && (
+        <OptionRow
+          id="flow-always-review-diplomas"
+          checked={diplomaMode === "always_review"}
+          label={t("identityProofingFlows.editor.review.diplomas")}
+          hint={t("identityProofingFlows.editor.review.diplomasHint")}
+          onChange={() =>
+            onDiploma(
+              diplomaMode === "always_review" ? "required" : "always_review",
             )
           }
         />

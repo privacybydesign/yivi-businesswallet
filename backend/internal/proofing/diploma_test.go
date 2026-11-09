@@ -214,3 +214,27 @@ func TestAddDiplomasCapsTheCount(t *testing.T) {
 		t.Errorf("AddDiplomas of %d = %v, want ErrInvalidInput", len(files), err)
 	}
 }
+
+// A diplomas review item settles the step as the address's does: in review
+// while it waits, rejected with DIPLOMA_REJECTED, done once confirmed.
+func TestDiplomasStepFollowsItsReview(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		review ReviewState
+		state  StepState
+		code   string
+	}{
+		{ReviewPending, StepInReview, ""},
+		{ReviewRejected, StepRejected, ErrorDiplomaRejected},
+		{ReviewConfirmed, StepDone, ""},
+	} {
+		req := Request{Diplomas: DiplomasAlwaysReview, CheckedAt: &now, DiplomasAddedAt: &now, DiplomasReview: tc.review}
+		steps := req.Steps(now)
+		if len(steps) != 1 || steps[0].State != tc.state || steps[0].Code != tc.code {
+			t.Errorf("review %q: steps = %+v, want %s %q", tc.review, steps, tc.state, tc.code)
+		}
+	}
+	if got := DiplomasAlwaysReview.forSubject(); got != DiplomasRequired {
+		t.Errorf("always_review for the subject = %q, want required", got)
+	}
+}

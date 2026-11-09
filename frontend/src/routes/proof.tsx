@@ -145,7 +145,7 @@ function HostedFlow({
     document: page.documentScan !== undefined,
     // The Yivi app shares the registered address: the person enters none.
     address: stepAsked(flow.addressMode) && method !== "yivi_app",
-    diplomas: flow.diplomaMode === "required",
+    diplomas: stepAsked(flow.diplomaMode),
     employment: stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<

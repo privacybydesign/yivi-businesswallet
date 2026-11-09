@@ -149,6 +149,8 @@ func (r Request) stepReview(kind ReviewKind) ReviewState {
 		return r.AddressReview
 	case ReviewKindEmployment:
 		return r.EmploymentReview
+	case ReviewKindDiplomas:
+		return r.DiplomasReview
 	}
 	return ""
 }
@@ -159,5 +161,7 @@ func (r *Request) setStepReview(kind ReviewKind, state ReviewState, at *time.Tim
 		r.AddressReview, r.AddressReviewedAt = state, at
 	case ReviewKindEmployment:
 		r.EmploymentReview, r.EmploymentReviewedAt = state, at
+	case ReviewKindDiplomas:
+		r.DiplomasReview, r.DiplomasReviewedAt = state, at
 	}
 }

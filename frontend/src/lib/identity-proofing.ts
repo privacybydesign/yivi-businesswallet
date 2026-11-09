@@ -31,6 +31,7 @@ import type {
   ProofingMethod,
   ProofingRequest,
   RegisterAddress,
+  StepReviewKind,
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
@@ -2041,7 +2042,7 @@ export function isProofingStep(value: string): value is ProofingStep {
 }
 
 // Whether a flow asks for a step of its own: required, or always reviewed.
-// EmploymentMode has the same values.
+// EmploymentMode and DiplomaMode have the same values.
 export function stepAsked(mode: AddressMode | undefined): boolean {
   return mode !== undefined && mode !== "off";
 }
@@ -2063,7 +2064,7 @@ export function flowStepLabels(
   if (stepAsked(flow.addressMode)) {
     labels.push(t("identityProofingFlows.steps.address"));
   }
-  if (flow.diplomaMode === "required") {
+  if (stepAsked(flow.diplomaMode)) {
     labels.push(t("identityProofingFlows.steps.diploma_upload"));
   }
   return labels;
@@ -2551,11 +2552,18 @@ export function sessionEventDetail(
   return [...parts, ...decisionEventDetail(fields, t)];
 }
 
-// What an employment review's decision reads as, per state.
-const EMPLOYMENT_OUTCOME_KEYS = {
-  confirmed: "employmentConfirmed",
-  rejected: "employmentRejected",
-  lapsed: "employmentLapsed",
+// What an employment or diplomas review's decision reads as, per state.
+const STEP_OUTCOME_KEYS = {
+  employment: {
+    confirmed: "employmentConfirmed",
+    rejected: "employmentRejected",
+    lapsed: "employmentLapsed",
+  },
+  diplomas: {
+    confirmed: "diplomasConfirmed",
+    rejected: "diplomasRejected",
+    lapsed: "diplomasLapsed",
+  },
 } as const;
 
 // What a review or address event adds: that an entered address goes to a
@@ -2584,7 +2592,9 @@ function decisionEventDetail(
     );
   }
   if (
-    (fields.kind === "address" || fields.kind === "employment") &&
+    (fields.kind === "address" ||
+      fields.kind === "employment" ||
+      fields.kind === "diplomas") &&
     (fields.state === "confirmed" ||
       fields.state === "rejected" ||
       fields.state === "lapsed")
@@ -2593,7 +2603,7 @@ function decisionEventDetail(
       fields.kind === "address"
         ? t(`identityProofing.sessions.address.tag.${fields.state}`)
         : t(
-            `identityProofing.reviews.outcome.${EMPLOYMENT_OUTCOME_KEYS[fields.state]}`,
+            `identityProofing.reviews.outcome.${STEP_OUTCOME_KEYS[fields.kind][fields.state]}`,
           ),
     );
   }
@@ -2726,7 +2736,7 @@ export interface StepReviewDecision {
 
 export function latestStepDecision(
   events: readonly AuditEvent[],
-  kind: "address" | "employment",
+  kind: StepReviewKind,
 ): StepReviewDecision | undefined {
   const event = events.findLast(
     (e) =>

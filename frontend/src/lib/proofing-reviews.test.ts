@@ -28,6 +28,7 @@ import {
   provenWithParts,
   reviewCounts,
   reviewTabFrom,
+  stepReviewOf,
   waitingParts,
   waitingOfTab,
   reasonProblem,
@@ -121,7 +122,13 @@ describe("review tabs", () => {
   it("counts every session once, and each tab its own", () => {
     expect(
       reviewCounts({
-        counts: { identity: 2, address: 2, employment: 1, data_request: 2 },
+        counts: {
+          identity: 2,
+          address: 2,
+          employment: 1,
+          diplomas: 0,
+          data_request: 2,
+        },
         sessions: 5,
         stepSessions: 2,
       }),
@@ -559,6 +566,12 @@ describe("step review whys", () => {
     expect(i18n.exists("identityProofing.reviews.employment.whyAlways")).toBe(
       true,
     );
+    expect(i18n.exists("identityProofing.reviews.why.diplomasAlways")).toBe(
+      true,
+    );
+    expect(i18n.exists("identityProofing.reviews.diplomas.whyAlways")).toBe(
+      true,
+    );
   });
 });
 
@@ -594,6 +607,20 @@ describe("waitingParts", () => {
       ),
     ).toBeUndefined();
     expect(waitingParts(request({ flowKind: "data_access" }))).toEqual([]);
+  });
+
+  it("puts the diplomas between the Verzekeringsbericht and the address", () => {
+    const steps = request({
+      status: "approved",
+      employmentReview: "pending",
+      diplomasReview: "pending",
+      addressReview: "pending",
+    });
+    expect(waitingParts(steps)).toEqual(["employment", "diplomas", "address"]);
+    expect(nextPart(steps, "employment")).toBe("diplomas");
+    expect(
+      stepReviewOf(request({ status: "approved", diplomasReview: "pending" })),
+    ).toBe("diplomas");
   });
 });
 

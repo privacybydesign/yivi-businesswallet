@@ -5726,7 +5726,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [identity, address, employment, data_request]
+            enum: [identity, address, employment, diplomas, data_request]
           description: >-
             Only the requests with a review item of this kind in `reviewState`. An `address` or
             `employment` item is listed in any state; an `identity` review while it waits, and once
@@ -6794,7 +6794,9 @@ paths:
         already sent keep the mode they were sent with. A flow that asks for diplomas cannot be
         mailed or sent as a bare deep link (422 `diplomas_need_page`): show it on screen or
         create it `hosted`. Audited `identity_proofing.flow_diplomas_configured` with before and
-        after. A mode other than `off` or `required` is 400 `invalid_input`.
+        after. `always_review` is `required` with the kept extracts sent to a reviewer (a
+        `diplomas` review item). A mode other than `off`, `required` or `always_review` is 400
+        `invalid_input`.
       requestBody:
         required: true
         content:
@@ -7295,7 +7297,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [identity, address, employment, data_request]
+          enum: [identity, address, employment, diplomas, data_request]
         description: The review item decided; any other is 404 `not_found`.
     post:
       tags: [identity-proofing]
@@ -7407,13 +7409,15 @@ paths:
                 properties:
                   counts:
                     type: object
-                    required: [identity, address, employment, data_request]
+                    required: [identity, address, employment, diplomas, data_request]
                     properties:
                       identity:
                         type: integer
                       address:
                         type: integer
                       employment:
+                        type: integer
+                      diplomas:
                         type: integer
                       data_request:
                         type: integer
@@ -7431,6 +7435,7 @@ paths:
                       identity: 2
                       address: 1
                       employment: 0
+                      diplomas: 0
                       data_request: 0
                     sessions: 2
                     stepSessions: 1
@@ -11950,7 +11955,8 @@ components:
           example: EMPLOYMENT_NOT_PROVIDED
           description: >-
             Why a step did not pass: `ADDRESS_NOT_PROVIDED`, `ADDRESS_REJECTED`,
-            `DIPLOMA_NOT_PROVIDED`, `EMPLOYMENT_NOT_PROVIDED`, `EMPLOYMENT_REJECTED` or
+            `DIPLOMA_NOT_PROVIDED`, `DIPLOMA_REJECTED`, `EMPLOYMENT_NOT_PROVIDED`,
+            `EMPLOYMENT_REJECTED` or
             `REVIEW_LAPSED`.
         reviewed:
           type: boolean
@@ -12234,7 +12240,7 @@ components:
               properties:
                 kind:
                   type: string
-                  enum: [employment]
+                  enum: [employment, diplomas]
                 state:
                   type: string
                   enum: [confirmed, rejected]
@@ -12621,7 +12627,7 @@ components:
                 `allowed`.
             diplomaMode:
               type: string
-              enum: ['off', required]
+              enum: ['off', required, always_review]
             addressMode:
               type: string
               enum: ['off', required, always_review]
@@ -12927,7 +12933,7 @@ components:
       properties:
         diplomaMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
       required: [diplomaMode]
     ProofingRequest:
       type: object
@@ -13000,7 +13006,7 @@ components:
           format: date-time
         diplomaMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
         diplomas:
           type: array
           items:
@@ -13094,6 +13100,16 @@ components:
           format: date-time
           readOnly: true
           description: When a reviewer decided the statement's review, or it lapsed.
+        diplomasReview:
+          type: string
+          readOnly: true
+          enum: [pending, confirmed, rejected, lapsed]
+          description: The review of the kept diploma extracts, on a flow that sends them to one.
+        diplomasReviewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When the diplomas review was decided or lapsed.
         steps:
           type: array
           readOnly: true

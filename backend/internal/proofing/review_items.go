@@ -21,15 +21,16 @@ const (
 	ReviewKindIdentity    ReviewKind = "identity"
 	ReviewKindAddress     ReviewKind = "address"
 	ReviewKindEmployment  ReviewKind = "employment"
+	ReviewKindDiplomas    ReviewKind = "diplomas"
 	ReviewKindDataRequest ReviewKind = "data_request"
 )
 
 // ReviewKinds are every kind, in the order a count lists them.
-var ReviewKinds = []ReviewKind{ReviewKindIdentity, ReviewKindAddress, ReviewKindEmployment, ReviewKindDataRequest}
+var ReviewKinds = []ReviewKind{ReviewKindIdentity, ReviewKindAddress, ReviewKindEmployment, ReviewKindDiplomas, ReviewKindDataRequest}
 
 func (k ReviewKind) known() bool {
 	switch k {
-	case ReviewKindIdentity, ReviewKindAddress, ReviewKindEmployment, ReviewKindDataRequest:
+	case ReviewKindIdentity, ReviewKindAddress, ReviewKindEmployment, ReviewKindDiplomas, ReviewKindDataRequest:
 		return true
 	}
 	return false
@@ -57,7 +58,7 @@ func (s ReviewState) known() bool {
 // stepReview is whether kind is an extra step's review, stored as its own
 // item beside the session's outcome.
 func (k ReviewKind) stepReview() bool {
-	return k == ReviewKindAddress || k == ReviewKindEmployment
+	return k == ReviewKindAddress || k == ReviewKindEmployment || k == ReviewKindDiplomas
 }
 
 // reviewKind is the kind of req's own review (needs_review): a data
@@ -116,23 +117,28 @@ func reviewItemOrder(state ReviewState, k string) string {
 			WHERE i.request_id = r.id AND i.kind = ` + k + `) DESC NULLS LAST, r.created_at DESC`
 }
 
-// latestAddressItem and latestEmploymentItem pick r's latest item of a step.
+// latestAddressItem, latestEmploymentItem and latestDiplomasItem pick r's
+// latest item of a step.
 const (
 	latestAddressItem = `FROM identity_proofing_review_items i
 		WHERE i.request_id = r.id AND i.kind = 'address' ORDER BY i.created_at DESC LIMIT 1`
 	latestEmploymentItem = `FROM identity_proofing_review_items i
 		WHERE i.request_id = r.id AND i.kind = 'employment' ORDER BY i.created_at DESC LIMIT 1`
+	latestDiplomasItem = `FROM identity_proofing_review_items i
+		WHERE i.request_id = r.id AND i.kind = 'diplomas' ORDER BY i.created_at DESC LIMIT 1`
 )
 
-// stepReviewColumns are the state of r's address and employment items and
+// stepReviewColumns are the state of r's address, employment and diplomas items and
 // when each was decided, when the first waiting one lapses, and when a
 // reviewer decided its identity, for Request's reviews.
 const stepReviewColumns = `COALESCE((SELECT i.state ` + latestAddressItem + `), ''),
 	(SELECT i.decided_at ` + latestAddressItem + `),
 	COALESCE((SELECT i.state ` + latestEmploymentItem + `), ''),
 	(SELECT i.decided_at ` + latestEmploymentItem + `),
+	COALESCE((SELECT i.state ` + latestDiplomasItem + `), ''),
+	(SELECT i.decided_at ` + latestDiplomasItem + `),
 	(SELECT min(i.due_at) FROM identity_proofing_review_items i
-		WHERE i.request_id = r.id AND i.kind IN ('address', 'employment') AND i.state = 'pending'),
+		WHERE i.request_id = r.id AND i.kind IN ('address', 'employment', 'diplomas') AND i.state = 'pending'),
 	CASE WHEN r.flow_kind = 'identity' THEN (SELECT max(a.occurred_at) ` + identityReviewDecided + `) END`
 
 // identityReviewDecided is r's identity_proofing.review_decided audit events:
@@ -287,7 +293,7 @@ type ReviewTally struct {
 	// Sessions is how many sessions wait, each once.
 	Sessions int
 	// StepSessions is how many of them wait for a step (an address, a
-	// Verzekeringsbericht), each once.
+	// Verzekeringsbericht, diplomas), each once.
 	StepSessions int
 }
 
@@ -295,27 +301,28 @@ type ReviewTally struct {
 func (s *RequestStore) ReviewCounts(ctx context.Context, orgID uuid.UUID) (ReviewTally, error) {
 	const stepWaits = `EXISTS (SELECT 1 FROM identity_proofing_review_items i
 		WHERE i.request_id = r.id AND i.kind = %s AND i.state = 'pending')`
-	address, employment := fmt.Sprintf(stepWaits, "$2"), fmt.Sprintf(stepWaits, "$3")
-	var identity, dataRequest, addresses, statements, sessions, steps int
+	address, employment, diplomas := fmt.Sprintf(stepWaits, "$2"), fmt.Sprintf(stepWaits, "$3"), fmt.Sprintf(stepWaits, "$6")
+	var identity, dataRequest, addresses, statements, extracts, sessions, steps int
 	err := s.db.QueryRow(ctx, `WITH waiting AS (
 			SELECT `+sessionReviewWaits+` AS own, `+sessionReviewKindColumn+` AS own_kind,
-				`+address+` AS address, `+employment+` AS employment
+				`+address+` AS address, `+employment+` AS employment, `+diplomas+` AS diplomas
 			FROM identity_proofing_requests r
 			WHERE r.organization_id = $1 AND r.purged_at IS NULL
 		)
 		SELECT count(*) FILTER (WHERE own AND own_kind = $4), count(*) FILTER (WHERE own AND own_kind = $5),
-			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment),
-			count(*) FILTER (WHERE own OR address OR employment), count(*) FILTER (WHERE address OR employment)
+			count(*) FILTER (WHERE address), count(*) FILTER (WHERE employment), count(*) FILTER (WHERE diplomas),
+			count(*) FILTER (WHERE own OR address OR employment OR diplomas),
+			count(*) FILTER (WHERE address OR employment OR diplomas)
 		FROM waiting`, orgID, string(ReviewKindAddress), string(ReviewKindEmployment),
-		string(ReviewKindIdentity), string(ReviewKindDataRequest)).
-		Scan(&identity, &dataRequest, &addresses, &statements, &sessions, &steps)
+		string(ReviewKindIdentity), string(ReviewKindDataRequest), string(ReviewKindDiplomas)).
+		Scan(&identity, &dataRequest, &addresses, &statements, &extracts, &sessions, &steps)
 	if err != nil {
 		return ReviewTally{}, fmt.Errorf("proofing: count reviews org %s: %w", orgID, err)
 	}
 	return ReviewTally{
 		Kinds: map[ReviewKind]int{
 			ReviewKindIdentity: identity, ReviewKindAddress: addresses,
-			ReviewKindEmployment: statements, ReviewKindDataRequest: dataRequest,
+			ReviewKindEmployment: statements, ReviewKindDiplomas: extracts, ReviewKindDataRequest: dataRequest,
 		},
 		Sessions: sessions, StepSessions: steps,
 	}, nil

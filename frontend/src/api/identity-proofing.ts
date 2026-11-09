@@ -25,7 +25,7 @@ export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 // Whether a flow has the diploma step: once their identity is approved, its
 // subject must add their DUO diploma extracts (the PDFs from mijn.duo.nl),
 // checked by the wallet.
-export const DIPLOMA_MODES = ["off", "required"] as const;
+export const DIPLOMA_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required: the page then asks for diplomas rather
 // than silently skipping a step the backend enforces.
 const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
@@ -67,11 +67,15 @@ export const REVIEW_KINDS = [
   "identity",
   "address",
   "employment",
+  "diplomas",
   "data_request",
 ] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 // The kinds a step's own review is of, beside the session's outcome.
-export type StepReviewKind = Extract<ReviewKind, "address" | "employment">;
+export type StepReviewKind = Extract<
+  ReviewKind,
+  "address" | "employment" | "diplomas"
+>;
 
 // An extra step of a session: where it stands, until when it takes input
 // while open, and why one did not pass.
@@ -88,7 +92,7 @@ export type ProofingStep = z.infer<typeof proofingStepSchema>;
 // A reviewer's decision on a request: its session's review or a step's (its
 // address, its Verzekeringsbericht), the outcome, why, by whom and when.
 const proofingDecisionSchema = z.object({
-  kind: z.enum(["review", "address", "employment"]),
+  kind: z.enum(["review", "address", "employment", "diplomas"]),
   outcome: z.string(),
   reason: z.string().optional(),
   errorCode: z.string().optional(),
@@ -378,6 +382,10 @@ const proofingRequestSchema = z.object({
   reviewReason: z.string().optional(),
   employmentReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
   employmentReviewedAt: z.string().optional(),
+  // Where the kept diploma extracts' review stands, on a flow that sends
+  // them to one, and when it was decided or lapsed.
+  diplomasReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  diplomasReviewedAt: z.string().optional(),
   // The extra steps the flow asks for, each with its own outcome.
   steps: z.array(proofingStepSchema).optional(),
   // A request in review whose flow version sends every session to review.
@@ -1874,6 +1882,7 @@ const reviewItemCountsSchema = z.object({
     identity: z.number(),
     address: z.number(),
     employment: z.number(),
+    diplomas: z.number(),
     data_request: z.number(),
   }),
   // The sessions that wait, and those waiting for a step, each once.

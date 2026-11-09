@@ -57,49 +57,81 @@ export function reviewTabFrom(raw: string | null): ReviewTab {
   return REVIEW_TABS.find((tab) => tab === raw) ?? DEFAULT_REVIEW_TAB;
 }
 
+// The steps a reviewer decides, in the order the review walks through them:
+// the Verzekeringsbericht, the diplomas, then the address.
+const STEP_REVIEW_ORDER = ["employment", "diplomas", "address"] as const;
+
+// Where a step's review stands; undefined for none.
+export function reviewOfStep(
+  request: ProofingRequest,
+  step: StepReviewKind,
+): AddressReviewState | undefined {
+  switch (step) {
+    case "employment":
+      return request.employmentReview;
+    case "diplomas":
+      return request.diplomasReview;
+    case "address":
+      return request.addressReview;
+  }
+}
+
+// When a step's review was decided or lapsed.
+function stepReviewedAt(
+  request: ProofingRequest,
+  step: StepReviewKind,
+): string | undefined {
+  switch (step) {
+    case "employment":
+      return request.employmentReviewedAt;
+    case "diplomas":
+      return request.diplomasReviewedAt;
+    case "address":
+      return request.addressReviewedAt;
+  }
+}
+
 // The step a request is reviewed for, apart from the check itself, which is
-// decided: the Verzekeringsbericht before the address, so a request with both
-// waiting opens that first. Undefined for none.
+// decided: the first waiting in STEP_REVIEW_ORDER, else the first decided.
+// Undefined for none.
 export function stepReviewOf(
   request: ProofingRequest,
 ): StepReviewKind | undefined {
   if (request.flowKind !== "identity" || request.status === "needs_review") {
     return undefined;
   }
-  if (request.employmentReview === "pending") return "employment";
-  if (request.addressReview === "pending") return "address";
-  if (request.employmentReview !== undefined) return "employment";
-  if (request.addressReview !== undefined) return "address";
-  return undefined;
+  return (
+    STEP_REVIEW_ORDER.find((s) => reviewOfStep(request, s) === "pending") ??
+    STEP_REVIEW_ORDER.find((s) => reviewOfStep(request, s) !== undefined)
+  );
 }
 
 // What a reviewer decides on an identity check's session, in the order the
-// review walks through it: the identity, then the Verzekeringsbericht, then
-// the address. Only what waits.
+// review walks through it: the identity, then its steps (STEP_REVIEW_ORDER).
+// Only what waits.
 export type ReviewPart = "identity" | StepReviewKind;
 
 export function waitingParts(request: ProofingRequest): ReviewPart[] {
   if (request.flowKind !== "identity") return [];
-  const parts: ReviewPart[] = [];
-  if (request.status === "needs_review") parts.push("identity");
-  if (request.employmentReview === "pending") parts.push("employment");
-  if (request.addressReview === "pending") parts.push("address");
-  return parts;
+  return [
+    ...(request.status === "needs_review" ? (["identity"] as const) : []),
+    ...STEP_REVIEW_ORDER.filter((s) => reviewOfStep(request, s) === "pending"),
+  ];
 }
 
-// What a reviewer decided on an identity check's session, in the same order:
-// its identity, its Verzekeringsbericht, its address.
+// What a reviewer decided on an identity check's session, in the same order.
 export function decidedParts(request: ProofingRequest): ReviewPart[] {
   if (request.flowKind !== "identity") return [];
-  const decided = (state: string | undefined): boolean =>
-    state !== undefined && state !== "pending";
-  const parts: ReviewPart[] = [];
-  if (request.identityReviewedAt && request.status !== "needs_review") {
-    parts.push("identity");
-  }
-  if (decided(request.employmentReview)) parts.push("employment");
-  if (decided(request.addressReview)) parts.push("address");
-  return parts;
+  const identityDecided =
+    request.identityReviewedAt !== undefined &&
+    request.status !== "needs_review";
+  return [
+    ...(identityDecided ? (["identity"] as const) : []),
+    ...STEP_REVIEW_ORDER.filter((s) => {
+      const state = reviewOfStep(request, s);
+      return state !== undefined && state !== "pending";
+    }),
+  ];
 }
 
 // Whether a session's review is over: something was decided and nothing waits.
@@ -111,6 +143,7 @@ export function isClosedSession(request: ProofingRequest): boolean {
 export const REVIEW_PART_KEYS = {
   identity: "identityProofing.reviews.identityCheck",
   employment: "identityProofing.reviews.employmentCheck",
+  diplomas: "identityProofing.reviews.diplomasCheck",
   address: "identityProofing.reviews.addressCheck",
 } as const satisfies Record<ReviewPart, string>;
 
@@ -132,14 +165,8 @@ export function isAddressReview(request: ProofingRequest): boolean {
 export function stepReviewState(
   request: ProofingRequest,
 ): AddressReviewState | undefined {
-  switch (stepReviewOf(request)) {
-    case "employment":
-      return request.employmentReview;
-    case "address":
-      return request.addressReview;
-    default:
-      return undefined;
-  }
+  const step = stepReviewOf(request);
+  return step === undefined ? undefined : reviewOfStep(request, step);
 }
 
 // Whether the check itself waits for a decision. A purged one has no person
@@ -152,8 +179,7 @@ function isInReview(request: ProofingRequest): boolean {
 function isWaiting(request: ProofingRequest): boolean {
   return (
     isInReview(request) ||
-    ((request.addressReview === "pending" ||
-      request.employmentReview === "pending") &&
+    (STEP_REVIEW_ORDER.some((s) => reviewOfStep(request, s) === "pending") &&
       request.purgedAt === undefined)
   );
 }
@@ -244,13 +270,12 @@ export function isDecidedStep(request: ProofingRequest): boolean {
 // When a closed request closed: its last part was decided or lapsed, or it
 // ended.
 export function closedAt(request: ProofingRequest): string {
-  const at = {
-    identity: request.identityReviewedAt,
-    employment: request.employmentReviewedAt,
-    address: request.addressReviewedAt,
-  };
   const decided = decidedParts(request)
-    .map((part) => at[part])
+    .map((part) =>
+      part === "identity"
+        ? request.identityReviewedAt
+        : stepReviewedAt(request, part),
+    )
     .filter((when): when is string => when !== undefined)
     .sort((a, b) => Date.parse(b) - Date.parse(a));
   return decided[0] ?? request.completedAt ?? request.createdAt;

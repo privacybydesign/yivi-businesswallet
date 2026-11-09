@@ -6,7 +6,11 @@ import type {
   ProofingRequest,
 } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
-import { REVIEW_PART_KEYS, decidedParts } from "../lib/proofing-reviews";
+import {
+  REVIEW_PART_KEYS,
+  decidedParts,
+  reviewOfStep,
+} from "../lib/proofing-reviews";
 import type { ReviewPart } from "../lib/proofing-reviews";
 import {
   assuranceLevelLabel,
@@ -175,8 +179,7 @@ function partOutcome(
       ? PART_OUTCOME.approved
       : PART_OUTCOME.rejected;
   }
-  const state =
-    part === "employment" ? request.employmentReview : request.addressReview;
+  const state = reviewOfStep(request, part);
   if (state === undefined || state === "pending") return undefined;
   return PART_OUTCOME[state];
 }
