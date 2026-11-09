@@ -1,12 +1,22 @@
 -- +goose Up
 -- 'always_review' is 'required' with the kept diploma extracts sent to a
 -- reviewer, as the address and the Verzekeringsbericht have it.
-ALTER TABLE identity_proofing_requests
-    DROP CONSTRAINT identity_proofing_requests_diplomas_check,
-    ADD CONSTRAINT identity_proofing_requests_diplomas_check CHECK (diplomas IN ('off', 'required', 'always_review'));
+-- format names the constraint once.
+-- +goose StatementBegin
+DO $$
+BEGIN
+    EXECUTE format(
+        'ALTER TABLE identity_proofing_requests DROP CONSTRAINT %1$I, ADD CONSTRAINT %1$I CHECK (diplomas IN (''off'', ''required'', ''always_review''))',
+        'identity_proofing_requests_diplomas_check');
+END $$;
+-- +goose StatementEnd
 
 -- +goose Down
-UPDATE identity_proofing_requests SET diplomas = 'required' WHERE diplomas = 'always_review';
-ALTER TABLE identity_proofing_requests
-    DROP CONSTRAINT identity_proofing_requests_diplomas_check,
-    ADD CONSTRAINT identity_proofing_requests_diplomas_check CHECK (diplomas IN ('off', 'required'));
+-- +goose StatementBegin
+DO $$
+BEGIN
+    EXECUTE format(
+        'UPDATE identity_proofing_requests SET diplomas = ''required'' WHERE diplomas = ''always_review''; ALTER TABLE identity_proofing_requests DROP CONSTRAINT %1$I, ADD CONSTRAINT %1$I CHECK (diplomas IN (''off'', ''required''))',
+        'identity_proofing_requests_diplomas_check');
+END $$;
+-- +goose StatementEnd
