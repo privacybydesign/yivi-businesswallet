@@ -248,7 +248,7 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 		return false, nil
 	}
 	f.stored.SubjectAddress, f.registeredAddress = &addr, nil
-	if review := addressReviewOf(addr); review != nil {
+	if review := addressReviewOf(addr, f.stored.Address); review != nil {
 		f.stored.AddressReview = *review
 	}
 	return true, nil
@@ -283,8 +283,9 @@ func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employm
 	}
 	now := time.Now()
 	f.stored.SubjectEmployment, f.stored.EmploymentAddedAt = &emp, &now
-	if reason := emp.reviewReason(); reason != "" {
-		f.stored.ReviewReason, f.stored.EmploymentReview = reason, ReviewPending
+	f.stored.ReviewReason = emp.reviewReason()
+	if emp.reviewed(f.stored.Employment) {
+		f.stored.EmploymentReview = ReviewPending
 	}
 	return true, nil
 }

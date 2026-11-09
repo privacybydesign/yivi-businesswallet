@@ -41,7 +41,7 @@ import type {
   CheckReviewReason,
 } from "../lib/proofing-reviews";
 import { Button, Icon, Select, StatusText, TopBar } from "../ui";
-import { IdentityPhotos, SessionEmployment } from "./proofing-people";
+import { IdentityPhotos } from "./proofing-people";
 import {
   BackToReviews,
   ClosedNote,
@@ -113,18 +113,18 @@ export function IdentityCheckReview({
       />
       <div className="flex flex-wrap items-start gap-6 p-4 sm:p-8">
         <div className="flex min-w-0 flex-[1_1_34rem] flex-col gap-6">
-          {waiting ? (
-            <WhyItWaits reason={checkReviewReason(request)} />
-          ) : (
-            <ClosedNote request={request} />
-          )}
+          {waiting && <WhyItWaits reason={checkReviewReason(request)} />}
+          {/* Neither approved nor rejected: no decision to list below. */}
+          {!waiting &&
+            request.status !== "approved" &&
+            request.status !== "rejected" && <ClosedNote request={request} />}
           <AutomaticChecks result={result} />
-          <SessionDecisions request={request} except="identity" />
+          <SessionDecisions
+            request={request}
+            except={waiting ? "identity" : undefined}
+          />
           <ChipData request={request} result={result} />
           {result.data && <PhotosSection result={result.data} />}
-          {request.employmentMode !== "off" && (
-            <SessionEmployment request={request} />
-          )}
         </div>
         {waiting &&
           (own ? (

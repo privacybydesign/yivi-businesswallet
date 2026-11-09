@@ -29,14 +29,26 @@ type AddressMode string
 const (
 	AddressOff      AddressMode = "off"
 	AddressRequired AddressMode = "required"
+	// AddressAlwaysReview is AddressRequired with every address sent to a
+	// reviewer, the registered one too.
+	AddressAlwaysReview AddressMode = "always_review"
 )
 
 func (m AddressMode) valid() bool {
-	return m == AddressOff || m == AddressRequired
+	return m == AddressOff || m == AddressRequired || m == AddressAlwaysReview
 }
 
 // asked is the mode as read from a row; "" (a store-less service) is off.
-func (m AddressMode) asked() bool { return m == AddressRequired }
+func (m AddressMode) asked() bool { return m == AddressRequired || m == AddressAlwaysReview }
+
+// forSubject is the mode as the subject's page reads it: never whether a
+// reviewer looks at every address.
+func (m AddressMode) forSubject() AddressMode {
+	if m == AddressAlwaysReview {
+		return AddressRequired
+	}
+	return m
+}
 
 const (
 	// AddressWindow is how long after the identity check finished the
@@ -250,8 +262,8 @@ func (s *FlowAddressStore) Save(ctx context.Context, orgID uuid.UUID, flowID str
 
 // AddAddress seals addr on req, audited identity_proofing.address_added
 // (with its verification, without the address), and sends session.address_added.
-// One the registered address did not confirm waits for a reviewer: a pending
-// address review item. It is false, and changes nothing, when the request
+// One the registered address did not confirm, or any on an AddressAlwaysReview
+// request, waits for a reviewer: a pending address review item. It is false, and changes nothing, when the request
 // holds an address already or was erased.
 func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address) (bool, error) {
 	if s.cipher == nil {
@@ -281,7 +293,7 @@ func (s *RequestStore) AddAddress(ctx context.Context, req Request, addr Address
 		added = true
 		now := time.Now()
 		req.AddressAddedAt = &now
-		if review := addressReviewOf(addr); review != nil {
+		if review := addressReviewOf(addr, req.Address); review != nil {
 			if err := openReviewItem(ctx, q, req, ReviewKindAddress); err != nil {
 				return err
 			}
@@ -391,7 +403,7 @@ func (s *Service) SaveFlowAddress(ctx context.Context, org Org, flowID string, m
 		return "", errors.New("proofing: no address settings store configured")
 	}
 	if !mode.valid() {
-		return "", fmt.Errorf("%w: address is off or required", ErrInvalidInput)
+		return "", fmt.Errorf("%w: address is off, required or always_review", ErrInvalidInput)
 	}
 	if err := s.orgHasFlow(ctx, org, flowID); err != nil {
 		return "", err
@@ -472,7 +484,7 @@ func (s *Service) addAddress(ctx context.Context, req Request, addr Address) (Re
 
 	now := s.now()
 	req.SubjectAddress, req.AddressAddedAt = &addr, &now
-	if review := addressReviewOf(addr); review != nil {
+	if review := addressReviewOf(addr, req.Address); review != nil {
 		req.AddressReview = *review
 		s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
 	}
@@ -536,8 +548,12 @@ func (s *Service) keepRegisteredAddress(ctx context.Context, req Request, regist
 	}
 	registered.Verification = AddressRegistered
 	// False when an address is kept already: a repeat of the disclosure.
-	if _, err := s.requests.AddAddress(ctx, req, registered); err != nil {
+	added, err := s.requests.AddAddress(ctx, req, registered)
+	if err != nil {
 		return err
+	}
+	if added && addressReviewOf(registered, req.Address) != nil {
+		s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
 	}
 	return nil
 }

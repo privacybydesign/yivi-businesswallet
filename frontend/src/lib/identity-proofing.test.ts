@@ -81,6 +81,7 @@ import {
   externalFlows,
   flowPurgeDays,
   flowStepLabels,
+  stepAsked,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -1750,6 +1751,15 @@ describe("flowPurgeDays", () => {
   });
 });
 
+describe("stepAsked", () => {
+  it("asks a step that is required or always reviewed", () => {
+    expect(stepAsked("required")).toBe(true);
+    expect(stepAsked("always_review")).toBe(true);
+    expect(stepAsked("off")).toBe(false);
+    expect(stepAsked(undefined)).toBe(false);
+  });
+});
+
 describe("flowStepLabels", () => {
   it("names each step in the order given", () => {
     expect(
@@ -1770,6 +1780,12 @@ describe("flowStepLabels", () => {
     expect(
       flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
     ).toEqual(["Face check"]);
+  });
+
+  it("names an always reviewed address as an asked one", () => {
+    expect(
+      flowStepLabels({ steps: [], addressMode: "always_review" }, t),
+    ).toEqual(["Enter the address"]);
   });
 
   it("adds the address entry before the diploma upload", () => {

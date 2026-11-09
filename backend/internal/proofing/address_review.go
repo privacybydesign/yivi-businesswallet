@@ -35,10 +35,11 @@ const (
 var ErrAddressNotUnderReview = errors.New("proofing: the address does not wait for a review")
 
 // addressReviewOf is the review a newly entered address starts with: pending
-// unless it is the registered (BRP) address. One that differs from it is
-// reviewed too: the person may have moved since.
-func addressReviewOf(addr Address) *AddressReview {
-	if addr.Verification == AddressRegistered {
+// unless it is the registered (BRP) address and mode does not review every
+// address. One that differs from it is reviewed too: the person may have
+// moved since.
+func addressReviewOf(addr Address, mode AddressMode) *AddressReview {
+	if addr.Verification == AddressRegistered && mode != AddressAlwaysReview {
 		return nil
 	}
 	pending := AddressReviewPending

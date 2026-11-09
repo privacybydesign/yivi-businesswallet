@@ -321,6 +321,38 @@ export function walletReviewReason(
   );
 }
 
+// Why an address waits: it differs from the registered address (BRP), it is
+// the registered one on a flow that reviews every address, or no register
+// confirms it.
+export type AddressReviewWhy = "addressMismatch" | "addressAlways" | "address";
+
+export function addressReviewWhy(
+  request: Pick<ProofingRequest, "address">,
+): AddressReviewWhy {
+  switch (request.address?.verification) {
+    case "registered_mismatch":
+      return "addressMismatch";
+    case "registered":
+      return "addressAlways";
+    default:
+      return "address";
+  }
+}
+
+// Why a Verzekeringsbericht waits: what it lists, else its flow reviewing
+// every statement.
+export function employmentReviewWhy(
+  request: Pick<ProofingRequest, "reviewReason" | "employmentMode">,
+): WalletReviewReason | "employmentAlways" {
+  const reason = walletReviewReason(request);
+  if (reason !== undefined) {
+    return reason;
+  }
+  return request.employmentMode === "always_review"
+    ? "employmentAlways"
+    : "no_current_employment";
+}
+
 // Why an identity check waits: its flow sending every session to review;
 // undefined is the engine's doubt.
 export type CheckReviewReason = "alwaysReview";

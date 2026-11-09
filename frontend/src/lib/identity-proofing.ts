@@ -2040,6 +2040,12 @@ export function isProofingStep(value: string): value is ProofingStep {
   return PROOFING_STEPS.has(value);
 }
 
+// Whether a flow asks for a step of its own: required, or always reviewed.
+// EmploymentMode has the same values.
+export function stepAsked(mode: AddressMode | undefined): boolean {
+  return mode !== undefined && mode !== "off";
+}
+
 // A flow version's steps in words, in the order the app runs them; a step the
 // wallet has no copy for shows as it is.
 export function flowStepLabels(
@@ -2054,7 +2060,7 @@ export function flowStepLabels(
     isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
   );
   // The wallet's own steps, after the app's: given in the browser.
-  if (flow.addressMode === "required") {
+  if (stepAsked(flow.addressMode)) {
     labels.push(t("identityProofingFlows.steps.address"));
   }
   if (flow.diplomaMode === "required") {

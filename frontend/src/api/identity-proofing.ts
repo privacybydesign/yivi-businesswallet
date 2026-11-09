@@ -32,8 +32,8 @@ const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
 
 // Whether a flow has the address step: once their identity is approved, its
 // subject enters their postal address. It is what they declare, not read off
-// a document.
-const ADDRESS_MODES = ["off", "required"] as const;
+// a document. always_review also sends every address to a reviewer.
+const ADDRESS_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required, as diplomaModeSchema.
 const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;
@@ -130,8 +130,9 @@ export type RegisterAddress = z.infer<typeof registerAddressSchema>;
 
 // Whether a flow has the employment step: once their identity is approved,
 // its subject uploads their UWV Verzekeringsbericht (the sealed PDF from
-// mijn.uwv.nl), checked by the wallet.
-const EMPLOYMENT_MODES = ["off", "required"] as const;
+// mijn.uwv.nl), checked by the wallet. always_review also sends every kept
+// statement to a reviewer.
+const EMPLOYMENT_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required, as diplomaModeSchema.
 const employmentModeSchema = z.enum(EMPLOYMENT_MODES).catch("required");
 export type EmploymentMode = z.infer<typeof employmentModeSchema>;

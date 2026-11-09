@@ -34,6 +34,7 @@ import {
   yiviAppAvailable,
   idemAppAvailable,
   acceptsPersonalData,
+  stepAsked,
 } from "../lib/identity-proofing";
 import { blockingError } from "../lib/query-state";
 import { Button, Card, Stepper, TopBar } from "../ui";
@@ -182,9 +183,9 @@ function VerifyFlow({
     app: !browserOnly && methods.length > 1,
     document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
     // The Yivi app shares the registered address: the person enters none.
-    address: flow.addressMode === "required" && method !== "yivi_app",
+    address: stepAsked(flow.addressMode) && method !== "yivi_app",
     diplomas: flow.diplomaMode === "required",
-    employment: flow.employmentMode === "required",
+    employment: stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"

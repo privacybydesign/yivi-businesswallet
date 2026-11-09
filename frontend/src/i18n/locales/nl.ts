@@ -1376,6 +1376,8 @@ export const nl: Translation<typeof en> = {
       employment: {
         title: "Verzekeringsbericht beoordelen",
         whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat elk Verzekeringsbericht door een beoordelaar goedkeuren. In dit bericht staat een huidige baan en geen uitkering of ander inkomen.",
         decisionTitle: "Besluit",
         confirm: "Verzekeringsbericht accepteren",
         reject: "Verzekeringsbericht afwijzen",
@@ -1389,6 +1391,8 @@ export const nl: Translation<typeof en> = {
         why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
         whyMismatch:
           "Dit adres wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. Misschien is diegene net verhuisd, dus een beoordelaar beslist.",
+        whyAlways:
+          "Deze flow laat elk adres door een beoordelaar goedkeuren. Het woonadres uit de BRP dat de persoon deelde, bevestigt dit adres.",
         method: "Gecontroleerd met",
         level: "Betrouwbaarheidsniveau",
         decisionTitle: "Besluit",
@@ -1417,7 +1421,9 @@ export const nl: Translation<typeof en> = {
           "In het Verzekeringsbericht staat geen huidige baan",
         current_benefit:
           "In het Verzekeringsbericht staat een lopende uitkering van UWV",
-        alwaysReview: "De flow laat elke controle beoordelen",
+        alwaysReview: "De flow laat elk identiteitsbewijs beoordelen",
+        addressAlways: "De flow laat elk adres beoordelen",
+        employmentAlways: "De flow laat elk Verzekeringsbericht beoordelen",
         current_other_income:
           "In het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren",
       },
@@ -1454,7 +1460,7 @@ export const nl: Translation<typeof en> = {
         why: {
           title: "Waarom dit op jou wacht",
           alwaysReview:
-            "Deze flow laat elke controle door een beoordelaar goedkeuren. Bekijk de automatische controles hieronder voordat je beslist.",
+            "Deze flow laat elk identiteitsbewijs door een beoordelaar goedkeuren. Bekijk de automatische controles hieronder voordat je beslist.",
           body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
           no_current_employment:
             "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder.",
@@ -1989,10 +1995,16 @@ export const nl: Translation<typeof en> = {
       },
       review: {
         title: "Beoordeling",
-        hint: "Wat er gebeurt met een sessie die alle controles doorstaat.",
-        always: "Altijd laten beoordelen",
+        hint: "Welke delen van een sessie op een beoordelaar wachten, ook als ze alle controles doorstaan.",
+        always: "Het identiteitsbewijs altijd laten beoordelen",
         alwaysHint:
-          "Een sessie die alle controles doorstaat, wacht op een beoordelaar die hem goedkeurt. Een mislukte controle wijst hem nog steeds af.",
+          "Een identiteitsbewijs dat alle controles doorstaat, wacht op een beoordelaar die het goedkeurt. Een mislukte controle wijst het nog steeds af.",
+        address: "Het adres altijd laten beoordelen",
+        addressHint:
+          "Elk adres wacht op een beoordelaar, ook een adres dat het woonadres uit de BRP bevestigt.",
+        employment: "Het Verzekeringsbericht altijd laten beoordelen",
+        employmentHint:
+          "Elk bewaard Verzekeringsbericht wacht op een beoordelaar, ook een bericht met alleen een huidige baan.",
       },
       privacy: {
         title: "Privacy",

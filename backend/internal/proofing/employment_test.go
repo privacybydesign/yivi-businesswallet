@@ -236,6 +236,25 @@ func TestBenefitGoesToReview(t *testing.T) {
 	}
 }
 
+// A flow that reviews every statement sends one with a current job to a
+// reviewer too, with no reason of its own.
+func TestAlwaysReviewStatementReviewed(t *testing.T) {
+	e := newEmploymentFixture(EmploymentAlwaysReview)
+	req := sendApprovedAddress(t, e.fixture, time.Minute)
+	verdict, err := e.upload(req, "statement")
+	if err != nil || verdict.Employment == nil || !verdict.Employment.Employed {
+		t.Fatalf("a statement with a job = %+v, %v; want it kept, employed", verdict, err)
+	}
+	got := e.requests.stored
+	if got.Status != StatusApproved || got.ReviewReason != "" || got.EmploymentReview != ReviewPending {
+		t.Fatalf("request = %s (%q, review %q), want approved with the statement in review, no reason",
+			got.Status, got.ReviewReason, got.EmploymentReview)
+	}
+	if steps := got.Steps(time.Now()); len(steps) != 1 || steps[0].State != StepInReview {
+		t.Errorf("steps = %+v, want the employment step in review", steps)
+	}
+}
+
 func TestEmploymentReviewReason(t *testing.T) {
 	job := EmploymentRelation{Kind: string(employment.KindEmployment)}
 	benefit := EmploymentRelation{Kind: string(employment.KindBenefit)}

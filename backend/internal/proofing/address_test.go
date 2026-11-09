@@ -200,10 +200,17 @@ func TestAddAddressVerification(t *testing.T) {
 			if *got.SubjectAddress != tc.want {
 				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
 			}
-			if tc.query == "" && len(tc.lookup.queries) != 0 || tc.query != "" && (len(tc.lookup.queries) != 1 || tc.lookup.queries[0] != tc.query) {
-				t.Errorf("register asked %q, want %q", tc.lookup.queries, tc.query)
-			}
+			checkRegisterAsked(t, tc.lookup, tc.query)
 		})
+	}
+}
+
+// checkRegisterAsked checks that the register was asked query once, or not at
+// all for "".
+func checkRegisterAsked(t *testing.T, lookup *fakeAddressLookup, query string) {
+	t.Helper()
+	if query == "" && len(lookup.queries) != 0 || query != "" && (len(lookup.queries) != 1 || lookup.queries[0] != query) {
+		t.Errorf("register asked %q, want %q", lookup.queries, query)
 	}
 }
 
@@ -410,7 +417,7 @@ func TestAddAddressComparedWithRegistered(t *testing.T) {
 				t.Errorf("address = %+v, want %+v", got, tc.want)
 			}
 			var review AddressReview
-			if r := addressReviewOf(got); r != nil {
+			if r := addressReviewOf(got, AddressRequired); r != nil {
 				review = *r
 			}
 			if review != tc.wantReview {
@@ -488,5 +495,50 @@ func TestAddressReviewNeedsReason(t *testing.T) {
 		if _, err := f.svc.DecideAddressReview(ctx, testOrg.ID, req.ID, StepReviewInput{Confirm: true, Reason: reason, ReviewerID: uuid.New(), Scope: ReviewScopeAll, OwnAllowed: false}); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("reason %q: DecideAddressReview = %v; want ErrInvalidInput", reason, err)
 		}
+	}
+}
+
+// A flow that reviews every address sends the registered one to a reviewer
+// too; otherwise only an address no register confirmed waits.
+func TestAddressReviewOf(t *testing.T) {
+	for _, tc := range []struct {
+		verification AddressVerification
+		mode         AddressMode
+		want         bool
+	}{
+		{AddressRegistered, AddressRequired, false},
+		{AddressRegistered, AddressAlwaysReview, true},
+		{AddressVerified, AddressRequired, true},
+		{AddressRegisteredMismatch, AddressAlwaysReview, true},
+	} {
+		got := addressReviewOf(Address{Verification: tc.verification}, tc.mode) != nil
+		if got != tc.want {
+			t.Errorf("%s under %s: reviewed = %v, want %v", tc.verification, tc.mode, got, tc.want)
+		}
+	}
+}
+
+func TestYiviRegisteredAddressAlwaysReviewed(t *testing.T) {
+	f := discloseYiviAddress(t, AddressAlwaysReview, brpClaims)
+	got := f.requests.stored
+	if got.SubjectAddress == nil || got.AddressReview != AddressReviewPending || got.Status != StatusApproved {
+		t.Fatalf("address %+v, review %q, %s; want the registered one kept, pending, approved", got.SubjectAddress, got.AddressReview, got.Status)
+	}
+	if steps := got.Steps(time.Now()); len(steps) != 1 || steps[0].State != StepInReview {
+		t.Errorf("steps = %+v, want the address in review", steps)
+	}
+}
+
+// The subject's page never learns that a reviewer looks at every address or
+// statement.
+func TestStepModesForSubject(t *testing.T) {
+	if got := AddressAlwaysReview.forSubject(); got != AddressRequired {
+		t.Errorf("address always_review for the subject = %q, want required", got)
+	}
+	if got := EmploymentAlwaysReview.forSubject(); got != EmploymentRequired {
+		t.Errorf("employment always_review for the subject = %q, want required", got)
+	}
+	if got := AddressOff.forSubject(); got != AddressOff {
+		t.Errorf("address off for the subject = %q, want off", got)
 	}
 }

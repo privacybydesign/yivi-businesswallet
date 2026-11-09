@@ -18,6 +18,7 @@ import {
 } from "../lib/identity-proofing";
 import { toast } from "../lib/toast";
 import {
+  addressReviewWhy,
   nextPart,
   ownReview,
   reasonProblem,
@@ -37,6 +38,12 @@ import {
 } from "./proofing-review-parts";
 import { useAfterDecision } from "../lib/use-after-decision";
 import { PostalAddress } from "./proofing-ui";
+
+const ADDRESS_WHY_HINT = {
+  addressMismatch: "identityProofing.reviews.address.whyMismatch",
+  addressAlways: "identityProofing.reviews.address.whyAlways",
+  address: "identityProofing.reviews.address.why",
+} as const;
 
 // An address that waits for a person, or was decided: the address (and the
 // registered one it differs from), the identity check it came with (decided
@@ -75,11 +82,7 @@ export function AddressReview({
         <ReviewSection
           id="address-review-why"
           title={t("identityProofing.reviews.address.whyTitle")}
-          hint={t(
-            address?.verification === "registered_mismatch"
-              ? "identityProofing.reviews.address.whyMismatch"
-              : "identityProofing.reviews.address.why",
-          )}
+          hint={t(ADDRESS_WHY_HINT[addressReviewWhy(request)])}
         >
           {address === undefined ? (
             <p className={REVIEW_HINT}>
