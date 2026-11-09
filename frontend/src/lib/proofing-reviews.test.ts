@@ -9,6 +9,7 @@ import {
 } from "./identity-proofing";
 import {
   REJECT_REASONS,
+  addressReviewWhy,
   answerBy,
   nextPart,
   decidedParts,
@@ -20,6 +21,7 @@ import {
   checkDecisionProblems,
   closedAt,
   closedRequests,
+  employmentReviewWhy,
   isAddressReview,
   ownReview,
   personName,
@@ -500,6 +502,63 @@ describe("wallet review reasons mirror the backend", () => {
     );
     expect(walletReviewReason({ reviewReason: "other" })).toBeUndefined();
     expect(walletReviewReason({})).toBeUndefined();
+  });
+});
+
+describe("step review whys", () => {
+  const at = (
+    verification: "registered" | "registered_mismatch" | "verified",
+  ) =>
+    ({
+      street: "Kerkstraat",
+      houseNumber: "12",
+      postalCode: "6511AB",
+      city: "Nijmegen",
+      country: "Nederland",
+      verification,
+    }) as const;
+
+  it("names the registered address on a flow that reviews every one", () => {
+    expect(addressReviewWhy({ address: at("registered") })).toBe(
+      "addressAlways",
+    );
+    expect(addressReviewWhy({ address: at("registered_mismatch") })).toBe(
+      "addressMismatch",
+    );
+    expect(addressReviewWhy({ address: at("verified") })).toBe("address");
+    expect(addressReviewWhy({})).toBe("address");
+  });
+
+  it("reads the statement's reason before the flow's", () => {
+    expect(
+      employmentReviewWhy({
+        reviewReason: "current_benefit",
+        employmentMode: "always_review",
+      }),
+    ).toBe("current_benefit");
+    expect(employmentReviewWhy({ employmentMode: "always_review" })).toBe(
+      "employmentAlways",
+    );
+    expect(employmentReviewWhy({ employmentMode: "required" })).toBe(
+      "no_current_employment",
+    );
+  });
+
+  it("has copy for every why in the list and on the review pages", () => {
+    for (const why of [
+      "address",
+      "addressMismatch",
+      "addressAlways",
+      "employmentAlways",
+    ]) {
+      expect(i18n.exists(`identityProofing.reviews.why.${why}`)).toBe(true);
+    }
+    for (const key of ["why", "whyMismatch", "whyAlways"]) {
+      expect(i18n.exists(`identityProofing.reviews.address.${key}`)).toBe(true);
+    }
+    expect(i18n.exists("identityProofing.reviews.employment.whyAlways")).toBe(
+      true,
+    );
   });
 });
 

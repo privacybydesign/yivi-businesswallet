@@ -25,12 +25,9 @@ export default function ProofingReview(): React.JSX.Element {
   const request = useProofingRequestQuery(slug, id, { enabled: canReview });
 
   const { data } = request;
-  // A closed session whose identity a reviewer decided opens as that check,
-  // with every decision of its review.
-  const closedCheck =
-    data !== undefined &&
-    data.identityReviewedAt !== undefined &&
-    waitingParts(data).length === 0;
+  // A closed session opens as its identity check, with every decision of its
+  // review listed together.
+  const closedCheck = data !== undefined && waitingParts(data).length === 0;
   const step = data && !closedCheck ? stepReviewOf(data) : undefined;
   if (data && step === "employment") {
     return <EmploymentReview slug={slug} request={data} />;

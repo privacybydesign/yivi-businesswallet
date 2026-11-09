@@ -5,10 +5,10 @@ import type { ProofingRequest } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import { proofingMethodLabel, requestSubject } from "../lib/identity-proofing";
 import {
+  employmentReviewWhy,
   ownReview,
   reviewPath,
   STEP_DECIDED_KEYS,
-  walletReviewReason,
 } from "../lib/proofing-reviews";
 import { TopBar } from "../ui";
 import { StepDecision } from "./address-review";
@@ -37,7 +37,7 @@ export function EmploymentReview({
   // reviewer's.
   const own = ownReview(request, me.data);
   const review = request.employmentReview;
-  const reason = walletReviewReason(request);
+  const why = employmentReviewWhy(request);
   const subtitle = [
     requestSubject(request).name,
     request.flowName,
@@ -58,7 +58,9 @@ export function EmploymentReview({
           id="employment-review-why"
           title={t("identityProofing.reviews.employment.whyTitle")}
           hint={t(
-            `identityProofing.reviews.check.why.${reason ?? "no_current_employment"}`,
+            why === "employmentAlways"
+              ? "identityProofing.reviews.employment.whyAlways"
+              : `identityProofing.reviews.check.why.${why}`,
           )}
         >
           <SessionEmployment request={request} />

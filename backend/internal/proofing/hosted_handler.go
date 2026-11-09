@@ -397,8 +397,8 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.YiviPersonalData = acceptsPersonalData(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
 	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
-	out.Flow.AddressMode = addressModeOf(hosted.Request)
-	out.Flow.EmploymentMode = employmentModeOf(hosted.Request)
+	out.Flow.AddressMode = addressModeOf(hosted.Request).forSubject()
+	out.Flow.EmploymentMode = employmentModeOf(hosted.Request).forSubject()
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
 

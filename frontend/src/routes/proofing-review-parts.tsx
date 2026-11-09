@@ -189,7 +189,9 @@ export function SessionDecisions({
   except,
 }: Readonly<{
   request: ProofingRequest;
-  except: ReviewPart;
+  // The part the page itself shows; none on a closed session, which lists
+  // every part here.
+  except?: ReviewPart;
 }>): React.JSX.Element | null {
   const { t } = useTranslation();
   const identityDecided =
@@ -201,7 +203,7 @@ export function SessionDecisions({
   if (parts.length === 0) return null;
   return (
     <ReviewSection
-      id={`session-decisions-${except}`}
+      id={`session-decisions-${except ?? "all"}`}
       title={t("identityProofing.reviews.alsoDecided")}
     >
       {parts.map((part) => {

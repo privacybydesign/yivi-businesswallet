@@ -30,6 +30,7 @@ import {
   lockedByLevel,
   retentionChoices,
   scansFace,
+  stepAsked,
   ttlMinutes,
   wholeDays,
 } from "../lib/identity-proofing";
@@ -104,7 +105,14 @@ export function AdvancedSettings(
         error={error}
       />
       <ChecksSection draft={draft} update={update} />
-      <ReviewSection draft={draft} update={update} />
+      <ReviewSection
+        draft={draft}
+        update={update}
+        addressMode={props.addressMode}
+        onAddress={props.onAddress}
+        employmentMode={props.employmentMode}
+        onEmployment={props.onEmployment}
+      />
       <PrivacySection draft={draft} update={update} settings={settings} />
     </>
   );
@@ -838,13 +846,24 @@ function ChecksSection({
   );
 }
 
+// Each part of a session that waits for a reviewer even when it passes: the
+// identity proof, and each extra step the flow asks for.
 function ReviewSection({
   draft,
   update,
-}: Readonly<{
-  draft: ProofingFlowDraft;
-  update: (patch: Partial<ProofingFlowDraft>) => void;
-}>): React.JSX.Element {
+  addressMode,
+  onAddress,
+  employmentMode,
+  onEmployment,
+}: Readonly<
+  {
+    draft: ProofingFlowDraft;
+    update: (patch: Partial<ProofingFlowDraft>) => void;
+  } & Pick<
+    AdvancedSettingsProps,
+    "addressMode" | "onAddress" | "employmentMode" | "onEmployment"
+  >
+>): React.JSX.Element {
   const { t } = useTranslation();
 
   return (
@@ -859,6 +878,32 @@ function ReviewSection({
         hint={t("identityProofingFlows.editor.review.alwaysHint")}
         onChange={() => update({ alwaysReview: !draft.alwaysReview })}
       />
+      {stepAsked(addressMode) && (
+        <OptionRow
+          id="flow-always-review-address"
+          checked={addressMode === "always_review"}
+          label={t("identityProofingFlows.editor.review.address")}
+          hint={t("identityProofingFlows.editor.review.addressHint")}
+          onChange={() =>
+            onAddress(
+              addressMode === "always_review" ? "required" : "always_review",
+            )
+          }
+        />
+      )}
+      {stepAsked(employmentMode) && (
+        <OptionRow
+          id="flow-always-review-employment"
+          checked={employmentMode === "always_review"}
+          label={t("identityProofingFlows.editor.review.employment")}
+          hint={t("identityProofingFlows.editor.review.employmentHint")}
+          onChange={() =>
+            onEmployment(
+              employmentMode === "always_review" ? "required" : "always_review",
+            )
+          }
+        />
+      )}
     </Section>
   );
 }

@@ -39,6 +39,7 @@ import {
   supportContactLink,
   verifyStages,
   firstMethod,
+  stepAsked,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
@@ -143,9 +144,9 @@ function HostedFlow({
     app: !flow.browserOnly && methods.length > 1,
     document: page.documentScan !== undefined,
     // The Yivi app shares the registered address: the person enters none.
-    address: flow.addressMode === "required" && method !== "yivi_app",
+    address: stepAsked(flow.addressMode) && method !== "yivi_app",
     diplomas: flow.diplomaMode === "required",
-    employment: flow.employmentMode === "required",
+    employment: stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"

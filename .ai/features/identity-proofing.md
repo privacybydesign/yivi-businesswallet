@@ -1440,14 +1440,23 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 - Closed: one row per session whose review is over (`isClosedSession`), each
   part's outcome, closed at its last decision; and the data requests that
   ended. A data request carries no mark of a reviewer's decision, so it shows
-  that it ended and its error code in words. A closed session opens as its
-  identity check when a reviewer decided that.
+  that it ended and its error code in words. A closed session always opens as
+  its identity check, every decision listed under "Already decided in this
+  session" (`SessionDecisions` without `except`), none on top.
+- The identity review shows only the identity: no Verzekeringsbericht, which
+  has its own review page.
 - The waiting list is three reads (`useWaitingReviewsQuery`): `?status=needs_review`,
   `?reviewKind=address` and `?reviewKind=employment`, each narrowed before its
   cap of 200, longest waiting first, so the cap leaves out the newest.
 
-**Always send to review (`alwaysReview` on a flow version).**
-- Set in the flow editor's Review section. The engine sends a session it would
+**Always send to review, per part.**
+- The flow editor's Review section has a toggle per part: the identity proof
+  (`alwaysReview` on a flow version, below), and the address and the
+  Verzekeringsbericht while the flow asks for them (their `always_review`
+  mode, §16, §17). Diplomas have no review yet.
+
+**Always send the identity proof to review (`alwaysReview` on a flow version).**
+- The engine sends a session it would
   approve to `needs_review` (audit reason `flow_always_review`): in
   `sessionOutcome` for the Idem app and the browser, in `acceptReference` for Yivi.
 - Every rejection still rejects (chip, document, face, level not met).
@@ -2125,8 +2134,10 @@ BAG; a Yivi app request takes the registered (BRP) address from the app
 instead, and asks none.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
-  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
-  audited `flow_address_configured`.
+  `PUT .../flows/{id}/address`, admin): `off` (the default), `required`, or
+  `always_review` (`required`, and every address waits for a reviewer, the
+  `registered` one too), audited `flow_address_configured`.
+  - The subject's page reads `always_review` as `required` (`forSubject`).
   - The flow editor shows it as "Enter the address", before the diploma step;
     saved after the flow and before the diplomas' follow-up save.
   - The flow list carries it as `addressMode`; a single version's answer omits
@@ -2213,6 +2224,8 @@ instead, and asks none.
 - **Address review**: any address but `registered` waits for a reviewer
   (a pending `address` review item, §9, opened by `AddAddress`,
   `addressReviewOf`), `registered_mismatch` included: the person may have moved.
+  Under `always_review` the `registered` one waits too, on the page and from
+  the Yivi disclosure (`keepRegisteredAddress`).
   Migration `20261105120100` moved the `address_review*` columns onto items.
   - Only the address is reviewed: the session keeps its outcome, and the
     engine's session review is untouched (`address_review.go`).
@@ -2323,8 +2336,10 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     does not tell them apart.
 - **Per flow** (`identity_proofing_flow_settings.employment`,
   `FlowEmploymentStore`, `PUT .../flows/{id}/employment`, admin): `off` (the
-  default) or `required`, audited `flow_employment_configured`.
-  - `required` needs a flow that reads `dg1` (`flow_no_identity`), and keeps
+  default), `required`, or `always_review` (`required`, and every kept
+  statement waits for a reviewer), audited `flow_employment_configured`.
+  - The subject's page reads `always_review` as `required` (`forSubject`).
+  - `required` (and `always_review`) needs a flow that reads `dg1` (`flow_no_identity`), and keeps
     an edit or older version from dropping it (`identityRequired`).
   - The flow list carries it as `employmentMode`. A data request flow asks for
     none. A request snapshots it at send (`identity_proofing_requests.employment`).
@@ -2411,6 +2426,10 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - `current_benefit`: a job, and a current `benefit` relation beside it;
   - `current_other_income`: a job, and a current `other_income` relation
     beside it (no `benefit`).
+  - Under `always_review` any kept statement opens the item
+    (`Employment.reviewed`), with no `review_reason` when it lists nothing of
+    the above. The review page then says the flow reviews every statement
+    (`employmentReviewWhy`).
   - A statement kept while the engine still reviews the identity opens its
     item at once; the engine's approval settles only the identity.
   - Decided on the Reviews page (`routes/employment-review.tsx`) through

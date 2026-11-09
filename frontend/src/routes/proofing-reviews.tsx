@@ -20,6 +20,8 @@ import {
   requestedBy,
 } from "../lib/identity-proofing";
 import {
+  addressReviewWhy,
+  employmentReviewWhy,
   DEFAULT_REVIEW_TAB,
   REVIEW_PART_KEYS,
   REVIEW_TABS,
@@ -27,7 +29,6 @@ import {
   closedAt,
   closedRequests,
   stepReviewOf,
-  walletReviewReason,
   personName,
   reviewCounts,
   reviewPath,
@@ -229,19 +230,14 @@ function WaitingTable({
 function reviewWhy(request: ProofingRequest, t: TFunction): string {
   const step = stepReviewOf(request);
   if (step === "employment") {
-    return t(
-      `identityProofing.reviews.why.${walletReviewReason(request) ?? "no_current_employment"}`,
-    );
+    return t(`identityProofing.reviews.why.${employmentReviewWhy(request)}`);
   }
   if (step !== "address") {
     return t(
       `identityProofing.reviews.why.${checkReviewReason(request) ?? request.flowKind}`,
     );
   }
-  if (request.address?.verification === "registered_mismatch") {
-    return t("identityProofing.reviews.why.addressMismatch");
-  }
-  return t("identityProofing.reviews.why.address");
+  return t(`identityProofing.reviews.why.${addressReviewWhy(request)}`);
 }
 
 // How a data request's person was proven: the app, and the level reached.

@@ -6665,10 +6665,11 @@ paths:
       tags: [identity-proofing]
       summary: Read whether a flow asks for the postal address
       description: >-
-        Requires an administrator role in the organisation. `{addressMode}`: `off` or
-        `required` (the flow has the address step). With `required`, once the identity is
-        approved the subject enters their postal address on the page that ran the session. It
-        is what they declare, not read off a document. A flow never set reads `off`.
+        Requires an administrator role in the organisation. `{addressMode}`: `off`,
+        `required` (the flow has the address step) or `always_review` (as `required`, and every
+        address waits for a reviewer, the registered one too). With `required`, once the
+        identity is approved the subject enters their postal address on the page that ran the
+        session. It is what they declare, not read off a document. A flow never set reads `off`.
       responses:
         '200':
           description: The flow's address mode.
@@ -6699,7 +6700,7 @@ paths:
         already sent keep the mode they were sent with. A flow that asks for the address cannot
         be mailed or sent as a bare deep link (422 `address_needs_page`): show it on screen or
         create it `hosted`. Audited `identity_proofing.flow_address_configured` with before and
-        after. A mode other than `off` or `required` is 400 `invalid_input`.
+        after. A mode other than `off`, `required` or `always_review` is 400 `invalid_input`.
       requestBody:
         required: true
         content:
@@ -6793,7 +6794,7 @@ paths:
         already sent keep the mode they were sent with. A flow that asks for diplomas cannot be
         mailed or sent as a bare deep link (422 `diplomas_need_page`): show it on screen or
         create it `hosted`. Audited `identity_proofing.flow_diplomas_configured` with before and
-        after. A mode other than `off` or `required` is 400 `invalid_input`.
+        after. A mode other than `off`, `required` or `always_review` is 400 `invalid_input`.
       requestBody:
         required: true
         content:
@@ -6853,8 +6854,10 @@ paths:
       tags: [identity-proofing]
       summary: Read whether a flow asks for the UWV Verzekeringsbericht
       description: >-
-        Requires an administrator role in the organisation. `{employmentMode}`: `off` or
-        `required` (the flow has the employment step). With `required`, once the identity is
+        Requires an administrator role in the organisation. `{employmentMode}`: `off`,
+        `required` (the flow has the employment step) or `always_review` (as `required`, and
+        every kept statement waits for a reviewer, one with no reason too). With `required`,
+        once the identity is
         approved the subject uploads their UWV Verzekeringsbericht on the page that ran the
         session, and its employment relations are kept. A flow never set reads `off`.
       responses:
@@ -6884,14 +6887,14 @@ paths:
       summary: Set whether a flow asks for the UWV Verzekeringsbericht
       description: >-
         Requires an administrator role in the organisation. Body `{employmentMode}`. Sessions
-        already sent keep the mode they were sent with. `required` needs a flow that reads the
-        name and date of birth (`dg1`), which the statement's holder is matched against (422
+        already sent keep the mode they were sent with. `required` and `always_review` need a
+        flow that reads the name and date of birth (`dg1`), which the statement's holder is matched against (422
         `flow_no_identity`). A flow that asks for the statement cannot be mailed or sent as a
         bare deep link (422 `employment_needs_page`): show it on screen or create it `hosted`.
         A deployment that checks no statement (`EMPLOYMENT_VALIDATOR_PROVIDER=off`) refuses
-        `required` (409 `no_employment_checker`). Audited
+        both (409 `no_employment_checker`). Audited
         `identity_proofing.flow_employment_configured` with before and after. A mode
-        other than `off` or `required` is 400 `invalid_input`.
+        other than `off`, `required` or `always_review` is 400 `invalid_input`.
       requestBody:
         required: true
         content:
@@ -12357,7 +12360,7 @@ components:
       properties:
         employmentMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
       required: [employmentMode]
     ProofingEmployment:
       type: object
@@ -12621,10 +12624,10 @@ components:
               enum: ['off', required]
             addressMode:
               type: string
-              enum: ['off', required]
+              enum: ['off', required, always_review]
             employmentMode:
               type: string
-              enum: ['off', required]
+              enum: ['off', required, always_review]
             needsReferencePhoto:
               type: boolean
               description: The face is matched against a reference photo; only the API can send such a flow.
@@ -12854,7 +12857,7 @@ components:
       properties:
         addressMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
       required: [addressMode]
     ProofingAddress:
       type: object
@@ -13008,7 +13011,7 @@ components:
           description: When the person can last add a diploma extract; absent until the identity is approved.
         addressMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
         address:
           $ref: '#/components/schemas/ProofingAddress'
         addressUntil:
@@ -13070,7 +13073,7 @@ components:
                 format: date-time
         employmentMode:
           type: string
-          enum: ['off', required]
+          enum: ['off', required, always_review]
         employment:
           $ref: '#/components/schemas/ProofingEmployment'
         employmentUntil:

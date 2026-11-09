@@ -1343,6 +1343,8 @@ export const en = {
       employment: {
         title: "Review a Verzekeringsbericht",
         whyTitle: "Why this waits for you",
+        whyAlways:
+          "This flow has a reviewer approve every Verzekeringsbericht. This one lists a current job and no benefit or other income.",
         decisionTitle: "Decision",
         confirm: "Accept Verzekeringsbericht",
         reject: "Reject Verzekeringsbericht",
@@ -1356,6 +1358,8 @@ export const en = {
         why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
         whyMismatch:
           "This address differs from the registered address (BRP) the person shared from the Yivi app. They may have moved recently, so a reviewer decides.",
+        whyAlways:
+          "This flow has a reviewer approve every address. The registered address (BRP) the person shared confirms this one.",
         method: "Checked with",
         level: "Assurance level",
         decisionTitle: "Decision",
@@ -1380,7 +1384,9 @@ export const en = {
         data_erasure: "A reviewer approves every request to delete data",
         no_current_employment: "The Verzekeringsbericht lists no current job",
         current_benefit: "The Verzekeringsbericht lists a current UWV benefit",
-        alwaysReview: "The flow sends every check to review",
+        alwaysReview: "The flow sends every identity proof to review",
+        addressAlways: "The flow sends every address to review",
+        employmentAlways: "The flow sends every Verzekeringsbericht to review",
         current_other_income:
           "The Verzekeringsbericht lists other current income without hours worked",
       },
@@ -1416,7 +1422,7 @@ export const en = {
         why: {
           title: "Why this waits for you",
           alwaysReview:
-            "This flow has a reviewer approve every check. Look at the automatic checks below before you decide.",
+            "This flow has a reviewer approve every identity proof. Look at the automatic checks below before you decide.",
           body: "No signature or register vouches for part of this check, so a person has to check it.",
           no_current_employment:
             "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below.",
@@ -1941,10 +1947,16 @@ export const en = {
       },
       review: {
         title: "Review",
-        hint: "What happens to a session that passes every check.",
-        always: "Always send to review",
+        hint: "Which parts of a session wait for a reviewer, even when they pass every check.",
+        always: "Always send the identity proof to review",
         alwaysHint:
-          "A session that passes every check waits for a reviewer to approve it. A failed check still rejects it.",
+          "An identity proof that passes every check waits for a reviewer to approve it. A failed check still rejects it.",
+        address: "Always send the address to review",
+        addressHint:
+          "Every address waits for a reviewer, also one the registered address (BRP) confirms.",
+        employment: "Always send the Verzekeringsbericht to review",
+        employmentHint:
+          "Every kept Verzekeringsbericht waits for a reviewer, also one that lists a current job and nothing else.",
       },
       privacy: {
         title: "Privacy",

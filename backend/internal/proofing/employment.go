@@ -27,14 +27,26 @@ type EmploymentMode string
 const (
 	EmploymentOff      EmploymentMode = "off"
 	EmploymentRequired EmploymentMode = "required"
+	// EmploymentAlwaysReview is EmploymentRequired with every kept statement
+	// sent to a reviewer, one with no reviewReason too.
+	EmploymentAlwaysReview EmploymentMode = "always_review"
 )
 
 func (m EmploymentMode) valid() bool {
-	return m == EmploymentOff || m == EmploymentRequired
+	return m == EmploymentOff || m == EmploymentRequired || m == EmploymentAlwaysReview
 }
 
 // asked is the mode as read from a row; "" (a store-less service) is off.
-func (m EmploymentMode) asked() bool { return m == EmploymentRequired }
+func (m EmploymentMode) asked() bool { return m == EmploymentRequired || m == EmploymentAlwaysReview }
+
+// forSubject is the mode as the subject's page reads it: never whether a
+// reviewer looks at every statement.
+func (m EmploymentMode) forSubject() EmploymentMode {
+	if m == EmploymentAlwaysReview {
+		return EmploymentRequired
+	}
+	return m
+}
 
 // EmploymentWindow is how long after the identity check finished the subject
 // can still upload their statement, on the page that ran the session.
@@ -120,6 +132,11 @@ func (e Employment) reviewReason() string {
 		return ReviewCurrentOtherIncome
 	}
 	return ""
+}
+
+// reviewed is whether e, kept under mode, waits for a reviewer.
+func (e Employment) reviewed(mode EmploymentMode) bool {
+	return e.reviewReason() != "" || mode == EmploymentAlwaysReview
 }
 
 func (e Employment) hasKind(kind employment.Kind) bool {
@@ -241,8 +258,9 @@ func (s *FlowEmploymentStore) Save(ctx context.Context, orgID uuid.UUID, flowID 
 // AddEmployment seals emp on req, audited identity_proofing.employment_added
 // (without the relations), and sends session.employment_added. A statement
 // without a current job, or with a current benefit or other income, also
-// opens an employment review item, with its reason (reviewReason): the session
-// keeps its outcome. It is false, and changes nothing, when the request holds
+// opens an employment review item, with its reason (reviewReason), as does
+// any statement on an EmploymentAlwaysReview request: the session keeps its
+// outcome. It is false, and changes nothing, when the request holds
 // a statement already, is neither approved nor in review, or was erased or
 // cancelled.
 func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error) {
@@ -287,10 +305,13 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 				req.ID, reason); err != nil {
 				return fmt.Errorf("proofing: review employment request %s: %w", req.ID, err)
 			}
+			kept.ReviewReason = reason
+		}
+		if emp.reviewed(req.Employment) {
 			if err := openReviewItem(ctx, q, req, ReviewKindEmployment); err != nil {
 				return err
 			}
-			kept.ReviewReason, kept.EmploymentReview = reason, ReviewPending
+			kept.EmploymentReview = ReviewPending
 		}
 		data := sessionEventData(kept, req.Status)
 		data[webhookEmploymentKey] = emp
@@ -368,7 +389,7 @@ func (s *Service) SaveFlowEmployment(ctx context.Context, org Org, flowID string
 		return "", errors.New("proofing: no employment settings store configured")
 	}
 	if !mode.valid() {
-		return "", fmt.Errorf("%w: employment is off or required", ErrInvalidInput)
+		return "", fmt.Errorf("%w: employment is off, required or always_review", ErrInvalidInput)
 	}
 	// Without a checker no statement could ever be kept.
 	if mode.asked() && s.employmentChecker == nil {
@@ -474,7 +495,7 @@ func (s *Service) addEmployment(ctx context.Context, req Request, f DiplomaFile)
 		return EmploymentVerdict{}, ErrEmploymentClosed
 	}
 	verdict.Employment = &emp
-	if emp.reviewReason() != "" {
+	if emp.reviewed(req.Employment) {
 		s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
 	}
 	return verdict, nil
