@@ -26,14 +26,26 @@ type DiplomaMode string
 const (
 	DiplomasOff      DiplomaMode = "off"
 	DiplomasRequired DiplomaMode = "required"
+	// DiplomasAlwaysReview is DiplomasRequired with the kept extracts sent to
+	// a reviewer.
+	DiplomasAlwaysReview DiplomaMode = "always_review"
 )
 
 func (m DiplomaMode) valid() bool {
-	return m == DiplomasOff || m == DiplomasRequired
+	return m == DiplomasOff || m == DiplomasRequired || m == DiplomasAlwaysReview
 }
 
 // asked is the mode as read from a row; "" (a store-less service) is off.
-func (m DiplomaMode) asked() bool { return m == DiplomasRequired }
+func (m DiplomaMode) asked() bool { return m == DiplomasRequired || m == DiplomasAlwaysReview }
+
+// forSubject is the mode as the subject's page reads it: never whether a
+// reviewer looks at the extracts.
+func (m DiplomaMode) forSubject() DiplomaMode {
+	if m == DiplomasAlwaysReview {
+		return DiplomasRequired
+	}
+	return m
+}
 
 const (
 	// MaxDiplomasPerRequest bounds how many extracts one request keeps.
@@ -263,7 +275,9 @@ func (s *DiplomaStore) List(ctx context.Context, requestIDs []uuid.UUID) (map[uu
 }
 
 // Add keeps an accepted extract on req, audited
-// identity_proofing.diploma_added, and sends session.diploma_added. It is
+// identity_proofing.diploma_added, and sends session.diploma_added. On a
+// DiplomasAlwaysReview request it opens a diplomas review item, one for the
+// extracts kept while it waits: the session keeps its outcome. It is
 // false, and changes nothing, for an extract the request already holds, or
 // one a concurrent upload would take past MaxDiplomasPerRequest.
 func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma, bool, error) {
@@ -291,6 +305,12 @@ func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma
 		}
 		added = true
 		req.DiplomasAddedAt = cmp.Or(req.DiplomasAddedAt, &d.CreatedAt)
+		if req.Diplomas == DiplomasAlwaysReview {
+			if err := openReviewItem(ctx, q, req, ReviewKindDiplomas); err != nil {
+				return err
+			}
+			req.DiplomasReview = ReviewPending
+		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingDiplomaAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 			audit.Created(req.auditFields(d.auditFields()))); err != nil {
@@ -359,7 +379,7 @@ func (s *Service) SaveFlowDiplomas(ctx context.Context, org Org, flowID string, 
 		return "", errors.New("proofing: no diploma settings store configured")
 	}
 	if !mode.valid() {
-		return "", fmt.Errorf("%w: diplomas is off or required", ErrInvalidInput)
+		return "", fmt.Errorf("%w: diplomas is off, required or always_review", ErrInvalidInput)
 	}
 	flow, err := s.editableFlow(ctx, org, flowID)
 	if err != nil {
@@ -524,6 +544,9 @@ func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.
 		}
 		if added {
 			verdict.Diploma = &kept
+			if req.Diplomas == DiplomasAlwaysReview {
+				s.rejectStepReviewsIfPaused(ctx, req.OrganizationID)
+			}
 			return verdict, nil
 		}
 		out.Reason = DiplomaReasonDuplicate

@@ -506,14 +506,15 @@ export function useWaitingReviewsQuery(
 ): UseQueryResult<WaitingReviews, Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
-    // Three reads: the checks and data requests in review, and the addresses
-    // and the Verzekeringsberichten waiting for a reviewer, each under its own
-    // cap.
+    // Four reads: the checks and data requests in review, and the addresses,
+    // the Verzekeringsberichten and the diplomas waiting for a reviewer, each
+    // under its own cap.
     queryFn: async ({ signal }) => {
       const reads = await Promise.all([
         getProofingRequests(slug, { status: "needs_review" }, signal),
         getProofingRequests(slug, { reviewKind: "address" }, signal),
         getProofingRequests(slug, { reviewKind: "employment" }, signal),
+        getProofingRequests(slug, { reviewKind: "diplomas" }, signal),
       ]);
       // A request waits once, whatever more of it waits.
       const byId = new Map(reads.flat().map((r) => [r.id, r]));

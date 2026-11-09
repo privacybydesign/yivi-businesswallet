@@ -72,7 +72,8 @@ func (sc ReviewScope) reaches(req Request) bool {
 // decided, which the Reviews page lists as closed. Never the result of a
 // check it holds.
 func (sc ReviewScope) reachesStepReview(req Request) bool {
-	return sc.reaches(req) || req.AddressReview != "" || req.EmploymentReview != "" || req.IdentityReviewedAt != nil
+	return sc.reaches(req) || req.AddressReview != "" || req.EmploymentReview != "" || req.DiplomasReview != "" ||
+		req.IdentityReviewedAt != nil
 }
 
 // ReviewInput is a decision on a request under review: approve, or reject with

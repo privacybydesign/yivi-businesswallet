@@ -405,6 +405,10 @@ type requestResponse struct {
 	ReviewReason         string      `json:"reviewReason,omitempty"`
 	EmploymentReview     ReviewState `json:"employmentReview,omitempty"`
 	EmploymentReviewedAt *time.Time  `json:"employmentReviewedAt,omitempty"`
+	// DiplomasReview is where the kept extracts' review stands, and
+	// DiplomasReviewedAt when it was decided or lapsed.
+	DiplomasReview     ReviewState `json:"diplomasReview,omitempty"`
+	DiplomasReviewedAt *time.Time  `json:"diplomasReviewedAt,omitempty"`
 	// Steps are the extra steps the flow asks for, each with its own outcome
 	// beside the identity's.
 	Steps []StepOutcome `json:"steps"`
@@ -446,6 +450,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
+		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,
 		Steps:    req.Steps(now),
 		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
@@ -526,8 +531,8 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 
 // requestResponseFor is req's response as the caller sees it: a member who
 // reaches it only for its steps' reviews (onlyStepReviews) gets it without
-// its diplomas and proofed name, and without its address and employment
-// unless they review that step: deciding a step needs only the step.
+// its proofed name, and without its address, employment and diplomas unless
+// they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
 	if onlyStepReviews(ctx, req) {
@@ -538,7 +543,9 @@ func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, no
 		if req.EmploymentReview == "" {
 			out.Employment = nil
 		}
-		return out
+		if req.DiplomasReview == "" {
+			return out
+		}
 	}
 	return out.withDiplomas(diplomas)
 }

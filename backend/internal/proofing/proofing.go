@@ -440,8 +440,12 @@ type Request struct {
 	EmploymentReview ReviewState
 	// EmploymentReviewedAt is when it was decided or lapsed; nil while it waits.
 	EmploymentReviewedAt *time.Time
+	// DiplomasReview is the kept extracts' review item; empty for none.
+	DiplomasReview ReviewState
+	// DiplomasReviewedAt is when it was decided or lapsed; nil while it waits.
+	DiplomasReviewedAt *time.Time
 	// StepReviewDueAt is when the first of its waiting step reviews (address,
-	// employment) lapses; nil while none waits.
+	// employment, diplomas) lapses; nil while none waits.
 	StepReviewDueAt *time.Time
 	// IdentityReviewedAt is when a reviewer last decided its identity; nil
 	// when none did.

@@ -1104,6 +1104,15 @@ export const en = {
         title: "Diplomas",
         none: "No diploma added.",
         number: "DUO number {{number}}",
+        review: {
+          pending:
+            "Waiting for a reviewer to decide on the diplomas. The identity check is not affected.",
+          confirmed: "A reviewer accepted the diplomas.",
+          rejected:
+            "A reviewer rejected the diplomas. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the diplomas in time. The identity check is not affected.",
+        },
       },
       employment: {
         title: "Verzekeringsbericht",
@@ -1340,6 +1349,19 @@ export const en = {
       identityCheck: "Identity check",
       addressCheck: "Address",
       employmentCheck: "Verzekeringsbericht",
+      diplomasCheck: "Diplomas",
+      diplomas: {
+        title: "Review diplomas",
+        whyTitle: "Why this waits for you",
+        whyAlways:
+          "This flow has a reviewer approve the diplomas. DUO's seal on each extract checked out, and each one names the person.",
+        decisionTitle: "Decision",
+        confirm: "Accept diplomas",
+        reject: "Reject diplomas",
+        confirmed: "The diplomas were accepted.",
+        rejected: "The diplomas were rejected.",
+        lapsed: "Nobody reviewed the diplomas in time.",
+      },
       employment: {
         title: "Review a Verzekeringsbericht",
         whyTitle: "Why this waits for you",
@@ -1387,6 +1409,7 @@ export const en = {
         alwaysReview: "The flow sends every identity proof to review",
         addressAlways: "The flow sends every address to review",
         employmentAlways: "The flow sends every Verzekeringsbericht to review",
+        diplomasAlways: "The flow sends the diplomas to review",
         current_other_income:
           "The Verzekeringsbericht lists other current income without hours worked",
       },
@@ -1400,6 +1423,9 @@ export const en = {
         employmentConfirmed: "Verzekeringsbericht accepted",
         employmentRejected: "Verzekeringsbericht rejected",
         employmentLapsed: "Verzekeringsbericht review lapsed",
+        diplomasConfirmed: "Diplomas accepted",
+        diplomasRejected: "Diplomas rejected",
+        diplomasLapsed: "Diplomas review lapsed",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",
@@ -1957,6 +1983,9 @@ export const en = {
         employment: "Always send the Verzekeringsbericht to review",
         employmentHint:
           "Every kept Verzekeringsbericht waits for a reviewer, also one that lists a current job and nothing else.",
+        diplomas: "Always send the diplomas to review",
+        diplomasHint:
+          "The kept diploma extracts wait for a reviewer, also when DUO's seal checks out.",
       },
       privacy: {
         title: "Privacy",

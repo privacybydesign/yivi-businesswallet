@@ -9,11 +9,12 @@ import { DataRequestReview } from "./data-request-review";
 import { IdentityCheckReview } from "./identity-check-review";
 import { AddressReview } from "./address-review";
 import { EmploymentReview } from "./employment-review";
+import { DiplomasReview } from "./diplomas-review";
 import { stepReviewOf, waitingParts } from "../lib/proofing-reviews";
 
 // One thing that waits for a decision, or was decided: the page of an identity
-// check, of one of its steps (a self-declared address, a Verzekeringsbericht),
-// or of a data request. For an admin and a member with the reviewer right.
+// check, of one of its steps (a self-declared address, a Verzekeringsbericht,
+// diplomas), or of a data request. For an admin and a member with the reviewer right.
 export default function ProofingReview(): React.JSX.Element {
   const { t } = useTranslation();
   const { orgSlug, requestId } = useParams();
@@ -31,6 +32,9 @@ export default function ProofingReview(): React.JSX.Element {
   const step = data && !closedCheck ? stepReviewOf(data) : undefined;
   if (data && step === "employment") {
     return <EmploymentReview slug={slug} request={data} />;
+  }
+  if (data && step === "diplomas") {
+    return <DiplomasReview slug={slug} request={data} />;
   }
   if (data && step === "address") {
     return <AddressReview slug={slug} request={data} />;

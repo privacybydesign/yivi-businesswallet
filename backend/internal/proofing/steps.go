@@ -61,6 +61,7 @@ const (
 	ErrorAddressNotProvided = "ADDRESS_NOT_PROVIDED"
 	ErrorAddressRejected    = "ADDRESS_REJECTED"
 	ErrorDiplomaNotProvided = "DIPLOMA_NOT_PROVIDED"
+	ErrorDiplomaRejected    = "DIPLOMA_REJECTED"
 	ErrorEmploymentRejected = "EMPLOYMENT_REJECTED"
 )
 
@@ -74,10 +75,10 @@ var extraSteps = []extraStep{
 		notProvided: ErrorAddressNotProvided, rejected: ErrorAddressRejected,
 	},
 	{
-		kind: StepDiplomas, window: DiplomaUploadWindow,
+		kind: StepDiplomas, review: ReviewKindDiplomas, window: DiplomaUploadWindow,
 		asked:       func(r Request) bool { return r.Diplomas.asked() },
 		given:       func(r Request) bool { return r.DiplomasAddedAt != nil },
-		notProvided: ErrorDiplomaNotProvided,
+		notProvided: ErrorDiplomaNotProvided, rejected: ErrorDiplomaRejected,
 	},
 	{
 		kind: StepEmployment, review: ReviewKindEmployment, window: EmploymentWindow,

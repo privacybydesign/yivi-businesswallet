@@ -20,6 +20,7 @@ import {
   requestedBy,
 } from "../lib/identity-proofing";
 import {
+  reviewOfStep,
   addressReviewWhy,
   employmentReviewWhy,
   DEFAULT_REVIEW_TAB,
@@ -231,6 +232,9 @@ function reviewWhy(request: ProofingRequest, t: TFunction): string {
   const step = stepReviewOf(request);
   if (step === "employment") {
     return t(`identityProofing.reviews.why.${employmentReviewWhy(request)}`);
+  }
+  if (step === "diplomas") {
+    return t("identityProofing.reviews.why.diplomasAlways");
   }
   if (step !== "address") {
     return t(
@@ -478,6 +482,11 @@ const STEP_OUTCOME_KEYS = {
     rejected: "identityProofing.reviews.outcome.employmentRejected",
     lapsed: "identityProofing.reviews.outcome.employmentLapsed",
   },
+  diplomas: {
+    confirmed: "identityProofing.reviews.outcome.diplomasConfirmed",
+    rejected: "identityProofing.reviews.outcome.diplomasRejected",
+    lapsed: "identityProofing.reviews.outcome.diplomasLapsed",
+  },
 } as const;
 
 const STEP_OUTCOME_TONES = {
@@ -527,8 +536,7 @@ function PartOutcome({
       </StatusText>
     );
   }
-  const state =
-    part === "employment" ? request.employmentReview : request.addressReview;
+  const state = reviewOfStep(request, part);
   if (state === undefined || state === "pending") {
     return null;
   }

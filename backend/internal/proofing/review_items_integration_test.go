@@ -88,7 +88,10 @@ func TestReviewItemsCountedAndListedPerKind(t *testing.T) {
 
 	tally, err := requests.ReviewCounts(ctx, orgID)
 	counts := tally.Kinds
-	want := map[ReviewKind]int{ReviewKindIdentity: 1, ReviewKindAddress: 1, ReviewKindEmployment: 0, ReviewKindDataRequest: 1}
+	want := map[ReviewKind]int{
+		ReviewKindIdentity: 1, ReviewKindAddress: 1, ReviewKindEmployment: 0, ReviewKindDiplomas: 0,
+		ReviewKindDataRequest: 1,
+	}
 	if err != nil || len(counts) != len(want) {
 		t.Fatalf("ReviewCounts = %v, %v; want %v", counts, err, want)
 	}

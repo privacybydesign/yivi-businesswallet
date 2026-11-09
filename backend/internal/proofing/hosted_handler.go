@@ -396,7 +396,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.IdemAvailable = idemAppAvailable(f)
 	out.Flow.YiviPersonalData = acceptsPersonalData(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
-	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
+	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request).forSubject()
 	out.Flow.AddressMode = addressModeOf(hosted.Request).forSubject()
 	out.Flow.EmploymentMode = employmentModeOf(hosted.Request).forSubject()
 	out.Flow.Kind = hosted.Request.FlowKind

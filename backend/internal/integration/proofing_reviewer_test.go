@@ -432,8 +432,8 @@ func TestProofingAddressReviewFlow(t *testing.T) {
 	counts := decodeJSON[struct {
 		Counts map[string]int `json:"counts"`
 	}](t, env.do(http.MethodGet, "/api/v1/orgs/acme/identity-proofing/review-items/counts", nil))
-	if counts.Counts["address"] != 1 || counts.Counts["identity"] != 0 || len(counts.Counts) != 4 {
-		t.Errorf("counts = %v, want one address of four kinds", counts.Counts)
+	if counts.Counts["address"] != 1 || counts.Counts["identity"] != 0 || len(counts.Counts) != 5 {
+		t.Errorf("counts = %v, want one address of five kinds", counts.Counts)
 	}
 	wantProofingError(t, "an address decision without a reason", env.postJSON(review,
 		map[string]any{"decision": "confirm", "reason": " "}), http.StatusBadRequest, "invalid_input")
