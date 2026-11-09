@@ -33,6 +33,7 @@ import {
   REVIEW_FIELD_LABEL,
   REVIEW_HINT,
   REVIEW_TEXTAREA,
+  ReviewProgress,
   ReviewSection,
   SessionDecisions,
 } from "./proofing-review-parts";
@@ -79,6 +80,7 @@ export function AddressReview({
         subtitle={subtitle}
       />
       <div className="flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} />
         <ReviewSection
           id="address-review-why"
           title={t("identityProofing.reviews.address.whyTitle")}

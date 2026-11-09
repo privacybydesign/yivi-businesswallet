@@ -27,6 +27,7 @@ import {
   personName,
   provenWithParts,
   reviewCounts,
+  reviewSteps,
   reviewTabFrom,
   stepReviewOf,
   waitingParts,
@@ -621,6 +622,43 @@ describe("waitingParts", () => {
     expect(
       stepReviewOf(request({ status: "approved", diplomasReview: "pending" })),
     ).toBe("diplomas");
+  });
+});
+
+describe("reviewSteps", () => {
+  it("puts the decided parts first, then marks the first waiting part as current", () => {
+    const steps = reviewSteps(
+      request({
+        status: "approved",
+        identityReviewedAt: "2026-11-06T10:00:00Z",
+        employmentReview: "confirmed",
+        diplomasReview: "pending",
+        addressReview: "pending",
+      }),
+    );
+    expect(steps).toEqual({
+      parts: ["identity", "employment", "diplomas", "address"],
+      current: 2,
+    });
+  });
+
+  it("starts at the identity while it waits", () => {
+    expect(reviewSteps(request({ addressReview: "pending" }))).toEqual({
+      parts: ["identity", "address"],
+      current: 0,
+    });
+  });
+
+  it("is past the last part once the session is closed", () => {
+    expect(
+      reviewSteps(
+        request({
+          status: "approved",
+          identityReviewedAt: "2026-11-06T10:00:00Z",
+          addressReview: "confirmed",
+        }),
+      ),
+    ).toEqual({ parts: ["identity", "address"], current: 2 });
   });
 });
 

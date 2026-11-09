@@ -134,6 +134,20 @@ export function decidedParts(request: ProofingRequest): ReviewPart[] {
   ];
 }
 
+// A session's review as steps: the parts decided, then those that wait, and
+// the index of the one the page shows (the first waiting; past the end once
+// closed). Empty for a data request.
+export function reviewSteps(request: ProofingRequest): {
+  parts: ReviewPart[];
+  current: number;
+} {
+  const decided = decidedParts(request);
+  return {
+    parts: [...decided, ...waitingParts(request)],
+    current: decided.length,
+  };
+}
+
 // Whether a session's review is over: something was decided and nothing waits.
 export function isClosedSession(request: ProofingRequest): boolean {
   return waitingParts(request).length === 0 && decidedParts(request).length > 0;

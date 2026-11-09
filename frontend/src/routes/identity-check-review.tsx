@@ -45,6 +45,7 @@ import { IdentityPhotos } from "./proofing-people";
 import {
   BackToReviews,
   ClosedNote,
+  ReviewProgress,
   SessionDecisions,
   REVIEW_ERROR,
   REVIEW_FIELD_LABEL,
@@ -112,6 +113,7 @@ export function IdentityCheckReview({
         subtitle={subtitle}
       />
       <div className="flex flex-wrap items-start gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} className="basis-full" />
         <div className="flex min-w-0 flex-[1_1_34rem] flex-col gap-6">
           {waiting && <WhyItWaits reason={checkReviewReason(request)} />}
           {/* Neither approved nor rejected: no decision to list below. */}

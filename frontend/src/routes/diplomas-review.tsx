@@ -14,6 +14,7 @@ import { StepDecision } from "./address-review";
 import {
   BackToReviews,
   DecisionReasons,
+  ReviewProgress,
   ReviewSection,
   SessionDecisions,
 } from "./proofing-review-parts";
@@ -49,6 +50,7 @@ export function DiplomasReview({
         subtitle={subtitle}
       />
       <div className="flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} />
         <ReviewSection
           id="diplomas-review-why"
           title={t("identityProofing.reviews.diplomas.whyTitle")}

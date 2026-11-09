@@ -10,13 +10,14 @@ import {
   REVIEW_PART_KEYS,
   decidedParts,
   reviewOfStep,
+  reviewSteps,
 } from "../lib/proofing-reviews";
 import type { ReviewPart } from "../lib/proofing-reviews";
 import {
   assuranceLevelLabel,
   proofingMethodLabel,
 } from "../lib/identity-proofing";
-import { Card, StatusText } from "../ui";
+import { Card, StatusText, Stepper } from "../ui";
 
 // A link that looks like Button's primary/md and secondary/md: Button renders
 // only <button>.
@@ -32,6 +33,28 @@ export const REVIEW_HINT = "text-ink-soft text-[12.5px]";
 // Mirrors the Input base, so the reason reads as the same field.
 export const REVIEW_TEXTAREA =
   "rounded-yivi border-line-strong bg-surface text-ink focus:border-ink focus:ring-ink/10 min-h-24 w-full border px-3 py-2 text-[13.5px] outline-none focus:ring-3";
+
+// Where the session's review stands: each part to decide, with the one this
+// page shows. Nothing for a review of a single part.
+export function ReviewProgress({
+  request,
+  className,
+}: Readonly<{
+  request: ProofingRequest;
+  className?: string;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const { parts, current } = reviewSteps(request);
+  if (parts.length < 2) return null;
+  return (
+    <div className={className}>
+      <Stepper
+        steps={parts.map((part) => t(REVIEW_PART_KEYS[part]))}
+        current={current}
+      />
+    </div>
+  );
+}
 
 // A titled box of the review page.
 export function ReviewSection({
