@@ -51,18 +51,7 @@ func TestAlwaysReviewStepsOpenReviews(t *testing.T) {
 		if approved.Address != tc.address || approved.Employment != tc.employment {
 			t.Fatalf("stored modes = %q, %q; want %q, %q", approved.Address, approved.Employment, tc.address, tc.employment)
 		}
-
-		registered := testAddress
-		registered.Verification = AddressRegistered
-		if added, err := f.requests.AddAddress(ctx, approved, registered); err != nil || !added {
-			t.Fatalf("%s: AddAddress = %v, %v; want added", tc.address, added, err)
-		}
-		emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
-			{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
-		}}
-		if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
-			t.Fatalf("%s: AddEmployment = %v, %v; want added", tc.employment, added, err)
-		}
+		addPassingSteps(t, f.requests, approved)
 
 		got, err := f.requests.Get(ctx, f.orgID, approved.ID)
 		if err != nil || got.Status != StatusApproved || got.AddressReview != tc.want ||
@@ -75,5 +64,23 @@ func TestAlwaysReviewStepsOpenReviews(t *testing.T) {
 			counts.StepSessions != tc.waiting {
 			t.Errorf("%s: ReviewCounts = %+v, %v; want %d waiting of each", tc.address, counts, err, tc.waiting)
 		}
+	}
+}
+
+// addPassingSteps keeps on req steps whose checks pass: the registered
+// address, and a statement with a current job and nothing else.
+func addPassingSteps(t *testing.T, requests *RequestStore, req Request) {
+	t.Helper()
+	ctx := context.Background()
+	registered := testAddress
+	registered.Verification = AddressRegistered
+	if added, err := requests.AddAddress(ctx, req, registered); err != nil || !added {
+		t.Fatalf("AddAddress = %v, %v; want added", added, err)
+	}
+	emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
+		{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
+	}}
+	if added, err := requests.AddEmployment(ctx, req, emp); err != nil || !added {
+		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
 	}
 }

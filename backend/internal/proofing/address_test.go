@@ -200,10 +200,17 @@ func TestAddAddressVerification(t *testing.T) {
 			if *got.SubjectAddress != tc.want {
 				t.Errorf("address = %+v, want %+v", *got.SubjectAddress, tc.want)
 			}
-			if tc.query == "" && len(tc.lookup.queries) != 0 || tc.query != "" && (len(tc.lookup.queries) != 1 || tc.lookup.queries[0] != tc.query) {
-				t.Errorf("register asked %q, want %q", tc.lookup.queries, tc.query)
-			}
+			checkRegisterAsked(t, tc.lookup, tc.query)
 		})
+	}
+}
+
+// checkRegisterAsked checks that the register was asked query once, or not at
+// all for "".
+func checkRegisterAsked(t *testing.T, lookup *fakeAddressLookup, query string) {
+	t.Helper()
+	if query == "" && len(lookup.queries) != 0 || query != "" && (len(lookup.queries) != 1 || lookup.queries[0] != query) {
+		t.Errorf("register asked %q, want %q", lookup.queries, query)
 	}
 }
 
