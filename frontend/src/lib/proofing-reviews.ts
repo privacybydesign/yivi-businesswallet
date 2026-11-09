@@ -43,7 +43,13 @@ export function askedLine(
 
 // The Reviews page's views: what waits, narrowed to one kind, and what is
 // closed.
-export const REVIEW_TABS = ["all", "checks", "data", "closed"] as const;
+export const REVIEW_TABS = [
+  "all",
+  "checks",
+  "steps",
+  "data",
+  "closed",
+] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number];
 export const DEFAULT_REVIEW_TAB: ReviewTab = "all";
 
@@ -65,6 +71,55 @@ export function stepReviewOf(
   if (request.employmentReview !== undefined) return "employment";
   if (request.addressReview !== undefined) return "address";
   return undefined;
+}
+
+// What a reviewer decides on an identity check's session, in the order the
+// review walks through it: the identity, then the Verzekeringsbericht, then
+// the address. Only what waits.
+export type ReviewPart = "identity" | StepReviewKind;
+
+export function waitingParts(request: ProofingRequest): ReviewPart[] {
+  if (request.flowKind !== "identity") return [];
+  const parts: ReviewPart[] = [];
+  if (request.status === "needs_review") parts.push("identity");
+  if (request.employmentReview === "pending") parts.push("employment");
+  if (request.addressReview === "pending") parts.push("address");
+  return parts;
+}
+
+// What a reviewer decided on an identity check's session, in the same order:
+// its identity, its Verzekeringsbericht, its address.
+export function decidedParts(request: ProofingRequest): ReviewPart[] {
+  if (request.flowKind !== "identity") return [];
+  const decided = (state: string | undefined): boolean =>
+    state !== undefined && state !== "pending";
+  const parts: ReviewPart[] = [];
+  if (request.identityReviewedAt && request.status !== "needs_review") {
+    parts.push("identity");
+  }
+  if (decided(request.employmentReview)) parts.push("employment");
+  if (decided(request.addressReview)) parts.push("address");
+  return parts;
+}
+
+// Whether a session's review is over: something was decided and nothing waits.
+export function isClosedSession(request: ProofingRequest): boolean {
+  return waitingParts(request).length === 0 && decidedParts(request).length > 0;
+}
+
+// The label of each part, as the Reviews page names it.
+export const REVIEW_PART_KEYS = {
+  identity: "identityProofing.reviews.identityCheck",
+  employment: "identityProofing.reviews.employmentCheck",
+  address: "identityProofing.reviews.addressCheck",
+} as const satisfies Record<ReviewPart, string>;
+
+// The part the review goes on with once decided was decided, if any.
+export function nextPart(
+  request: ProofingRequest,
+  decided: ReviewPart,
+): ReviewPart | undefined {
+  return waitingParts(request).find((part) => part !== decided);
 }
 
 // Whether the request waits for a decision on its self-declared address
@@ -131,17 +186,18 @@ export function waitingOldestFirst(
 interface ReviewCounts {
   all: number;
   checks: number;
+  steps: number;
   data: number;
 }
 
-// The tabs' counts from the items waiting per kind: data requests apart from
-// the checks and their steps.
+// The tabs' counts: every session once, those whose identity waits, those
+// with a step waiting (a session with both is in each), and data requests.
 export function reviewCounts(waiting: ReviewItemCounts): ReviewCounts {
-  const checks = waiting.identity + waiting.address + waiting.employment;
   return {
-    all: checks + waiting.data_request,
-    checks,
-    data: waiting.data_request,
+    all: waiting.sessions,
+    checks: waiting.counts.identity,
+    steps: waiting.stepSessions,
+    data: waiting.counts.data_request,
   };
 }
 
@@ -159,7 +215,11 @@ export function waitingOfTab(
     case "all":
       return [...waiting];
     case "checks":
-      return waiting.filter((r) => !isDataRequest(r.flowKind));
+      return waiting.filter((r) => waitingParts(r).includes("identity"));
+    case "steps":
+      return waiting.filter((r) =>
+        waitingParts(r).some((part) => part !== "identity"),
+      );
     case "data":
       return waiting.filter((r) => isDataRequest(r.flowKind));
     case "closed":
@@ -181,31 +241,34 @@ export function isDecidedStep(request: ProofingRequest): boolean {
   return state !== undefined && state !== "pending";
 }
 
-// When a closed request closed: its step was decided or lapsed, or it ended.
+// When a closed request closed: its last part was decided or lapsed, or it
+// ended.
 export function closedAt(request: ProofingRequest): string {
-  const decidedAt =
-    stepReviewOf(request) === "employment"
-      ? request.employmentReviewedAt
-      : request.addressReviewedAt;
-  if (isDecidedStep(request) && decidedAt) {
-    return decidedAt;
-  }
-  return request.completedAt ?? request.createdAt;
+  const at = {
+    identity: request.identityReviewedAt,
+    employment: request.employmentReviewedAt,
+    address: request.addressReviewedAt,
+  };
+  const decided = decidedParts(request)
+    .map((part) => at[part])
+    .filter((when): when is string => when !== undefined)
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
+  return decided[0] ?? request.completedAt ?? request.createdAt;
 }
 
-// What was closed, the latest first: the addresses a reviewer decided, and the
-// data requests that ended, whoever ended them: a reviewer, or no one (the
-// engine rejected the person, the review lapsed, the org paused, the law keeps
-// the data). A data request carries no mark of which, so the page claims no
-// decision and shows each one's error code. Identity checks themselves are not
-// listed: a decided one is closed to a reviewer.
+// What was closed, the latest first: the sessions whose review is over (its
+// identity, its steps, each decided), and the data requests that ended,
+// whoever ended them: a reviewer, or no one (the engine rejected the person,
+// the review lapsed, the org paused, the law keeps the data). A data request
+// carries no mark of which, so the page claims no decision and shows each
+// one's error code.
 export function closedRequests(
   requests: readonly ProofingRequest[],
 ): ProofingRequest[] {
   return requests
     .filter(
       (r) =>
-        isDecidedStep(r) ||
+        isClosedSession(r) ||
         (isDataRequest(r.flowKind) &&
           (r.status === "approved" || r.status === "rejected")),
     )
@@ -214,11 +277,15 @@ export function closedRequests(
 
 // Until when a data request in review can be answered: its review lapses then
 // (REVIEW_LAPSED, purge_at), a calendar month after it went there (askedAt).
-// Absent for a check, or once decided.
+// A step review lapses at its own due time. Absent for an identity check, or
+// once decided.
 export function answerBy(request: ProofingRequest): string | undefined {
-  return isDataRequest(request.flowKind) && isWaiting(request)
-    ? request.purgeAt
-    : undefined;
+  if (isDataRequest(request.flowKind)) {
+    return isWaiting(request) ? request.purgeAt : undefined;
+  }
+  return stepReviewOf(request) === undefined
+    ? undefined
+    : request.stepReviewDueAt;
 }
 
 // What a reviewer may find wrong with a check, and the error code the

@@ -142,6 +142,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/closed", reviewer(respond.HandlerFunc(h.closedReviews)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
@@ -380,6 +381,10 @@ type requestResponse struct {
 	AddressReview AddressReview `json:"addressReview,omitempty"`
 	// AddressReviewedAt is when a reviewer decided it.
 	AddressReviewedAt *time.Time `json:"addressReviewedAt,omitempty"`
+	// StepReviewDueAt is when the first waiting step review lapses.
+	StepReviewDueAt *time.Time `json:"stepReviewDueAt,omitempty"`
+	// IdentityReviewedAt is when a reviewer last decided the identity.
+	IdentityReviewedAt *time.Time `json:"identityReviewedAt,omitempty"`
 	// Decisions are the reviewers' decisions, with their reasons: only on
 	// GET .../requests/{id}, for an admin or a reviewer (decisionsFor).
 	Decisions []decisionResponse `json:"decisions,omitempty"`
@@ -429,8 +434,9 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
-		AddressReviewedAt: req.AddressReviewedAt,
-		EmploymentMode:    employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
+		AddressReviewedAt: req.AddressReviewedAt, StepReviewDueAt: req.StepReviewDueAt,
+		IdentityReviewedAt: req.IdentityReviewedAt,
+		EmploymentMode:     employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -479,6 +485,21 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// closedReviews is the Reviews page's Closed tab in one read (ClosedReviews):
+// the org's, for an admin and for a reviewer, as the page lists it.
+func (h *Handler) closedReviews(w http.ResponseWriter, r *http.Request) error {
+	reqs, err := h.service.Requests(r.Context(), orgFromRequest(r).ID, RequestFilter{ClosedReviews: true})
+	if err != nil {
+		return mapError(err)
+	}
+	out, err := h.listedResponses(r.Context(), reqs)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
 // listedResponses is reqs as a list shows them, each with its diplomas.
 func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]requestResponse, error) {
 	ids := make([]uuid.UUID, 0, len(reqs))
@@ -505,12 +526,15 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 
 // requestResponseFor is req's response as the caller sees it: a member who
 // reaches it only for its steps' reviews (onlyStepReviews) gets it without
-// its diplomas and proofed name, and without its employment unless they
-// review that: deciding a step needs only the step.
+// its diplomas and proofed name, and without its address and employment
+// unless they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
 	if onlyStepReviews(ctx, req) {
 		out.ProofedName = ""
+		if req.AddressReview == "" {
+			out.Address = nil
+		}
 		if req.EmploymentReview == "" {
 			out.Employment = nil
 		}
@@ -697,7 +721,8 @@ type decisionResponse struct {
 // admin or a reviewer: those who read the reasons in its timeline and on the
 // Reviews page. A member who only sent it gets none, as their timeline leaves
 // the reasons out. One reached only for its steps' reviews (onlyStepReviews)
-// gets the steps' decisions alone.
+// gets the steps' decisions alone, plus the identity's once a reviewer decided
+// it, as the Reviews page lists that check as closed.
 func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
 	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
 		return nil, nil
@@ -706,7 +731,7 @@ func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResp
 	if err != nil {
 		return nil, err
 	}
-	stepsOnly := onlyStepReviews(ctx, req)
+	stepsOnly := onlyStepReviews(ctx, req) && req.IdentityReviewedAt == nil
 	out := []decisionResponse{}
 	for _, d := range decisions {
 		if stepsOnly && d.Kind == DecisionReview {
@@ -791,17 +816,22 @@ func (h *Handler) decideReviewItem(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-// reviewItemCountsResponse is how many items of each kind wait.
+// reviewItemCountsResponse is what waits: sessions per kind, all of them, and
+// those waiting for a step, each once.
 type reviewItemCountsResponse struct {
-	Counts map[ReviewKind]int `json:"counts"`
+	Counts       map[ReviewKind]int `json:"counts"`
+	Sessions     int                `json:"sessions"`
+	StepSessions int                `json:"stepSessions"`
 }
 
 func (h *Handler) reviewItemCounts(w http.ResponseWriter, r *http.Request) error {
-	counts, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
+	tally, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
 	if err != nil {
 		return mapError(err)
 	}
-	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{Counts: counts})
+	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{
+		Counts: tally.Kinds, Sessions: tally.Sessions, StepSessions: tally.StepSessions,
+	})
 	return nil
 }
 

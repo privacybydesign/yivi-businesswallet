@@ -1408,34 +1408,43 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
   `data_request` to `DecideReview` with `ReviewInput.Kind`, 409
   `not_under_review` when the request's review is of another kind.
   `.../review` still decides a request's own review.
-- `GET .../review-items/counts` (`ReviewCounts`): every kind's waiting items,
-  0 for none. The sidebar and the tabs read it (`useReviewItemCountsQuery`), so
-  a count is never capped.
+- `GET .../review-items/counts` (`ReviewCounts`, `ReviewTally`): sessions
+  waiting per kind (one waiting for its identity and its address counts under
+  both), `sessions` (each once) and `stepSessions` (those with a step waiting).
+  The sidebar and the tabs read it (`useReviewItemCountsQuery`), so a count is
+  never capped.
+- `GET .../review-items/closed` (`RequestFilter.ClosedReviews`): what Closed
+  lists, in one read (many parallel reads made the tab slow, as the Overview
+  was before `.../overview`).
 - `GET .../requests?reviewKind=&reviewState=` (`pending` by default, a state
   needs a kind) lists the requests with such an item: waiting ones the longest
-  waiting first, decided ones the latest decision first.
-The page lists what waits, oldest first (waiting since = `completed_at`, when it
-went to review), under All, Identity checks and Data requests, and beside them
-the addresses waiting for review (§16). Closed lists:
-- the addresses a reviewer confirmed or rejected, by `addressReviewedAt`;
-- the data requests that ended, whoever ended them.
+  waiting first, decided ones the latest decision first. `identity` with
+  `confirmed`/`rejected` is a check a reviewer decided, read from its
+  `review_decided` audit event (`identityReviewDecided`, `identityReviewedAt`).
 
-A data request carries no mark of a reviewer's decision (the audit event is not read), and a data request is also
-rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
-the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
-data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
-that a reviewer decided, and the Outcome column shows the error code in words.
-A decided identity check is not listed: it is closed to a reviewer. A data
-request shows "Answer by" = `purge_at`, a calendar month after it went to review
-(`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
-The list is two reads, `GET .../requests?status=needs_review` and
-`?reviewKind=address` (`useWaitingReviewsQuery`): each filter is applied
-before its read's cap of 200, and each read is the longest waiting first, so the
-cap leaves out the newest, never the most overdue. The counts on the tabs and
-the sidebar come from `.../review-items/counts`, not from these lists. Closed reads
-`?flowKind=data_request&status=approved`, `...&status=rejected`, and
-`?reviewKind=address&reviewState=` `confirmed`, `rejected` and `lapsed`
-(`useClosedReviewsQuery`), each narrowed before its cap.
+**The Reviews page** (`routes/proofing-reviews.tsx`, `lib/proofing-reviews.ts`):
+- One row per session, oldest waiting first (waiting since = `completed_at`).
+  - Tabs: All, Identity checks, Extra steps, Data requests, Closed. A session
+    waiting for its identity and a step is in both tabs, once under All.
+  - The row names every part that waits ("Identity check + Address"), with
+    what was already decided under it (`waitingParts`, `decidedParts`).
+  - "Answer by": a data request's `purge_at`; a step review's `due_at`
+    (`stepReviewDueAt`, the first waiting one).
+- One review per session: identity, then the Verzekeringsbericht, then the
+  address (`nextPart`, `lib/use-after-decision.ts`). After each decision the
+  page goes on to the next part ("Next: …"), else back to the list.
+- Each part's page shows "Already decided in this session"
+  (`SessionDecisions`): the identity once decided, with its method and level,
+  by a reviewer or automatically, and each decided step, with who, when, why.
+- The identity review shows the photos the flow captured (`IdentityPhotos`).
+- Closed: one row per session whose review is over (`isClosedSession`), each
+  part's outcome, closed at its last decision; and the data requests that
+  ended. A data request carries no mark of a reviewer's decision, so it shows
+  that it ended and its error code in words. A closed session opens as its
+  identity check when a reviewer decided that.
+- The waiting list is three reads (`useWaitingReviewsQuery`): `?status=needs_review`,
+  `?reviewKind=address` and `?reviewKind=employment`, each narrowed before its
+  cap of 200, longest waiting first, so the cap leaves out the newest.
 
 **Always send to review (`alwaysReview` on a flow version).**
 - Set in the flow editor's Review section. The engine sends a session it would
@@ -1506,7 +1515,7 @@ anew, and `memberships_can_review_member` holds every row to that.
 `organization.MayReview` is an admin whose mandate is not withdrawn, or a member
 with the right, and `organization.RequireReviewer` gates the `reviewer(...)`
 routes in `proofing/handler.go`: `review`, `review-items/{kind}`,
-`review-items/counts`, `result`, `data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
+`review-items/counts`, `review-items/closed`, `result`, `data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
 reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
 request waiting for review, and a data request (`data_access`, `data_erasure`)
 in any status. An identity check that is not waiting holds a person's identity
@@ -1516,6 +1525,8 @@ reads `pending`, Closed `confirmed`, `rejected` and `lapsed`) and for
 `?flowKind=data_request` (Closed reads it with `status=approved` and
 `rejected`); any other list is the requests they sent. So
 are the stats, All people and the member routes.
+- A check whose identity a reviewer decided stays reachable as closed
+  (`reachesStepReview`): its decisions, never its result, photos or proofed name.
 - `GET .../requests/{id}` opens one they sent or one in the wider
   `reachesAddress` scope: that scope plus a check whose address is reviewed,
   waiting or decided (`mayOpen`, judged on the stored request through

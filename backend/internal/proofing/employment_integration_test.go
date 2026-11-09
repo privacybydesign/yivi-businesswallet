@@ -151,8 +151,8 @@ func TestNoJobOpensReview(t *testing.T) {
 	if listed, err := f.requests.List(ctx, f.orgID, RequestFilter{ReviewKind: &kind}); err != nil || len(listed) != 1 {
 		t.Errorf("List employment reviews = %d, %v; want the one", len(listed), err)
 	}
-	if counts, err := f.requests.ReviewCounts(ctx, f.orgID); err != nil || counts[ReviewKindEmployment] != 1 || counts[ReviewKindIdentity] != 0 {
-		t.Errorf("ReviewCounts = %v, %v; want one employment review, no identity review", counts, err)
+	if tally, err := f.requests.ReviewCounts(ctx, f.orgID); err != nil || tally.Kinds[ReviewKindEmployment] != 1 || tally.Kinds[ReviewKindIdentity] != 0 {
+		t.Errorf("ReviewCounts = %+v, %v; want one employment review, no identity review", tally, err)
 	}
 
 	// The engine's approval, read again, changes nothing.

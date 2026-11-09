@@ -6,7 +6,13 @@ import type {
   ProofingRequest,
 } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
-import { Card } from "../ui";
+import { REVIEW_PART_KEYS, decidedParts } from "../lib/proofing-reviews";
+import type { ReviewPart } from "../lib/proofing-reviews";
+import {
+  assuranceLevelLabel,
+  proofingMethodLabel,
+} from "../lib/identity-proofing";
+import { Card, StatusText } from "../ui";
 
 // A link that looks like Button's primary/md and secondary/md: Button renders
 // only <button>.
@@ -139,5 +145,112 @@ export function BackToReviews({
     >
       {t("identityProofing.reviews.back")}
     </Link>
+  );
+}
+
+const DECISION_NOTE =
+  "border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]";
+
+const PART_OUTCOME = {
+  approved: { key: "identityProofing.reviews.outcome.approved", tone: "green" },
+  rejected: { key: "identityProofing.reviews.outcome.rejected", tone: "red" },
+  confirmed: {
+    key: "identityProofing.sessions.parts.state.accepted",
+    tone: "green",
+  },
+  lapsed: {
+    key: "identityProofing.sessions.parts.state.lapsed",
+    tone: "amber",
+  },
+} as const;
+
+// The outcome of a decided part: the identity approved or rejected, a step
+// accepted, rejected or lapsed.
+function partOutcome(
+  request: ProofingRequest,
+  part: ReviewPart,
+): (typeof PART_OUTCOME)[keyof typeof PART_OUTCOME] | undefined {
+  if (part === "identity") {
+    return request.status === "approved"
+      ? PART_OUTCOME.approved
+      : PART_OUTCOME.rejected;
+  }
+  const state =
+    part === "employment" ? request.employmentReview : request.addressReview;
+  if (state === undefined || state === "pending") return undefined;
+  return PART_OUTCOME[state];
+}
+
+// Where the session's other parts stand: its identity once decided, by the
+// engine or a reviewer, with how it was checked, and any step a reviewer
+// decided; each by name with its outcome, then who decided it, when and why.
+export function SessionDecisions({
+  request,
+  except,
+}: Readonly<{
+  request: ProofingRequest;
+  except: ReviewPart;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const identityDecided =
+    request.status === "approved" || request.status === "rejected";
+  const parts = [
+    ...(identityDecided ? (["identity"] as const) : []),
+    ...decidedParts(request).filter((part) => part !== "identity"),
+  ].filter((part) => part !== except);
+  if (parts.length === 0) return null;
+  return (
+    <ReviewSection
+      id={`session-decisions-${except}`}
+      title={t("identityProofing.reviews.alsoDecided")}
+    >
+      {parts.map((part) => {
+        const outcome = partOutcome(request, part);
+        if (outcome === undefined) return null;
+        return (
+          <output key={part} className={DECISION_NOTE}>
+            <span className="font-semibold">{t(REVIEW_PART_KEYS[part])}</span>
+            {" · "}
+            <StatusText tone={outcome.tone}>{t(outcome.key)}</StatusText>
+            {part === "identity" && <IdentityFacts request={request} />}
+            {part === "identity" && request.identityReviewedAt === undefined ? (
+              <span className="text-ink-soft mt-2 block text-[12.5px]">
+                {t("identityProofing.reviews.decidedAutomatically")}
+              </span>
+            ) : (
+              <DecisionReasons
+                request={request}
+                kind={part === "identity" ? "review" : part}
+              />
+            )}
+          </output>
+        );
+      })}
+    </ReviewSection>
+  );
+}
+
+// How the identity was checked: the method and the eIDAS level it reached.
+function IdentityFacts({
+  request,
+}: Readonly<{ request: ProofingRequest }>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2">
+      <ReviewFacts
+        rows={[
+          {
+            label: t("identityProofing.reviews.address.method"),
+            value: proofingMethodLabel(request.method, t),
+          },
+          {
+            label: t("identityProofing.reviews.address.level"),
+            value: request.eidasLevel
+              ? assuranceLevelLabel(request.eidasLevel, t)
+              : "—",
+          },
+        ]}
+      />
+    </div>
   );
 }

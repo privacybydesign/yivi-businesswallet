@@ -440,6 +440,12 @@ type Request struct {
 	EmploymentReview ReviewState
 	// EmploymentReviewedAt is when it was decided or lapsed; nil while it waits.
 	EmploymentReviewedAt *time.Time
+	// StepReviewDueAt is when the first of its waiting step reviews (address,
+	// employment) lapses; nil while none waits.
+	StepReviewDueAt *time.Time
+	// IdentityReviewedAt is when a reviewer last decided its identity; nil
+	// when none did.
+	IdentityReviewedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -659,6 +665,10 @@ type RequestFilter struct {
 	// decided ones the latest decision first.
 	ReviewKind  *ReviewKind
 	ReviewState *ReviewState
+	// ClosedReviews narrows to what the Reviews page lists as closed: the
+	// sessions whose review is over (something decided, nothing waiting) and
+	// the data requests that ended, the latest closed first.
+	ClosedReviews bool
 }
 
 func (f RequestFilter) reviewState() ReviewState {

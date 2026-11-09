@@ -1113,7 +1113,7 @@ function IdentityRows({
 // the document's front and back; only an approval carries them, only when
 // the flow requested them, and the face photos only when it keeps them. Each
 // is blurred until a member reveals it.
-function IdentityPhotos({
+export function IdentityPhotos({
   result,
 }: Readonly<{
   result: ProofingResult;
