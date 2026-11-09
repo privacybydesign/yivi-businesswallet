@@ -31,63 +31,49 @@ func TestFlowStepAlwaysReviewSaved(t *testing.T) {
 	}
 }
 
-// On a request that reviews every step, the registered address and a
-// statement with a current job each wait for a reviewer; the session stays
-// approved.
+// The registered address and a statement with a current job each wait for a
+// reviewer on a request that reviews every step, and pass without one under
+// required. The session stays approved either way.
 func TestAlwaysReviewStepsOpenReviews(t *testing.T) {
-	f := newSealedFixture(t, EventSessionAddressAdded)
-	ctx := context.Background()
-	f.in.Address, f.in.Employment = AddressAlwaysReview, EmploymentAlwaysReview
-	approved := approvedRequest(t, f.requests, f.in, "s1")
-	if approved.Address != AddressAlwaysReview || approved.Employment != EmploymentAlwaysReview {
-		t.Fatalf("stored modes = %q, %q; want always_review", approved.Address, approved.Employment)
-	}
+	for _, tc := range []struct {
+		address    AddressMode
+		employment EmploymentMode
+		want       ReviewState
+		waiting    int
+	}{
+		{AddressAlwaysReview, EmploymentAlwaysReview, ReviewPending, 1},
+		{AddressRequired, EmploymentRequired, "", 0},
+	} {
+		f := newSealedFixture(t, EventSessionAddressAdded)
+		ctx := context.Background()
+		f.in.Address, f.in.Employment = tc.address, tc.employment
+		approved := approvedRequest(t, f.requests, f.in, "s1")
+		if approved.Address != tc.address || approved.Employment != tc.employment {
+			t.Fatalf("stored modes = %q, %q; want %q, %q", approved.Address, approved.Employment, tc.address, tc.employment)
+		}
 
-	registered := testAddress
-	registered.Verification = AddressRegistered
-	if added, err := f.requests.AddAddress(ctx, approved, registered); err != nil || !added {
-		t.Fatalf("AddAddress = %v, %v; want added", added, err)
-	}
-	emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
-		{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
-	}}
-	if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
-		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
-	}
+		registered := testAddress
+		registered.Verification = AddressRegistered
+		if added, err := f.requests.AddAddress(ctx, approved, registered); err != nil || !added {
+			t.Fatalf("%s: AddAddress = %v, %v; want added", tc.address, added, err)
+		}
+		emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
+			{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
+		}}
+		if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
+			t.Fatalf("%s: AddEmployment = %v, %v; want added", tc.employment, added, err)
+		}
 
-	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-	if err != nil || got.Status != StatusApproved || got.AddressReview != ReviewPending ||
-		got.EmploymentReview != ReviewPending || got.ReviewReason != "" {
-		t.Fatalf("Get = %s, address %q, employment %q (%q), %v; want approved, both pending, no reason",
-			got.Status, got.AddressReview, got.EmploymentReview, got.ReviewReason, err)
-	}
-	counts, err := f.requests.ReviewCounts(ctx, f.orgID)
-	if err != nil || counts.Kinds[ReviewKindAddress] != 1 || counts.Kinds[ReviewKindEmployment] != 1 || counts.StepSessions != 1 {
-		t.Errorf("ReviewCounts = %+v, %v; want one address, one employment, one session waiting for a step", counts, err)
-	}
-}
-
-// Under required, the registered address and a statement with a current job
-// pass without a reviewer.
-func TestRequiredStepsPassWithoutReview(t *testing.T) {
-	f := newSealedFixture(t, EventSessionAddressAdded)
-	ctx := context.Background()
-	f.in.Address, f.in.Employment = AddressRequired, EmploymentRequired
-	approved := approvedRequest(t, f.requests, f.in, "s1")
-
-	registered := testAddress
-	registered.Verification = AddressRegistered
-	if added, err := f.requests.AddAddress(ctx, approved, registered); err != nil || !added {
-		t.Fatalf("AddAddress = %v, %v; want added", added, err)
-	}
-	emp := Employment{StatementDate: "2026-10-15", Employed: true, Relations: []EmploymentRelation{
-		{Kind: string(employment.KindEmployment), Employer: "VOORBEELD B.V.", PayrollTaxNumber: "123456789L01", From: "2025-01-01", To: "2026-09-30"},
-	}}
-	if added, err := f.requests.AddEmployment(ctx, approved, emp); err != nil || !added {
-		t.Fatalf("AddEmployment = %v, %v; want added", added, err)
-	}
-	got, err := f.requests.Get(ctx, f.orgID, approved.ID)
-	if err != nil || got.AddressReview != "" || got.EmploymentReview != "" {
-		t.Errorf("Get = address %q, employment %q, %v; want no review", got.AddressReview, got.EmploymentReview, err)
+		got, err := f.requests.Get(ctx, f.orgID, approved.ID)
+		if err != nil || got.Status != StatusApproved || got.AddressReview != tc.want ||
+			got.EmploymentReview != tc.want || got.ReviewReason != "" {
+			t.Errorf("%s: Get = %s, address %q, employment %q (%q), %v; want approved, both %q, no reason",
+				tc.address, got.Status, got.AddressReview, got.EmploymentReview, got.ReviewReason, err, tc.want)
+		}
+		counts, err := f.requests.ReviewCounts(ctx, f.orgID)
+		if err != nil || counts.Kinds[ReviewKindAddress] != tc.waiting || counts.Kinds[ReviewKindEmployment] != tc.waiting ||
+			counts.StepSessions != tc.waiting {
+			t.Errorf("%s: ReviewCounts = %+v, %v; want %d waiting of each", tc.address, counts, err, tc.waiting)
+		}
 	}
 }

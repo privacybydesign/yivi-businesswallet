@@ -6794,7 +6794,7 @@ paths:
         already sent keep the mode they were sent with. A flow that asks for diplomas cannot be
         mailed or sent as a bare deep link (422 `diplomas_need_page`): show it on screen or
         create it `hosted`. Audited `identity_proofing.flow_diplomas_configured` with before and
-        after. A mode other than `off`, `required` or `always_review` is 400 `invalid_input`.
+        after. A mode other than `off` or `required` is 400 `invalid_input`.
       requestBody:
         required: true
         content:
