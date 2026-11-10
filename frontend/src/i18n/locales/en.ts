@@ -993,6 +993,7 @@ export const en = {
       details: "Details",
     },
     sessions: {
+      sealCheckedAgain: "After a reviewer checked the seal again",
       review: {
         reasonRequired: "Give a reason: it is kept in the audit log.",
         reasonTooLong: "Keep the reason to {{max}} characters or fewer.",

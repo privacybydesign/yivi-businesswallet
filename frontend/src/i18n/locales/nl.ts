@@ -1022,6 +1022,7 @@ export const nl: Translation<typeof en> = {
       details: "Details",
     },
     sessions: {
+      sealCheckedAgain: "Nadat een beoordelaar het zegel opnieuw controleerde",
       review: {
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
         reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
