@@ -2632,6 +2632,8 @@ export const en = {
         "Changed whether a flow asks for the Verzekeringsbericht",
       identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
       identityProofingEmploymentRejected: "Refused a Verzekeringsbericht",
+      identityProofingDocumentUnchecked:
+        "Kept a document whose seal could not be checked",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
