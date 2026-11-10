@@ -2609,7 +2609,34 @@ export function sessionEventDetail(
       t("identityProofingFlows.versionShort", { version: fields.flowVersion }),
     );
   }
-  return [...parts, ...decisionEventDetail(fields, t)];
+  return [
+    ...parts,
+    ...documentEventDetail(fields, t),
+    ...decisionEventDetail(fields, t),
+  ];
+}
+
+// What an uploaded document's event adds: which document went to a reviewer
+// as its seal could not be checked, that a refusal or keep came from a
+// reviewer checking that seal again, and the file.
+function documentEventDetail(
+  fields: Record<string, unknown>,
+  t: TFunction,
+): string[] {
+  const parts: string[] = [];
+  if (
+    fields.sealUnchecked === true &&
+    (fields.kind === "diplomas" || fields.kind === "employment")
+  ) {
+    parts.push(t(`identityProofing.documents.kinds.${fields.kind}`));
+  }
+  if (fields.sealCheckedAgain === true) {
+    parts.push(t("identityProofing.sessions.sealCheckedAgain"));
+  }
+  if (typeof fields.fileName === "string" && fields.fileName !== "") {
+    parts.push(fields.fileName);
+  }
+  return parts;
 }
 
 // The reviewer's copy for why a diploma or Verzekeringsbericht was refused; undefined for a
@@ -2687,8 +2714,17 @@ function decisionEventDetail(
     );
   }
   if (typeof fields.reason === "string" && fields.reason !== "") {
+    // A check's own refusal, not a reviewer's free text.
+    const refusal =
+      fields.state === undefined && fields.decision === undefined
+        ? SEAL_REFUSAL_KEYS[fields.reason]
+        : undefined;
     parts.push(
-      t("identityProofing.reviews.decided.reason", { reason: fields.reason }),
+      refusal === undefined
+        ? t("identityProofing.reviews.decided.reason", {
+            reason: fields.reason,
+          })
+        : t(refusal),
     );
   }
   return parts;

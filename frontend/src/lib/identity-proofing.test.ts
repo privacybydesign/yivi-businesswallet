@@ -2044,6 +2044,41 @@ describe("session method and timeline", () => {
     expect(sessionEventDetail({}, t)).toEqual([]);
   });
 
+  it("names a document whose seal waits, and a refusal of its check again", () => {
+    expect(
+      sessionEventDetail(
+        { after: { kind: "diplomas", fileName: "a.pdf", sealUnchecked: true } },
+        t,
+      ),
+    ).toEqual(["Diploma extract from DUO", "a.pdf"]);
+    expect(
+      sessionEventDetail(
+        {
+          after: {
+            reason: "signature_invalid",
+            failedCheck: "cms_signature",
+            sealCheckedAgain: true,
+            fileName: "nep.pdf",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      "After a reviewer checked the seal again",
+      "nep.pdf",
+      t("identityProofing.reviews.seal.reasons.signatureInvalid"),
+    ]);
+    // A reviewer's own words stay theirs.
+    expect(
+      sessionEventDetail(
+        { after: { kind: "diplomas", state: "rejected", reason: "duplicate" } },
+        t,
+      ),
+    ).toContain(
+      t("identityProofing.reviews.decided.reason", { reason: "duplicate" }),
+    );
+  });
+
   it("says an entered address goes to a reviewer, and what was decided", () => {
     expect(
       sessionEventDetail({ after: { verification: "registered_mismatch" } }, t),
