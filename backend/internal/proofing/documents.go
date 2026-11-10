@@ -43,7 +43,7 @@ const (
 // no longer takes documents, or the deployment checks none.
 var uploadErrors = []error{
 	ErrSessionOver, ErrDiplomasClosed, ErrEmploymentClosed, ErrNoDiplomaChecker, ErrNoEmploymentChecker,
-	ErrNoEncryptionKey, context.Canceled, context.DeadlineExceeded,
+	ErrNoEncryptionKey,
 }
 
 // fileCheckFailed is an error that breaks one file's check only: the
@@ -223,7 +223,9 @@ func (s *Service) addDocuments(ctx context.Context, req Request, files []Diploma
 		verdict, err := s.checkDocument(ctx, up, kind, f)
 		// The files decided before it are kept already: their verdicts must
 		// still reach the page, or it asks for them again.
-		if err != nil && fileCheckFailed(err) {
+		// Only the upload's own ctx ending fails it whole: a seal server's
+		// timeout also matches context.DeadlineExceeded.
+		if err != nil && ctx.Err() == nil && fileCheckFailed(err) {
 			slog.ErrorContext(ctx, "proofing: check uploaded document",
 				slog.String("request", req.ID.String()), slog.String("kind", string(kind)), slog.Any("error", err))
 			verdict, err = DocumentVerdict{FileName: f.Name, Kind: kind, Reason: DocumentReasonCheckFailed}, nil

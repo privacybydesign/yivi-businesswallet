@@ -2799,7 +2799,9 @@ setting, check, window, request step, webhook and review item.
     logged, with nothing of it kept. The files before it are kept already, so
     their verdicts still go back, or the page asks for them again. Only
     `uploadErrors` (the session no longer takes documents, no checker, no
-    key, the caller gone) fail the whole upload.
+    key) and the upload's own ctx ending fail the whole upload. A seal
+    server's timeout also matches `context.DeadlineExceeded`, so that is not
+    on the list.
   - The hosted route checks the link first and reads only as many files as
     the request still takes (`HostedDocumentsOpen`).
   - The old `/diplomas` and `/employment` routes stay for API callers.

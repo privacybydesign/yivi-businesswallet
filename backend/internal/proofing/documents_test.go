@@ -157,27 +157,48 @@ func TestHostedDocumentsChecksLink(t *testing.T) {
 // A check that breaks on one file fails that file only: the statement kept
 // before it is still reported, so the page does not ask for it again.
 func TestAddDocumentsReportsKeptFilesWhenACheckBreaks(t *testing.T) {
-	d, _ := newDocumentFixture(DiplomasRequired, EmploymentRequired)
-	d.checker.err = fmt.Errorf("diploma: validate: %w", diploma.ErrRevocationUnavailable)
-	req := d.sendApproved(t, time.Minute)
+	for name, checkErr := range map[string]error{
+		"unreachable": fmt.Errorf("diploma: validate: %w", diploma.ErrRevocationUnavailable),
+		"timed out":   fmt.Errorf("%w: %w", diploma.ErrTrustUnavailable, context.DeadlineExceeded),
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, _ := newDocumentFixture(DiplomasRequired, EmploymentRequired)
+			d.checker.err = checkErr
+			req := d.sendApproved(t, time.Minute)
 
-	verdicts, err := uploadDocuments(d, req, "UWV statement", "Anna Maria Jansen")
-	if err != nil {
-		t.Fatalf("AddDocuments: %v", err)
+			verdicts, err := uploadDocuments(d, req, "UWV statement", "Anna Maria Jansen")
+			if err != nil {
+				t.Fatalf("AddDocuments: %v", err)
+			}
+			if len(verdicts) != 2 || verdicts[0].Employment == nil ||
+				verdicts[1].Kind != DocumentDiploma || verdicts[1].Reason != DocumentReasonCheckFailed {
+				t.Fatalf("verdicts = %+v, want the statement kept and the diploma check_failed", verdicts)
+			}
+			if d.requests.stored.SubjectEmployment == nil || len(d.diplomas.held[req.ID]) != 0 {
+				t.Errorf("kept statement %v, %d extracts; want the statement only",
+					d.requests.stored.SubjectEmployment, len(d.diplomas.held[req.ID]))
+			}
+		})
 	}
-	if len(verdicts) != 2 || verdicts[0].Employment == nil ||
-		verdicts[1].Kind != DocumentDiploma || verdicts[1].Reason != DocumentReasonCheckFailed {
-		t.Fatalf("verdicts = %+v, want the statement kept and the diploma check_failed", verdicts)
-	}
-	if d.requests.stored.SubjectEmployment == nil || len(d.diplomas.held[req.ID]) != 0 {
-		t.Errorf("kept statement %v, %d extracts; want the statement only",
-			d.requests.stored.SubjectEmployment, len(d.diplomas.held[req.ID]))
+}
+
+// An upload whose own request ends fails whole, whatever its check returned.
+func TestAddDocumentsFailsWhollyWhenItsRequestEnds(t *testing.T) {
+	d, _ := newDocumentFixture(DiplomasRequired, EmploymentRequired)
+	d.checker.err = context.Canceled
+	req := d.sendApproved(t, time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	files := []DiplomaFile{{Name: "duo.pdf", Bytes: []byte("Anna Maria Jansen")}}
+	if verdicts, err := d.svc.AddDocuments(ctx, testOrg.ID, req.ID, nil, files); !errors.Is(err, context.Canceled) {
+		t.Errorf("AddDocuments = %+v, %v; want context.Canceled", verdicts, err)
 	}
 }
 
 // A request that no longer takes documents still fails the whole upload.
 func TestAddDocumentsFailsWhollyWhenClosed(t *testing.T) {
-	if fileCheckFailed(ErrSessionOver) || fileCheckFailed(fmt.Errorf("x: %w", context.Canceled)) {
+	if fileCheckFailed(ErrSessionOver) || fileCheckFailed(fmt.Errorf("x: %w", ErrNoEncryptionKey)) {
 		t.Error("an upload-wide error read as one file's")
 	}
 	if !fileCheckFailed(fmt.Errorf("x: %w", diploma.ErrTrustUnavailable)) {
