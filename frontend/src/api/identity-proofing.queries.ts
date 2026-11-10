@@ -58,10 +58,9 @@ import {
   startProofingYivi,
   startProofingDocumentScan,
   finishProofingDocumentScan,
-  uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
-  uploadProofingEmployment,
+  uploadProofingDocuments,
 } from "./identity-proofing";
 import type {
   AddressReviewInput,
@@ -101,12 +100,11 @@ import type {
   ProofingFlowBrandingInput,
   ProofingFlowHosted,
   DiplomaMode,
-  DiplomaVerdict,
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
   EmploymentMode,
-  EmploymentVerdict,
+  DocumentVerdict,
   ProofingDataMatch,
   ProofingOverview,
 } from "./identity-proofing";
@@ -1044,16 +1042,6 @@ export function useYiviDisclosureQuery(
   });
 }
 
-// Checks uploaded diploma extracts; each verdict says what became of a file.
-export function useUploadDiplomasMutation(
-  target: VerifyTarget,
-): UseMutationResult<DiplomaVerdict[], Error, File[]> {
-  return useMutation({
-    mutationFn: (files) => uploadProofingDiplomas(target, files),
-    meta: { suppressErrorToast: true },
-  });
-}
-
 // The Dutch addresses at a postal code and house number; asked only for a
 // Dutch postal code and a house number that starts with a number.
 export function useAddressLookupQuery(
@@ -1093,13 +1081,13 @@ export function useSubmitAddressMutation(
   });
 }
 
-// Checks an uploaded Verzekeringsbericht. The step shows what was kept until
-// the subject continues, as the diploma step does.
-export function useUploadEmploymentMutation(
+// Checks uploaded documents, each as the one its seal names. The step shows
+// what was kept until the subject continues.
+export function useUploadDocumentsMutation(
   target: VerifyTarget,
-): UseMutationResult<EmploymentVerdict, Error, File> {
+): UseMutationResult<DocumentVerdict[], Error, File[]> {
   return useMutation({
-    mutationFn: (file) => uploadProofingEmployment(target, file),
+    mutationFn: (files) => uploadProofingDocuments(target, files),
     meta: { suppressErrorToast: true },
   });
 }

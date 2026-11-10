@@ -184,15 +184,13 @@ function VerifyFlow({
     document: flow.steps.includes(STEP_DOCUMENT_PHOTO),
     // The Yivi app shares the registered address: the person enters none.
     address: stepAsked(flow.addressMode) && method !== "yivi_app",
-    diplomas: stepAsked(flow.diplomaMode),
-    employment: stepAsked(flow.employmentMode),
+    documents: stepAsked(flow.diplomaMode) || stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"
   >("session");
   const [inAddress, setInAddress] = useState(false);
-  const [inDiplomas, setInDiplomas] = useState(false);
-  const [inEmployment, setInEmployment] = useState(false);
+  const [inDocuments, setInDocuments] = useState(false);
   const [sent, setSent] = useState<ProofingSent>();
   const create = useCreateRequestMutation(slug);
   const name = org.branding.displayName || org.name;
@@ -235,8 +233,7 @@ function VerifyFlow({
           currentStage({
             step: step === "session" ? sessionStage : step,
             inAddress,
-            inDiplomas,
-            inEmployment,
+            inDocuments,
           }),
         )}
       />
@@ -285,11 +282,10 @@ function VerifyFlow({
           onMethod={setMethod}
           diplomaMode={sent.diplomaMode}
           diplomas={sent.diplomas}
-          onDiplomaStep={setInDiplomas}
           addressMode={sent.addressMode}
           onAddressStep={setInAddress}
           employmentMode={sent.employmentMode}
-          onEmploymentStep={setInEmployment}
+          onDocumentStep={setInDocuments}
           onRestart={restart}
           renderEnded={() => (
             <CheckEnded message={t("identityProofing.onScreen.ended.message")}>

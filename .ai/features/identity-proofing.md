@@ -102,8 +102,8 @@ tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
 `matchSubject` in `service.go` (one known person, §13), `address*.go` +
 `routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16),
-`employment*.go` + `internal/employment` + `EmploymentStep` (the UWV
-Verzekeringsbericht, §17).
+`employment*.go` + `internal/employment` (the UWV Verzekeringsbericht, §17),
+`documents*.go` + `DocumentStep` (the one upload step for both, §20).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -1797,8 +1797,8 @@ only: the engine knows nothing of it.
   spec must name `dg1`) and `ActivateFlowVersion` too (a data request flow is
   never edited, §15); the editor locks Name and document details on
   and saves a setting that lifts the rule before a version that drops `dg1`.
-  The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
-  for the admin, never sent to the engine (its steps are the app's, and it
+  The flow editor shows it as a document under the "Upload documents" step
+  (§20): a step for the admin, never sent to the engine (its steps are the app's, and it
   would refuse one it does not know). It is saved after the flow, so a new flow
   gets it once it has an id; the flow list's summary appends it to the
   engine's steps. The flow list carries it as
@@ -1810,7 +1810,7 @@ only: the engine knows nothing of it.
   deep link (`diplomas_need_page`, 422): on screen or hosted only. The send
   form switches to on-screen by itself (`sendableByMail`).
 - **Upload** (`POST .../requests/{id}/diplomas`, `POST /proof/{token}/diplomas`,
-  multipart `file` parts): only once the identity check finished, approved or
+  multipart `file` parts; the page uploads through `.../documents`, §20): only once the identity check finished, approved or
   in review, within `DiplomaUploadWindow` (1 h) of it (`checked_at`,
   `stepsOpen`; `diplomasUntil` in the request, hosted progress), at most 10 per request, 5 MiB each; the hosted
   route reads a body only as large as the extracts the request still takes
@@ -2345,7 +2345,8 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     none. A request snapshots it at send (`identity_proofing_requests.employment`).
 - **A page, never a mail**: `employment_needs_page` (422), as §16.
 - **Upload** (`POST .../requests/{id}/employment`, `POST /proof/{token}/employment`,
-  one multipart `file`, 5 MiB, read as one diploma extract):
+  one multipart `file`, 5 MiB, read as one diploma extract; the page uploads
+  through `.../documents`, §20):
   - Within `EmploymentWindow` (1 h) of the identity check finishing, approved
     or in the engine's review (`checked_at`, `stepsOpen`, `employmentUntil`;
     the hosted progress says `employmentGiven`), so the subject gives it before
@@ -2766,3 +2767,48 @@ other choice offered.
     document to check, and `document` holds the BRP name and date of birth.
   - The session stays eIDAS low: neither the BRP data nor the ID scan's face
     match against a photographed portrait reaches a higher level.
+
+## 20. One document upload step
+
+The DUO diploma (§12) and the UWV Verzekeringsbericht (§17) are one step for
+the admin and the subject. Underneath they stay two: each keeps its own flow
+setting, check, window, request step, webhook and review item.
+
+- **Flow editor**: "Upload documents", with the accepted documents to tick
+  (`DocumentsOption` in `routes/flow-editor-advanced.tsx`).
+  - Each ticked document is required: its `diplomaMode` or `employmentMode`
+    is `required`. The step is on while any is ticked, a DUO diploma when it
+    is turned on.
+  - "Always send … to review" stays per document (§9).
+  - The flow list's summary reads "Upload documents (DUO diploma, UWV
+    Verzekeringsbericht)" (`flowStepLabels`).
+- **Upload** (`POST .../requests/{id}/documents`, `POST /proof/{token}/documents`,
+  `documents.go`): up to 11 `file` parts, 5 MiB each. Per file:
+  1. **Which document**: who sealed it (`verify.SealedBy` with `trust.DUO`,
+     `trust.UWV`). It reads the one signature's signer certificate, with no
+     trust, no network and no PDFium, so an unvetted PDF never reaches PDFium.
+     A changed file still names its issuer and then fails that issuer's check.
+  2. **Refused without a check**: sealed by neither (`not_supported`), a
+     document the request does not ask for (`not_asked`), an 11th diploma
+     (`too_many`), a second statement (`duplicate`).
+  3. **Otherwise that document's own check** (`checkDiploma`,
+     `checkEmployment`), audited, kept and reviewed as on its own route.
+  - The verdict per file adds `kind` (`diploma`, `employment`).
+  - A check that breaks on the server's side (`fileCheckFailed`: the seal
+    unreachable, PDFium, storing it) fails only that file, `check_failed`,
+    logged, with nothing of it kept. The files before it are kept already, so
+    their verdicts still go back, or the page asks for them again. Only
+    `uploadErrors` (the session no longer takes documents, no checker, no
+    key) and the upload's own ctx ending fail the whole upload. A seal
+    server's timeout also matches `context.DeadlineExceeded`, so that is not
+    on the list.
+  - The hosted route checks the link first and reads only as many files as
+    the request still takes (`HostedDocumentsOpen`).
+  - The old `/diplomas` and `/employment` routes stay for API callers.
+- **Subject's page**: one stage, "Documents" (`DocumentStep`,
+  `sessionView` → `documents`).
+  - One list of what is still needed, each with where to download it.
+  - Continue once every asked document has a kept file, or the window is up
+    (`documentStepDone`).
+  - It still waits for the statement's read after Continue (`employmentOwed`).
+

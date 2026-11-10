@@ -471,7 +471,13 @@ func (s *Service) addEmployment(ctx context.Context, req Request, f DiplomaFile)
 	if err != nil {
 		return EmploymentVerdict{}, err
 	}
+	return s.checkEmployment(ctx, req, holder, f)
+}
 
+// checkEmployment checks f against holder, the identity the engine approved
+// for req, and keeps it when accepted: ErrEmploymentClosed when a concurrent
+// upload or a purge got there first.
+func (s *Service) checkEmployment(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (EmploymentVerdict, error) {
 	verdict := EmploymentVerdict{FileName: f.Name}
 	out, err := s.employmentChecker.Check(ctx, f.Bytes, holder)
 	if err != nil {

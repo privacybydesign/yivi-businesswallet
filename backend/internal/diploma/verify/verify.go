@@ -279,14 +279,10 @@ func PDF(ctx context.Context, pdf []byte, opts Options) (*Result, error) {
 	})
 
 	// 5. Issuer identity.
-	orgID := subjectAttr(signer.Subject, oidOrganizationIdent)
-	org := ""
-	if len(signer.Subject.Organization) > 0 {
-		org = signer.Subject.Organization[0]
-	}
+	org, orgID := signerOrganization(signer)
 	res.add(Check{
 		ID: CheckSignerIdentity, Name: "signer is " + opts.Issuer.Name,
-		OK:     orgID == opts.Issuer.OrganizationIdentifier && org == opts.Issuer.Organization,
+		OK:     names(signer, *opts.Issuer),
 		Detail: fmt.Sprintf("subject O=%q organizationIdentifier=%q", org, orgID),
 	})
 
@@ -729,6 +725,37 @@ func unsignedAttr(p7 *pkcs7.PKCS7, oid asn1.ObjectIdentifier) []byte {
 		}
 	}
 	return nil
+}
+
+// SealedBy reports whether pdf carries one signature whose signer
+// certificate names issuer, as the signer_identity check reads it. It
+// establishes no trust and checks no signature: it only tells which issuer a
+// file claims, and PDF decides whether that seal holds.
+func SealedBy(pdf []byte, issuer trust.Issuer) bool {
+	sigs, err := pdfsig.Extract(pdf)
+	if err != nil || len(sigs) != 1 {
+		return false
+	}
+	p7, err := pkcs7.Parse(sigs[0].CMS)
+	if err != nil {
+		return false
+	}
+	signer := p7.GetOnlySigner()
+	return signer != nil && names(signer, issuer)
+}
+
+// signerOrganization is the signer's subject O and organizationIdentifier.
+func signerOrganization(signer *x509.Certificate) (org, orgID string) {
+	if len(signer.Subject.Organization) > 0 {
+		org = signer.Subject.Organization[0]
+	}
+	return org, subjectAttr(signer.Subject, oidOrganizationIdent)
+}
+
+// names reports whether signer's subject is issuer's.
+func names(signer *x509.Certificate, issuer trust.Issuer) bool {
+	org, orgID := signerOrganization(signer)
+	return orgID == issuer.OrganizationIdentifier && org == issuer.Organization
 }
 
 func subjectAttr(n pkix.Name, oid asn1.ObjectIdentifier) string {

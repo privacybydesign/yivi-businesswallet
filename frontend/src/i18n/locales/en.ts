@@ -652,25 +652,12 @@ export const en = {
         detail:
           "After the identity check: the diploma extracts you download from DUO, checked against DUO's signature and your name and date of birth",
       },
-      identityDone: "Your identity is verified.",
-      heading: "Now add your diploma",
-      intro:
-        "Upload the official extract of your diploma from DUO. We check that DUO issued it and that it is in your name.",
       how: {
         login: "Log in to Mijn DUO with DigiD.",
         openDuo: "Open Mijn DUO",
         download:
-          "Under “Mijn diploma's”, download the extract (uittreksel) of your diploma as a PDF.",
-        upload:
-          "Upload that PDF here, unchanged. A scan or photo of your diploma does not work.",
+          "Under “Mijn diploma's”, download the extract (uittreksel) of each diploma as a PDF.",
       },
-      choose: "Choose PDF",
-      chooseAnother: "Add another diploma",
-      checking: "Checking…",
-      closed: "The time to add diplomas is up.",
-      done: "Done",
-      needOne: "Add at least one diploma to continue.",
-      verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
       level: "level {{level}}",
       reasons: {
         notADiploma:
@@ -687,23 +674,12 @@ export const en = {
         detail:
           "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
       },
-      identityDone: "Your identity is verified.",
-      heading: "Now add your Verzekeringsbericht",
-      intro:
-        "Upload the Verzekeringsbericht from UWV. It lists your employment. We check that UWV issued it and that it is in your name.",
       how: {
         login: "Log in to Mijn UWV with DigiD.",
         openUwv: "Open Mijn UWV",
         download:
           "Under “Persoonlijke gegevens”, open “Arbeidsverleden” and download it as a PDF.",
-        upload:
-          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF, because that removes UWV's seal.",
       },
-      choose: "Choose PDF",
-      chooseAgain: "Choose another PDF",
-      checking: "Checking…",
-      closed: "The time to add your Verzekeringsbericht is up.",
-      continue: "Continue",
       kept: "Verzekeringsbericht of {{date}} accepted",
       keptChecks:
         "UWV's seal is valid, the file is unchanged, and it is in your name.",
@@ -725,6 +701,36 @@ export const en = {
         holderMismatch: "This Verzekeringsbericht is in another person's name.",
         stale:
           "This Verzekeringsbericht is older than 30 days. Download a new one.",
+        duplicate: "A Verzekeringsbericht was added already.",
+      },
+    },
+    documents: {
+      identityDone: "Your identity is verified.",
+      heading: "Now add your documents",
+      intro:
+        "Upload the documents below as PDFs, all at once if you like. We check who issued each one and that it is in your name.",
+      kinds: {
+        diplomas: "Diploma extract from DUO",
+        employment: "Verzekeringsbericht from UWV",
+      },
+      needed: "Still needed",
+      added: "Added",
+      choose: "Choose PDFs",
+      chooseAnother: "Add another PDF",
+      checking: "Checking…",
+      unchanged:
+        "Upload each PDF exactly as you downloaded it. A scan, a photo or a PDF printed again does not work.",
+      closed: "The time to add documents is up.",
+      continue: "Continue",
+      needAll: "Add every document above to continue.",
+      verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
+      reasons: {
+        notSupported:
+          "This is not a document we can check. Upload the original PDF, as you downloaded it.",
+        notAsked: "This document is not asked for here.",
+        tooMany: "You added the most diplomas a check takes.",
+        checkFailed:
+          "We could not check this file right now. Upload this file again.",
       },
     },
     flows: {
@@ -820,8 +826,7 @@ export const en = {
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
-        diplomas: "Diploma",
-        employment: "Verzekeringsbericht",
+        documents: "Documents",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -1758,8 +1763,11 @@ export const en = {
       document_photo: "Photograph the document",
       face_verification: "Face check",
       address: "Enter the address",
-      diploma_upload: "Upload diplomas (DUO)",
-      employment_upload: "Upload Verzekeringsbericht (UWV)",
+      documents: "Upload documents ({{documents}})",
+    },
+    documents: {
+      diploma: "DUO diploma",
+      employment: "UWV Verzekeringsbericht",
     },
     bsnPolicies: {
       retrieve: "Keep the full BSN",
@@ -1890,10 +1898,13 @@ export const en = {
         faceInScan: "Check the face in the ID scan",
         faceInScanHint:
           "Right after the document photo, in the browser: the ID scan checks the person is live and compares their face with the photo on the document. Not the chip photo, so it reaches no assurance level.",
-        diplomaHint:
-          "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
-        employmentHint:
-          "After the identity check, in the browser: the person uploads the Verzekeringsbericht from Mijn UWV, checked against UWV's seal and their name and date of birth. Only on screen or as a link, never by e-mail.",
+        documents: "Upload documents",
+        documentsHint:
+          "After the identity check, in the browser: the person uploads every document ticked below as a PDF. Each file is checked against its issuer's seal and the person's name and date of birth. Only on screen or as a link, never by e-mail.",
+        diploma: "Diploma extract (DUO)",
+        diplomaHint: "From Mijn DUO, up to 10 per session.",
+        employment: "Verzekeringsbericht (UWV)",
+        employmentHint: "From Mijn UWV, one per session.",
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
         apps: "Apps",

@@ -357,6 +357,7 @@ export function FlowEditor({
                 }
                 employmentMode={employmentMode}
                 onEmployment={(mode) => chooseUploads(diplomaMode, mode)}
+                onDocuments={chooseUploads}
                 employmentError={
                   saveEmployment.isError
                     ? proofingErrorMessage(saveEmployment.error, t)

@@ -675,25 +675,12 @@ export const nl: Translation<typeof en> = {
         detail:
           "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
       },
-      identityDone: "Je identiteit is geverifieerd.",
-      heading: "Voeg nu je diploma toe",
-      intro:
-        "Upload het officiële uittreksel van je diploma van DUO. We controleren of DUO het heeft uitgegeven en of het op jouw naam staat.",
       how: {
         login: "Log in bij Mijn DUO met DigiD.",
         openDuo: "Open Mijn DUO",
         download:
-          "Download bij ‘Mijn diploma's’ het uittreksel van je diploma als pdf.",
-        upload:
-          "Upload die pdf hier, onveranderd. Een scan of foto van je diploma werkt niet.",
+          "Download bij ‘Mijn diploma's’ het uittreksel van elk diploma als pdf.",
       },
-      choose: "Pdf kiezen",
-      chooseAnother: "Nog een diploma toevoegen",
-      checking: "Bezig met controleren…",
-      closed: "De tijd om diploma's toe te voegen is voorbij.",
-      done: "Klaar",
-      needOne: "Voeg minstens één diploma toe om verder te gaan.",
-      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
       level: "niveau {{level}}",
       reasons: {
         notADiploma:
@@ -710,23 +697,12 @@ export const nl: Translation<typeof en> = {
         detail:
           "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
       },
-      identityDone: "Je identiteit is geverifieerd.",
-      heading: "Voeg nu je Verzekeringsbericht toe",
-      intro:
-        "Upload het Verzekeringsbericht van UWV. Daarin staat je arbeidsverleden. We controleren of UWV het heeft uitgegeven en of het op jouw naam staat.",
       how: {
         login: "Log in bij Mijn UWV met DigiD.",
         openUwv: "Open Mijn UWV",
         download:
           "Open bij ‘Persoonlijke gegevens’ je ‘Arbeidsverleden’ en download het als pdf.",
-        upload:
-          "Upload die pdf hier, precies zoals je hem downloadde. Druk hem niet af naar pdf, want dan verdwijnt het zegel van UWV.",
       },
-      choose: "Pdf kiezen",
-      chooseAgain: "Een andere pdf kiezen",
-      checking: "Bezig met controleren…",
-      closed: "De tijd om je Verzekeringsbericht toe te voegen is voorbij.",
-      continue: "Verder",
       kept: "Verzekeringsbericht van {{date}} geaccepteerd",
       keptChecks:
         "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
@@ -749,6 +725,37 @@ export const nl: Translation<typeof en> = {
           "Dit Verzekeringsbericht staat op naam van iemand anders.",
         stale:
           "Dit Verzekeringsbericht is ouder dan 30 dagen. Download een nieuw exemplaar.",
+        duplicate: "Er is al een Verzekeringsbericht toegevoegd.",
+      },
+    },
+    documents: {
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je documenten toe",
+      intro:
+        "Upload de documenten hieronder als pdf, als je wilt allemaal tegelijk. We controleren wie elk document heeft uitgegeven en of het op jouw naam staat.",
+      kinds: {
+        diplomas: "Diploma-uittreksel van DUO",
+        employment: "Verzekeringsbericht van UWV",
+      },
+      needed: "Nog nodig",
+      added: "Toegevoegd",
+      choose: "Pdf's kiezen",
+      chooseAnother: "Nog een pdf toevoegen",
+      checking: "Bezig met controleren…",
+      unchanged:
+        "Upload elke pdf precies zoals je hem downloadde. Een scan, een foto of een opnieuw afgedrukte pdf werkt niet.",
+      closed: "De tijd om documenten toe te voegen is voorbij.",
+      continue: "Verder",
+      needAll: "Voeg elk document hierboven toe om verder te gaan.",
+      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
+      reasons: {
+        notSupported:
+          "Dit is geen document dat we kunnen controleren. Upload de originele pdf, zoals je hem downloadde.",
+        notAsked: "Dit document wordt hier niet gevraagd.",
+        tooMany:
+          "Je hebt het maximale aantal diploma's voor een controle toegevoegd.",
+        checkFailed:
+          "We konden dit bestand nu niet controleren. Upload dit bestand opnieuw.",
       },
     },
     flows: {
@@ -844,8 +851,7 @@ export const nl: Translation<typeof en> = {
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
-        diplomas: "Diploma",
-        employment: "Verzekeringsbericht",
+        documents: "Documenten",
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
@@ -1802,8 +1808,11 @@ export const nl: Translation<typeof en> = {
       document_photo: "Document fotograferen",
       face_verification: "Gezichtscontrole",
       address: "Adres invullen",
-      diploma_upload: "Diploma's uploaden (DUO)",
-      employment_upload: "Verzekeringsbericht uploaden (UWV)",
+      documents: "Documenten uploaden ({{documents}})",
+    },
+    documents: {
+      diploma: "DUO-diploma",
+      employment: "UWV-Verzekeringsbericht",
     },
     bsnPolicies: {
       retrieve: "Het volledige BSN bewaren",
@@ -1937,10 +1946,13 @@ export const nl: Translation<typeof en> = {
         faceInScan: "Het gezicht controleren in de ID-scan",
         faceInScanHint:
           "Direct na de foto van het document, in de browser: de ID-scan controleert of de persoon levend is en vergelijkt het gezicht met de foto op het document. Niet met de chipfoto, dus dit haalt geen betrouwbaarheidsniveau.",
-        diplomaHint:
-          "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
-        employmentHint:
-          "Na de identiteitscontrole, in de browser: de persoon uploadt het Verzekeringsbericht uit Mijn UWV, gecontroleerd op het zegel van UWV en op naam en geboortedatum. Alleen op het scherm of als link, nooit per e-mail.",
+        documents: "Documenten uploaden",
+        documentsHint:
+          "Na de identiteitscontrole, in de browser: de persoon uploadt elk document dat hieronder is aangevinkt als pdf. Elk bestand wordt gecontroleerd op het zegel van de uitgever en op naam en geboortedatum. Alleen op het scherm of via een link, nooit per e-mail.",
+        diploma: "Diploma-uittreksel (DUO)",
+        diplomaHint: "Uit Mijn DUO, tot 10 per sessie.",
+        employment: "Verzekeringsbericht (UWV)",
+        employmentHint: "Uit Mijn UWV, één per sessie.",
         faceWithoutChip:
           "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
         lifetime: "Geldigheid QR-code",

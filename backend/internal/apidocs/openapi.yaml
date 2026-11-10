@@ -7654,6 +7654,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/documents:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+    post:
+      tags: [identity-proofing]
+      summary: Upload documents on an on-screen request
+      description: >-
+        Requires organisation membership (an admin, or the member who sent it). Multipart `file`
+        parts, each a PDF of at most 5 MiB, at most 11 per upload. Only within an hour of the
+        identity check finishing (approved, or in review) on a request that asks for diplomas or
+        the Verzekeringsbericht.
+        Each file is read from who sealed it: DUO's seal is a diploma extract, UWV's a
+        Verzekeringsbericht. That document's own check then runs, as on its own upload route
+        (`.../diplomas`, `.../employment`). A file sealed by neither is refused `not_supported`,
+        and a document the session does not ask for `not_asked`, without a check. A session
+        keeps at most 10 extracts (a further one is `too_many`) and one statement (a further one
+        is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
+        accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
+        failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
+        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
+        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
+        their verdicts. Only a session that no longer takes documents fails the whole upload.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentUpload'
+      responses:
+        '200':
+          description: A verdict per file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDocumentVerdictList'
+              examples:
+                verdicts:
+                  summary: A diploma kept, a file nobody sealed refused
+                  value:
+                    - fileName: diploma.pdf
+                      kind: diploma
+                      accepted: true
+                      diploma:
+                        documentType: Diploma
+                        qualification: HBO Bachelor Verpleegkunde
+                        profiles: []
+                        institution: Hogeschool van Amsterdam
+                        placeOfIssue: Amsterdam
+                        dateAwarded: "2019-07-05"
+                        nlqfLevel: "6"
+                        eqfLevel: "6"
+                        documentNumber: "2019-0042137"
+                        signedAt: "2026-10-02T09:36:40Z"
+                        addedAt: "2026-10-02T09:37:02Z"
+                    - fileName: scan.pdf
+                      accepted: false
+                      reason: not_supported
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: A file or the upload is too large (`too_large`).
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-matches:
     parameters:
       - name: slug
@@ -9307,6 +9391,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/proof/{token}/documents:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The hosted link's token.
+    post:
+      tags: [identity-proofing-hosted]
+      summary: Upload documents on a hosted page
+      description: >-
+        Anonymous: the link's token is the credential. As the on-screen upload, for the subject
+        of a hosted session. The link is checked before the body is read, and no more files are
+        read than the session still takes.
+        Each file is read from who sealed it: DUO's seal is a diploma extract, UWV's a
+        Verzekeringsbericht. That document's own check then runs, as on its own upload route
+        (`.../diplomas`, `.../employment`). A file sealed by neither is refused `not_supported`,
+        and a document the session does not ask for `not_asked`, without a check. A session
+        keeps at most 10 extracts (a further one is `too_many`) and one statement (a further one
+        is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
+        accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
+        failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
+        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
+        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
+        their verdicts. Only a session that no longer takes documents fails the whole upload.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingDocumentUpload'
+      responses:
+        '200':
+          description: A verdict per file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingDocumentVerdictList'
+              examples:
+                verdicts:
+                  summary: A diploma kept, a file nobody sealed refused
+                  value:
+                    - fileName: diploma.pdf
+                      kind: diploma
+                      accepted: true
+                      diploma:
+                        documentType: Diploma
+                        qualification: HBO Bachelor Verpleegkunde
+                        profiles: []
+                        institution: Hogeschool van Amsterdam
+                        placeOfIssue: Amsterdam
+                        dateAwarded: "2019-07-05"
+                        nlqfLevel: "6"
+                        eqfLevel: "6"
+                        documentNumber: "2019-0042137"
+                        signedAt: "2026-10-02T09:36:40Z"
+                        addedAt: "2026-10-02T09:37:02Z"
+                    - fileName: scan.pdf
+                      accepted: false
+                      reason: not_supported
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: A file or the upload is too large (`too_large`).
   /api/v1/proofing/sessions:
     get:
       tags: [identity-proofing-api]
@@ -12360,6 +12517,43 @@ components:
             type: string
             format: binary
       required: [file]
+    ProofingDocumentUpload:
+      type: object
+      properties:
+        file:
+          type: array
+          maxItems: 11
+          description: The PDFs, each at most 5 MiB, sent as repeated `file` parts.
+          items:
+            type: string
+            format: binary
+      required: [file]
+    ProofingDocumentVerdictList:
+      type: array
+      description: What became of each uploaded file, in upload order.
+      items:
+        type: object
+        properties:
+          fileName:
+            type: string
+          kind:
+            type: string
+            enum: [diploma, employment]
+            description: The document the file's seal names; absent for one the step does not take.
+          accepted:
+            type: boolean
+          diploma:
+            $ref: '#/components/schemas/ProofingDiploma'
+          employment:
+            $ref: '#/components/schemas/ProofingEmployment'
+          reason:
+            type: string
+            enum: [not_supported, not_asked, too_many, check_failed, duplicate, not_a_diploma, not_a_statement, signature_invalid, holder_mismatch, stale]
+            description: Why a file was refused.
+          failedCheck:
+            type: string
+            description: Which seal check failed, with `signature_invalid`.
+        required: [fileName, accepted]
     ProofingFlowEmployment:
       type: object
       additionalProperties: false
