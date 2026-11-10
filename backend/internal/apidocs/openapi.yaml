@@ -7684,6 +7684,9 @@ paths:
         is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
         accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
         failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
+        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
+        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
+        their verdicts. Only a session that no longer takes documents fails the whole upload.
       requestBody:
         required: true
         content:
@@ -7735,12 +7738,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '413':
           description: A file or the upload is too large (`too_large`).
-        '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/data-matches:
     parameters:
       - name: slug
@@ -9417,6 +9414,9 @@ paths:
         is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
         accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
         failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
+        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
+        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
+        their verdicts. Only a session that no longer takes documents fails the whole upload.
       requestBody:
         required: true
         content:
@@ -9464,12 +9464,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '413':
           description: A file or the upload is too large (`too_large`).
-        '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
   /api/v1/proofing/sessions:
     get:
       tags: [identity-proofing-api]
@@ -12554,7 +12548,7 @@ components:
             $ref: '#/components/schemas/ProofingEmployment'
           reason:
             type: string
-            enum: [not_supported, not_asked, too_many, duplicate, not_a_diploma, not_a_statement, signature_invalid, holder_mismatch, stale]
+            enum: [not_supported, not_asked, too_many, check_failed, duplicate, not_a_diploma, not_a_statement, signature_invalid, holder_mismatch, stale]
             description: Why a file was refused.
           failedCheck:
             type: string

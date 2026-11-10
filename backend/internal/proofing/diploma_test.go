@@ -63,10 +63,17 @@ func (f *fakeDiplomas) RecordRejected(_ context.Context, _ Request, reason, _ st
 
 // fakeChecker reads a file's bytes as the holder's full name, and accepts the
 // extract when it names the holder.
-type fakeChecker struct{ holders []diploma.Person }
+type fakeChecker struct {
+	holders []diploma.Person
+	// err is the checker's own failure, for every file.
+	err error
+}
 
 func (f *fakeChecker) Check(_ context.Context, pdf []byte, holder diploma.Person) (diploma.Outcome, error) {
 	f.holders = append(f.holders, holder)
+	if f.err != nil {
+		return diploma.Outcome{}, f.err
+	}
 	if string(pdf) == "not a pdf" {
 		return diploma.Outcome{Reason: diploma.ReasonNotADiploma}, nil
 	}

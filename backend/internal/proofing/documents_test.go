@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
@@ -150,5 +151,36 @@ func TestHostedDocumentsChecksLink(t *testing.T) {
 	var apiErr *respond.APIError
 	if err := h.hostedAddDocuments(httptest.NewRecorder(), r); !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
 		t.Errorf("upload to an unknown link = %v, want 404", err)
+	}
+}
+
+// A check that breaks on one file fails that file only: the statement kept
+// before it is still reported, so the page does not ask for it again.
+func TestAddDocumentsReportsKeptFilesWhenACheckBreaks(t *testing.T) {
+	d, _ := newDocumentFixture(DiplomasRequired, EmploymentRequired)
+	d.checker.err = fmt.Errorf("diploma: validate: %w", diploma.ErrRevocationUnavailable)
+	req := d.sendApproved(t, time.Minute)
+
+	verdicts, err := uploadDocuments(d, req, "UWV statement", "Anna Maria Jansen")
+	if err != nil {
+		t.Fatalf("AddDocuments: %v", err)
+	}
+	if len(verdicts) != 2 || verdicts[0].Employment == nil ||
+		verdicts[1].Kind != DocumentDiploma || verdicts[1].Reason != DocumentReasonCheckFailed {
+		t.Fatalf("verdicts = %+v, want the statement kept and the diploma check_failed", verdicts)
+	}
+	if d.requests.stored.SubjectEmployment == nil || len(d.diplomas.held[req.ID]) != 0 {
+		t.Errorf("kept statement %v, %d extracts; want the statement only",
+			d.requests.stored.SubjectEmployment, len(d.diplomas.held[req.ID]))
+	}
+}
+
+// A request that no longer takes documents still fails the whole upload.
+func TestAddDocumentsFailsWhollyWhenClosed(t *testing.T) {
+	if fileCheckFailed(ErrSessionOver) || fileCheckFailed(fmt.Errorf("x: %w", context.Canceled)) {
+		t.Error("an upload-wide error read as one file's")
+	}
+	if !fileCheckFailed(fmt.Errorf("x: %w", diploma.ErrTrustUnavailable)) {
+		t.Error("an unreachable seal read as upload-wide")
 	}
 }

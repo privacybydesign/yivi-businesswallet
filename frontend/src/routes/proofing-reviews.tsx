@@ -318,11 +318,7 @@ function WhatCell({
   if (step !== undefined) {
     return (
       <Table.Cell>
-        {t(
-          step === "address"
-            ? "identityProofing.reviews.addressCheck"
-            : "identityProofing.reviews.employmentCheck",
-        )}
+        {t(REVIEW_PART_KEYS[step])}
         <div className={SUB_LINE}>{request.flowName}</div>
       </Table.Cell>
     );

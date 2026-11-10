@@ -729,6 +729,8 @@ export const en = {
           "This is not a document we can check. Upload the original PDF, as you downloaded it.",
         notAsked: "This document is not asked for here.",
         tooMany: "You added the most diplomas a check takes.",
+        checkFailed:
+          "We could not check this file right now. Upload this file again.",
       },
     },
     flows: {

@@ -754,6 +754,8 @@ export const nl: Translation<typeof en> = {
         notAsked: "Dit document wordt hier niet gevraagd.",
         tooMany:
           "Je hebt het maximale aantal diploma's voor een controle toegevoegd.",
+        checkFailed:
+          "We konden dit bestand nu niet controleren. Upload dit bestand opnieuw.",
       },
     },
     flows: {

@@ -1803,6 +1803,8 @@ export function documentRejectionReason(
       return t("identityProofing.documents.reasons.notAsked");
     case "too_many":
       return t("identityProofing.documents.reasons.tooMany");
+    case "check_failed":
+      return t("identityProofing.documents.reasons.checkFailed");
   }
   if (verdict.kind === "employment") {
     return reason === "duplicate"

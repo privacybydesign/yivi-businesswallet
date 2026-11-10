@@ -2794,6 +2794,12 @@ setting, check, window, request step, webhook and review item.
   3. **Otherwise that document's own check** (`checkDiploma`,
      `checkEmployment`), audited, kept and reviewed as on its own route.
   - The verdict per file adds `kind` (`diploma`, `employment`).
+  - A check that breaks on the server's side (`fileCheckFailed`: the seal
+    unreachable, PDFium, storing it) fails only that file, `check_failed`,
+    logged, with nothing of it kept. The files before it are kept already, so
+    their verdicts still go back, or the page asks for them again. Only
+    `uploadErrors` (the session no longer takes documents, no checker, no
+    key, the caller gone) fail the whole upload.
   - The hosted route checks the link first and reads only as many files as
     the request still takes (`HostedDocumentsOpen`).
   - The old `/diplomas` and `/employment` routes stay for API callers.

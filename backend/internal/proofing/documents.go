@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -31,7 +33,24 @@ const (
 	DocumentReasonNotAsked = "not_asked"
 	// DocumentReasonTooMany is a diploma past MaxDiplomasPerRequest.
 	DocumentReasonTooMany = "too_many"
+	// DocumentReasonCheckFailed is a file whose check broke on the server's
+	// side (fileCheckFailed): nothing of it is kept, so the subject uploads it
+	// again, and the upload's other files keep their verdicts.
+	DocumentReasonCheckFailed = "check_failed"
 )
+
+// uploadErrors end a whole upload rather than one file's check: the request
+// no longer takes documents, or the deployment checks none.
+var uploadErrors = []error{
+	ErrSessionOver, ErrDiplomasClosed, ErrEmploymentClosed, ErrNoDiplomaChecker, ErrNoEmploymentChecker,
+	ErrNoEncryptionKey, context.Canceled, context.DeadlineExceeded,
+}
+
+// fileCheckFailed is an error that breaks one file's check only: the
+// checker's own (a seal it cannot reach, PDFium), or storing what it decided.
+func fileCheckFailed(err error) bool {
+	return !slices.ContainsFunc(uploadErrors, func(target error) bool { return errors.Is(err, target) })
+}
 
 // MaxDocumentsPerUpload is how many files one upload takes: every diploma a
 // request keeps, and its one statement.
@@ -165,7 +184,9 @@ type documentUpload struct {
 // addDocuments checks each file as the document its seal names, with that
 // document's own check (checkDiploma, checkEmployment), against the identity
 // the engine approved for req. A file sealed by no issuer the step takes, or
-// by one req does not ask for, is refused without a check.
+// by one req does not ask for, is refused without a check. A file whose check
+// breaks on the server's side is DocumentReasonCheckFailed, and the others
+// keep their verdicts.
 func (s *Service) addDocuments(ctx context.Context, req Request, files []DiplomaFile) ([]DocumentVerdict, error) {
 	if err := s.documentsOpen(req); err != nil {
 		return nil, err
@@ -198,7 +219,15 @@ func (s *Service) addDocuments(ctx context.Context, req Request, files []Diploma
 	}
 	verdicts := make([]DocumentVerdict, 0, len(files))
 	for _, f := range files {
-		verdict, err := s.checkDocument(ctx, up, detect(f.Bytes), f)
+		kind := detect(f.Bytes)
+		verdict, err := s.checkDocument(ctx, up, kind, f)
+		// The files decided before it are kept already: their verdicts must
+		// still reach the page, or it asks for them again.
+		if err != nil && fileCheckFailed(err) {
+			slog.ErrorContext(ctx, "proofing: check uploaded document",
+				slog.String("request", req.ID.String()), slog.String("kind", string(kind)), slog.Any("error", err))
+			verdict, err = DocumentVerdict{FileName: f.Name, Kind: kind, Reason: DocumentReasonCheckFailed}, nil
+		}
 		if err != nil {
 			return nil, err
 		}

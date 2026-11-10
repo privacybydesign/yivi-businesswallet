@@ -2689,7 +2689,12 @@ describe("document step", () => {
 
   it("explains every refusal, by the document the file is", () => {
     const t = i18n.getFixedT("en");
-    for (const reason of ["not_supported", "not_asked", "too_many"]) {
+    for (const reason of [
+      "not_supported",
+      "not_asked",
+      "too_many",
+      "check_failed",
+    ]) {
       expect(documentRejectionReason({ reason }, t)).not.toBe(reason);
     }
     expect(
