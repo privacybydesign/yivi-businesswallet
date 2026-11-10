@@ -188,6 +188,11 @@ type Service struct {
 	flowDiplomaSettings flowDiplomaStore
 	diplomas            diplomaStore
 	diplomaChecker      diplomaChecker
+	// unchecked keeps the files whose seal could not be checked at upload;
+	// nil fails such an upload.
+	unchecked uncheckedDocumentStore
+	// sealRetryDelay is the wait between tries of an unreachable seal check.
+	sealRetryDelay time.Duration
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
 	flowAddressSettings flowAddressStore
 	// flowEmploymentSettings is each flow's EmploymentMode; nil asks for none.
@@ -233,6 +238,9 @@ type Stores struct {
 	// requests hold; nil asks for none.
 	FlowDiplomas flowDiplomaStore
 	Diplomas     diplomaStore
+	// Unchecked keeps the files whose seal could not be checked at upload;
+	// nil fails such an upload.
+	Unchecked uncheckedDocumentStore
 	// FlowAddresses holds each flow's AddressMode; nil asks for none.
 	FlowAddresses flowAddressStore
 	// FlowEmployment holds each flow's EmploymentMode; nil asks for none.
@@ -249,6 +257,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
+		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay,
 		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),

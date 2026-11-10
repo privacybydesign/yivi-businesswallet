@@ -415,6 +415,16 @@ type Request struct {
 	// DiplomasAddedAt is when the first extract was kept; nil for none, and
 	// once purged.
 	DiplomasAddedAt *time.Time
+	// UncheckedDiplomas is how many extracts wait for a reviewer to check
+	// their seal, and UncheckedEmployment whether a statement does
+	// (keepUnchecked).
+	UncheckedDiplomas   int
+	UncheckedEmployment bool
+	// uncheckedStatements is how many statements wait so.
+	uncheckedStatements int
+	// SealChecks are the files kept for a reviewer as their seal could not be
+	// checked at upload, waiting or decided; nil once purged.
+	SealChecks []SealCheck
 	// Address is whether the request asks for the subject's postal address
 	// once the identity check finished: its flow's AddressMode when it was sent.
 	// SubjectAddress is the address they entered, decrypted, at

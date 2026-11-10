@@ -99,6 +99,9 @@ func (s *Service) decideStepReview(ctx context.Context, orgID, id uuid.UUID, kin
 	if ownReview(req, in.ReviewerID) && !in.OwnAllowed {
 		return Request{}, ErrOwnReview
 	}
+	if in.Confirm && req.hasUnchecked(kind) {
+		return Request{}, ErrSealUnchecked
+	}
 	decided := ReviewRejected
 	if in.Confirm {
 		decided = ReviewConfirmed

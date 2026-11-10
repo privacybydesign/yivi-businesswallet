@@ -259,6 +259,10 @@ const (
 	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"
 	IdentityProofingEmploymentAdded          = "identity_proofing.employment_added"
 	IdentityProofingEmploymentRejected       = "identity_proofing.employment_rejected"
+
+	// a diploma extract or Verzekeringsbericht kept for a reviewer, as its
+	// seal could not be checked at upload
+	IdentityProofingDocumentUnchecked = "identity_proofing.document_unchecked"
 )
 
 const (
@@ -421,10 +425,11 @@ func (NopRecorder) Record(context.Context, database.Querier, string, Target, map
 
 // IdentityProofingPersonalKeys are the fields of a proofing request's audit
 // events that name or describe its subject: who it is, their diplomas, and a
-// reviewer's free-text reason, which may name them.
+// reviewer's free-text reason, which may name them, and the name of a file
+// they uploaded.
 var IdentityProofingPersonalKeys = []string{
 	"subjectName", "subjectEmail",
-	"reason",
+	"reason", "fileName",
 	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
 }
 

@@ -146,13 +146,16 @@ type hostedProgressResponse struct {
 	// DiplomasUntil is when the subject can last add a diploma extract;
 	// absent while they cannot.
 	DiplomasUntil *time.Time `json:"diplomasUntil,omitempty"`
+	// UncheckedDiplomas is how many of the subject's extracts a reviewer
+	// checks, as their seal could not be checked at upload.
+	UncheckedDiplomas int `json:"uncheckedDiplomas,omitempty"`
 	// AddressUntil is when the subject can last enter their address; absent
 	// while they cannot, and once they did (AddressGiven).
 	AddressUntil *time.Time `json:"addressUntil,omitempty"`
 	AddressGiven bool       `json:"addressGiven"`
 	// EmploymentUntil is when the subject can last upload their
 	// Verzekeringsbericht; absent while they cannot, and once one was kept
-	// (EmploymentGiven).
+	// or waits for a reviewer to check its seal (EmploymentGiven).
 	EmploymentUntil *time.Time `json:"employmentUntil,omitempty"`
 	EmploymentGiven bool       `json:"employmentGiven"`
 	// DataExportUntil is until when an approved "see my data" request's data
@@ -217,8 +220,9 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
-		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
-		DocumentScan: documentScanState(req), AppDone: req.appDone, Steps: req.Steps(now),
+		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil || req.UncheckedEmployment,
+		UncheckedDiplomas: req.UncheckedDiplomas,
+		DocumentScan:      documentScanState(req), AppDone: req.appDone, Steps: req.Steps(now),
 	}
 }
 

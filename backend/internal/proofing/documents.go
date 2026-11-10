@@ -168,7 +168,7 @@ func (s *Service) diplomaSlots(ctx context.Context, req Request) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return max(MaxDiplomasPerRequest-len(held[req.ID]), 0), nil
+	return max(MaxDiplomasPerRequest-len(held[req.ID])-req.UncheckedDiplomas, 0), nil
 }
 
 // documentUpload is what one upload still takes while its files are checked:
@@ -179,6 +179,7 @@ type documentUpload struct {
 	diplomasErr   error
 	diplomas      int
 	employmentErr error
+	seal          *sealCheck
 }
 
 // addDocuments checks each file as the document its seal names, with that
@@ -211,6 +212,7 @@ func (s *Service) addDocuments(ctx context.Context, req Request, files []Diploma
 	up := &documentUpload{
 		req: req, holder: holder,
 		diplomasErr: s.diplomasOpen(req), diplomas: slots, employmentErr: s.employmentOpen(req),
+		seal: s.newSealCheck(false),
 	}
 
 	detect := s.detectDocument
@@ -263,11 +265,11 @@ func (s *Service) checkDiplomaFile(ctx context.Context, up *documentUpload, f Di
 		out.Reason = DocumentReasonTooMany
 		return out, nil
 	}
-	v, err := s.checkDiploma(ctx, up.req, up.holder, f)
+	v, err := s.checkDiploma(ctx, up.req, up.holder, f, up.seal)
 	if err != nil {
 		return DocumentVerdict{}, err
 	}
-	if v.Diploma != nil {
+	if v.Diploma != nil || v.Reason == DocumentReasonSealPending {
 		up.diplomas--
 	}
 	out.Diploma, out.Reason, out.FailedCheck = v.Diploma, v.Reason, v.FailedCheck
@@ -288,7 +290,7 @@ func (s *Service) checkEmploymentFile(ctx context.Context, up *documentUpload, f
 	if up.employmentErr != nil {
 		return DocumentVerdict{}, up.employmentErr
 	}
-	v, err := s.checkEmployment(ctx, up.req, up.holder, f)
+	v, err := s.checkEmployment(ctx, up.req, up.holder, f, up.seal)
 	if errors.Is(err, ErrEmploymentClosed) {
 		up.employmentErr = err
 		out.Reason = DiplomaReasonDuplicate
