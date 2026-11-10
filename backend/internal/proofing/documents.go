@@ -238,56 +238,66 @@ func (s *Service) addDocuments(ctx context.Context, req Request, files []Diploma
 
 // checkDocument checks f as kind for up, and counts what it kept.
 func (s *Service) checkDocument(ctx context.Context, up *documentUpload, kind DocumentKind, f DiplomaFile) (DocumentVerdict, error) {
-	out := DocumentVerdict{FileName: f.Name, Kind: kind}
 	switch kind {
 	case DocumentDiploma:
-		if !up.req.Diplomas.asked() {
-			out.Reason = DocumentReasonNotAsked
-			return out, nil
-		}
-		if up.diplomasErr != nil {
-			return DocumentVerdict{}, up.diplomasErr
-		}
-		if up.diplomas == 0 {
-			out.Reason = DocumentReasonTooMany
-			return out, nil
-		}
-		v, err := s.checkDiploma(ctx, up.req, up.holder, f)
-		if err != nil {
-			return DocumentVerdict{}, err
-		}
-		if v.Diploma != nil {
-			up.diplomas--
-		}
-		out.Diploma, out.Reason, out.FailedCheck = v.Diploma, v.Reason, v.FailedCheck
+		return s.checkDiplomaFile(ctx, up, f)
 	case DocumentEmployment:
-		if !up.req.Employment.asked() {
-			out.Reason = DocumentReasonNotAsked
-			return out, nil
-		}
-		// The windows are the same, so a closed one is a statement held.
-		if errors.Is(up.employmentErr, ErrEmploymentClosed) {
-			out.Reason = DiplomaReasonDuplicate
-			return out, nil
-		}
-		if up.employmentErr != nil {
-			return DocumentVerdict{}, up.employmentErr
-		}
-		v, err := s.checkEmployment(ctx, up.req, up.holder, f)
-		if errors.Is(err, ErrEmploymentClosed) {
-			up.employmentErr = err
-			out.Reason = DiplomaReasonDuplicate
-			return out, nil
-		}
-		if err != nil {
-			return DocumentVerdict{}, err
-		}
-		if v.Employment != nil {
-			up.employmentErr = ErrEmploymentClosed
-		}
-		out.Employment, out.Reason, out.FailedCheck = v.Employment, v.Reason, v.FailedCheck
+		return s.checkEmploymentFile(ctx, up, f)
 	default:
-		out.Reason = DocumentReasonNotSupported
+		return DocumentVerdict{FileName: f.Name, Kind: kind, Reason: DocumentReasonNotSupported}, nil
 	}
+}
+
+func (s *Service) checkDiplomaFile(ctx context.Context, up *documentUpload, f DiplomaFile) (DocumentVerdict, error) {
+	out := DocumentVerdict{FileName: f.Name, Kind: DocumentDiploma}
+	if !up.req.Diplomas.asked() {
+		out.Reason = DocumentReasonNotAsked
+		return out, nil
+	}
+	if up.diplomasErr != nil {
+		return DocumentVerdict{}, up.diplomasErr
+	}
+	if up.diplomas == 0 {
+		out.Reason = DocumentReasonTooMany
+		return out, nil
+	}
+	v, err := s.checkDiploma(ctx, up.req, up.holder, f)
+	if err != nil {
+		return DocumentVerdict{}, err
+	}
+	if v.Diploma != nil {
+		up.diplomas--
+	}
+	out.Diploma, out.Reason, out.FailedCheck = v.Diploma, v.Reason, v.FailedCheck
+	return out, nil
+}
+
+func (s *Service) checkEmploymentFile(ctx context.Context, up *documentUpload, f DiplomaFile) (DocumentVerdict, error) {
+	out := DocumentVerdict{FileName: f.Name, Kind: DocumentEmployment}
+	if !up.req.Employment.asked() {
+		out.Reason = DocumentReasonNotAsked
+		return out, nil
+	}
+	// The windows are the same, so a closed one is a statement held.
+	if errors.Is(up.employmentErr, ErrEmploymentClosed) {
+		out.Reason = DiplomaReasonDuplicate
+		return out, nil
+	}
+	if up.employmentErr != nil {
+		return DocumentVerdict{}, up.employmentErr
+	}
+	v, err := s.checkEmployment(ctx, up.req, up.holder, f)
+	if errors.Is(err, ErrEmploymentClosed) {
+		up.employmentErr = err
+		out.Reason = DiplomaReasonDuplicate
+		return out, nil
+	}
+	if err != nil {
+		return DocumentVerdict{}, err
+	}
+	if v.Employment != nil {
+		up.employmentErr = ErrEmploymentClosed
+	}
+	out.Employment, out.Reason, out.FailedCheck = v.Employment, v.Reason, v.FailedCheck
 	return out, nil
 }
