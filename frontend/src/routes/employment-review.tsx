@@ -60,13 +60,7 @@ export function EmploymentReview({
         <ReviewSection
           id="employment-review-why"
           title={t("identityProofing.reviews.employment.whyTitle")}
-          hint={t(
-            unchecked
-              ? "identityProofing.reviews.seal.why"
-              : why === "employmentAlways"
-                ? "identityProofing.reviews.employment.whyAlways"
-                : `identityProofing.reviews.check.why.${why}`,
-          )}
+          hint={t(employmentWhyKey(unchecked, why))}
         >
           <UncheckedSeals
             slug={slug}
@@ -107,4 +101,15 @@ export function EmploymentReview({
       </div>
     </>
   );
+}
+
+function employmentWhyKey(
+  unchecked: boolean,
+  why: ReturnType<typeof employmentReviewWhy>,
+) {
+  if (unchecked) return "identityProofing.reviews.seal.why" as const;
+  if (why === "employmentAlways") {
+    return "identityProofing.reviews.employment.whyAlways" as const;
+  }
+  return `identityProofing.reviews.check.why.${why}` as const;
 }

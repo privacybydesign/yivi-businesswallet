@@ -7,7 +7,6 @@ import {
   SEAL_REFUSAL_KEYS,
   sealCheckState,
   sealChecksOf,
-  uncheckedSeals,
 } from "../lib/proofing-reviews";
 import { toast } from "../lib/toast";
 import { Button, Icon, StatusText } from "../ui";
@@ -38,7 +37,9 @@ export function UncheckedSeals({
   const { t } = useTranslation();
   const check = useCheckSealsAgainMutation(slug, request.id, kind);
   const files = sealChecksOf(request, kind);
-  const waiting = uncheckedSeals(request, kind);
+  const waiting = files.filter(
+    (f) => sealCheckState(f.outcome) === "waiting",
+  ).length;
   if (files.length === 0) return null;
 
   return (

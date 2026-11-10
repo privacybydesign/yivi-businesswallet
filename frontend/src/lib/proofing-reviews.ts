@@ -13,7 +13,6 @@ import {
   REVIEW_REASON_MAX_CHARS,
   documentKindOf,
   requestSubject,
-  SEAL_REFUSAL_KEYS,
 } from "./identity-proofing";
 import { issuingCountryName } from "./issuing-countries";
 
@@ -377,7 +376,7 @@ export function uncheckedSeals(
 
 export type SealCheckFile = NonNullable<ProofingRequest["sealChecks"]>[number];
 
-export { SEAL_REFUSAL_KEYS };
+export { SEAL_REFUSAL_KEYS } from "./identity-proofing";
 
 // The files of a step that went to a reviewer as their seal could not be
 // checked at upload, oldest first.
