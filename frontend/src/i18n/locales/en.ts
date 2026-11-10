@@ -616,6 +616,8 @@ export const en = {
       tooLarge: "The file is too large.",
       sealCheckUnavailable:
         "The seal on the file cannot be checked right now. Try again in a few minutes.",
+      sealUnchecked:
+        "A document of this step has a seal that was never checked. Check the seal again before you accept it.",
       generic: "Something went wrong. Please try again.",
     },
     address: {
@@ -724,6 +726,10 @@ export const en = {
       continue: "Continue",
       needAll: "Add every document above to continue.",
       verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
+      sealPending_one:
+        "We received {{count}} document but could not check its seal right now. A reviewer checks it later. You do not need to do anything.",
+      sealPending_other:
+        "We received {{count}} documents but could not check their seals right now. A reviewer checks them later. You do not need to do anything.",
       reasons: {
         notSupported:
           "This is not a document we can check. Upload the original PDF, as you downloaded it.",
@@ -1355,6 +1361,34 @@ export const en = {
       addressCheck: "Address",
       employmentCheck: "Verzekeringsbericht",
       diplomasCheck: "Diplomas",
+      seal: {
+        why: "The seal could not be checked when this was uploaded, because the EU trusted lists or the issuer's revocation server could not be reached. Check it again before you decide.",
+        unchecked_one:
+          "{{count}} file still has an unchecked seal. You can only accept this step once the seal is checked.",
+        unchecked_other:
+          "{{count}} files still have an unchecked seal. You can only accept this step once every seal is checked.",
+        checkAgain: "Check seal again",
+        checked: "The seals were checked. The result is shown per file.",
+        files_one:
+          "{{count}} file went to review because its seal could not be checked at upload",
+        files_other:
+          "{{count}} files went to review because their seal could not be checked at upload",
+        states: {
+          waiting: "Seal not checked yet",
+          kept: "Seal checked, kept",
+          refused: "Refused",
+          notChecked: "Never checked",
+        },
+        reasons: {
+          signatureInvalid:
+            "The seal does not hold. The file was changed after sealing, or it was not made by the issuer.",
+          holderMismatch: "The document is in another person's name.",
+          notADocument: "This is not a readable document of the issuer.",
+          stale: "The Verzekeringsbericht is older than 30 days.",
+          duplicate:
+            "The same document was already added, so this copy was not kept.",
+        },
+      },
       diplomas: {
         title: "Review diplomas",
         whyTitle: "Why this waits for you",

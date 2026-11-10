@@ -9,9 +9,11 @@ import {
   ownReview,
   reviewPath,
   STEP_DECIDED_KEYS,
+  uncheckedSeals,
 } from "../lib/proofing-reviews";
 import { TopBar } from "../ui";
 import { StepDecision } from "./address-review";
+import { UncheckedSeals } from "./unchecked-seals";
 import {
   BackToReviews,
   DecisionReasons,
@@ -37,6 +39,7 @@ export function EmploymentReview({
   // reviewer's.
   const own = ownReview(request, me.data);
   const review = request.employmentReview;
+  const unchecked = uncheckedSeals(request, "employment") > 0;
   const why = employmentReviewWhy(request);
   const subtitle = [
     requestSubject(request).name,
@@ -57,12 +60,14 @@ export function EmploymentReview({
         <ReviewSection
           id="employment-review-why"
           title={t("identityProofing.reviews.employment.whyTitle")}
-          hint={t(
-            why === "employmentAlways"
-              ? "identityProofing.reviews.employment.whyAlways"
-              : `identityProofing.reviews.check.why.${why}`,
-          )}
+          hint={t(employmentWhyKey(unchecked, why))}
         >
+          <UncheckedSeals
+            slug={slug}
+            request={request}
+            kind="employment"
+            canCheck={review === "pending" && !own}
+          />
           <SessionEmployment request={request} />
         </ReviewSection>
         <SessionDecisions request={request} except="employment" />
@@ -76,7 +81,12 @@ export function EmploymentReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <StepDecision slug={slug} request={request} kind="employment" />
+              <StepDecision
+                slug={slug}
+                request={request}
+                kind="employment"
+                confirmBlocked={unchecked}
+              />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
@@ -91,4 +101,15 @@ export function EmploymentReview({
       </div>
     </>
   );
+}
+
+function employmentWhyKey(
+  unchecked: boolean,
+  why: ReturnType<typeof employmentReviewWhy>,
+) {
+  if (unchecked) return "identityProofing.reviews.seal.why" as const;
+  if (why === "employmentAlways") {
+    return "identityProofing.reviews.employment.whyAlways" as const;
+  }
+  return `identityProofing.reviews.check.why.${why}` as const;
 }

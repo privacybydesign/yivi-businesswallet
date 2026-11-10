@@ -49,6 +49,8 @@ import {
   selectedLocales,
   diplomaRejectionReason,
   documentStepDone,
+  splitVerdicts,
+  SEAL_CHECK_PENDING,
   documentRejectionReason,
   employmentRejectionReason,
   employmentReview,
@@ -2685,6 +2687,49 @@ describe("document step", () => {
     expect(
       documentStepDone({ ...both, diplomasAsked: false, statementKept: true }),
     ).toBe(true);
+  });
+
+  it("counts a file whose seal waits as given, not refused", () => {
+    const split = splitVerdicts([
+      { fileName: "a.pdf", kind: "diploma", accepted: true },
+      {
+        fileName: "b.pdf",
+        kind: "diploma",
+        accepted: false,
+        reason: SEAL_CHECK_PENDING,
+      },
+      {
+        fileName: "c.pdf",
+        kind: "employment",
+        accepted: false,
+        reason: SEAL_CHECK_PENDING,
+      },
+      {
+        fileName: "d.pdf",
+        kind: "diploma",
+        accepted: false,
+        reason: "holder_mismatch",
+      },
+    ]);
+    expect(split.uncheckedDiplomas).toBe(1);
+    expect(split.statementUnchecked).toBe(true);
+    expect(split.unchecked.map((v) => v.fileName)).toEqual(["b.pdf", "c.pdf"]);
+    expect(split.refused.map((v) => v.fileName)).toEqual(["d.pdf"]);
+  });
+
+  it("names the reason the backend gives a file whose seal waits", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofing/unchecked_documents.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    expect(source).toContain(
+      `DocumentReasonSealPending = "${SEAL_CHECK_PENDING}"`,
+    );
   });
 
   it("explains every refusal, by the document the file is", () => {

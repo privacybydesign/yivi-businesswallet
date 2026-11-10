@@ -639,6 +639,8 @@ export const nl: Translation<typeof en> = {
       tooLarge: "Het bestand is te groot.",
       sealCheckUnavailable:
         "Het zegel op het bestand kan nu niet worden gecontroleerd. Probeer het over een paar minuten opnieuw.",
+      sealUnchecked:
+        "Een document van deze stap heeft een zegel dat nooit is gecontroleerd. Controleer het zegel opnieuw voordat je het accepteert.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
     address: {
@@ -748,6 +750,10 @@ export const nl: Translation<typeof en> = {
       continue: "Verder",
       needAll: "Voeg elk document hierboven toe om verder te gaan.",
       verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
+      sealPending_one:
+        "We hebben {{count}} document ontvangen, maar konden het zegel nu niet controleren. Een beoordelaar controleert het later. Je hoeft niets te doen.",
+      sealPending_other:
+        "We hebben {{count}} documenten ontvangen, maar konden de zegels nu niet controleren. Een beoordelaar controleert ze later. Je hoeft niets te doen.",
       reasons: {
         notSupported:
           "Dit is geen document dat we kunnen controleren. Upload de originele pdf, zoals je hem downloadde.",
@@ -1389,6 +1395,35 @@ export const nl: Translation<typeof en> = {
       addressCheck: "Adres",
       employmentCheck: "Verzekeringsbericht",
       diplomasCheck: "Diploma's",
+      seal: {
+        why: "Het zegel kon bij het uploaden niet worden gecontroleerd, omdat de EU-vertrouwenslijsten of de intrekkingsserver van de uitgever niet bereikbaar waren. Controleer het opnieuw voordat je beslist.",
+        unchecked_one:
+          "{{count}} bestand heeft nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als het zegel is gecontroleerd.",
+        unchecked_other:
+          "{{count}} bestanden hebben nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als elk zegel is gecontroleerd.",
+        checkAgain: "Zegel opnieuw controleren",
+        checked:
+          "De zegels zijn gecontroleerd. Het resultaat staat per bestand.",
+        files_one:
+          "{{count}} bestand ging naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        files_other:
+          "{{count}} bestanden gingen naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        states: {
+          waiting: "Zegel nog niet gecontroleerd",
+          kept: "Zegel gecontroleerd, bewaard",
+          refused: "Geweigerd",
+          notChecked: "Nooit gecontroleerd",
+        },
+        reasons: {
+          signatureInvalid:
+            "Het zegel klopt niet. Het bestand is na het verzegelen gewijzigd, of het komt niet van de uitgever.",
+          holderMismatch: "Het document staat op naam van een ander.",
+          notADocument: "Dit is geen leesbaar document van de uitgever.",
+          stale: "Het Verzekeringsbericht is ouder dan 30 dagen.",
+          duplicate:
+            "Hetzelfde document was al toegevoegd, dus deze kopie is niet bewaard.",
+        },
+      },
       diplomas: {
         title: "Diploma's beoordelen",
         whyTitle: "Waarom dit op jou wacht",

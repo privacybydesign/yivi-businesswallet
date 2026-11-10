@@ -33,6 +33,7 @@ import {
   getProofingApp,
   getHostedProofing,
   decideReviewItem,
+  checkSealsAgain,
   getReviewItemCounts,
   decideProofingReview,
   getProofingDataMatches,
@@ -1160,6 +1161,24 @@ export function useDecideStepReviewMutation(
     mutationFn: (input) => decideReviewItem(slug, requestId, kind, input),
     meta: { suppressErrorToast: true },
     onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
+  });
+}
+
+// Checks again the seals of a step's files that could not be checked at
+// upload; the request is read again.
+export function useCheckSealsAgainMutation(
+  slug: string,
+  requestId: string,
+  kind: "diplomas" | "employment",
+): UseMutationResult<ProofingRequest, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => checkSealsAgain(slug, requestId, kind),
+    meta: { suppressErrorToast: true },
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: proofingRequestsQueryKey(slug),
+      }),
   });
 }
 

@@ -52,6 +52,7 @@ import {
   documentRejectionReason,
   documentScanMessage,
   documentStepDone,
+  splitVerdicts,
   isProofingLive,
   employmentOwed,
   employmentReview,
@@ -676,6 +677,7 @@ export function Session({
         }
         statementAsked={statementAsked}
         initialDiplomas={diplomas}
+        initialUnchecked={current.uncheckedDiplomas ?? 0}
         inReview={inReview}
         settling={documentsDone}
         onKept={() => setKeptUntil(employmentUntil)}
@@ -1119,15 +1121,17 @@ function KeptStatement({
 // they like in one go. Each file is read as the document its seal names and
 // checked at once against that issuer's seal and their proven name and date
 // of birth. The step ends when the subject continues once every asked
-// document has a kept file, or when the time to add them is up. settling is
-// the subject having continued while the page waits for what the backend
-// holds after it.
+// document has a kept file, or when the time to add them is up. A file whose
+// seal could not be checked counts as given: a reviewer checks it.
+// settling is the subject having continued while the page waits for what
+// the backend holds after it.
 function DocumentStep({
   target,
   until,
   diplomasAsked,
   statementAsked,
   initialDiplomas,
+  initialUnchecked,
   inReview,
   settling,
   onKept,
@@ -1138,6 +1142,7 @@ function DocumentStep({
   diplomasAsked: boolean;
   statementAsked: boolean;
   initialDiplomas: HostedDiploma[];
+  initialUnchecked: number;
   inReview: boolean;
   settling: boolean;
   onKept: () => void;
@@ -1150,6 +1155,17 @@ function DocumentStep({
   const [held, setHeld] = useState<HostedDiploma[]>(initialDiplomas);
   const [kept, setKept] = useState<ProofingEmployment>();
   const [refused, setRefused] = useState<DocumentVerdict[]>([]);
+  const [uncheckedNow, setUncheckedNow] = useState<DocumentVerdict[]>([]);
+  // Read once: the progress poll counts this page's uploads too.
+  const [uncheckedAtStart] = useState(initialUnchecked);
+  const uncheckedDiplomas =
+    uncheckedAtStart + uncheckedNow.filter((v) => v.kind === "diploma").length;
+  const statementsUnchecked = uncheckedNow.filter(
+    (v) => v.kind === "employment",
+  ).length;
+  const statementGiven = kept !== undefined || statementsUnchecked > 0;
+  const diplomasGiven = held.length + uncheckedDiplomas;
+  const uncheckedCount = uncheckedDiplomas + statementsUnchecked;
   // What the last upload decided, for a screen reader: the lists below
   // appear without moving focus.
   const [announced, setAnnounced] = useState("");
@@ -1157,14 +1173,15 @@ function DocumentStep({
   const open = secondsLeft > 0;
   const canFinish = documentStepDone({
     diplomasAsked,
-    diplomasHeld: held.length,
+    diplomasHeld: diplomasGiven,
     statementAsked,
-    statementKept: kept !== undefined,
+    statementKept: statementGiven,
     secondsLeft,
   });
-  // A diploma can always be added while open; the statement only once.
+  // A diploma can always be added while open; the statement until one is
+  // kept, as one whose seal waits may be the wrong file.
   const takesMore = open && (diplomasAsked || kept === undefined);
-  const nothingYet = held.length === 0 && kept === undefined;
+  const nothingYet = diplomasGiven === 0 && !statementGiven;
 
   function check(files: File[]): void {
     if (files.length === 0) return;
@@ -1175,16 +1192,19 @@ function DocumentStep({
           ...verdicts.flatMap((v) => (v.diploma ? [v.diploma] : [])),
         ]);
         const statement = verdicts.find((v) => v.employment)?.employment;
+        const split = splitVerdicts(verdicts);
         if (statement !== undefined) {
           setKept(statement);
+        }
+        if (statement !== undefined || split.statementUnchecked) {
           onKept();
         }
-        const refusedNow = verdicts.filter((v) => !v.accepted);
-        setRefused(refusedNow);
+        setUncheckedNow((current) => [...current, ...split.unchecked]);
+        setRefused(split.refused);
         setAnnounced(
           t("identityProofing.documents.verdictsAnnounced", {
-            accepted: verdicts.length - refusedNow.length,
-            refused: refusedNow.length,
+            accepted: verdicts.length - split.refused.length,
+            refused: split.refused.length,
           }),
         );
       },
@@ -1214,10 +1234,10 @@ function DocumentStep({
 
       <ul className="flex flex-col gap-2">
         {diplomasAsked && (
-          <AskedDocument section="diplomas" added={held.length > 0} />
+          <AskedDocument section="diplomas" added={diplomasGiven > 0} />
         )}
         {statementAsked && (
-          <AskedDocument section="employment" added={kept !== undefined} />
+          <AskedDocument section="employment" added={statementGiven} />
         )}
       </ul>
 
@@ -1243,6 +1263,15 @@ function DocumentStep({
       )}
 
       {kept !== undefined && <KeptStatement kept={kept} />}
+
+      {uncheckedCount > 0 && (
+        <p className="bg-tile text-ink rounded-yivi flex items-start gap-3 px-4 py-3 text-[13px]">
+          <Icon name="time" className="text-tile-fg mt-0.5 shrink-0" />
+          {t("identityProofing.documents.sealPending", {
+            count: uncheckedCount,
+          })}
+        </p>
+      )}
 
       {refused.length > 0 && (
         <ul className="flex flex-col gap-2">

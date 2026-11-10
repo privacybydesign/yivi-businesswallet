@@ -138,10 +138,13 @@ export function StepDecision({
   slug,
   request,
   kind,
+  confirmBlocked = false,
 }: Readonly<{
   slug: string;
   request: ProofingRequest;
   kind: StepReviewKind;
+  // A file whose seal nobody checked yet: rejecting is all that remains.
+  confirmBlocked?: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const afterDecision = useAfterDecision(slug);
@@ -205,7 +208,7 @@ export function StepDecision({
       <div className="flex flex-wrap gap-2">
         <Button
           loading={decide.isPending && decide.variables?.decision === "confirm"}
-          disabled={decide.isPending}
+          disabled={decide.isPending || confirmBlocked}
           onClick={() => submit("confirm")}
         >
           {t(`identityProofing.reviews.${kind}.confirm`)}
