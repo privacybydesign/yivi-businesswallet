@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
@@ -169,6 +170,11 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 	if !att.RequesterIsRepresentative {
 		return RegistrationResult{}, ErrNotRepresentative
 	}
+	id, err := euid.Parse(att.EUID)
+	if err != nil {
+		return RegistrationResult{}, fmt.Errorf("wallet: registry EUID: %w", err)
+	}
+	att.EUID = id.String()
 
 	// The org's own default (sending) address is slug-based. KVK is saved as a
 	// recipient in the address book at the address it delivers the attestation

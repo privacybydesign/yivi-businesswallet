@@ -24,7 +24,7 @@ func stubAttestation() registryprovider.RegistrationAttestation {
 	return registryprovider.RegistrationAttestation{
 		KVKNumber:                    stubKVK,
 		LegalName:                    "Stub Company B.V.",
-		EUID:                         "NL.KVK." + stubKVK,
+		EUID:                         "NLNHR." + stubKVK,
 		RequesterIsRepresentative:    true,
 		RequesterRepresentativeIndex: 0,
 		Representatives: []registryprovider.Representative{

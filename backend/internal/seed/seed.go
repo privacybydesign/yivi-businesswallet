@@ -88,7 +88,7 @@ type demoMembership struct {
 // the dev demo seed and the only org provisioned by the staging org seed
 // (EnsureYiviOrganization), so both paths create an identical Yivi wallet.
 var yiviOrg = demoOrganization{
-	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NL.KVK.90000010",
+	name: "Yivi B.V.", slug: demoOrgSlug, kvkNumber: "90000010", euid: "NLNHR.90000010",
 	addressLocal: "yivi", repGiven: "Johannes Hendrik", repFamily: "Janssen",
 	repKind: "bestuurder", repAuth: "sole", repDOB: "1979-05-14",
 }
@@ -124,21 +124,21 @@ type partnerOrganization struct {
 // "@") — TestPartnerOrgFixturesAreWellFormed guards that.
 var partnerOrganizations = []partnerOrganization{
 	{
-		org: demoOrganization{name: "Anoigo Services B.V.", slug: "anoigo", kvkNumber: "84991011", euid: "NL.KVK.84991011", addressLocal: "anoigo"},
+		org: demoOrganization{name: "Anoigo Services B.V.", slug: "anoigo", kvkNumber: "84991011", euid: "NLNHR.84991011", addressLocal: "anoigo"},
 		team: []demoUser{
 			{email: "jeroen.debeer@anoigo.nl", givenNames: "Jeroen", lastName: "de Beer"},
 			{email: "cristy.meddens@anoigo.nl", givenNames: "Cristy", lastName: "Meddens"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen"},
+		org: demoOrganization{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NLNHR.09220932", addressLocal: "nijmegen"},
 		team: []demoUser{
 			{email: "w.van.den.eeckhout@nijmegen.nl", givenNames: "Wendy", lastName: "van den Eeckhout"},
 			{email: "m.dessing@nijmegen.nl", givenNames: "Marnix", lastName: "Dessing"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Ver.iD", slug: "ver-id", kvkNumber: "86662236", euid: "NL.KVK.86662236", addressLocal: "ver-id"},
+		org: demoOrganization{name: "Ver.iD", slug: "ver-id", kvkNumber: "86662236", euid: "NLNHR.86662236", addressLocal: "ver-id"},
 		team: []demoUser{
 			{email: "robert@ver.id", givenNames: "Robert", lastName: "van Altena"},
 			{email: "sten@ver.id", givenNames: "Sten", lastName: "Reijers"},
@@ -148,21 +148,21 @@ var partnerOrganizations = []partnerOrganization{
 		},
 	},
 	{
-		org: demoOrganization{name: "PinkRoccade Local Government", slug: "pinkroccade", kvkNumber: "27322975", euid: "NL.KVK.27322975", addressLocal: "pinkroccade"},
+		org: demoOrganization{name: "PinkRoccade Local Government", slug: "pinkroccade", kvkNumber: "27322975", euid: "NLNHR.27322975", addressLocal: "pinkroccade"},
 		team: []demoUser{
 			{email: "engelbert.wijnhoven@pinkroccade.nl", givenNames: "Engelbert", lastName: "Wijnhoven"},
 			{email: "annemarie.stel@pinkroccade.nl", givenNames: "Annemarie", lastName: "Stel"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Stichting Nuts", slug: "nuts", kvkNumber: "73134562", euid: "NL.KVK.73134562", addressLocal: "nuts"},
+		org: demoOrganization{name: "Stichting Nuts", slug: "nuts", kvkNumber: "73134562", euid: "NLNHR.73134562", addressLocal: "nuts"},
 		team: []demoUser{
 			{email: "sergej.van.middendorp@nuts.nl", givenNames: "Sergej", lastName: "van Middendorp"},
 			{email: "roland@headease.nl", givenNames: "Roland", lastName: "Groen"},
 		},
 	},
 	{
-		org: demoOrganization{name: "Secumail B.V.", slug: "secumail", kvkNumber: "69887594", euid: "NL.KVK.69887594", addressLocal: "secumail"},
+		org: demoOrganization{name: "Secumail B.V.", slug: "secumail", kvkNumber: "69887594", euid: "NLNHR.69887594", addressLocal: "secumail"},
 		team: []demoUser{
 			{email: "yvonne@secumailer.com", givenNames: "Yvonne", lastName: "Hoogendoorn"},
 		},
@@ -184,24 +184,24 @@ var kvkRegisterOrg = demoOrganization{
 // can log in predictably. Volume and variety are generated with the faker.
 var demoOrganizations = []demoOrganization{
 	yiviOrg,
-	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NL.KVK.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
-	{name: "Radboud Universiteit (Demo)", slug: radboudSlug, kvkNumber: "90000030", euid: "NL.KVK.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
-	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NL.KVK.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
+	{name: "Firsty.app B.V.", slug: "firsty", kvkNumber: "90000020", euid: "NLNHR.90000020", addressLocal: "firsty", repGiven: "Thijs Adriaan", repFamily: "de Vries", repKind: "bestuurder", repAuth: "jointly", repDOB: "1985-11-22"},
+	{name: "Radboud Universiteit (Demo)", slug: radboudSlug, kvkNumber: "90000030", euid: "NLNHR.90000030", addressLocal: "radboud", repGiven: "Anke", repFamily: "Bakker", repKind: "gevolmachtigde", repAuth: "beperkt", repDOB: "1990-02-17"},
+	{name: "Gemeente Nijmegen", slug: "nijmegen", kvkNumber: "09220932", euid: "NLNHR.09220932", addressLocal: "nijmegen", repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14"},
 	// Identity proofing use cases (demoProofingOrgs): real names marked "(Demo)",
 	// with no representative and placeholder KVK numbers outside the register.
-	{name: "a.s.r. verzekeringen (Demo)", slug: asrSlug, kvkNumber: "90000110", euid: "NL.KVK.90000110", addressLocal: "asr"},
-	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NL.KVK.90000120", addressLocal: "unibet"},
-	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NL.KVK.90000130", addressLocal: "cm"},
-	{name: "odixus (Demo)", slug: odixusSlug, kvkNumber: "90000140", euid: "NL.KVK.90000140", addressLocal: "odixus"},
+	{name: "a.s.r. verzekeringen (Demo)", slug: asrSlug, kvkNumber: "90000110", euid: "NLNHR.90000110", addressLocal: "asr"},
+	{name: "Unibet (Demo)", slug: unibetSlug, kvkNumber: "90000120", euid: "NLNHR.90000120", addressLocal: "unibet"},
+	{name: "CM.com (Demo)", slug: cmSlug, kvkNumber: "90000130", euid: "NLNHR.90000130", addressLocal: "cm"},
+	{name: "odixus (Demo)", slug: odixusSlug, kvkNumber: "90000140", euid: "NLNHR.90000140", addressLocal: "odixus"},
 	// The beschermingsbewind demo (bewind.go): a fictional office, whose
 	// bestuurder is the root of its mandate chain, and the court that appoints it.
 	bewindOfficeOrg,
-	{name: "Rechtbank Gelderland (Demo)", slug: bewindCourtSlug, kvkNumber: "90000160", euid: "NL.KVK.90000160", addressLocal: bewindCourtSlug},
+	{name: "Rechtbank Gelderland (Demo)", slug: bewindCourtSlug, kvkNumber: "90000160", euid: "NLNHR.90000160", addressLocal: bewindCourtSlug},
 }
 
 // bewindOfficeOrg is the bewindvoeringskantoor of the beschermingsbewind demo.
 var bewindOfficeOrg = demoOrganization{
-	name: "Waalstad Bewindvoering B.V. (Demo)", slug: bewindOfficeSlug, kvkNumber: "90000150", euid: "NL.KVK.90000150",
+	name: "Waalstad Bewindvoering B.V. (Demo)", slug: bewindOfficeSlug, kvkNumber: "90000150", euid: "NLNHR.90000150",
 	addressLocal: bewindOfficeSlug, repGiven: "Dibran", repFamily: "Mulder", repKind: "bestuurder", repAuth: "sole", repDOB: "1991-05-14",
 }
 
@@ -310,7 +310,7 @@ var communityOrganizations = []communityOrganization{
 	{
 		org: demoOrganization{
 			name: "Hervormde Gemeente Barneveld", slug: "hervormd-barneveld",
-			kvkNumber: "90000050", euid: "NL.KVK.90000050", addressLocal: "hervormd-barneveld",
+			kvkNumber: "90000050", euid: "NLNHR.90000050", addressLocal: "hervormd-barneveld",
 		},
 		departments: []string{
 			"Wijkgemeente 1",
@@ -322,7 +322,7 @@ var communityOrganizations = []communityOrganization{
 	{
 		org: demoOrganization{
 			name: "SDV Barneveld", slug: "sdvb",
-			kvkNumber: "90000060", euid: "NL.KVK.90000060", addressLocal: "sdvb",
+			kvkNumber: "90000060", euid: "NLNHR.90000060", addressLocal: "sdvb",
 		},
 		departments: expandTeams(sdvbTeamGroups, sdvbExtraTeams),
 	},

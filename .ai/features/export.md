@@ -117,7 +117,7 @@ when, what is inside each section, and the digest of every file.
     "name": "Caesar Groep B.V.",           // the register's official legal name
     "slug": "caesar",
     "kvkNumber": "12345678",
-    "euid": "NLKVK.12345678",
+    "euid": "NLNHR.12345678",
     "digitalAddress": "qerds:nl:caesar",
     "status": "active",
     "bootstrappedAt": "2026-01-08T11:22:31Z"

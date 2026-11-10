@@ -58,7 +58,7 @@ describe("resolveSubjectSource", () => {
       name: "City of Utrecht (address book)",
       legalName: "Gemeente Utrecht",
       kvkNumber: "12345678",
-      euid: "NL.KVK.12345678",
+      euid: "NLNHR.12345678",
       address: "utrecht@qerds.eu",
     },
   };
@@ -67,7 +67,7 @@ describe("resolveSubjectSource", () => {
     // org.name prefers the legal name over the address-book display name.
     expect(resolveSubjectSource("org.name", org)).toBe("Gemeente Utrecht");
     expect(resolveSubjectSource("org.kvkNumber", org)).toBe("12345678");
-    expect(resolveSubjectSource("org.euid", org)).toBe("NL.KVK.12345678");
+    expect(resolveSubjectSource("org.euid", org)).toBe("NLNHR.12345678");
     expect(resolveSubjectSource("org.digitalAddress", org)).toBe(
       "utrecht@qerds.eu",
     );

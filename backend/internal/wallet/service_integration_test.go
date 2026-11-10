@@ -73,6 +73,9 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	if org.KVKNumber != registryprovider.OpenableKVKNumber {
 		t.Fatalf("org kvk = %q, want %q", org.KVKNumber, registryprovider.OpenableKVKNumber)
 	}
+	if want := "NLNHR." + registryprovider.OpenableKVKNumber; org.EUID != want {
+		t.Fatalf("org euid = %q, want %q", org.EUID, want)
+	}
 	if org.Name != "Zonnedael B.V." {
 		t.Fatalf("org name = %q, want the register's legal name Zonnedael B.V.", org.Name)
 	}

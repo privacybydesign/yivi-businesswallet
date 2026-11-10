@@ -20,7 +20,7 @@ func seedOrg(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string)
 	var id uuid.UUID
 	err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		slug, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost").Scan(&id)
+		slug, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost").Scan(&id)
 	if err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}

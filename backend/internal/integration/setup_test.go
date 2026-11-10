@@ -370,7 +370,7 @@ func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 	err := e.pool.QueryRow(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost",
+		name, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost",
 	).Scan(&id)
 	if err != nil {
 		e.t.Fatalf("create org %q: %v", slug, err)

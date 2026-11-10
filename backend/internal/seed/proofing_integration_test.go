@@ -165,7 +165,7 @@ func TestEnsureProofingDemoRefusesForeignOrg(t *testing.T) {
 	ctx := context.Background()
 	var orgID uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('a.s.r.', $1, '12345678', 'NL.KVK.12345678', 'asr@qerds.example') RETURNING id`, asrSlug).Scan(&orgID); err != nil {
+		VALUES ('a.s.r.', $1, '12345678', 'NLNHR.12345678', 'asr@qerds.example') RETURNING id`, asrSlug).Scan(&orgID); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 

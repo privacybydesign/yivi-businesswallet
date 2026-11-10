@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
@@ -501,6 +502,14 @@ func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
 	if req.Address == "" {
 		return badRequest("invalid_input", "address is required")
 	}
+	contactEUID := trimOptional(req.EUID)
+	if contactEUID != nil {
+		id, err := euid.Parse(*contactEUID)
+		if err != nil {
+			return badRequest("invalid_euid", "euid is not a valid EUID")
+		}
+		*contactEUID = id.String()
+	}
 
 	org := organization.OrgFromContext(r.Context())
 	contact, err := h.contacts.CreateContact(r.Context(), org.ID, Contact{
@@ -508,7 +517,7 @@ func (h *Handler) createContact(w http.ResponseWriter, r *http.Request) error {
 		Address:   req.Address,
 		LegalName: trimOptional(req.LegalName),
 		KVKNumber: trimOptional(req.KVKNumber),
-		EUID:      trimOptional(req.EUID),
+		EUID:      contactEUID,
 	})
 	if errors.Is(err, ErrContactAddressTaken) {
 		return &respond.APIError{Status: http.StatusConflict, Code: "address_taken", Message: "a contact with that address already exists"}
