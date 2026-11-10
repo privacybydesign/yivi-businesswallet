@@ -293,7 +293,7 @@ func (s *RequestStore) AddEmployment(ctx context.Context, req Request, emp Emplo
 
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingEmploymentAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(map[string]any{"statementDate": emp.StatementDate}))); err != nil {
+			audit.Created(req.auditFields(sealRecheckFields(ctx, map[string]any{"statementDate": emp.StatementDate})))); err != nil {
 			return err
 		}
 
@@ -336,7 +336,7 @@ func (s *RequestStore) RecordEmploymentRejected(ctx context.Context, req Request
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingEmploymentRejected,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(fields)))
+			audit.Created(req.auditFields(sealRecheckFields(ctx, fields))))
 	})
 }
 
@@ -437,7 +437,7 @@ func (s *Service) HostedAddEmployment(ctx context.Context, token string, f Diplo
 }
 
 // employmentOpen reports whether req takes a statement now: it asks for one,
-// holds none yet, is not erased or cancelled, and its steps are open for
+// holds none yet (nor MaxUncheckedStatements whose seal waits), is not erased or cancelled, and its steps are open for
 // EmploymentWindow (stepsOpen).
 func (s *Service) employmentOpen(req Request) error {
 	if s.employmentChecker == nil {
@@ -450,7 +450,8 @@ func (s *Service) employmentOpen(req Request) error {
 		return ErrSessionOver
 	}
 	now := s.now()
-	if req.SubjectEmployment != nil || !req.stepsOpen(now, EmploymentWindow) {
+	if req.SubjectEmployment != nil || req.uncheckedStatements >= MaxUncheckedStatements ||
+		!req.stepsOpen(now, EmploymentWindow) {
 		return ErrEmploymentClosed
 	}
 	return nil
@@ -471,15 +472,31 @@ func (s *Service) addEmployment(ctx context.Context, req Request, f DiplomaFile)
 	if err != nil {
 		return EmploymentVerdict{}, err
 	}
-	return s.checkEmployment(ctx, req, holder, f)
+	return s.checkEmployment(ctx, req, holder, f, s.newSealCheck(false))
 }
 
 // checkEmployment checks f against holder, the identity the engine approved
 // for req, and keeps it when accepted: ErrEmploymentClosed when a concurrent
 // upload or a purge got there first.
-func (s *Service) checkEmployment(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (EmploymentVerdict, error) {
+func (s *Service) checkEmployment(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile, seal *sealCheck) (EmploymentVerdict, error) {
 	verdict := EmploymentVerdict{FileName: f.Name}
-	out, err := s.employmentChecker.Check(ctx, f.Bytes, holder)
+	var out employment.Outcome
+	err := seal.run(ctx, func() error {
+		var err error
+		out, err = s.employmentChecker.Check(ctx, f.Bytes, holder)
+		return err
+	})
+	if seal.keepsUnchecked(err) {
+		added, err := s.keepUnchecked(ctx, req, ReviewKindEmployment, holder, f)
+		if err != nil {
+			return EmploymentVerdict{}, err
+		}
+		if !added {
+			return EmploymentVerdict{}, ErrEmploymentClosed
+		}
+		verdict.Reason = DocumentReasonSealPending
+		return verdict, nil
+	}
 	if err != nil {
 		return EmploymentVerdict{}, fmt.Errorf("proofing: check employment request %s: %w", req.ID, err)
 	}

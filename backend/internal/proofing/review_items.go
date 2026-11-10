@@ -181,6 +181,9 @@ func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier,
 	if err != nil {
 		return nil, fmt.Errorf("proofing: decide %s review request %s: %w", kind, req.ID, err)
 	}
+	if err := closeUncheckedDocuments(ctx, q, req.ID, kind); err != nil {
+		return nil, err
+	}
 	if err := s.audit.Record(ctx, q, audit.IdentityProofingReviewItemDecided,
 		audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
 		audit.Updated(req.auditFields(map[string]any{"kind": string(kind), "state": string(ReviewPending)}),
@@ -190,9 +193,13 @@ func (s *RequestStore) decideReviewItem(ctx context.Context, q database.Querier,
 	return &at, nil
 }
 
-// clearReviewItems drops req's waiting items at its purge, and the reasons of
-// its decided ones, which may name the person.
+// clearReviewItems drops req's waiting items at its purge, with the files
+// they wait on, and the reasons of its decided ones, which may name the
+// person.
 func clearReviewItems(ctx context.Context, q database.Querier, id uuid.UUID) error {
+	if err := purgeUncheckedDocuments(ctx, q, id); err != nil {
+		return err
+	}
 	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_review_items
 		WHERE request_id = $1 AND state = 'pending'`, id); err != nil {
 		return fmt.Errorf("proofing: purge waiting reviews request %s: %w", id, err)
@@ -250,6 +257,9 @@ func (s *RequestStore) closeReviewItems(ctx context.Context, where string, state
 			return fmt.Errorf("proofing: close reviews: %w", err)
 		}
 		for _, it := range items {
+			if err := closeUncheckedDocuments(ctx, q, it.req.ID, ReviewKind(it.kind)); err != nil {
+				return err
+			}
 			after := map[string]any{"kind": it.kind, "state": string(state), "errorCode": code}
 			if reason != "" {
 				after["reason"] = reason

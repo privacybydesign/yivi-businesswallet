@@ -7376,7 +7376,76 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: >-
-            The item waits for no decision (`address_not_under_review`, `not_under_review`).
+            The item waits for no decision (`address_not_under_review`, `not_under_review`), or
+            `confirm` on a step with a file whose seal was never checked (`seal_unchecked`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}/seal-check:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: requestID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Request id, the UUID or the `ps_…` id the API and webhooks show.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [diplomas, employment]
+        description: The step whose files are checked; another review kind is 400 `invalid_input`, an unknown one 404 `not_found`.
+    post:
+      tags: [identity-proofing]
+      summary: Check the seals that could not be checked at upload again
+      description: >-
+        Requires an administrator role in the organisation, or the reviewer right, on a step
+        whose review item waits (409 `not_under_review` otherwise). Each of the step's files
+        whose seal could not be checked at upload (`uncheckedDiplomas`, `uncheckedEmployment`)
+        is checked as on upload, against the identity the session approved: kept or refused,
+        audited as on upload, and its PDF deleted, its outcome kept in `sealChecks`. A seal that is still unreachable is 503
+        `seal_check_unavailable`, with the files checked before it decided and the rest still
+        waiting. The step's item still waits for the reviewer's decision, which `confirm` can
+        only make once no file waits. A reviewer who is not an administrator does not reach a
+        request outside the Reviews page (404 `session_not_found`); one on a request the caller
+        sent, or about the caller, is 403 `own_review`. The answer is the request.
+      responses:
+        '200':
+          description: The request after the check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Not an administrator or reviewer (`forbidden`), or a request the caller sent or is the
+            subject of (`own_review`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The step's item waits for no decision (`not_under_review`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The seal still cannot be checked (`seal_check_unavailable`). Try again later.
           content:
             application/json:
               schema:
@@ -7552,7 +7621,7 @@ paths:
         '413':
           description: An extract or the upload is too large (`too_large`).
         '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
+          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached, and the file could not be kept for a reviewer either. Try again later; the file is not at fault.
           content:
             application/json:
               schema:
@@ -7649,7 +7718,7 @@ paths:
         '413':
           description: The file is too large (`too_large`).
         '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
+          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached, and the file could not be kept for a reviewer either. Try again later; the file is not at fault.
           content:
             application/json:
               schema:
@@ -7684,9 +7753,18 @@ paths:
         is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
         accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
         failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
-        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
-        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
-        their verdicts. Only a session that no longer takes documents fails the whole upload.
+        A check that breaks on the server's side (the PDF reader, or a seal that can be neither
+        checked nor kept for a reviewer) fails only its file, `check_failed`, with nothing of it
+        kept: the others keep their verdicts. Only a session that no longer takes documents fails
+        the whole upload.
+
+        A seal that cannot be checked as the EU Trusted Lists or a revocation responder cannot
+        be reached is tried three times. Still unreachable, the file is not refused: its PDF and
+        the identity it must name are kept encrypted, its step's review item opens, and its
+        verdict is `seal_check_pending`, audited `identity_proofing.document_unchecked`. The step
+        reads as given; a reviewer checks the seal again (`.../review-items/{kind}/seal-check`).
+        Up to three statements wait so, since a wrong one cannot be told from the real one
+        yet: the check keeps the first that holds.
       requestBody:
         required: true
         content:
@@ -9299,7 +9377,7 @@ paths:
         '413':
           description: An extract or the upload is too large (`too_large`).
         '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
+          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached, and the file could not be kept for a reviewer either. Try again later; the file is not at fault.
           content:
             application/json:
               schema:
@@ -9386,7 +9464,7 @@ paths:
         '413':
           description: The file is too large (`too_large`).
         '503':
-          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached. Try again later; the file is not at fault.
+          description: The seal cannot be checked now (`seal_check_unavailable`), as the EU Trusted Lists or the revocation responder cannot be reached, and the file could not be kept for a reviewer either. Try again later; the file is not at fault.
           content:
             application/json:
               schema:
@@ -9414,9 +9492,18 @@ paths:
         is `duplicate`). The answer is a verdict per file, in upload order: `{fileName, kind,
         accepted, diploma | employment}` or `{fileName, kind, accepted: false, reason,
         failedCheck}`. What is kept, audited and reviewed is as on the document's own route.
-        A check that breaks on the server's side (a seal that cannot be checked now, the PDF
-        reader) fails only its file, `check_failed`, with nothing of it kept: the others keep
-        their verdicts. Only a session that no longer takes documents fails the whole upload.
+        A check that breaks on the server's side (the PDF reader, or a seal that can be neither
+        checked nor kept for a reviewer) fails only its file, `check_failed`, with nothing of it
+        kept: the others keep their verdicts. Only a session that no longer takes documents fails
+        the whole upload.
+
+        A seal that cannot be checked as the EU Trusted Lists or a revocation responder cannot
+        be reached is tried three times. Still unreachable, the file is not refused: its PDF and
+        the identity it must name are kept encrypted, its step's review item opens, and its
+        verdict is `seal_check_pending`, audited `identity_proofing.document_unchecked`. The step
+        reads as given; a reviewer checks the seal again (`.../review-items/{kind}/seal-check`).
+        Up to three statements wait so, since a wrong one cannot be told from the real one
+        yet: the check keeps the first that holds.
       requestBody:
         required: true
         content:
@@ -12500,8 +12587,10 @@ components:
             $ref: '#/components/schemas/ProofingDiploma'
           reason:
             type: string
-            enum: [not_a_diploma, signature_invalid, holder_mismatch, duplicate]
-            description: Why a file was refused.
+            enum: [not_a_diploma, signature_invalid, holder_mismatch, duplicate, seal_check_pending]
+            description: >-
+              Why a file was refused; `seal_check_pending` is one not refused but kept for a
+              reviewer, as its seal could not be checked.
           failedCheck:
             type: string
             description: Which signature or holder check failed, for a refused file.
@@ -12548,8 +12637,10 @@ components:
             $ref: '#/components/schemas/ProofingEmployment'
           reason:
             type: string
-            enum: [not_supported, not_asked, too_many, check_failed, duplicate, not_a_diploma, not_a_statement, signature_invalid, holder_mismatch, stale]
-            description: Why a file was refused.
+            enum: [not_supported, not_asked, too_many, check_failed, duplicate, not_a_diploma, not_a_statement, signature_invalid, holder_mismatch, stale, seal_check_pending]
+            description: >-
+              Why a file was refused; `seal_check_pending` is one not refused but kept for a
+              reviewer, as its seal could not be checked.
           failedCheck:
             type: string
             description: Which seal check failed, with `signature_invalid`.
@@ -12613,8 +12704,10 @@ components:
           $ref: '#/components/schemas/ProofingEmployment'
         reason:
           type: string
-          enum: [not_a_statement, signature_invalid, holder_mismatch, stale]
-          description: Why the file was refused.
+          enum: [not_a_statement, signature_invalid, holder_mismatch, stale, seal_check_pending]
+          description: >-
+            Why the file was refused; `seal_check_pending` is one not refused but kept for a
+            reviewer, as its seal could not be checked.
         failedCheck:
           type: string
           description: Which seal check failed, with `signature_invalid`.
@@ -13304,6 +13397,49 @@ components:
           format: date-time
           readOnly: true
           description: When the diplomas review was decided or lapsed.
+        uncheckedDiplomas:
+          type: integer
+          readOnly: true
+          description: >-
+            How many diploma extracts wait for a reviewer to check their seal again, as it could
+            not be checked at upload; absent for none. The diplomas review cannot be confirmed
+            before.
+        uncheckedEmployment:
+          type: boolean
+          readOnly: true
+          description: >-
+            The Verzekeringsbericht waits for a reviewer to check its seal again, as it could not
+            be checked at upload; absent otherwise. The employment review cannot be confirmed
+            before.
+        sealChecks:
+          type: array
+          readOnly: true
+          description: >-
+            The files kept for a reviewer as their seal could not be checked at upload, oldest
+            first, waiting or decided; absent for none. Only those of a step the caller reaches.
+            Their PDFs are deleted once decided; the names and outcomes at the session's purge.
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [diplomas, employment]
+              fileName:
+                type: string
+              outcome:
+                type: string
+                description: >-
+                  Empty while it waits; `kept`; `not_checked` when the step's review closed
+                  first; else why it was refused (`signature_invalid`, `holder_mismatch`,
+                  `not_a_diploma`, `not_a_statement`, `stale`, `duplicate`).
+              uploadedAt:
+                type: string
+                format: date-time
+              checkedAt:
+                type: string
+                format: date-time
+                nullable: true
+            required: [kind, fileName, outcome, uploadedAt]
         steps:
           type: array
           readOnly: true
@@ -14038,7 +14174,10 @@ components:
           description: When the subject can last upload their Verzekeringsbericht; absent while they cannot, and once one was kept.
         employmentGiven:
           type: boolean
-          description: A Verzekeringsbericht of the subject was kept.
+          description: A Verzekeringsbericht of the subject was kept, or waits for a reviewer to check its seal.
+        uncheckedDiplomas:
+          type: integer
+          description: How many of the subject's diploma extracts wait for a reviewer to check their seal; absent for none.
         steps:
           type: array
           description: Where each of the flow's extra steps stands, which the end screen tells the person. Empty for a flow without them.

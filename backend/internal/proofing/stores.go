@@ -21,6 +21,7 @@ func NewStores(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, r
 		FlowBranding:   NewFlowBrandingStore(db, recorder),
 		FlowDiplomas:   NewFlowDiplomaStore(db, recorder),
 		Diplomas:       NewDiplomaStore(db, recorder),
+		Unchecked:      NewUncheckedDocumentStore(db, recorder, cipher),
 		FlowAddresses:  NewFlowAddressStore(db, recorder),
 		FlowEmployment: NewFlowEmploymentStore(db, recorder),
 		DataRequests:   NewDataRequestStore(db, recorder, cipher),

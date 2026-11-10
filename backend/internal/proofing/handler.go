@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -142,6 +143,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/documents", member(respond.HandlerFunc(h.addDocuments)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}/seal-check", reviewer(respond.HandlerFunc(h.checkSealsAgain)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/closed", reviewer(respond.HandlerFunc(h.closedReviews)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
@@ -410,6 +412,13 @@ type requestResponse struct {
 	// DiplomasReviewedAt when it was decided or lapsed.
 	DiplomasReview     ReviewState `json:"diplomasReview,omitempty"`
 	DiplomasReviewedAt *time.Time  `json:"diplomasReviewedAt,omitempty"`
+	// UncheckedDiplomas is how many extracts, and UncheckedEmployment whether
+	// the statement, wait for a reviewer to check their seal again: it could
+	// not be checked at upload. Their step cannot be confirmed before.
+	UncheckedDiplomas   int  `json:"uncheckedDiplomas,omitempty"`
+	UncheckedEmployment bool `json:"uncheckedEmployment,omitempty"`
+	// SealChecks are those files, waiting or decided, by name and outcome.
+	SealChecks []SealCheck `json:"sealChecks,omitempty"`
 	// Steps are the extra steps the flow asks for, each with its own outcome
 	// beside the identity's.
 	Steps []StepOutcome `json:"steps"`
@@ -452,8 +461,10 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
 		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,
-		Steps:    req.Steps(now),
-		FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		UncheckedDiplomas: req.UncheckedDiplomas, UncheckedEmployment: req.UncheckedEmployment,
+		SealChecks: req.SealChecks,
+		Steps:      req.Steps(now),
+		FlowKind:   req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
@@ -544,6 +555,9 @@ func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, no
 		if req.EmploymentReview == "" {
 			out.Employment = nil
 		}
+		out.SealChecks = slices.DeleteFunc(slices.Clone(out.SealChecks), func(c SealCheck) bool {
+			return req.stepReview(c.Kind) == ""
+		})
 		if req.DiplomasReview == "" {
 			return out
 		}
@@ -816,6 +830,28 @@ func (h *Handler) decideReviewItem(w http.ResponseWriter, r *http.Request) error
 	req, err := h.service.DecideReviewItem(r.Context(), orgFromRequest(r).ID, id, kind, string(caller.Email), ReviewItemInput{
 		Confirm: body.Decision == "confirm", Reason: body.Reason, ErrorCode: body.ErrorCode, ReviewerID: caller.ID,
 		Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
+	})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
+	return nil
+}
+
+// checkSealsAgain checks the seals of a step's files that could not be
+// checked at upload, for the reviewer of its waiting item.
+func (h *Handler) checkSealsAgain(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseRequestID(r.PathValue("requestID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
+	}
+	kind := ReviewKind(r.PathValue("kind"))
+	if !kind.known() {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no such review item kind"}
+	}
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.CheckSealsAgain(r.Context(), orgFromRequest(r).ID, id, kind, StepReviewInput{
+		ReviewerID: caller.ID, Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
 	})
 	if err != nil {
 		return mapError(err)
@@ -1105,6 +1141,7 @@ var errorResponses = []struct {
 	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
 	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
 	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
+	{ErrSealUnchecked, respond.APIError{Status: http.StatusConflict, Code: "seal_unchecked", Message: "a document of this step has a seal nobody checked yet: check it again before confirming"}},
 	{ErrOwnReview, respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}},
 	{ErrLinkStarted, respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}},
 	{ErrDiplomasNotAsked, respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}},

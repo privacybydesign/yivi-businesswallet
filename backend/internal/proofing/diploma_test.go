@@ -3,6 +3,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -67,12 +68,17 @@ type fakeChecker struct {
 	holders []diploma.Person
 	// err is the checker's own failure, for every file.
 	err error
+	// down is a revocation responder that cannot be reached.
+	down bool
 }
 
 func (f *fakeChecker) Check(_ context.Context, pdf []byte, holder diploma.Person) (diploma.Outcome, error) {
 	f.holders = append(f.holders, holder)
 	if f.err != nil {
 		return diploma.Outcome{}, f.err
+	}
+	if f.down {
+		return diploma.Outcome{}, fmt.Errorf("diploma: validate: %w", diploma.ErrRevocationUnavailable)
 	}
 	if string(pdf) == "not a pdf" {
 		return diploma.Outcome{Reason: diploma.ReasonNotADiploma}, nil

@@ -313,7 +313,7 @@ func (s *DiplomaStore) Add(ctx context.Context, req Request, d Diploma) (Diploma
 		}
 		if err := s.audit.Record(ctx, q, audit.IdentityProofingDiplomaAdded,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(d.auditFields()))); err != nil {
+			audit.Created(req.auditFields(sealRecheckFields(ctx, d.auditFields())))); err != nil {
 			return err
 		}
 		data := sessionEventData(req, req.Status)
@@ -342,7 +342,7 @@ func (s *DiplomaStore) RecordRejected(ctx context.Context, req Request, reason, 
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingDiplomaRejected,
 			audit.Target{Type: audit.TargetIdentityProofingRequest, ID: req.ID.String(), OrgID: &req.OrganizationID},
-			audit.Created(req.auditFields(fields)))
+			audit.Created(req.auditFields(sealRecheckFields(ctx, fields))))
 	})
 }
 
@@ -443,7 +443,7 @@ func (s *Service) HostedDiplomasOpen(ctx context.Context, token string) (int, er
 	if err != nil {
 		return 0, err
 	}
-	slots := MaxDiplomasPerRequest - len(held[req.ID])
+	slots := MaxDiplomasPerRequest - len(held[req.ID]) - req.UncheckedDiplomas
 	if slots <= 0 {
 		return 0, fmt.Errorf("%w: a session holds at most %d extracts", ErrInvalidInput, MaxDiplomasPerRequest)
 	}
@@ -482,7 +482,8 @@ func (s *Service) diplomasOpen(req Request) error {
 // DUO's signature, then the printed holder's name and date of birth. An
 // accepted extract is kept, a refused one only audited with its reason. A
 // file the checker cannot decide on fails the whole call, with what was
-// decided before it kept.
+// decided before it kept; one whose seal it cannot reach is kept for a
+// reviewer (keepUnchecked).
 func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaFile) ([]DiplomaVerdict, error) {
 	if err := s.diplomasOpen(req); err != nil {
 		return nil, err
@@ -491,7 +492,7 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	if err != nil {
 		return nil, err
 	}
-	if len(files) == 0 || len(held[req.ID])+len(files) > MaxDiplomasPerRequest {
+	if len(files) == 0 || len(held[req.ID])+req.UncheckedDiplomas+len(files) > MaxDiplomasPerRequest {
 		return nil, fmt.Errorf("%w: a session holds at most %d extracts", ErrInvalidInput, MaxDiplomasPerRequest)
 	}
 	if req.session == nil {
@@ -503,8 +504,9 @@ func (s *Service) addDiplomas(ctx context.Context, req Request, files []DiplomaF
 	}
 
 	verdicts := make([]DiplomaVerdict, 0, len(files))
+	seal := s.newSealCheck(false)
 	for _, f := range files {
-		verdict, err := s.checkDiploma(ctx, req, holder, f)
+		verdict, err := s.checkDiploma(ctx, req, holder, f, seal)
 		if err != nil {
 			return nil, err
 		}
@@ -531,9 +533,25 @@ func (s *Service) sessionHolder(ctx context.Context, req Request) (diploma.Perso
 	return holder, nil
 }
 
-func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile) (DiplomaVerdict, error) {
+func (s *Service) checkDiploma(ctx context.Context, req Request, holder diploma.Person, f DiplomaFile, seal *sealCheck) (DiplomaVerdict, error) {
 	verdict := DiplomaVerdict{FileName: f.Name}
-	out, err := s.diplomaChecker.Check(ctx, f.Bytes, holder)
+	var out diploma.Outcome
+	err := seal.run(ctx, func() error {
+		var err error
+		out, err = s.diplomaChecker.Check(ctx, f.Bytes, holder)
+		return err
+	})
+	if seal.keepsUnchecked(err) {
+		added, err := s.keepUnchecked(ctx, req, ReviewKindDiplomas, holder, f)
+		if err != nil {
+			return DiplomaVerdict{}, err
+		}
+		verdict.Reason = DocumentReasonSealPending
+		if !added {
+			verdict.Reason = DiplomaReasonDuplicate
+		}
+		return verdict, nil
+	}
 	if err != nil {
 		return DiplomaVerdict{}, fmt.Errorf("proofing: check diploma request %s: %w", req.ID, err)
 	}

@@ -3,6 +3,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -67,10 +68,17 @@ var benefitStatement = &employment.Statement{
 // fakeEmploymentChecker reads a file's bytes as the reason to refuse it, and
 // accepts noJobStatement for "no job", benefitStatement for "benefit" and
 // testStatement for any other.
-type fakeEmploymentChecker struct{ holders []diploma.Person }
+type fakeEmploymentChecker struct {
+	holders []diploma.Person
+	// down is a revocation responder that cannot be reached.
+	down bool
+}
 
 func (f *fakeEmploymentChecker) Check(_ context.Context, pdf []byte, holder diploma.Person) (employment.Outcome, error) {
 	f.holders = append(f.holders, holder)
+	if f.down {
+		return employment.Outcome{}, fmt.Errorf("employment: validate: %w", diploma.ErrRevocationUnavailable)
+	}
 	switch reason := string(pdf); reason {
 	case employment.ReasonNotAStatement, employment.ReasonSignature, employment.ReasonHolder, employment.ReasonStale:
 		return employment.Outcome{Reason: reason}, nil

@@ -1860,7 +1860,8 @@ only: the engine knows nothing of it.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
-  PDF, the holder's name or birth date. Audited `diploma_added` (webhook
+  PDF, the holder's name or birth date, except while a seal waits for a
+  reviewer (§20, "Seal not checkable"). Audited `diploma_added` (webhook
   `session.diploma_added`) and `diploma_rejected` (reason only:
   `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
   Shown in the request responses, the public API's `result`, and the
@@ -2363,8 +2364,9 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
       nothing is embedded. A revoked seal is `signature_invalid`.
     - An unreachable responder is no answer about the seal
       (`verify.ErrRevocationUnreachable`): the check fails as the checker's
-      own, `diploma.ErrRevocationUnavailable`, 503 `seal_check_unavailable`
-      ("try again later"). DUO's online check reads the same.
+      own, `diploma.ErrRevocationUnavailable`. DUO's online check reads the
+      same. On an upload that is no 503 but a file kept for a reviewer
+      (§20, "Seal not checkable").
     - The pinned roots hold no QuoVadis anchor (`trust.Issuer.Pinned` is false
       for UWV). On them, `DIPLOMA_TRUST_SOURCE=pinned` or the fallback after the
       EU lists failed at boot, the UWV validator cannot check: `Validate` and
@@ -2811,4 +2813,46 @@ setting, check, window, request step, webhook and review item.
   - Continue once every asked document has a kept file, or the window is up
     (`documentStepDone`).
   - It still waits for the statement's read after Continue (`employmentOwed`).
+- **Seal not checkable** (`unchecked_documents.go`): the trust lists or a
+  revocation responder cannot be reached (`ErrTrustUnavailable`,
+  `ErrRevocationUnavailable`; `sealUnreachable`). Any other check error still
+  fails the upload.
+  - **Retry**: `sealCheckAttempts` (3) tries, `sealCheckRetryDelay` (2 s)
+    apart. Once one file stayed unreachable, the upload's next files try once
+    (`sealCheck.down`).
+  - **Kept for a reviewer**: still unreachable, the file is not refused.
+    - The whole PDF and the identity it must name (`sessionHolder`), sealed
+      with the proofing cipher, in `identity_proofing_request_unchecked_documents`
+      under the step's review kind (`diplomas`, `employment`). The only place
+      a whole PDF is kept.
+    - It opens the step's review item, whatever the flow's mode. Audited
+      `identity_proofing.document_unchecked` (the kind only).
+    - Verdict `seal_check_pending`. The step reads as given
+      (`employmentUntil`, `employmentGiven`), and an extract counts towards
+      the 10. The same file twice is kept once (`file_sha256`).
+    - Statements: up to `MaxUncheckedStatements` (3) wait together, as a
+      fake one cannot be told from the real one yet and must not lock it out
+      (`employmentOpen`). The check keeps the first that holds and refuses
+      the others (a later real one as `duplicate`).
+    - Shown on the request as `uncheckedDiplomas` / `uncheckedEmployment`,
+      on the hosted progress as `uncheckedDiplomas`.
+  - **The reviewer** (`POST .../review-items/{kind}/seal-check`,
+    `CheckSealsAgain`): runs each file's check again as at upload, against
+    the stored identity, then deletes its PDF.
+    - Kept or refused as at upload, with the same audits.
+    - Still unreachable: 503 `seal_check_unavailable`, with the files before
+      it decided and the rest still waiting.
+    - Confirm waits until no file does (409 `seal_unchecked`). Reject works
+      at once.
+  - **Deleted** when the re-check decides it, when the item is decided,
+    lapses or is rejected for a paused org (`dropUncheckedDocuments`), and
+    at the request's purge (`clearReviewItems`).
+  - The review pages list each file with its outcome and a "Check seal
+    again" button (`UncheckedSeals`). The subject's page says a reviewer
+    checks the file.
+  - **Timeline**: `document_unchecked` carries `kind`, `fileName` and
+    `sealUnchecked`. What a check again keeps or refuses is audited as at
+    upload, plus `sealCheckedAgain` and `fileName` (`withSealRecheck`), so the
+    timeline reads it as the reviewer's check. `fileName` is a personal key,
+    stripped at purge.
 

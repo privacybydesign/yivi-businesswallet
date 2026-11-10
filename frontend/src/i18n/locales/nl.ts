@@ -2697,6 +2697,8 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
       identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",
       identityProofingEmploymentRejected: "Verzekeringsbericht geweigerd",
+      identityProofingDocumentUnchecked:
+        "Document bewaard waarvan het zegel niet gecontroleerd kon worden",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
