@@ -905,14 +905,7 @@ func TestExternalReadsSkipMembers(t *testing.T) {
 	if member.External() || member.SubjectKind != SubjectMember {
 		t.Errorf("member request = kind %q; want a member's", member.SubjectKind)
 	}
-	var sent []Request
-	for _, email := range []string{"anna@example.org", "bram@example.org", "carla@example.org"} {
-		req, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject(email)))
-		if err != nil {
-			t.Fatalf("Create external request: %v", err)
-		}
-		sent = append(sent, req)
-	}
+	sent := createExternalRequests(t, store, orgID, sam, "anna@example.org", "bram@example.org", "carla@example.org")
 	foreign, err := store.Create(ctx, newStoredRequest(otherOrg, sam, externalSubject("dora@example.org")))
 	if err != nil {
 		t.Fatalf("Create other org's request: %v", err)
@@ -930,7 +923,27 @@ func TestExternalReadsSkipMembers(t *testing.T) {
 		t.Errorf("Get of the member's request = %+v, %v; want it, which the wallet's own reads may", got, err)
 	}
 
-	// Newest first, in pages: the cursor continues after the last one read.
+	checkExternalPages(t, store, orgID, sent)
+}
+
+func createExternalRequests(t *testing.T, store *RequestStore, orgID, by uuid.UUID, emails ...string) []Request {
+	t.Helper()
+	var sent []Request
+	for _, email := range emails {
+		req, err := store.Create(context.Background(), newStoredRequest(orgID, by, externalSubject(email)))
+		if err != nil {
+			t.Fatalf("Create external request: %v", err)
+		}
+		sent = append(sent, req)
+	}
+	return sent
+}
+
+// checkExternalPages reads sent back newest first, in pages: the cursor
+// continues after the last one read.
+func checkExternalPages(t *testing.T, store *RequestStore, orgID uuid.UUID, sent []Request) {
+	t.Helper()
+	ctx := context.Background()
 	page, err := store.ListExternalPage(ctx, orgID, nil, 2)
 	if err != nil || len(page) != 2 || page[0].ID != sent[2].ID || page[1].ID != sent[1].ID {
 		t.Fatalf("first page = %+v, %v; want the two newest external requests", page, err)
@@ -1909,16 +1922,8 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/proofing", []string{EventSessionExpired}); err != nil {
 		t.Fatalf("save webhook: %v", err)
 	}
-	_, hash, err := newLinkToken()
-	if err != nil {
-		t.Fatal(err)
-	}
 	lapse := time.Now().Add(time.Hour)
-	in := newStoredRequest(orgID, sam, Subject{Kind: SubjectExternal})
-	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
-	if _, err := store.Create(ctx, in); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	hash := createUnstartedLink(t, store, orgID, sam, lapse)
 	if next, err := store.NextDeadline(ctx, time.Now()); err != nil || !next.Equal(lapse.Truncate(time.Microsecond)) {
 		t.Errorf("NextDeadline = %v, %v; want the link's lapse %v", next, err, lapse)
 	}
@@ -1942,6 +1947,22 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionExpired {
 		t.Errorf("deliveries = %+v, %v; want one session.expired", deliveries, err)
 	}
+}
+
+// createUnstartedLink stores a hosted-link request that lapses at lapse and
+// returns its link token hash.
+func createUnstartedLink(t *testing.T, store *RequestStore, orgID, by uuid.UUID, lapse time.Time) []byte {
+	t.Helper()
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newStoredRequest(orgID, by, Subject{Kind: SubjectExternal})
+	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
+	if _, err := store.Create(context.Background(), in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return hash
 }
 
 // Delivered and failed deliveries are pruned past DeliveryRetention; a

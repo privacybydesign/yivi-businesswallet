@@ -30,31 +30,13 @@ func TestUpRewritesLegacyEUIDs(t *testing.T) {
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
-	rows := []struct {
-		key, before, want string
-	}{
+	rows := []legacyEUIDRow{
 		{"legacy", "NL.KVK.12345678", "NLNHR.12345678"},
 		{"bris", "NLNHR.87654321", "NLNHR.87654321"},
 		{"other", "DEHRB.12345", "DEHRB.12345"},
 		{"not-a-kvk-number", "NL.KVK.acme", "NL.KVK.acme"},
 	}
-	var orgID string
-	for _, r := range rows {
-		if err := conn.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-			VALUES ($1, $1, $1, $2, $1 || '@qerds.test') RETURNING id`, r.key, r.before).Scan(&orgID); err != nil {
-			t.Fatalf("seed org %s: %v", r.key, err)
-		}
-	}
-	for _, r := range rows {
-		if _, err := conn.Exec(ctx, `INSERT INTO qerds_contacts (organization_id, name, address, euid)
-			VALUES ($1, $2, $2, $3)`, orgID, r.key, r.before); err != nil {
-			t.Fatalf("seed contact %s: %v", r.key, err)
-		}
-	}
-	if _, err := conn.Exec(ctx, `INSERT INTO qerds_contacts (organization_id, name, address)
-		VALUES ($1, 'none', 'none')`, orgID); err != nil {
-		t.Fatalf("seed contact without euid: %v", err)
-	}
+	seedLegacyEUIDRows(t, conn, rows)
 
 	if err := migrate.Up(ctx, dsn); err != nil {
 		t.Fatalf("migrate up: %v", err)
@@ -75,5 +57,33 @@ func TestUpRewritesLegacyEUIDs(t *testing.T) {
 	var none *string
 	if err := conn.QueryRow(ctx, `SELECT euid FROM qerds_contacts WHERE address = 'none'`).Scan(&none); err != nil || none != nil {
 		t.Errorf("contact without euid = %v, %v; want NULL", none, err)
+	}
+}
+
+type legacyEUIDRow struct {
+	key, before, want string
+}
+
+// seedLegacyEUIDRows stores each row's before value as an org and as a contact
+// of the last org, plus one contact without an EUID.
+func seedLegacyEUIDRows(t *testing.T, conn *pgx.Conn, rows []legacyEUIDRow) {
+	t.Helper()
+	ctx := context.Background()
+	var orgID string
+	for _, r := range rows {
+		if err := conn.QueryRow(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
+			VALUES ($1, $1, $1, $2, $1 || '@qerds.test') RETURNING id`, r.key, r.before).Scan(&orgID); err != nil {
+			t.Fatalf("seed org %s: %v", r.key, err)
+		}
+	}
+	for _, r := range rows {
+		if _, err := conn.Exec(ctx, `INSERT INTO qerds_contacts (organization_id, name, address, euid)
+			VALUES ($1, $2, $2, $3)`, orgID, r.key, r.before); err != nil {
+			t.Fatalf("seed contact %s: %v", r.key, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO qerds_contacts (organization_id, name, address)
+		VALUES ($1, 'none', 'none')`, orgID); err != nil {
+		t.Fatalf("seed contact without euid: %v", err)
 	}
 }

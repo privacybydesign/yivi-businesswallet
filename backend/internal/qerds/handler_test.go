@@ -344,8 +344,8 @@ func TestCreateContactNormalizesEUID(t *testing.T) {
 		euid string
 		want *string
 	}{
-		{name: "rulebook form", euid: `"NLNHR.12345678"`, want: ptr("NLNHR.12345678")},
-		{name: "EBWOID form", euid: `"NLNHR.12345678.00001"`, want: ptr("NLNHR.12345678.00001")},
+		{name: "rulebook form", euid: `"NLNHR.12345678"`, want: new("NLNHR.12345678")},
+		{name: "EBWOID form", euid: `"NLNHR.12345678.00001"`, want: new("NLNHR.12345678.00001")},
 		{name: "blank", euid: `"  "`, want: nil},
 		{name: "absent", euid: `null`, want: nil},
 	}
@@ -385,8 +385,6 @@ func TestCreateContactRejectsInvalidEUID(t *testing.T) {
 		})
 	}
 }
-
-func ptr(s string) *string { return &s }
 
 func deref(s *string) string {
 	if s == nil {

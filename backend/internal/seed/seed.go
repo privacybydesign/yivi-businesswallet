@@ -328,6 +328,23 @@ var communityOrganizations = []communityOrganization{
 	},
 }
 
+// ensureCommunityOrganizations seeds each community org plus its departments,
+// nobody in them.
+func ensureCommunityOrganizations(ctx context.Context, pool *pgxpool.Pool, orgs *organization.Store, addressDomain string) error {
+	for _, c := range communityOrganizations {
+		org, err := ensureOrg(ctx, pool, c.org, addressDomain)
+		if err != nil {
+			return err
+		}
+		for _, name := range c.departments {
+			if _, err := ensureDepartment(ctx, orgs, org.ID, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) error {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -400,17 +417,8 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 		}
 	}
 
-	// Community organisations: an org plus its departments, nobody in them.
-	for _, c := range communityOrganizations {
-		org, err := ensureOrg(ctx, pool, c.org, addressDomain)
-		if err != nil {
-			return err
-		}
-		for _, name := range c.departments {
-			if _, err := ensureDepartment(ctx, orgs, org.ID, name); err != nil {
-				return err
-			}
-		}
+	if err := ensureCommunityOrganizations(ctx, pool, orgs, addressDomain); err != nil {
+		return err
 	}
 
 	demoOrg := orgsBySlug[demoOrgSlug]
