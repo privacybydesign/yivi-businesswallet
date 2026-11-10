@@ -8,9 +8,11 @@ import {
   ownReview,
   reviewPath,
   STEP_DECIDED_KEYS,
+  uncheckedSeals,
 } from "../lib/proofing-reviews";
 import { TopBar } from "../ui";
 import { StepDecision } from "./address-review";
+import { UncheckedSeals } from "./unchecked-seals";
 import {
   BackToReviews,
   DecisionReasons,
@@ -33,6 +35,7 @@ export function DiplomasReview({
   const me = useMeQuery();
   const own = ownReview(request, me.data);
   const review = request.diplomasReview;
+  const unchecked = uncheckedSeals(request, "diplomas") > 0;
   const subtitle = [
     requestSubject(request).name,
     request.flowName,
@@ -52,8 +55,18 @@ export function DiplomasReview({
         <ReviewSection
           id="diplomas-review-why"
           title={t("identityProofing.reviews.diplomas.whyTitle")}
-          hint={t("identityProofing.reviews.diplomas.whyAlways")}
+          hint={t(
+            unchecked
+              ? "identityProofing.reviews.seal.why"
+              : "identityProofing.reviews.diplomas.whyAlways",
+          )}
         >
+          <UncheckedSeals
+            slug={slug}
+            request={request}
+            kind="diplomas"
+            canCheck={review === "pending" && !own}
+          />
           <SessionDiplomas request={request} />
         </ReviewSection>
         <SessionDecisions request={request} except="diplomas" />
@@ -67,7 +80,12 @@ export function DiplomasReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <StepDecision slug={slug} request={request} kind="diplomas" />
+              <StepDecision
+                slug={slug}
+                request={request}
+                kind="diplomas"
+                confirmBlocked={unchecked}
+              />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">

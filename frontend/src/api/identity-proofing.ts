@@ -386,6 +386,25 @@ const proofingRequestSchema = z.object({
   // them to one, and when it was decided or lapsed.
   diplomasReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
   diplomasReviewedAt: z.string().optional(),
+  // How many extracts, and whether the statement, wait for a reviewer to
+  // check their seal again: it could not be checked at upload. Their step
+  // cannot be confirmed before.
+  uncheckedDiplomas: z.number().optional(),
+  uncheckedEmployment: z.boolean().optional(),
+  // Those files, waiting or decided: outcome is empty while one waits, then
+  // kept, not_checked, or why it was refused.
+  sealChecks: z
+    .array(
+      z.object({
+        kind: z.enum(["diplomas", "employment"]),
+        fileName: z.string(),
+        outcome: z.string(),
+        uploadedAt: z.string(),
+        checkedAt: z.string().nullable().optional(),
+      }),
+    )
+    .optional()
+    .catch(undefined),
   // The extra steps the flow asks for, each with its own outcome.
   steps: z.array(proofingStepSchema).optional(),
   // A request in review whose flow version sends every session to review.
@@ -1418,6 +1437,8 @@ export interface ProofingProgress {
   linkExpiresAt: string;
   // Until when the subject can add diploma extracts, once approved.
   diplomasUntil?: string;
+  // How many of the extracts wait for a reviewer to check their seal.
+  uncheckedDiplomas?: number;
   // A hosted data request's: until when approved data downloads, and how many
   // sessions an approved erasure kept.
   dataExportUntil?: string;
@@ -1607,9 +1628,13 @@ const hostedProgressSchema = z.object({
   addressUntil: z.string().optional(),
   addressGiven: z.boolean(),
   // Until when the subject can upload their Verzekeringsbericht; absent while
-  // they cannot, and once one is kept (employmentGiven).
+  // they cannot, and once one is kept or waits for a reviewer to check its
+  // seal (employmentGiven).
   employmentUntil: z.string().optional(),
   employmentGiven: z.boolean(),
+  // How many of the subject's extracts wait for a reviewer to check their
+  // seal.
+  uncheckedDiplomas: z.number().optional(),
   // Whether the document photo is still to be taken in the browser; absent
   // when the flow takes none.
   documentScan: documentScanSchema,
@@ -1844,6 +1869,25 @@ export function decideReviewItem(
       schema: proofingRequestSchema,
       method: "POST",
       body: input,
+      signal,
+    },
+  );
+}
+
+// Checks again the seals of a step's files that could not be checked at
+// upload, as the reviewer of its waiting item.
+export function checkSealsAgain(
+  slug: string,
+  requestId: string,
+  kind: "diplomas" | "employment",
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/review-items/${kind}/seal-check`,
+    {
+      schema: proofingRequestSchema,
+      method: "POST",
+      timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
       signal,
     },
   );

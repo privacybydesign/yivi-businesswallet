@@ -28,6 +28,10 @@ import {
   provenWithParts,
   reviewCounts,
   reviewTabFrom,
+  uncheckedSeals,
+  SEAL_REFUSAL_KEYS,
+  sealCheckState,
+  sealChecksOf,
   stepReviewOf,
   waitingParts,
   waitingOfTab,
@@ -644,5 +648,63 @@ describe("a closed session", () => {
       addressReview: "pending",
     });
     expect(isClosedSession(halfway)).toBe(false);
+  });
+});
+
+describe("uncheckedSeals", () => {
+  it("counts a step's files whose seal waits", () => {
+    expect(uncheckedSeals({ uncheckedDiplomas: 2 }, "diplomas")).toBe(2);
+    expect(uncheckedSeals({}, "diplomas")).toBe(0);
+    expect(uncheckedSeals({ uncheckedEmployment: true }, "employment")).toBe(1);
+    expect(uncheckedSeals({ uncheckedDiplomas: 2 }, "employment")).toBe(0);
+  });
+});
+
+describe("seal checks", () => {
+  it("lists a step's files and reads where each stands", () => {
+    const sealChecks = [
+      {
+        kind: "diplomas" as const,
+        fileName: "a.pdf",
+        outcome: "",
+        uploadedAt: "",
+      },
+      {
+        kind: "employment" as const,
+        fileName: "b.pdf",
+        outcome: "kept",
+        uploadedAt: "",
+      },
+      {
+        kind: "diplomas" as const,
+        fileName: "c.pdf",
+        outcome: "signature_invalid",
+        uploadedAt: "",
+      },
+    ];
+    expect(
+      sealChecksOf({ sealChecks }, "diplomas").map((c) => c.fileName),
+    ).toEqual(["a.pdf", "c.pdf"]);
+    expect(sealChecksOf({}, "employment")).toEqual([]);
+    expect(sealCheckState("")).toBe("waiting");
+    expect(sealCheckState("kept")).toBe("kept");
+    expect(sealCheckState("not_checked")).toBe("notChecked");
+    expect(sealCheckState("duplicate")).toBe("refused");
+  });
+
+  it("explains every refusal the checks give", () => {
+    const t = i18n.getFixedT("en");
+    for (const reason of [
+      "signature_invalid",
+      "holder_mismatch",
+      "not_a_diploma",
+      "not_a_statement",
+      "stale",
+      "duplicate",
+    ]) {
+      const key = SEAL_REFUSAL_KEYS[reason];
+      expect(key).toBeDefined();
+      if (key !== undefined) expect(t(key)).not.toBe(key);
+    }
   });
 });

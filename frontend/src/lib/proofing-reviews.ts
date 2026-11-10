@@ -13,6 +13,7 @@ import {
   REVIEW_REASON_MAX_CHARS,
   documentKindOf,
   requestSubject,
+  SEAL_REFUSAL_KEYS,
 } from "./identity-proofing";
 import { issuingCountryName } from "./issuing-countries";
 
@@ -361,6 +362,46 @@ export function addressReviewWhy(
       return "addressAlways";
     default:
       return "address";
+  }
+}
+
+// How many of a step's files wait for a reviewer to check their seal again:
+// it could not be checked at upload, and the step cannot be confirmed before.
+export function uncheckedSeals(
+  request: Pick<ProofingRequest, "uncheckedDiplomas" | "uncheckedEmployment">,
+  kind: "diplomas" | "employment",
+): number {
+  if (kind === "diplomas") return request.uncheckedDiplomas ?? 0;
+  return request.uncheckedEmployment === true ? 1 : 0;
+}
+
+export type SealCheckFile = NonNullable<ProofingRequest["sealChecks"]>[number];
+
+export { SEAL_REFUSAL_KEYS };
+
+// The files of a step that went to a reviewer as their seal could not be
+// checked at upload, oldest first.
+export function sealChecksOf(
+  request: Pick<ProofingRequest, "sealChecks">,
+  kind: "diplomas" | "employment",
+): SealCheckFile[] {
+  return (request.sealChecks ?? []).filter((c) => c.kind === kind);
+}
+
+// Where one such file stands: its seal still waits, it was kept, refused,
+// or its step's review closed before anyone checked it.
+export function sealCheckState(
+  outcome: string,
+): "waiting" | "kept" | "refused" | "notChecked" {
+  switch (outcome) {
+    case "":
+      return "waiting";
+    case "kept":
+      return "kept";
+    case "not_checked":
+      return "notChecked";
+    default:
+      return "refused";
   }
 }
 

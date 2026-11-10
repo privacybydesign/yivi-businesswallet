@@ -1814,6 +1814,33 @@ export function documentRejectionReason(
   return diplomaRejectionReason(reason, t);
 }
 
+// The reason of a file whose seal could not be checked at upload: not
+// refused but kept for a reviewer, so the subject has given it.
+export const SEAL_CHECK_PENDING = "seal_check_pending";
+
+// What one document upload decided: the files a reviewer checks the seal of,
+// and those refused.
+export function splitVerdicts<
+  V extends { accepted: boolean; kind?: string; reason?: string },
+>(
+  verdicts: V[],
+): {
+  uncheckedDiplomas: number;
+  statementUnchecked: boolean;
+  unchecked: V[];
+  refused: V[];
+} {
+  const unchecked = verdicts.filter((v) => v.reason === SEAL_CHECK_PENDING);
+  return {
+    uncheckedDiplomas: unchecked.filter((v) => v.kind === "diploma").length,
+    statementUnchecked: unchecked.some((v) => v.kind === "employment"),
+    unchecked,
+    refused: verdicts.filter(
+      (v) => !v.accepted && v.reason !== SEAL_CHECK_PENDING,
+    ),
+  };
+}
+
 // Why an uploaded Verzekeringsbericht was not kept, from its verdict's
 // reason. An unknown reason is shown as is.
 export function employmentRejectionReason(
@@ -1892,6 +1919,7 @@ const PROOFING_ERROR_KEYS = {
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
   seal_check_unavailable: "identityProofing.errors.sealCheckUnavailable",
+  seal_unchecked: "identityProofing.errors.sealUnchecked",
   flow_no_identity: "identityProofing.errors.flowNoIdentity",
   data_flow_for_member: "identityProofing.errors.dataFlowForMember",
   export_unavailable: "identityProofing.errors.exportUnavailable",
@@ -2583,6 +2611,25 @@ export function sessionEventDetail(
   }
   return [...parts, ...decisionEventDetail(fields, t)];
 }
+
+// The reviewer's copy for why a diploma or Verzekeringsbericht was refused; undefined for a
+// reason it does not know, shown as is.
+export const SEAL_REFUSAL_KEYS: Record<
+  string,
+  `identityProofing.reviews.seal.reasons.${
+    | "signatureInvalid"
+    | "holderMismatch"
+    | "notADocument"
+    | "stale"
+    | "duplicate"}`
+> = {
+  signature_invalid: "identityProofing.reviews.seal.reasons.signatureInvalid",
+  holder_mismatch: "identityProofing.reviews.seal.reasons.holderMismatch",
+  not_a_diploma: "identityProofing.reviews.seal.reasons.notADocument",
+  not_a_statement: "identityProofing.reviews.seal.reasons.notADocument",
+  stale: "identityProofing.reviews.seal.reasons.stale",
+  duplicate: "identityProofing.reviews.seal.reasons.duplicate",
+};
 
 // What an employment or diplomas review's decision reads as, per state.
 const STEP_OUTCOME_KEYS = {
