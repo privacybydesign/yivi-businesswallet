@@ -4145,6 +4145,8 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen contacten opgeslagen.",
       loadError: "Contacten laden mislukt: {{message}}",
       taken: "Er bestaat al een contact met dat adres.",
+      invalidEuid:
+        "Dat is geen geldige EUID. Gebruik een vorm als NLNHR.12345678.",
       error: "Er is iets misgegaan: {{message}}",
     },
   },

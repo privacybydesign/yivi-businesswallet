@@ -30,7 +30,7 @@ func TestSelfSendReachesInbox(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('Acme', 'acme', 'kvk-acme', 'NL.KVK.acme', 'acme@qerds.localhost')`); err != nil {
+		VALUES ('Acme', 'acme', 'kvk-acme', 'NLNHR.acme', 'acme@qerds.localhost')`); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, "acme")

@@ -313,3 +313,82 @@ func TestProvisionAddressAnchorsOnSlug(t *testing.T) {
 		})
 	}
 }
+
+// recordingContactManager records the contact the handler hands the store.
+type recordingContactManager struct {
+	created []Contact
+}
+
+func (m *recordingContactManager) ListContacts(context.Context, uuid.UUID) ([]Contact, error) {
+	return nil, nil
+}
+
+func (m *recordingContactManager) CreateContact(_ context.Context, _ uuid.UUID, in Contact) (Contact, error) {
+	m.created = append(m.created, in)
+	return in, nil
+}
+
+func (m *recordingContactManager) DeleteContact(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+func contactRequest(body string) (*httptest.ResponseRecorder, *http.Request) {
+	req := httptest.NewRequest(http.MethodPost, "/orgs/acme/qerds/contacts", bytes.NewBufferString(body))
+	ctx := organization.ContextWithOrg(req.Context(), organization.Organization{ID: uuid.New(), Slug: "acme"})
+	return httptest.NewRecorder(), req.WithContext(ctx)
+}
+
+func TestCreateContactNormalizesEUID(t *testing.T) {
+	cases := []struct {
+		name string
+		euid string
+		want *string
+	}{
+		{name: "rulebook form", euid: `"NLNHR.12345678"`, want: new("NLNHR.12345678")},
+		{name: "EBWOID form", euid: `"NLNHR.12345678.00001"`, want: new("NLNHR.12345678.00001")},
+		{name: "blank", euid: `"  "`, want: nil},
+		{name: "absent", euid: `null`, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &recordingContactManager{}
+			h := &Handler{contacts: mgr}
+			rec, req := contactRequest(`{"name":"KVK","address":"kvk@qerds.localhost","euid":` + tc.euid + `}`)
+			if err := h.createContact(rec, req); err != nil {
+				t.Fatalf("createContact: %v", err)
+			}
+			if len(mgr.created) != 1 {
+				t.Fatalf("created %d contacts, want 1", len(mgr.created))
+			}
+			got := mgr.created[0].EUID
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("stored euid = %v, want %v", deref(got), deref(tc.want))
+			}
+		})
+	}
+}
+
+func TestCreateContactRejectsInvalidEUID(t *testing.T) {
+	for _, bad := range []string{"NLNHR.123", "NL.KVK.12345678", "NL-NHR-12345678"} {
+		t.Run(bad, func(t *testing.T) {
+			mgr := &recordingContactManager{}
+			h := &Handler{contacts: mgr}
+			rec, req := contactRequest(`{"name":"KVK","address":"kvk@qerds.localhost","euid":"` + bad + `"}`)
+
+			var apiErr *respond.APIError
+			if err := h.createContact(rec, req); !errors.As(err, &apiErr) || apiErr.Code != "invalid_euid" {
+				t.Fatalf("err = %v, want an invalid_euid API error", err)
+			}
+			if len(mgr.created) != 0 {
+				t.Fatalf("store was called with %v, want no contact created", mgr.created)
+			}
+		})
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}

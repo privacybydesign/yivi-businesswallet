@@ -40,6 +40,27 @@ evidence (`registratie@kvk.nl`). One wallet per company: re-registering an
 already-active KVK returns `409 already_registered` (a second representative should
 join via a claim, not a duplicate).
 
+**EUID** (`internal/euid`, YIV-522). WE BUILD has not settled the string form, so:
+
+- `euid.Parse` reads only the two forms WE BUILD uses. Nothing else (dashes, a split-off
+  register, lowercase) is accepted:
+
+  | Form | Example | Source |
+  |---|---|---|
+  | Rulebook | `NLNHR.12345678` | rb-eu-poa, the only real example |
+  | EBWOID, third part | `NLNHR.12345678.00001` | EBWOID regex `^[A-Z]{2}[A-Z]{3}\.[a-zA-Z0-9]+\.[a-zA-Z0-9]+$`, no real example |
+
+- A Dutch EUID is `NL` + register `NHR` + the 8-digit KVK number. `NL.KVK.<kvk>` was our
+  own placeholder, never an EUID: it is rejected, and migrations `20261110105028`/`…029`
+  rewrote stored ones. Other countries take any 3-letter register and alphanumeric number.
+- The written form lives in `canonicalForm` alone (now `NLNHR.<kvk>[.<sub>]`). Change it
+  there once WE BUILD decides.
+- `OpenWallet` parses the register's EUID before the org is created and stores the written
+  form.
+- ISO 6523: `EUID.ISO6523` / `ParseISO6523` map `NLNHR.x` ↔ `0106:x` (also with an
+  `ebcore:iso6523:` prefix). The sub-ID has no place in ISO 6523 and is dropped. `0106` is
+  taken from Peppol, not yet from WE BUILD. The AS4 party id type is still `unregistered`.
+
 Still pending: owner-claim matching (`ClaimRepresentation`, 501); a shared strong
 identifier for matching; the async QERDS request→attestation transport.
 

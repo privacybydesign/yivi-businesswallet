@@ -19,7 +19,7 @@ import (
 func seedOrg(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string) uuid.UUID {
 	t.Helper()
 	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ($1, $2, $3, $4, $5)`, slug, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost"); err != nil {
+		VALUES ($1, $2, $3, $4, $5)`, slug, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost"); err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, slug)

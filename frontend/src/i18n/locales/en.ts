@@ -4045,6 +4045,7 @@ export const en = {
       empty: "No contacts saved yet.",
       loadError: "Could not load contacts: {{message}}",
       taken: "A contact with that address already exists.",
+      invalidEuid: "That is not a valid EUID. Use a form like NLNHR.12345678.",
       error: "Something went wrong: {{message}}",
     },
   },

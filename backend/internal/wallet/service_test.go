@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 )
 
@@ -48,6 +49,20 @@ func TestOpenWalletBouncesNonRepresentative(t *testing.T) {
 		Requester{GivenNames: "Mallory", FamilyName: "Impostor"}, "90000010", "acme")
 	if !errors.Is(err, ErrNotRepresentative) {
 		t.Fatalf("err = %v, want ErrNotRepresentative", err)
+	}
+}
+
+func TestOpenWalletRejectsInvalidRegistryEUID(t *testing.T) {
+	reg := &fakeRegistry{att: registryprovider.RegistrationAttestation{
+		KVKNumber:                 "90000010",
+		LegalName:                 "Yivi B.V.",
+		EUID:                      "not-an-euid",
+		RequesterIsRepresentative: true,
+	}}
+	_, err := serviceWith(reg).OpenWallet(context.Background(), uuid.New(),
+		Requester{GivenNames: "Alice", FamilyName: "Owner"}, "90000010", "acme")
+	if !errors.Is(err, euid.ErrInvalid) {
+		t.Fatalf("err = %v, want euid.ErrInvalid", err)
 	}
 }
 

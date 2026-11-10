@@ -107,7 +107,7 @@ func TestVeridInboundOfferIsPolledAndQueued(t *testing.T) {
 	const slug = "acme"
 	orgAddress := slug + "@qerds.localhost"
 	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('Acme', $1, 'kvk-acme', 'NL.KVK.acme', $2)`, slug, orgAddress); err != nil {
+		VALUES ('Acme', $1, 'kvk-acme', 'NLNHR.acme', $2)`, slug, orgAddress); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, slug)
@@ -248,7 +248,7 @@ func TestVeridInboundOfferFromUntrustedSenderIsNotQueued(t *testing.T) {
 	const slug = "globex"
 	orgAddress := slug + "@qerds.localhost"
 	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('Globex', $1, 'kvk-globex', 'NL.KVK.globex', $2)`, slug, orgAddress); err != nil {
+		VALUES ('Globex', $1, 'kvk-globex', 'NLNHR.globex', $2)`, slug, orgAddress); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, slug)

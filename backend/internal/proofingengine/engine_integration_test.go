@@ -83,7 +83,7 @@ func newHarness(t *testing.T, configure ...func(*proofingengine.Config)) harness
 	var orgID string
 	if err := pool.QueryRow(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ($1, 'acme', 'kvk-acme', 'NL.KVK.acme', 'acme@qerds.localhost') RETURNING id::text`, orgName,
+		VALUES ($1, 'acme', 'kvk-acme', 'NLNHR.acme', 'acme@qerds.localhost') RETURNING id::text`, orgName,
 	).Scan(&orgID); err != nil {
 		t.Fatal(err)
 	}
