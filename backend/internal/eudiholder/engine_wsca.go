@@ -41,7 +41,10 @@ type WSCAConfig struct {
 
 // SetWSCA enables WSCA-backed holder binding. nil (the default) keeps software
 // keys. Set once at boot before serving.
-func (e *Engine) SetWSCA(cfg *WSCAConfig) { e.wsca = cfg }
+func (e *Engine) SetWSCA(cfg *WSCAConfig) {
+	e.wsca = cfg
+	e.keysInHSM = cfg != nil
+}
 
 // OrgKeystoreDir is the per-org walletmobile keystore directory under base. It is
 // the single source of truth for the layout: the activation flow

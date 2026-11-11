@@ -92,6 +92,10 @@ type Engine struct {
 	// wsca, when set, backs holder binding keys with the wallet-provider WSCA/HSM
 	// instead of software keys (see engine_wsca.go). nil = software keys.
 	wsca *WSCAConfig
+	// walletUnit, when set, attests the org's wallet unit to issuers on redeem.
+	walletUnit WalletUnitAttester
+	// keysInHSM says holder keys are WSCA/HSM-held, so they may be key-attested.
+	keysInHSM bool
 }
 
 // RedeemConfig configures the OpenID4VCI holder-redemption path (the QERDS
@@ -150,7 +154,7 @@ func (e *Engine) Ping(ctx context.Context) error {
 	return st.Close()
 }
 
-// Store persists the credential as a single-instance CredentialBatch in the
+// Store persists the credential as a single-instance SdJwtVcBatch in the
 // org's holder engine and returns the created instance id.
 func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (string, error) {
 	eng, err := e.engineFor(ctx, orgID)
@@ -162,17 +166,17 @@ func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (s
 	if len(payload) == 0 {
 		payload = []byte(emptyJSONPayload)
 	}
-	batch := &models.CredentialBatch{
-		IssuerURL:                cred.IssuerURL,
-		VerifiableCredentialType: cred.VCT,
-		Format:                   models.CredentialFormatSdJwtVc,
-		Hash:                     cred.Hash,
-		ProcessedSdJwtPayload:    datatypes.JSON(payload),
-		IssuedAt:                 datatypes.NewNull(cred.IssuedAt),
-		BatchSize:                1,
-		RemainingCount:           1,
-		CredentialIssuer:         cred.CredentialIssuer,
-		Instances:                []models.IssuedCredentialInstance{{RawCredential: cred.RawToken}},
+	batch := &models.SdJwtVcBatch{
+		IssuerIdentifier:           cred.IssuerURL,
+		VerifiableCredentialType:   cred.VCT,
+		Format:                     models.CredentialFormatSdJwtVc,
+		Hash:                       cred.Hash,
+		ProcessedSdJwtPayload:      datatypes.JSON(payload),
+		IssuedAt:                   datatypes.NewNull(cred.IssuedAt),
+		BatchSize:                  1,
+		RemainingCount:             1,
+		CredentialIssuerIdentifier: cred.CredentialIssuer,
+		Instances:                  []models.SdJwtVcBatchInstance{{RawCredential: cred.RawToken}},
 	}
 	if cred.ExpiresAt != nil {
 		batch.ExpiresAt = datatypes.NewNull(*cred.ExpiresAt)
@@ -185,7 +189,7 @@ func (e *Engine) Store(ctx context.Context, orgID uuid.UUID, cred Credential) (s
 }
 
 // Delete erases the credential from the org's engine. ref is an instance id, but
-// Store persists one single-instance CredentialBatch per credential and irmago's
+// Store persists one single-instance SdJwtVcBatch per credential and irmago's
 // cascade is declared parent→child (batch→instances/metadata/display). Deleting
 // the instance alone would orphan the batch, which still holds the decoded
 // SD-JWT claims (ProcessedSdJwtPayload) plus issuer metadata/display — leaving a
@@ -205,11 +209,11 @@ func (e *Engine) Delete(ctx context.Context, orgID uuid.UUID, ref string) error 
 	}
 	base := eng.Db()
 	batchID := base.WithContext(ctx).
-		Model(&models.IssuedCredentialInstance{}).
+		Model(&models.SdJwtVcBatchInstance{}).
 		Select("credential_batch_id").
 		Where("id = ?", id)
 	if err := base.WithContext(ctx).
-		Where("id = (?)", batchID).Delete(&models.CredentialBatch{}).Error; err != nil {
+		Where("id = (?)", batchID).Delete(&models.SdJwtVcBatch{}).Error; err != nil {
 		return fmt.Errorf("eudiholder: delete credential %s org %s: %w", ref, orgID, err)
 	}
 	return nil
@@ -271,7 +275,7 @@ func (e *Engine) Displays(ctx context.Context, orgID uuid.UUID, lang string) (ma
 	if err != nil {
 		return nil, err
 	}
-	var batches []models.CredentialBatch
+	var batches []models.SdJwtVcBatch
 	if err := eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
 		Preload("IssuerDisplay").
@@ -331,7 +335,7 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 		LastStatusCheckAt *time.Time
 	}
 	if err := eng.Db().WithContext(ctx).
-		Model(&models.IssuedCredentialInstance{}).
+		Model(&models.SdJwtVcBatchInstance{}).
 		Select(`issued_credential_instances.id,
 			issued_credential_instances.credential_batch_id,
 			credential_batches.expires_at,
@@ -402,18 +406,18 @@ func (e *Engine) Validities(ctx context.Context, orgID uuid.UUID) (map[string]He
 // renders as "no attributes": an org that holds several credentials of one vct and
 // a row with no usable ref cannot be told apart, and showing an arbitrary sibling's
 // attributes under this credential's name would be worse than showing none.
-func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct string) (models.CredentialBatch, bool, error) {
+func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct string) (models.SdJwtVcBatch, bool, error) {
 	if id, perr := uuid.Parse(ref); perr == nil {
 		eng, err := e.engineFor(ctx, orgID)
 		if err != nil {
-			return models.CredentialBatch{}, false, err
+			return models.SdJwtVcBatch{}, false, err
 		}
 		base := eng.Db()
 		batchID := base.WithContext(ctx).
-			Model(&models.IssuedCredentialInstance{}).
+			Model(&models.SdJwtVcBatchInstance{}).
 			Select("credential_batch_id").
 			Where("id = ?", id)
-		var batch models.CredentialBatch
+		var batch models.SdJwtVcBatch
 		err = base.WithContext(ctx).
 			Preload("CredentialMetadata.Display").
 			Preload("CredentialMetadata.Claims.Display").
@@ -423,7 +427,7 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 			return batch, true, nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: claims %s org %s: %w", ref, orgID, err)
+			return models.SdJwtVcBatch{}, false, fmt.Errorf("eudiholder: claims %s org %s: %w", ref, orgID, err)
 		}
 	}
 	return e.batchByUniqueVCT(ctx, orgID, vct)
@@ -436,24 +440,24 @@ func (e *Engine) claimsBatch(ctx context.Context, orgID uuid.UUID, ref, vct stri
 // two or more credentials of that vct the type says nothing about which row was
 // asked for, so it reports no match rather than an arbitrary sibling. Also
 // (batch, false, nil) when vct is empty or nothing matches.
-func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct string) (models.CredentialBatch, bool, error) {
+func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct string) (models.SdJwtVcBatch, bool, error) {
 	if vct == "" {
-		return models.CredentialBatch{}, false, nil
+		return models.SdJwtVcBatch{}, false, nil
 	}
 	eng, err := e.engineFor(ctx, orgID)
 	if err != nil {
-		return models.CredentialBatch{}, false, err
+		return models.SdJwtVcBatch{}, false, err
 	}
 	// Limit(2) is enough to tell "exactly one" from "several" without loading every
 	// credential of the type.
-	var batches []models.CredentialBatch
+	var batches []models.SdJwtVcBatch
 	err = eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
 		Preload("CredentialMetadata.Claims.Display").
 		Preload("IssuerDisplay").
 		Where("verifiable_credential_type = ?", vct).Limit(2).Find(&batches).Error
 	if err != nil {
-		return models.CredentialBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
+		return models.SdJwtVcBatch{}, false, fmt.Errorf("eudiholder: batch by vct %q org %s: %w", vct, orgID, err)
 	}
 	if len(batches) != 1 {
 		if len(batches) > 1 {
@@ -464,7 +468,7 @@ func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct stri
 			slog.WarnContext(ctx, "eudiholder: held credential ref missing and vct is ambiguous",
 				slog.String("orgId", orgID.String()), slog.String("vct", vct))
 		}
-		return models.CredentialBatch{}, false, nil
+		return models.SdJwtVcBatch{}, false, nil
 	}
 	return batches[0], true, nil
 }
@@ -528,7 +532,7 @@ func (e *Engine) credentialLogoForVCT(ctx context.Context, orgID uuid.UUID, vct,
 	if err != nil {
 		return "", err
 	}
-	var batches []models.CredentialBatch
+	var batches []models.SdJwtVcBatch
 	if err := eng.Db().WithContext(ctx).
 		Preload("CredentialMetadata.Display").
 		Where("verifiable_credential_type = ?", vct).Find(&batches).Error; err != nil {

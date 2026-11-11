@@ -118,7 +118,7 @@ type Holder interface {
 }
 
 // Credential is a credential to persist in the holder engine. The fields mirror
-// the parts of irmago's CredentialBatch/IssuedCredentialInstance the engine
+// the parts of irmago's SdJwtVcBatch/SdJwtVcBatchInstance the engine
 // needs; the receive flows (§9.5) populate them from the actual received
 // SD-JWT VC, the dev seed synthesises a demo credential.
 type Credential struct {

@@ -6,7 +6,7 @@
 # .ai/features/openid4vp-inbound.md §8. Staging/demo tooling, not a product
 # component: it verifies presentations, it is not a qualified verifier.
 
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /app
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -448,8 +449,8 @@ type Config struct {
 	// WalletUnitVersion is the wallet_version a BWIA states.
 	WalletUnitVersion string
 	// WalletUnitCertificationInfo is the wallet solution's certification
-	// information; empty leaves the claim out.
-	WalletUnitCertificationInfo string
+	// information, a JSON object (CS-05); nil leaves the claim out.
+	WalletUnitCertificationInfo map[string]any
 	// WalletUnitSKA* describe the HSM behind the WSCA. All three set, or none:
 	// none issues no SKA.
 	WalletUnitSKACertificationURL string
@@ -792,7 +793,11 @@ func loadWalletUnit(c *Config) error {
 		return fmt.Errorf("config: %s must be %q or %q", envWalletUnitAttester, WalletUnitAttesterLocal, ProviderStub)
 	}
 	c.WalletUnitVersion = envOrDefault(envWalletUnitVersion, defaultWalletUnitVersion)
-	c.WalletUnitCertificationInfo = os.Getenv(envWalletUnitCertificationInfo)
+	if raw := os.Getenv(envWalletUnitCertificationInfo); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &c.WalletUnitCertificationInfo); err != nil || c.WalletUnitCertificationInfo == nil {
+			return fmt.Errorf("config: %s must be a JSON object: %v", envWalletUnitCertificationInfo, err)
+		}
+	}
 	c.WalletUnitSKACertificationURL = os.Getenv(envWalletUnitSKACertificationURL)
 	c.WalletUnitSKAKeyStorage = parseList(os.Getenv(envWalletUnitSKAKeyStorage))
 	c.WalletUnitSKAUserAuth = parseList(os.Getenv(envWalletUnitSKAUserAuth))
