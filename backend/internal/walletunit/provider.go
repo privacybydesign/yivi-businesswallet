@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -65,6 +66,7 @@ type Provider struct {
 }
 
 func NewProvider(store *Store, orgs orgReader, signer *Signer, cfg Config) *Provider {
+	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	return &Provider{store: store, orgs: orgs, signer: signer, cfg: cfg, now: time.Now}
 }
 
