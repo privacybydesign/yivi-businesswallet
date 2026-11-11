@@ -30,6 +30,7 @@ import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
 import { ThemeSettingsPanel } from "./theme-settings";
+import { WalletUnitPanel } from "./wallet-unit-panel";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
 
@@ -185,6 +186,11 @@ function SettingsPanel({
     case "signing":
       return <CscSettingsPanel slug={slug} />;
     default:
-      return <WscaWalletPanel slug={slug} />;
+      return (
+        <div className="flex flex-col gap-6">
+          <WscaWalletPanel slug={slug} />
+          <WalletUnitPanel slug={slug} />
+        </div>
+      );
   }
 }

@@ -51,6 +51,8 @@
     "wallet.revoked": "Revoked wallet",
     "wallet.representation_claimed": "Claimed representation",
     "wallet.representation_revoked": "Revoked representation",
+    "wallet.unit_activated": "Activated wallet unit",
+    "wallet.unit_revoked": "Revoked wallet unit",
 
     "qerds.message_sent": "Sent secure message",
     "qerds.message_received": "Received secure message",

@@ -69,6 +69,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
 )
@@ -542,6 +543,42 @@ func newRequesterCA(cfg config.Config) (*relyingparty.CA, error) {
 	return relyingparty.NewCA("Yivi Business Wallet ephemeral requester CA")
 }
 
+// walletUnitName is the wallet_name every BWIA states.
+const walletUnitName = "Yivi Business Wallet"
+
+// newWalletUnitSigner is the Business Wallet Provider signer from
+// WALLET_UNIT_PROVIDER_CERT/KEY, or an ephemeral one when unset: then no relying
+// party trusts the attestations, and they stop verifying after a restart.
+func newWalletUnitSigner(cfg config.Config) (*walletunit.Signer, error) {
+	if cfg.WalletUnitProviderCert != "" {
+		signer, err := walletunit.LoadSigner([]byte(cfg.WalletUnitProviderCert), []byte(cfg.WalletUnitProviderKey))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", "WALLET_UNIT_PROVIDER_CERT", err)
+		}
+		return signer, nil
+	}
+	slog.Warn("WALLET_UNIT_PROVIDER_CERT not set; wallet unit attestations are signed under an ephemeral " +
+		"certificate that nobody trusts and that changes on restart")
+	return walletunit.NewEphemeralSigner(walletUnitName + " ephemeral provider")
+}
+
+func walletUnitConfig(cfg config.Config) walletunit.Config {
+	out := walletunit.Config{
+		BaseURL:           cfg.AppBaseURL,
+		WalletName:        walletUnitName,
+		WalletVersion:     cfg.WalletUnitVersion,
+		CertificationInfo: cfg.WalletUnitCertificationInfo,
+	}
+	if cfg.WalletUnitSKACertificationURL != "" {
+		out.SKA = &walletunit.SKAConfig{
+			CertificationURL:   cfg.WalletUnitSKACertificationURL,
+			KeyStorage:         cfg.WalletUnitSKAKeyStorage,
+			UserAuthentication: cfg.WalletUnitSKAUserAuth,
+		}
+	}
+	return out
+}
+
 // chainedInboundConsumer notifies each QERDS inbound consumer in turn. Every
 // consumer already ignores an envelope type it does not recognise (see
 // attestation.OfferReceiver, openid4vppresenter.Receiver), so trying them in
@@ -637,6 +674,7 @@ type wiring struct {
 	requestTemplates      *openid4vprequester.TemplateHandler
 	attestationHandler    *attestation.Handler
 	wscaWalletHandler     *wscawallet.Handler
+	walletUnitHandler     *walletunit.Handler
 	notificationsHandler  *notifications.Handler
 	slackHandler          *slackchannel.Handler
 	teamsHandler          *teamschannel.Handler
@@ -968,6 +1006,14 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 		wscaStore,
 	)
 	w.wscaWalletHandler = wscawallet.NewHandler(wscaActivator, w.requireUser, w.orgHandler.Authorize)
+
+	walletUnitSigner, err := newWalletUnitSigner(cfg)
+	if err != nil {
+		return err
+	}
+	walletUnitStore := walletunit.NewStore(w.pool, w.recorder)
+	walletUnitProvider := walletunit.NewProvider(walletUnitStore, w.orgStore, walletUnitSigner, walletUnitConfig(cfg))
+	w.walletUnitHandler = walletunit.NewHandler(walletUnitStore, walletUnitProvider, w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 
@@ -1260,6 +1306,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.themeSettingsHandler,
 		w.attestationHandler,
 		w.wscaWalletHandler,
+		w.walletUnitHandler,
 		w.notificationsHandler,
 		w.slackHandler,
 		w.teamsHandler,

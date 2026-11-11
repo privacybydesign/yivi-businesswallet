@@ -47,10 +47,22 @@ const (
 	// (PEM content; unset mints an ephemeral one at boot), and the base URL
 	// another wallet reaches this backend's request_uri/response_uri on. See
 	// .ai/features/oid4vp-over-qerds.md.
-	envOpenID4VPOrgRequestTTL      = "OPENID4VP_ORG_REQUEST_TTL"
-	envOpenID4VPRequesterCACert    = "OPENID4VP_REQUESTER_CA_CERT"
-	envOpenID4VPRequesterCAKey     = "OPENID4VP_REQUESTER_CA_KEY"
-	envOpenID4VPRequesterPublicURL = "OPENID4VP_REQUESTER_PUBLIC_URL"
+	envOpenID4VPOrgRequestTTL   = "OPENID4VP_ORG_REQUEST_TTL"
+	envOpenID4VPRequesterCACert = "OPENID4VP_REQUESTER_CA_CERT"
+	envOpenID4VPRequesterCAKey  = "OPENID4VP_REQUESTER_CA_KEY"
+
+	// Business Wallet Provider (WE BUILD CS-05): the certificate chain (leaf
+	// first) and key the wallet unit attestations and their status lists are
+	// signed with, what the provider states about the wallet solution, and the
+	// HSM certification an SKA needs. See .ai/features/wallet-unit-attestation.md.
+	envWalletUnitProviderCert        = "WALLET_UNIT_PROVIDER_CERT"
+	envWalletUnitProviderKey         = "WALLET_UNIT_PROVIDER_KEY"
+	envWalletUnitVersion             = "WALLET_UNIT_VERSION"
+	envWalletUnitCertificationInfo   = "WALLET_UNIT_CERTIFICATION_INFO"
+	envWalletUnitSKACertificationURL = "WALLET_UNIT_SKA_CERTIFICATION_URL"
+	envWalletUnitSKAKeyStorage       = "WALLET_UNIT_SKA_KEY_STORAGE"
+	envWalletUnitSKAUserAuth         = "WALLET_UNIT_SKA_USER_AUTHENTICATION"
+	envOpenID4VPRequesterPublicURL   = "OPENID4VP_REQUESTER_PUBLIC_URL"
 
 	envPlatformAdminEmails = "PLATFORM_ADMIN_EMAILS"
 
@@ -239,7 +251,9 @@ const (
 	envTrustedProxies = "TRUSTED_PROXIES"
 
 	defaultAppBaseURL = "http://localhost:5173"
-	defaultMailLocale = "en"
+	// defaultWalletUnitVersion is what a BWIA states when no release version is set.
+	defaultWalletUnitVersion = "unreleased"
+	defaultMailLocale        = "en"
 
 	// PostGuard: the internal sidecar that performs encrypt-and-upload, the shared
 	// secret the backend presents to it, and the deployment master key that wraps
@@ -418,6 +432,21 @@ type Config struct {
 	// ephemeral CA at boot, which only this deployment trusts.
 	OpenID4VPRequesterCACert string
 	OpenID4VPRequesterCAKey  string
+	// WalletUnitProviderCert / Key are the PEM chain (leaf first) and key the
+	// Business Wallet Provider signs with. Both empty mints an ephemeral
+	// self-signed certificate at boot, which nobody else trusts.
+	WalletUnitProviderCert string
+	WalletUnitProviderKey  string
+	// WalletUnitVersion is the wallet_version a BWIA states.
+	WalletUnitVersion string
+	// WalletUnitCertificationInfo is the wallet solution's certification
+	// information; empty leaves the claim out.
+	WalletUnitCertificationInfo string
+	// WalletUnitSKA* describe the HSM behind the WSCA. All three set, or none:
+	// none issues no SKA.
+	WalletUnitSKACertificationURL string
+	WalletUnitSKAKeyStorage       []string
+	WalletUnitSKAUserAuth         []string
 	// OpenID4VPRequesterPublicURL is the base URL (no /api/v1) a receiving
 	// wallet fetches request_uri from and posts the response to. Defaults to
 	// AppBaseURL.
@@ -671,6 +700,7 @@ func Load() (Config, error) {
 		loadEudiVerifier,
 		loadDurations,
 		loadRequesterCA,
+		loadWalletUnit,
 		loadQerds,
 		loadDocumentValidators,
 		loadIdentityProofing,
@@ -740,6 +770,28 @@ func loadRequesterCA(c *Config) error {
 	c.OpenID4VPRequesterCACert, c.OpenID4VPRequesterCAKey = os.Getenv(envOpenID4VPRequesterCACert), os.Getenv(envOpenID4VPRequesterCAKey)
 	if (c.OpenID4VPRequesterCACert == "") != (c.OpenID4VPRequesterCAKey == "") {
 		return fmt.Errorf("config: %s and %s must be set together", envOpenID4VPRequesterCACert, envOpenID4VPRequesterCAKey)
+	}
+	return nil
+}
+
+func loadWalletUnit(c *Config) error {
+	c.WalletUnitProviderCert, c.WalletUnitProviderKey = os.Getenv(envWalletUnitProviderCert), os.Getenv(envWalletUnitProviderKey)
+	if (c.WalletUnitProviderCert == "") != (c.WalletUnitProviderKey == "") {
+		return fmt.Errorf("config: %s and %s must be set together", envWalletUnitProviderCert, envWalletUnitProviderKey)
+	}
+	c.WalletUnitVersion = envOrDefault(envWalletUnitVersion, defaultWalletUnitVersion)
+	c.WalletUnitCertificationInfo = os.Getenv(envWalletUnitCertificationInfo)
+	c.WalletUnitSKACertificationURL = os.Getenv(envWalletUnitSKACertificationURL)
+	c.WalletUnitSKAKeyStorage = parseList(os.Getenv(envWalletUnitSKAKeyStorage))
+	c.WalletUnitSKAUserAuth = parseList(os.Getenv(envWalletUnitSKAUserAuth))
+	set := 0
+	for _, v := range []bool{c.WalletUnitSKACertificationURL != "", len(c.WalletUnitSKAKeyStorage) > 0, len(c.WalletUnitSKAUserAuth) > 0} {
+		if v {
+			set++
+		}
+	}
+	if set != 0 && set != 3 {
+		return fmt.Errorf("config: %s, %s and %s must be set together", envWalletUnitSKACertificationURL, envWalletUnitSKAKeyStorage, envWalletUnitSKAUserAuth)
 	}
 	return nil
 }

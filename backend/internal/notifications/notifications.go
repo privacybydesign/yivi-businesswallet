@@ -133,6 +133,8 @@ var catalog = []CatalogEntry{
 	{audit.WalletRevoked, GroupWallet},
 	{audit.RepresentationClaimed, GroupWallet},
 	{audit.RepresentationRevoked, GroupWallet},
+	{audit.WalletUnitActivated, GroupWallet},
+	{audit.WalletUnitRevoked, GroupWallet},
 
 	{audit.QerdsMessageSent, GroupQerds},
 	{audit.QerdsMessageReceived, GroupQerds},

@@ -51,6 +51,8 @@
     "wallet.revoked": "Wallet ingetrokken",
     "wallet.representation_claimed": "Vertegenwoordiging geclaimd",
     "wallet.representation_revoked": "Vertegenwoordiging ingetrokken",
+    "wallet.unit_activated": "Wallet-unit geactiveerd",
+    "wallet.unit_revoked": "Wallet-unit ingetrokken",
 
     "qerds.message_sent": "Beveiligd bericht verstuurd",
     "qerds.message_received": "Beveiligd bericht ontvangen",
