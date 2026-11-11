@@ -51,20 +51,20 @@ type Issued struct {
 	SKA  string
 }
 
-type orgLookup interface {
+type orgReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (organization.Organization, error)
 }
 
 // Provider issues BWUAs and signs the status lists they reference.
 type Provider struct {
 	store  *Store
-	orgs   orgLookup
+	orgs   orgReader
 	signer *Signer
 	cfg    Config
 	now    func() time.Time
 }
 
-func NewProvider(store *Store, orgs orgLookup, signer *Signer, cfg Config) *Provider {
+func NewProvider(store *Store, orgs orgReader, signer *Signer, cfg Config) *Provider {
 	return &Provider{store: store, orgs: orgs, signer: signer, cfg: cfg, now: time.Now}
 }
 

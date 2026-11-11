@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/privacybydesign/irmago/eudi/openid4vp"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 )
 
 const (
@@ -103,33 +105,14 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	if !cert.IsCA {
 		return nil, errors.New("relyingparty: CA certificate is not a CA")
 	}
-	key, err := parseECKey(keyPEM)
+	key, err := crypto.ParseECPrivateKeyPEM(keyPEM)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("relyingparty: CA key: %w", err)
 	}
 	if !key.PublicKey.Equal(cert.PublicKey) {
 		return nil, errors.New("relyingparty: CA key does not match the CA certificate")
 	}
 	return &CA{cert: cert, key: key}, nil
-}
-
-func parseECKey(keyPEM []byte) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode(keyPEM)
-	if block == nil {
-		return nil, errors.New("relyingparty: CA key PEM holds no block")
-	}
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return key, nil
-	}
-	keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("relyingparty: CA key: %w", err)
-	}
-	key, ok := keyAny.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("relyingparty: CA key is %T, want ECDSA", keyAny)
-	}
-	return key, nil
 }
 
 // RootPEM is the CA certificate in PEM, what a receiving deployment adds to

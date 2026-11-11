@@ -42,7 +42,7 @@ type fakeLists struct {
 func (f fakeLists) StatusList(context.Context, int64) (string, error) { return f.token, f.err }
 
 // serve routes req through Register with the org in context under role.
-func serve(units unitStore, lists statusLists, role string, req *http.Request) *httptest.ResponseRecorder {
+func serve(units unitStore, lists statusLister, role string, req *http.Request) *httptest.ResponseRecorder {
 	withOrg := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := organization.ContextWithOrg(r.Context(), organization.Organization{ID: uuid.New(), Slug: "acme"})

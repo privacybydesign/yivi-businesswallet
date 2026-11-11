@@ -78,7 +78,7 @@ export function WalletUnitPanel({
               <span className="text-ink text-[13px]">
                 {formatWhen(summary.unit.revokedAt)}
                 {summary.unit.revokedReason &&
-                  ` · ${t(`walletUnit.reasons.${summary.unit.revokedReason}`)}`}
+                  " · " + t(`walletUnit.reasons.${summary.unit.revokedReason}`)}
               </span>
             </>
           )}

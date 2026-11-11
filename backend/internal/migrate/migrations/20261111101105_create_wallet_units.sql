@@ -14,7 +14,8 @@ CREATE TABLE wallet_units
     CONSTRAINT wallet_units_revoked_check CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))
 );
 
-CREATE UNIQUE INDEX wallet_units_one_active_per_org ON wallet_units (organization_id) WHERE status = 'active';
+-- revoked_at IS NULL holds exactly for active units, by wallet_units_revoked_check.
+CREATE UNIQUE INDEX wallet_units_one_active_per_org ON wallet_units (organization_id) WHERE revoked_at IS NULL;
 CREATE INDEX wallet_units_organization_id ON wallet_units (organization_id, created_at DESC);
 
 -- +goose Down

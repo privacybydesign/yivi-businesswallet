@@ -23,19 +23,19 @@ type unitStore interface {
 	Activate(ctx context.Context, orgID uuid.UUID) (Unit, error)
 }
 
-type statusLists interface {
+type statusLister interface {
 	StatusList(ctx context.Context, list int64) (string, error)
 }
 
 // Handler serves the org-admin wallet unit routes and the public status lists.
 type Handler struct {
 	units       unitStore
-	lists       statusLists
+	lists       statusLister
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(units unitStore, lists statusLists, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(units unitStore, lists statusLister, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{units: units, lists: lists, requireUser: requireUser, authorize: authorize}
 }
 

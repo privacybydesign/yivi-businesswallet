@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 )
 
 const (
@@ -52,9 +54,9 @@ func LoadSigner(chainPEM, keyPEM []byte) (*Signer, error) {
 	if len(chain) == 0 {
 		return nil, errors.New("walletunit: provider certificate PEM holds no CERTIFICATE block")
 	}
-	key, err := parseECKey(keyPEM)
+	key, err := crypto.ParseECPrivateKeyPEM(keyPEM)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("walletunit: provider key: %w", err)
 	}
 	if key.Curve != elliptic.P256() {
 		return nil, errors.New("walletunit: provider key must be P-256 for ES256")
@@ -99,25 +101,6 @@ func NewEphemeralSigner(commonName string) (*Signer, error) {
 		return nil, err
 	}
 	return &Signer{key: key, chain: []*x509.Certificate{cert}}, nil
-}
-
-func parseECKey(keyPEM []byte) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode(keyPEM)
-	if block == nil {
-		return nil, errors.New("walletunit: provider key PEM holds no block")
-	}
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return key, nil
-	}
-	keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("walletunit: provider key: %w", err)
-	}
-	key, ok := keyAny.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("walletunit: provider key is %T, want ECDSA", keyAny)
-	}
-	return key, nil
 }
 
 // RootPEM is the last certificate of the chain in PEM: what a relying party adds
