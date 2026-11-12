@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
@@ -48,8 +49,16 @@ func scanUnit(row pgx.Row) (Unit, error) {
 func (s *Store) activeUnitForIssue(ctx context.Context, orgID uuid.UUID) (Unit, error) {
 	const insertFirst = `INSERT INTO wallet_units (organization_id)
 		SELECT $1 WHERE NOT EXISTS (SELECT 1 FROM wallet_units WHERE organization_id = $1)
-		ON CONFLICT DO NOTHING`
-	if _, err := s.db.Exec(ctx, insertFirst, orgID); err != nil {
+		ON CONFLICT DO NOTHING
+		RETURNING id`
+	var first uuid.UUID
+	err := s.db.QueryRow(ctx, insertFirst, orgID).Scan(&first)
+	switch {
+	case err == nil:
+		if err := attestKeys(ctx, s.db, orgID, first); err != nil {
+			return Unit{}, err
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
 		return Unit{}, fmt.Errorf("walletunit: create first unit org %s: %w", orgID, err)
 	}
 	const active = `SELECT ` + unitColumns + ` FROM wallet_units WHERE organization_id = $1 AND status = 'active'`
@@ -139,21 +148,45 @@ func (s *Store) Revoke(ctx context.Context, orgID uuid.UUID, reason string) (Uni
 func (s *Store) Activate(ctx context.Context, orgID uuid.UUID) (Unit, error) {
 	var out Unit
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insert = `INSERT INTO wallet_units (organization_id) VALUES ($1) RETURNING ` + unitColumns
 		var err error
-		out, err = scanUnit(q.QueryRow(ctx, insert, orgID))
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-			return ErrUnitActive
-		}
-		if err != nil {
-			return fmt.Errorf("walletunit: activate org %s: %w", orgID, err)
-		}
-		return s.audit.Record(ctx, q, audit.WalletUnitActivated,
-			audit.Target{Type: audit.TargetWalletUnit, ID: out.ID.String(), OrgID: &orgID},
-			audit.Created(map[string]any{"status": out.Status}))
+		out, err = s.Provision(ctx, q, orgID)
+		return err
 	})
 	return out, err
+}
+
+// Provision creates the org's active unit and audits, inside the caller's tx:
+// wallet registration provisions it together with the organization.
+func (s *Store) Provision(ctx context.Context, q database.Querier, orgID uuid.UUID) (Unit, error) {
+	const insert = `INSERT INTO wallet_units (organization_id) VALUES ($1) RETURNING ` + unitColumns
+	out, err := scanUnit(q.QueryRow(ctx, insert, orgID))
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return Unit{}, ErrUnitActive
+	}
+	if err != nil {
+		return Unit{}, fmt.Errorf("walletunit: provision org %s: %w", orgID, err)
+	}
+	if err := attestKeys(ctx, q, orgID, out.ID); err != nil {
+		return Unit{}, err
+	}
+	if err := s.audit.Record(ctx, q, audit.WalletUnitActivated,
+		audit.Target{Type: audit.TargetWalletUnit, ID: out.ID.String(), OrgID: &orgID},
+		audit.Created(map[string]any{"status": out.Status})); err != nil {
+		return Unit{}, err
+	}
+	return out, nil
+}
+
+// attestKeys points the org's wallet_managed keys at unit, the wallet unit whose
+// attestations now cover them.
+func attestKeys(ctx context.Context, q database.Querier, orgID, unit uuid.UUID) error {
+	const update = `UPDATE attestation_keys SET wallet_unit_attestation = jsonb_build_object('walletUnitId', $2::uuid), updated_at = now()
+		WHERE organization_id = $1 AND kind = $3`
+	if _, err := q.Exec(ctx, update, orgID, unit, attestation.KeyWalletManaged); err != nil {
+		return fmt.Errorf("walletunit: attest keys org %s: %w", orgID, err)
+	}
+	return nil
 }
 
 // listStatuses returns the non-valid entries of status list `list`, keyed by

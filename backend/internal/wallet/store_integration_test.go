@@ -4,14 +4,17 @@ package wallet_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 const stubKVK = "90001234"
@@ -52,7 +55,7 @@ func TestRegisterOrganization(t *testing.T) {
 
 	att := stubAttestation()
 
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	const slug = "stub-co"
 	const address = slug + "@qerds.localhost"
 	const kvkAddress = "kvk-" + stubKVK + "@qerds.localhost"
@@ -123,6 +126,47 @@ func TestRegisterOrganization(t *testing.T) {
 	if claimed != 1 {
 		t.Fatalf("claimed representations = %d, want 1 (the requester)", claimed)
 	}
+
+	var unitStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM wallet_units WHERE organization_id = $1`, org.ID).Scan(&unitStatus); err != nil {
+		t.Fatalf("wallet unit missing: %v", err)
+	}
+	if unitStatus != walletunit.UnitActive {
+		t.Fatalf("wallet unit status = %q, want active", unitStatus)
+	}
+}
+
+// failOnBootstrap fails the last write of registration, after the wallet unit
+// was provisioned.
+type failOnBootstrap struct{}
+
+func (failOnBootstrap) Record(_ context.Context, _ database.Querier, action string, _ audit.Target, _ map[string]any) error {
+	if action == audit.WalletBootstrapped {
+		return errors.New("audit down")
+	}
+	return nil
+}
+
+// TestRegisterOrganizationRollsBackTheWalletUnit: a registration that fails
+// after provisioning leaves neither the org nor its wallet unit behind.
+func TestRegisterOrganizationRollsBackTheWalletUnit(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	ctx := context.Background()
+	requester, err := user.NewStore(pool).Create(ctx, user.User{Email: "carol@example.com", GivenNames: "Carol", LastName: "Owner"})
+	if err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
+	store := wallet.NewStore(pool, failOnBootstrap{}, walletunit.NewStore(pool, audit.NopRecorder{}))
+	if _, err := store.RegisterOrganization(ctx, requester.ID, "rollback-co", "rollback-co@qerds.localhost", "kvk@qerds.localhost", stubAttestation()); err == nil {
+		t.Fatal("RegisterOrganization succeeded, want the audit failure")
+	}
+	var orgs, units int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM organizations), (SELECT count(*) FROM wallet_units)`).Scan(&orgs, &units); err != nil {
+		t.Fatal(err)
+	}
+	if orgs != 0 || units != 0 {
+		t.Fatalf("after a failed registration: %d orgs, %d wallet units, want none", orgs, units)
+	}
 }
 
 // TestRegisterOrganizationRejectsDuplicateKVK covers "one wallet per company": a
@@ -136,7 +180,7 @@ func TestRegisterOrganizationRejectsDuplicateKVK(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 	att := stubAttestation()
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 
 	if _, err := store.RegisterOrganization(ctx, requester.ID, "first", "a@qerds.localhost", "kvk-a@qerds.localhost", att); err != nil {
 		t.Fatalf("first RegisterOrganization: %v", err)
@@ -157,7 +201,7 @@ func TestSetStatus(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 	att := stubAttestation()
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	org, err := store.RegisterOrganization(ctx, requester.ID, "carol-co", "c@qerds.localhost", "kvk-c@qerds.localhost", att)
 	if err != nil {
 		t.Fatalf("RegisterOrganization: %v", err)

@@ -562,6 +562,48 @@ func newWalletUnitSigner(cfg config.Config) (*walletunit.Signer, error) {
 	return walletunit.NewEphemeralSigner(walletUnitName + " ephemeral provider")
 }
 
+// wscaAccounts reads an org's WSCA account (wsca.ErrNotActivated when it has none).
+type wscaAccounts interface {
+	Get(ctx context.Context, orgID uuid.UUID) (wsca.Account, error)
+}
+
+// walletUnitKeys reports the SKA an org's holder keys get: only when the
+// deployment binds holder keys in the WSCA, describes its HSM, and the org
+// activated its WSCA account. Anything else gets no SKA, so no badge.
+type walletUnitKeys struct {
+	accounts wscaAccounts
+	levels   []string
+}
+
+func newWalletUnitKeys(cfg config.Config, accounts wscaAccounts) walletUnitKeys {
+	if cfg.AttestationHolderWSCAURL == "" {
+		return walletUnitKeys{}
+	}
+	return walletUnitKeys{accounts: accounts, levels: cfg.WalletUnitSKAKeyStorage}
+}
+
+func (k walletUnitKeys) KeyAttestation(ctx context.Context, orgID uuid.UUID) (*walletunit.KeyAttestation, error) {
+	if len(k.levels) == 0 {
+		return nil, nil
+	}
+	_, err := k.accounts.Get(ctx, orgID)
+	if errors.Is(err, wsca.ErrNotActivated) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &walletunit.KeyAttestation{Levels: k.levels}, nil
+}
+
+// newWalletUnitAttester is the wallet unit attestation source WALLET_UNIT_ATTESTER selects.
+func newWalletUnitAttester(cfg config.Config, store *walletunit.Store, orgs *organization.Store, signer *walletunit.Signer) walletunit.Attester {
+	if cfg.WalletUnitAttester == config.ProviderStub {
+		return walletunit.NewStubAttester(orgs, signer, walletUnitConfig(cfg))
+	}
+	return walletunit.NewProvider(store, orgs, signer, walletUnitConfig(cfg))
+}
+
 func walletUnitConfig(cfg config.Config) walletunit.Config {
 	out := walletunit.Config{
 		BaseURL:           cfg.AppBaseURL,
@@ -875,7 +917,7 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 	if err := probe(ctx, qerdsProbeTimeout, registry); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(w.pool, w.recorder)
+	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
 	walletService := wallet.NewService(walletStore, registry, w.authService, w.userStore, w.qerdsStore, cfg.QerdsDefaultAddressDomain)
 	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 
@@ -1012,8 +1054,8 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 		return err
 	}
 	walletUnitStore := walletunit.NewStore(w.pool, w.recorder)
-	walletUnitProvider := walletunit.NewProvider(walletUnitStore, w.orgStore, walletUnitSigner, walletUnitConfig(cfg))
-	w.walletUnitHandler = walletunit.NewHandler(walletUnitStore, walletUnitProvider, w.requireUser, w.orgHandler.Authorize)
+	walletUnitAttester := newWalletUnitAttester(cfg, walletUnitStore, w.orgStore, walletUnitSigner)
+	w.walletUnitHandler = walletunit.NewHandler(walletUnitStore, walletUnitAttester, newWalletUnitKeys(cfg, wscaStore), w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 

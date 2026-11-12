@@ -579,3 +579,23 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadWalletUnitAttester(t *testing.T) {
+	cfg, err := loadWith(t, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.WalletUnitAttester != WalletUnitAttesterLocal {
+		t.Errorf("default attester = %q, want %q", cfg.WalletUnitAttester, WalletUnitAttesterLocal)
+	}
+	cfg, err = loadWith(t, map[string]string{envWalletUnitAttester: ProviderStub})
+	if err != nil {
+		t.Fatalf("Load stub: %v", err)
+	}
+	if cfg.WalletUnitAttester != ProviderStub {
+		t.Errorf("attester = %q, want %q", cfg.WalletUnitAttester, ProviderStub)
+	}
+	if _, err := loadWith(t, map[string]string{envWalletUnitAttester: "remote"}); err == nil || !strings.Contains(err.Error(), envWalletUnitAttester) {
+		t.Errorf("unknown attester: err = %v, want one naming %s", err, envWalletUnitAttester)
+	}
+}

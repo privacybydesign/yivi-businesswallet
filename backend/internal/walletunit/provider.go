@@ -66,40 +66,63 @@ type Provider struct {
 }
 
 func NewProvider(store *Store, orgs orgReader, signer *Signer, cfg Config) *Provider {
-	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
-	return &Provider{store: store, orgs: orgs, signer: signer, cfg: cfg, now: time.Now}
+	return &Provider{store: store, orgs: orgs, signer: signer, cfg: cfg.normalized(), now: time.Now}
+}
+
+func (c Config) normalized() Config {
+	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
+	return c
+}
+
+// Attester is the wallet unit attestation source: Provider, or StubAttester in
+// local dev and CI (WALLET_UNIT_ATTESTER).
+type Attester interface {
+	Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest) (Issued, error)
+	StatusList(ctx context.Context, list int64) (string, error)
+}
+
+var _ Attester = (*Provider)(nil)
+
+// prepare checks the org can be attested and encodes the keys req names. The
+// attested keys are empty unless an SKA is due.
+func (c Config) prepare(ctx context.Context, orgs orgReader, orgID uuid.UUID, req IssueRequest) (organization.Organization, map[string]any, []map[string]any, error) {
+	if req.InstanceKey == nil {
+		return organization.Organization{}, nil, nil, ErrNoInstanceKey
+	}
+	org, err := orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return organization.Organization{}, nil, nil, fmt.Errorf("walletunit: org %s: %w", orgID, err)
+	}
+	if org.Status != organization.StatusActive {
+		return organization.Organization{}, nil, nil, ErrOrgNotActive
+	}
+	if org.EUID == "" {
+		return organization.Organization{}, nil, nil, ErrNoEUID
+	}
+	cnf, err := ecJWK(req.InstanceKey)
+	if err != nil {
+		return organization.Organization{}, nil, nil, err
+	}
+	var attested []map[string]any
+	if c.SKA != nil && req.KeysInHSM {
+		for _, k := range req.AttestedKeys {
+			j, err := ecJWK(k)
+			if err != nil {
+				return organization.Organization{}, nil, nil, err
+			}
+			attested = append(attested, j)
+		}
+	}
+	return org, cnf, attested, nil
 }
 
 // Issue attests the org's wallet unit: a fresh BWIA for req.InstanceKey and, when
 // the keys are HSM-held and the deployment describes its HSM, an SKA. Each gets
 // its own status index, so two attestations cannot be linked by it.
 func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest) (Issued, error) {
-	if req.InstanceKey == nil {
-		return Issued{}, ErrNoInstanceKey
-	}
-	org, err := p.orgs.GetByID(ctx, orgID)
-	if err != nil {
-		return Issued{}, fmt.Errorf("walletunit: org %s: %w", orgID, err)
-	}
-	if org.Status != organization.StatusActive {
-		return Issued{}, ErrOrgNotActive
-	}
-	if org.EUID == "" {
-		return Issued{}, ErrNoEUID
-	}
-	cnf, err := ecJWK(req.InstanceKey)
+	org, cnf, attested, err := p.cfg.prepare(ctx, p.orgs, orgID, req)
 	if err != nil {
 		return Issued{}, err
-	}
-	var attested []map[string]any
-	if p.cfg.SKA != nil && req.KeysInHSM {
-		for _, k := range req.AttestedKeys {
-			j, err := ecJWK(k)
-			if err != nil {
-				return Issued{}, err
-			}
-			attested = append(attested, j)
-		}
 	}
 
 	unit, err := p.store.activeUnitForIssue(ctx, orgID)
@@ -113,23 +136,8 @@ func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest)
 	if err != nil {
 		return Issued{}, err
 	}
-	bwia := jwt.MapClaims{
-		"sub":            p.cfg.BaseURL + "/wallet-units/" + unit.ID.String(),
-		"iat":            now.Unix(),
-		"exp":            exp.Unix(),
-		"cnf":            map[string]any{"jwk": cnf},
-		"wallet_name":    p.cfg.WalletName,
-		"wallet_version": p.cfg.WalletVersion,
-		"wallet_link":    p.cfg.BaseURL,
-		"ebwoid_id":      org.EUID,
-		"legal_name":     org.Name,
-		"client_status":  map[string]any{"status": map[string]any{"status_list": statusRef(p.cfg.BaseURL, idx)}, "exp": statusExp.Unix()},
-	}
-	if p.cfg.CertificationInfo != "" {
-		bwia["wallet_solution_certification_information"] = p.cfg.CertificationInfo
-	}
 	var out Issued
-	if out.BWIA, err = p.signer.sign(bwiaTyp, bwia); err != nil {
+	if out.BWIA, err = p.signer.sign(bwiaTyp, p.cfg.bwiaClaims(unit.ID.String(), org, cnf, idx, now)); err != nil {
 		return Issued{}, err
 	}
 	if len(attested) == 0 {
@@ -140,16 +148,7 @@ func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest)
 	if err != nil {
 		return Issued{}, err
 	}
-	ska := jwt.MapClaims{
-		"iat":                 now.Unix(),
-		"exp":                 exp.Unix(),
-		"attested_keys":       attested,
-		"key_storage":         p.cfg.SKA.KeyStorage,
-		"user_authentication": p.cfg.SKA.UserAuthentication,
-		"certification":       p.cfg.SKA.CertificationURL,
-		"key_storage_status":  map[string]any{"status": map[string]any{"status_list": statusRef(p.cfg.BaseURL, idx)}, "exp": statusExp.Unix()},
-	}
-	if out.SKA, err = p.signer.sign(skaTyp, ska); err != nil {
+	if out.SKA, err = p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now)); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
@@ -168,14 +167,50 @@ func (p *Provider) StatusList(ctx context.Context, list int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	now := p.now()
-	return p.signer.sign(statusListTyp, jwt.MapClaims{
-		"sub":         statusListURI(p.cfg.BaseURL, list),
+	return p.signer.sign(statusListTyp, p.cfg.statusListClaims(list, lst, p.now()))
+}
+
+// bwiaClaims is the BWIA for unit, whose status entry is idx.
+func (c Config) bwiaClaims(unit string, org organization.Organization, cnf map[string]any, idx int64, now time.Time) jwt.MapClaims {
+	claims := jwt.MapClaims{
+		"sub":            c.BaseURL + "/wallet-units/" + unit,
+		"iat":            now.Unix(),
+		"exp":            now.Add(tokenTTL).Unix(),
+		"cnf":            map[string]any{"jwk": cnf},
+		"wallet_name":    c.WalletName,
+		"wallet_version": c.WalletVersion,
+		"wallet_link":    c.BaseURL,
+		"ebwoid_id":      org.EUID,
+		"legal_name":     org.Name,
+		"client_status":  map[string]any{"status": map[string]any{"status_list": statusRef(c.BaseURL, idx)}, "exp": now.Add(statusMaintenance).Unix()},
+	}
+	if c.CertificationInfo != "" {
+		claims["wallet_solution_certification_information"] = c.CertificationInfo
+	}
+	return claims
+}
+
+// skaClaims is the SKA for attested, whose status entry is idx. c.SKA is set.
+func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time) jwt.MapClaims {
+	return jwt.MapClaims{
+		"iat":                 now.Unix(),
+		"exp":                 now.Add(tokenTTL).Unix(),
+		"attested_keys":       attested,
+		"key_storage":         c.SKA.KeyStorage,
+		"user_authentication": c.SKA.UserAuthentication,
+		"certification":       c.SKA.CertificationURL,
+		"key_storage_status":  map[string]any{"status": map[string]any{"status_list": statusRef(c.BaseURL, idx)}, "exp": now.Add(statusMaintenance).Unix()},
+	}
+}
+
+func (c Config) statusListClaims(list int64, lst string, now time.Time) jwt.MapClaims {
+	return jwt.MapClaims{
+		"sub":         statusListURI(c.BaseURL, list),
 		"iat":         now.Unix(),
 		"exp":         now.Add(statusListTokenTTL).Unix(),
 		"ttl":         int64(statusListCacheTTL / time.Second),
 		"status_list": map[string]any{"bits": statusBits, "lst": lst},
-	})
+	}
 }
 
 // ecJWK is pub as a public EC JWK (RFC 7518 §6.2).

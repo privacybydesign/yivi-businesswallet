@@ -44,6 +44,7 @@ export function WalletUnitPanel({
   }
 
   const state = walletUnitState(view.data);
+  const keyAttestation = view.data.keyAttestation;
   const summary = view.data.summary;
   const actionError = revoke.error ?? activate.error;
 
@@ -54,6 +55,13 @@ export function WalletUnitPanel({
         <Tag tone={WALLET_UNIT_TONE[state]}>
           {t(`walletUnit.states.${state}`)}
         </Tag>
+        {keyAttestation && (
+          <Tag tone="green">
+            {t("walletUnit.keysInHsm", {
+              levels: keyAttestation.levels.join(", "),
+            })}
+          </Tag>
+        )}
       </div>
       <p className="text-ink-soft mt-1 text-[13px]">{t("walletUnit.intro")}</p>
       {summary && (

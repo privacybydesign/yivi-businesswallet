@@ -3454,6 +3454,7 @@ export const nl: Translation<typeof en> = {
     activateHint:
       "Activeer een nieuwe wallet-unit om weer attestaties uit te geven. De sleutels mogen niet de gecompromitteerde zijn.",
     activate: "Nieuwe wallet-unit activeren",
+    keysInHsm: "Sleutels in HSM · {{levels}}",
     actionError: "De bewerking is mislukt: {{message}}",
   },
   wscaWallet: {

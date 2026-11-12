@@ -2,6 +2,7 @@ package walletunit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -43,15 +44,37 @@ func (f fakeLists) StatusList(context.Context, int64) (string, error) { return f
 
 // serve routes req through Register with the org in context under role.
 func serve(units unitStore, lists statusLister, role string, req *http.Request) *httptest.ResponseRecorder {
+	return serveWith(units, lists, fakeKeys{}, role, req)
+}
+
+type fakeKeys struct {
+	att *KeyAttestation
+	err error
+}
+
+func (f fakeKeys) KeyAttestation(context.Context, uuid.UUID) (*KeyAttestation, error) {
+	return f.att, f.err
+}
+
+func serveWith(units unitStore, lists statusLister, keys keyAttester, role string, req *http.Request) *httptest.ResponseRecorder {
+	return serveAs(units, lists, keys, organization.Organization{ID: uuid.New(), Slug: "acme"}, role, req)
+}
+
+// serveOrg serves req as an admin of org.
+func serveOrg(units unitStore, keys keyAttester, org organization.Organization, req *http.Request) *httptest.ResponseRecorder {
+	return serveAs(units, fakeLists{}, keys, org, organization.RoleAdmin, req)
+}
+
+func serveAs(units unitStore, lists statusLister, keys keyAttester, org organization.Organization, role string, req *http.Request) *httptest.ResponseRecorder {
 	withOrg := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := organization.ContextWithOrg(r.Context(), organization.Organization{ID: uuid.New(), Slug: "acme"})
+			ctx := organization.ContextWithOrg(r.Context(), org)
 			next.ServeHTTP(w, r.WithContext(organization.ContextWithRole(ctx, role)))
 		})
 	}
 	pass := func(next http.Handler) http.Handler { return next }
 	mux := http.NewServeMux()
-	NewHandler(units, lists, pass, withOrg).Register(mux)
+	NewHandler(units, lists, keys, pass, withOrg).Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
@@ -114,5 +137,52 @@ func TestStatusListRoute(t *testing.T) {
 				t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
 			}
 		})
+	}
+}
+
+func TestSummaryKeyAttestation(t *testing.T) {
+	t.Parallel()
+	ska := fakeKeys{att: &KeyAttestation{Levels: []string{"iso_18045_high"}}}
+	active := Summary{Unit: Unit{Status: UnitActive}}
+	revoked := Summary{Unit: Unit{Status: UnitRevoked}}
+	attestable := organization.Organization{ID: uuid.New(), Slug: "acme", Status: organization.StatusActive, EUID: "NLNHR.12345678"}
+	suspended, noEUID := attestable, attestable
+	suspended.Status = organization.StatusSuspended
+	noEUID.EUID = ""
+
+	tests := []struct {
+		name    string
+		org     organization.Organization
+		units   *fakeUnits
+		keys    fakeKeys
+		wantSKA bool
+	}{
+		{"active unit of an attestable org", attestable, &fakeUnits{summary: active}, ska, true},
+		{"no SKA for the org's keys", attestable, &fakeUnits{summary: active}, fakeKeys{}, false},
+		{"revoked unit", attestable, &fakeUnits{summary: revoked}, ska, false},
+		{"no unit yet", attestable, &fakeUnits{summaryErr: ErrNoActiveUnit}, ska, false},
+		{"suspended org", suspended, &fakeUnits{summary: active}, ska, false},
+		{"org without an EUID", noEUID, &fakeUnits{summary: active}, ska, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec := serveOrg(tc.units, tc.keys, tc.org, httptest.NewRequest(http.MethodGet, "/orgs/acme/wallet-unit", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if has := got["keyAttestation"] != nil; has != tc.wantSKA {
+				t.Errorf("keyAttestation = %v, want present %v", got["keyAttestation"], tc.wantSKA)
+			}
+		})
+	}
+
+	failing := fakeKeys{err: errors.New("db down")}
+	if rec := serveOrg(&fakeUnits{summary: active}, failing, attestable, httptest.NewRequest(http.MethodGet, "/orgs/acme/wallet-unit", nil)); rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d on a lookup failure, want 500", rec.Code)
 	}
 }

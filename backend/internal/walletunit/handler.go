@@ -27,16 +27,28 @@ type statusLister interface {
 	StatusList(ctx context.Context, list int64) (string, error)
 }
 
+// KeyAttestation is what the SKA an org's holder keys get states about them,
+// shown as the admin's assurance badge.
+type KeyAttestation struct {
+	Levels []string `json:"levels"`
+}
+
+// keyAttester reports the SKA org's holder keys get, nil when they get none.
+type keyAttester interface {
+	KeyAttestation(ctx context.Context, orgID uuid.UUID) (*KeyAttestation, error)
+}
+
 // Handler serves the org-admin wallet unit routes and the public status lists.
 type Handler struct {
 	units       unitStore
 	lists       statusLister
+	keys        keyAttester
 	requireUser func(http.Handler) http.Handler
 	authorize   func(http.Handler) http.Handler
 }
 
-func NewHandler(units unitStore, lists statusLister, requireUser, authorize func(http.Handler) http.Handler) *Handler {
-	return &Handler{units: units, lists: lists, requireUser: requireUser, authorize: authorize}
+func NewHandler(units unitStore, lists statusLister, keys keyAttester, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+	return &Handler{units: units, lists: lists, keys: keys, requireUser: requireUser, authorize: authorize}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -53,6 +65,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 type summaryView struct {
 	Issued  bool     `json:"issued"`
 	Summary *Summary `json:"summary,omitempty"`
+	// KeyAttestation is set only when the org's holder keys get an SKA.
+	KeyAttestation *KeyAttestation `json:"keyAttestation,omitempty"`
 }
 
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) error {
@@ -65,7 +79,14 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) error {
 	case err != nil:
 		return fmt.Errorf("wallet unit summary: %w", err)
 	}
-	respond.JSON(w, r, http.StatusOK, summaryView{Issued: true, Summary: &sum})
+	view := summaryView{Issued: true, Summary: &sum}
+	// An SKA is only issued for an active unit of an active org with an EUID.
+	if sum.Unit.Status == UnitActive && org.Status == organization.StatusActive && org.EUID != "" {
+		if view.KeyAttestation, err = h.keys.KeyAttestation(r.Context(), org.ID); err != nil {
+			return fmt.Errorf("wallet unit key attestation: %w", err)
+		}
+	}
+	respond.JSON(w, r, http.StatusOK, view)
 	return nil
 }
 

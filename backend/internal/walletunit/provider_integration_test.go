@@ -20,10 +20,17 @@ import (
 	"github.com/privacybydesign/irmago/eudi/credentials/statuslist"
 	eudi_jwt "github.com/privacybydesign/irmago/eudi/jwt"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 )
+
+type noKeyAttestation struct{}
+
+func (noKeyAttestation) KeyAttestation(context.Context, uuid.UUID) (*KeyAttestation, error) {
+	return nil, nil
+}
 
 type env struct {
 	pool     *pgxpool.Pool
@@ -50,7 +57,7 @@ func newEnv(t *testing.T, ska *SKAConfig) *env {
 	})
 	api := http.NewServeMux()
 	pass := func(next http.Handler) http.Handler { return next }
-	NewHandler(store, provider, pass, pass).Register(api)
+	NewHandler(store, provider, noKeyAttestation{}, pass, pass).Register(api)
 	mux.Handle("/api/v1/", http.StripPrefix("/api/v1", api))
 
 	roots := x509.NewCertPool()
@@ -272,4 +279,84 @@ func TestStatusLifecycle(t *testing.T) {
 	}
 	expect(fresh, statuslist.StatusInvalid)
 	expect(otherRef, statuslist.StatusValid)
+}
+
+func keyUnit(t *testing.T, pool *pgxpool.Pool, key uuid.UUID) *string {
+	t.Helper()
+	var unit *string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT wallet_unit_attestation->>'walletUnitId' FROM attestation_keys WHERE id = $1`, key).Scan(&unit); err != nil {
+		t.Fatalf("read key %s: %v", key, err)
+	}
+	return unit
+}
+
+func TestWalletManagedKeysFollowTheActiveUnit(t *testing.T) {
+	e := newEnv(t, nil)
+	ctx := context.Background()
+	org := seedOrg(t, e.pool, "keys", "NLNHR.11111111")
+	keys := attestation.NewStore(e.pool, audit.NopRecorder{})
+
+	early, err := keys.CreateKey(ctx, org, attestation.KeyWalletManaged, "before the unit", "ref-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, early.ID); got != nil {
+		t.Fatalf("key before any unit attested by %q, want none", *got)
+	}
+
+	first, err := e.store.Activate(ctx, org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, early.ID); got == nil || *got != first.ID.String() {
+		t.Fatalf("key attested by %v, want the provisioned unit %s", got, first.ID)
+	}
+	later, err := keys.CreateKey(ctx, org, attestation.KeyWalletManaged, "after the unit", "ref-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, later.ID); got == nil || *got != first.ID.String() {
+		t.Fatalf("new key attested by %v, want %s", got, first.ID)
+	}
+	qualified, err := keys.CreateKey(ctx, org, attestation.KeyQualifiedCertificate, "qtsp", "ref-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, qualified.ID); got != nil {
+		t.Fatalf("qualified key attested by %q, want none", *got)
+	}
+
+	if _, err := e.store.Revoke(ctx, org, ReasonKeyCompromise); err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.store.Activate(ctx, org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, later.ID); got == nil || *got != second.ID.String() {
+		t.Fatalf("key attested by %v after reactivation, want %s", got, second.ID)
+	}
+}
+
+// An org registered before wallet units existed gets its first unit on the first
+// issue; its wallet_managed keys then point at that unit too.
+func TestFirstIssueAttestsExistingKeys(t *testing.T) {
+	e := newEnv(t, nil)
+	ctx := context.Background()
+	org := seedOrg(t, e.pool, "legacy", "NLNHR.22222222")
+	key, err := attestation.NewStore(e.pool, audit.NopRecorder{}).CreateKey(ctx, org, attestation.KeyWalletManaged, "legacy key", "ref")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.provider.Issue(ctx, org, IssueRequest{InstanceKey: newKey(t)}); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	sum, err := e.store.Summary(ctx, org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := keyUnit(t, e.pool, key.ID); got == nil || *got != sum.Unit.ID.String() {
+		t.Fatalf("key attested by %v, want the first unit %s", got, sum.Unit.ID)
+	}
 }

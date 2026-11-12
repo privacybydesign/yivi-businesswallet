@@ -16,6 +16,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/testdb"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 // captureInbox records the deposited attestation instead of writing it, so the
@@ -55,7 +56,7 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 		t.Fatalf("create requester: %v", err)
 	}
 
-	store := wallet.NewStore(pool, audit.NopRecorder{})
+	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	reg := registryprovider.NewSeededRegistry(pool, audit.NewDBRecorder())
 	inbox := &captureInbox{}
 	svc := wallet.NewService(store, reg, nil, nil, inbox, "qerds.localhost")

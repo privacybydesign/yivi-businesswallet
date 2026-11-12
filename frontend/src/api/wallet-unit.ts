@@ -31,6 +31,9 @@ export const walletUnitViewSchema = z.object({
       lastIssuedAt: z.string().optional(),
     })
     .optional(),
+  // Set only when the org's holder keys get a key attestation (SKA): the
+  // key storage levels it states.
+  keyAttestation: z.object({ levels: z.array(z.string()) }).optional(),
 });
 
 export type WalletUnitView = z.infer<typeof walletUnitViewSchema>;

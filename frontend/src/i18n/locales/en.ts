@@ -3366,6 +3366,7 @@ export const en = {
     activateHint:
       "Activate a new wallet unit to issue attestations again. Its keys must not be the ones that were compromised.",
     activate: "Activate new wallet unit",
+    keysInHsm: "Keys in HSM · {{levels}}",
     actionError: "The operation failed: {{message}}",
   },
   wscaWallet: {

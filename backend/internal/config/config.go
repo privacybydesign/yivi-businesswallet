@@ -58,6 +58,7 @@ const (
 	envWalletUnitProviderCert        = "WALLET_UNIT_PROVIDER_CERT"
 	envWalletUnitProviderKey         = "WALLET_UNIT_PROVIDER_KEY"
 	envWalletUnitVersion             = "WALLET_UNIT_VERSION"
+	envWalletUnitAttester            = "WALLET_UNIT_ATTESTER"
 	envWalletUnitCertificationInfo   = "WALLET_UNIT_CERTIFICATION_INFO"
 	envWalletUnitSKACertificationURL = "WALLET_UNIT_SKA_CERTIFICATION_URL"
 	envWalletUnitSKAKeyStorage       = "WALLET_UNIT_SKA_KEY_STORAGE"
@@ -251,6 +252,10 @@ const (
 	envTrustedProxies = "TRUSTED_PROXIES"
 
 	defaultAppBaseURL = "http://localhost:5173"
+	// WalletUnitAttesterLocal attests wallet units with this deployment's own
+	// provider; ProviderStub selects the in-process stub (local dev / CI).
+	WalletUnitAttesterLocal = "local"
+
 	// defaultWalletUnitVersion is what a BWIA states when no release version is set.
 	defaultWalletUnitVersion = "unreleased"
 	defaultMailLocale        = "en"
@@ -437,6 +442,9 @@ type Config struct {
 	// self-signed certificate at boot, which nobody else trusts.
 	WalletUnitProviderCert string
 	WalletUnitProviderKey  string
+	// WalletUnitAttester selects the wallet unit attestation source:
+	// WalletUnitAttesterLocal or ProviderStub.
+	WalletUnitAttester string
 	// WalletUnitVersion is the wallet_version a BWIA states.
 	WalletUnitVersion string
 	// WalletUnitCertificationInfo is the wallet solution's certification
@@ -778,6 +786,10 @@ func loadWalletUnit(c *Config) error {
 	c.WalletUnitProviderCert, c.WalletUnitProviderKey = os.Getenv(envWalletUnitProviderCert), os.Getenv(envWalletUnitProviderKey)
 	if (c.WalletUnitProviderCert == "") != (c.WalletUnitProviderKey == "") {
 		return fmt.Errorf("config: %s and %s must be set together", envWalletUnitProviderCert, envWalletUnitProviderKey)
+	}
+	c.WalletUnitAttester = envOrDefault(envWalletUnitAttester, WalletUnitAttesterLocal)
+	if c.WalletUnitAttester != WalletUnitAttesterLocal && c.WalletUnitAttester != ProviderStub {
+		return fmt.Errorf("config: %s must be %q or %q", envWalletUnitAttester, WalletUnitAttesterLocal, ProviderStub)
 	}
 	c.WalletUnitVersion = envOrDefault(envWalletUnitVersion, defaultWalletUnitVersion)
 	c.WalletUnitCertificationInfo = os.Getenv(envWalletUnitCertificationInfo)
