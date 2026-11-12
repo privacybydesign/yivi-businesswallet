@@ -10,7 +10,7 @@ import (
 
 // WSCAConfig enables WSCA-backed holder binding on the redeem path: the SD-JWT VC
 // holder binding keys are generated and their OpenID4VCI proofs signed by the
-// wallet-provider WSCA/HSM (irmabinding over walletmobile) instead of software
+// wallet-provider WSCA/HSM (wscaHolderSigner over walletmobile) instead of software
 // keys, so the holder private key never enters this process. Optional; when the
 // engine has no WSCAConfig the default software binder is used (backwards
 // compatible). See .ai/features/wsca-holder-binding.md.

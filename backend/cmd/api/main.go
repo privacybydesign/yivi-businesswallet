@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -729,8 +730,8 @@ type wiring struct {
 }
 
 func (w *wiring) close() {
-	for i := len(w.closers) - 1; i >= 0; i-- {
-		w.closers[i]()
+	for _, v := range slices.Backward(w.closers) {
+		v()
 	}
 }
 

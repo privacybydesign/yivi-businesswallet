@@ -38,12 +38,29 @@ func (e *Engine) SetWalletUnitAttester(a WalletUnitAttester) { e.walletUnit = a 
 
 // orgWalletAttester is irmago's WalletAttester for one redemption of one org.
 type orgWalletAttester struct {
-	ctx      context.Context //nolint:containedctx // irmago calls back without a context; this one is the redemption's.
-	orgID    uuid.UUID
-	provider WalletUnitAttester
+	orgID uuid.UUID
 	// keysInHSM is set when holder keys live in the WSCA/HSM; only then can
 	// they be attested.
 	keysInHSM bool
+	issueBWIA func(instanceKey *ecdsa.PublicKey) (string, error)
+	issueSKA  func(keys []*ecdsa.PublicKey) (string, error)
+	warn      func(msg string, args ...any)
+}
+
+// newOrgWalletAttester binds the redemption's context into the calls, since
+// irmago's WalletAttester methods take none.
+func newOrgWalletAttester(ctx context.Context, orgID uuid.UUID, provider WalletUnitAttester, keysInHSM bool) *orgWalletAttester {
+	return &orgWalletAttester{
+		orgID:     orgID,
+		keysInHSM: keysInHSM,
+		issueBWIA: func(instanceKey *ecdsa.PublicKey) (string, error) {
+			return provider.IssueBWIA(ctx, orgID, instanceKey)
+		},
+		issueSKA: func(keys []*ecdsa.PublicKey) (string, error) {
+			return provider.IssueSKA(ctx, orgID, keys)
+		},
+		warn: func(msg string, args ...any) { slog.WarnContext(ctx, msg, args...) },
+	}
 }
 
 var _ openid4vci.WalletAttester = (*orgWalletAttester)(nil)
@@ -54,9 +71,9 @@ func (a *orgWalletAttester) ClientAttestation(credentialIssuer string) (*openid4
 	if err != nil {
 		return nil, fmt.Errorf("eudiholder: instance key: %w", err)
 	}
-	bwia, err := a.provider.IssueBWIA(a.ctx, a.orgID, &key.PublicKey)
+	bwia, err := a.issueBWIA(&key.PublicKey)
 	if errors.Is(err, ErrNotAttestable) {
-		slog.WarnContext(a.ctx, "eudiholder: receiving without a wallet unit attestation",
+		a.warn("eudiholder: receiving without a wallet unit attestation",
 			slog.String("org_id", a.orgID.String()), slog.String("issuer", credentialIssuer), slog.String("reason", err.Error()))
 		return nil, nil
 	}
@@ -76,7 +93,7 @@ func (a *orgWalletAttester) KeyAttestation(_ string, key *ecdsa.PublicKey, _ *st
 	if !a.keysInHSM {
 		return "", nil
 	}
-	return a.provider.IssueSKA(a.ctx, a.orgID, []*ecdsa.PublicKey{key})
+	return a.issueSKA([]*ecdsa.PublicKey{key})
 }
 
 func es256Signer(key *ecdsa.PrivateKey) func([]byte) ([]byte, error) {

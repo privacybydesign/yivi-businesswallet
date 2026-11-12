@@ -81,8 +81,7 @@ func (s *Store) CreateInvitation(ctx context.Context, in Invitation) (Invitation
 			in.GivenNames, in.LastName, tokenHash[:], time.Now().Add(inviteTTL),
 			in.MemberType, in.ExternalOrganisation,
 		).Scan(&in.ID, &in.ExpiresAt, &in.CreatedAt, &deptName)
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 			switch {
 			case pgErr.Code == uniqueViolation:
 				return ErrAlreadyInvited

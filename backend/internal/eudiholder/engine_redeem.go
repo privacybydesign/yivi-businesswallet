@@ -136,7 +136,7 @@ func (e *Engine) Redeem(ctx context.Context, orgID uuid.UUID, offerURI string) (
 		return Redeemed{}, fmt.Errorf("eudiholder: redeem client org %s: %w", orgID, err)
 	}
 	if e.walletUnit != nil {
-		client.SetWalletAttester(&orgWalletAttester{ctx: ctx, orgID: orgID, provider: e.walletUnit, keysInHSM: e.keysInHSM})
+		client.SetWalletAttester(newOrgWalletAttester(ctx, orgID, e.walletUnit, e.keysInHSM))
 	}
 	client.SetAllowInsecureHttp(e.redeem.AllowInsecureHTTP)
 

@@ -74,7 +74,7 @@ func brandedFixture(t *testing.T) fixture {
 		t.Fatalf("SaveBranding: %v", err)
 	}
 	if _, err := f.svc.SaveFlowBranding(ctx, testOrg, chipFlow.ID, FlowBranding{
-		Custom: true, Branding: Branding{DisplayName: " Acme Reizen "},
+		Custom: true, DisplayName: " Acme Reizen ",
 	}, LogoChange{Replace: true, Logo: flowLogo}); err != nil {
 		t.Fatalf("SaveFlowBranding: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestBrandingOver(t *testing.T) {
 // A flow that is not custom wears the org's branding, whatever fields it holds.
 func TestBrandedForNotCustom(t *testing.T) {
 	org := Settings{Branding: Branding{DisplayName: "Org"}}
-	got := org.brandedFor(FlowBranding{Branding: Branding{DisplayName: "Flow"}})
+	got := org.brandedFor(FlowBranding{DisplayName: "Flow"})
 	if got.Branding.DisplayName != "Org" {
 		t.Errorf("display name = %q, want the org's", got.Branding.DisplayName)
 	}
@@ -189,7 +189,7 @@ func TestMailBlockedByBranding(t *testing.T) {
 func TestMailLogoFallsBackToOrg(t *testing.T) {
 	f := brandedFixture(t)
 	if _, err := f.svc.SaveFlowBranding(context.Background(), testOrg, chipFlow.ID, FlowBranding{
-		Custom: true, Branding: Branding{DisplayName: "Acme Reizen"},
+		Custom: true, DisplayName: "Acme Reizen",
 	}, LogoChange{Replace: true}); err != nil {
 		t.Fatalf("SaveFlowBranding: %v", err)
 	}

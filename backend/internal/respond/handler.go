@@ -19,8 +19,7 @@ func (h HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		Error(w, r, apiErr.Status, apiErr.Code, apiErr.Message)
 		return
 	}

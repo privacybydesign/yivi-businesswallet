@@ -89,26 +89,38 @@ func autoSelect(plan *clientmodels.DisclosurePlan, queryIDs []dcql.ChoiceQueryId
 		if len(pick.OwnedOptions) == 0 {
 			return nil, ErrNoMatchingCredential
 		}
-		for _, cred := range pick.OwnedOptions[0].Credentials {
-			paths := make([][]any, 0, len(cred.Attributes))
-			for _, attr := range cred.Attributes {
-				if len(attr.ClaimPath) > 0 {
-					paths = append(paths, attr.ClaimPath)
-				}
-			}
-			queryID := queryIDs[i].QueryIdFor(cred.Hash, paths)
-			if queryID == "" {
-				return nil, fmt.Errorf("eudiholder: plan names credential %q outside the query", cred.Hash)
-			}
-			selections = append(selections, dcql.DisclosureSelection{
-				QueryId:        queryID,
-				CredentialHash: cred.Hash,
-				ClaimPaths:     paths,
-			})
+		bundle, err := bundleSelections(pick.OwnedOptions[0], queryIDs[i])
+		if err != nil {
+			return nil, err
 		}
+		selections = append(selections, bundle...)
 	}
 	if len(selections) == 0 {
 		return nil, ErrNoMatchingCredential
+	}
+	return selections, nil
+}
+
+// bundleSelections selects every credential of one bundle with the claim paths
+// the plan derived for it.
+func bundleSelections(bundle *clientmodels.DisclosureBundle, queryIDs dcql.ChoiceQueryIds) ([]dcql.DisclosureSelection, error) {
+	selections := make([]dcql.DisclosureSelection, 0, len(bundle.Credentials))
+	for _, cred := range bundle.Credentials {
+		paths := make([][]any, 0, len(cred.Attributes))
+		for _, attr := range cred.Attributes {
+			if len(attr.ClaimPath) > 0 {
+				paths = append(paths, attr.ClaimPath)
+			}
+		}
+		queryID := queryIDs.QueryIdFor(cred.Hash, paths)
+		if queryID == "" {
+			return nil, fmt.Errorf("eudiholder: plan names credential %q outside the query", cred.Hash)
+		}
+		selections = append(selections, dcql.DisclosureSelection{
+			QueryId:        queryID,
+			CredentialHash: cred.Hash,
+			ClaimPaths:     paths,
+		})
 	}
 	return selections, nil
 }

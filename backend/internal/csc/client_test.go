@@ -39,8 +39,7 @@ func TestClientInfoRejectsEmptyInfo(t *testing.T) {
 		}))
 		_, err := NewClient().Info(context.Background(), server.URL)
 		server.Close()
-		var testErr *TestError
-		if !errors.As(err, &testErr) {
+		if _, ok := errors.AsType[*TestError](err); !ok {
 			t.Fatalf("Info(%s) error = %v, want *TestError", body, err)
 		}
 	}

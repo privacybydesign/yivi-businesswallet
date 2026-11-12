@@ -34,7 +34,7 @@ func (f *fakeWalletUnit) IssueSKA(_ context.Context, _ uuid.UUID, keys []*ecdsa.
 
 func TestOrgWalletAttesterClientAttestation(t *testing.T) {
 	t.Parallel()
-	a := &orgWalletAttester{ctx: context.Background(), orgID: uuid.New(), provider: &fakeWalletUnit{}}
+	a := newOrgWalletAttester(context.Background(), uuid.New(), &fakeWalletUnit{}, false)
 	ca, err := a.ClientAttestation("https://issuer.example")
 	if err != nil {
 		t.Fatal(err)
@@ -55,13 +55,13 @@ func TestOrgWalletAttesterClientAttestation(t *testing.T) {
 
 func TestOrgWalletAttesterNotAttestable(t *testing.T) {
 	t.Parallel()
-	a := &orgWalletAttester{ctx: context.Background(), orgID: uuid.New(), provider: &fakeWalletUnit{bwiaErr: fmt.Errorf("%w: no EUID", ErrNotAttestable)}}
+	a := newOrgWalletAttester(context.Background(), uuid.New(), &fakeWalletUnit{bwiaErr: fmt.Errorf("%w: no EUID", ErrNotAttestable)}, false)
 	ca, err := a.ClientAttestation("https://issuer.example")
 	if err != nil || ca != nil {
 		t.Errorf("got %v, %v; want no attestation and no error", ca, err)
 	}
 
-	a.provider = &fakeWalletUnit{bwiaErr: fmt.Errorf("db down")}
+	a = newOrgWalletAttester(context.Background(), uuid.New(), &fakeWalletUnit{bwiaErr: fmt.Errorf("db down")}, false)
 	if _, err := a.ClientAttestation("https://issuer.example"); err == nil {
 		t.Error("another error was swallowed")
 	}
@@ -74,7 +74,7 @@ func TestOrgWalletAttesterKeyAttestationOnlyForHSMKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := &fakeWalletUnit{}
-	a := &orgWalletAttester{ctx: context.Background(), orgID: uuid.New(), provider: unit}
+	a := newOrgWalletAttester(context.Background(), uuid.New(), unit, false)
 	if ka, _ := a.KeyAttestation("https://issuer.example", &k.PublicKey, nil); ka != "" || len(unit.skaKeys) != 0 {
 		t.Errorf("a software key got an SKA: %q", ka)
 	}

@@ -18,7 +18,6 @@ import (
 	irmastorage "github.com/privacybydesign/irmago/eudi/storage"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/wallet-provider/mobile/walletmobile"
-	"github.com/privacybydesign/wallet-provider/mobile/walletmobile/irmabinding"
 )
 
 // holderKeyBinder (wsca build) builds the org's WSCA issuance key binder over its
@@ -32,7 +31,7 @@ func (e *Engine) holderKeyBinder(ctx context.Context, orgID uuid.UUID, st irmast
 	if err != nil {
 		return nil, err
 	}
-	return irmabinding.NewIssuanceBinderFactory(signer)(st), nil
+	return &wscaIssuanceBinder{signer: signer, store: db.NewHolderBindingKeyStore(st.Db())}, nil
 }
 
 // presentationKeyBinder (wsca build) signs the key-binding JWT of an OpenID4VP
@@ -48,16 +47,16 @@ func (e *Engine) presentationKeyBinder(ctx context.Context, orgID uuid.UUID, st 
 	if err != nil {
 		return nil, err
 	}
-	return holderkeys.NewSignerKeyBinder(&wscaRowSigner{Signer: signer, keys: db.NewHolderBindingKeyStore(st.Db())}), nil
+	return holderkeys.NewSignerKeyBinder(&wscaRowSigner{wscaHolderSigner: signer, keys: db.NewHolderBindingKeyStore(st.Db())}), nil
 }
 
 // wscaRefPrefix marks the WSCA key id the issuance binder records in the
-// holder-key row's private-key column (irmabinding.bindingKeyModel): the key
+// holder-key row's private-key column (wscaBindingKeyRow): the key
 // itself never leaves the HSM, the row remembers which one backs the credential.
 const wscaRefPrefix = "wsca:"
 
 // wscaRowSigner is the org's WSCA signer with key resolution through irmago's
-// holder-key rows. irmabinding.Signer.Reference matches the credential's cnf key
+// holder-key rows. wscaHolderSigner.Reference matches the credential's cnf key
 // against the WSCA's key list by thumbprint, but that list carries the raw EC
 // point in public_key_hex (the DER form is public_key_der_hex), so the match
 // never succeeds. The issuance binder wrote the WSCA key id into the row it
@@ -65,7 +64,7 @@ const wscaRefPrefix = "wsca:"
 // software binder uses — so the reference is read from there, and the WSCA list
 // is only the fallback for a row this backend did not write.
 type wscaRowSigner struct {
-	*irmabinding.Signer
+	*wscaHolderSigner
 	keys db.HolderBindingKeyStore
 }
 
@@ -87,7 +86,7 @@ func (s *wscaRowSigner) Reference(pub jwk.Key) (string, error) {
 			}
 		}
 	}
-	return s.Signer.Reference(pub)
+	return s.wscaHolderSigner.Reference(pub)
 }
 
 func (s *wscaRowSigner) refByDID(did string) (string, bool) {
@@ -105,7 +104,7 @@ func wscaRef(privateKey []byte) (string, bool) {
 
 // wscaSigner opens the org's already-activated walletmobile wallet and wraps it
 // in irmago's HolderSigner shape with the org's sealed activation secret.
-func (e *Engine) wscaSigner(ctx context.Context, orgID uuid.UUID) (*irmabinding.Signer, error) {
+func (e *Engine) wscaSigner(ctx context.Context, orgID uuid.UUID) (*wscaHolderSigner, error) {
 	w, err := walletmobile.NewWallet(e.wsca.BaseURL, OrgKeystoreDir(e.wsca.KeystoreDir, orgID), e.wsca.Insecure)
 	if err != nil {
 		return nil, fmt.Errorf("eudiholder: open WSCA wallet org %s: %w", orgID, err)
@@ -114,5 +113,5 @@ func (e *Engine) wscaSigner(ctx context.Context, orgID uuid.UUID) (*irmabinding.
 	if err != nil {
 		return nil, fmt.Errorf("eudiholder: WSCA secret org %s: %w", orgID, err)
 	}
-	return irmabinding.NewSigner(w, func() (string, error) { return secret, nil }), nil
+	return &wscaHolderSigner{w: w, pin: func() (string, error) { return secret, nil }}, nil
 }

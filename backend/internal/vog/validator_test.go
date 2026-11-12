@@ -36,9 +36,9 @@ func TestValidateAuthentic(t *testing.T) {
 }
 
 func TestValidateFinalRejectionDoesNotRetry(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		writeCode(w, 2)
 	})
 	code, err := c.Validate(context.Background(), []byte("doc"))
@@ -48,15 +48,15 @@ func TestValidateFinalRejectionDoesNotRetry(t *testing.T) {
 	if code != 2 {
 		t.Errorf("code = %d, want 2", code)
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Errorf("calls = %d, want 1 (a final rejection must not retry)", got)
 	}
 }
 
 func TestValidateRetryableThenSuccess(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n < 2 {
 			writeCode(w, 3) // retryable
 			return
@@ -71,7 +71,7 @@ func TestValidateRetryableThenSuccess(t *testing.T) {
 	if code != ResponseAuthentic {
 		t.Errorf("code = %d, want authentic", code)
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("calls = %d, want 2", got)
 	}
 	if elapsed := time.Since(start); elapsed < retryBackoff[0] {
@@ -80,24 +80,24 @@ func TestValidateRetryableThenSuccess(t *testing.T) {
 }
 
 func TestValidateExhaustsRetries(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		writeCode(w, 5) // always retryable
 	})
 	_, err := c.Validate(context.Background(), []byte("doc"))
 	if err == nil {
 		t.Fatal("Validate: want an error once every attempt is retryable")
 	}
-	if got := atomic.LoadInt32(&calls); int(got) != maxAttempts {
+	if got := calls.Load(); int(got) != maxAttempts {
 		t.Errorf("calls = %d, want %d", got, maxAttempts)
 	}
 }
 
 func TestValidateServerErrorIsRetryable(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		if n < 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return

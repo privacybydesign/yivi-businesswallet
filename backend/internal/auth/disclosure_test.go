@@ -289,8 +289,7 @@ func TestMapClaimError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mapClaimError(tt.in)
-			var apiErr *respond.APIError
-			if errors.As(got, &apiErr) {
+			if apiErr, ok := errors.AsType[*respond.APIError](got); ok {
 				if !tt.wantAPI {
 					t.Fatalf("expected non-APIError passthrough, got APIError %+v", apiErr)
 				}

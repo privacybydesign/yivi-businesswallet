@@ -70,7 +70,7 @@ func TestEmploymentReviewResult(t *testing.T) {
 func TestAPIResultAgeOver(t *testing.T) {
 	req := Request{ID: uuid.New(), Status: StatusApproved}
 	identity := proofingprovider.Identity{
-		Result:  proofingprovider.Result{Status: proofingprovider.StatusApproved},
+		Status:  proofingprovider.StatusApproved,
 		AgeOver: &proofingprovider.AgeOver{Age: 18, Over: true},
 	}
 	out := newAPIResultResponse(req, identity, time.Now())
