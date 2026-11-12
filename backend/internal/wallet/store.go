@@ -14,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 const (
@@ -44,10 +45,16 @@ var statusAudit = map[string]string{
 type Store struct {
 	db    database.DB
 	audit audit.Recorder
+	units unitProvisioner
 }
 
-func NewStore(db database.DB, recorder audit.Recorder) *Store {
-	return &Store{db: db, audit: recorder}
+// unitProvisioner creates the org's wallet unit inside the registration tx.
+type unitProvisioner interface {
+	Provision(ctx context.Context, q database.Querier, orgID uuid.UUID) (walletunit.Unit, error)
+}
+
+func NewStore(db database.DB, recorder audit.Recorder, units unitProvisioner) *Store {
+	return &Store{db: db, audit: recorder, units: units}
 }
 
 func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization) error {
@@ -111,6 +118,10 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 		}
 
 		if err := insertRepresentations(ctx, q, org.ID, requestorUserID, att); err != nil {
+			return err
+		}
+
+		if _, err := s.units.Provision(ctx, q, org.ID); err != nil {
 			return err
 		}
 

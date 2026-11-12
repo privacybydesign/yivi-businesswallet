@@ -31,6 +31,8 @@ tags:
     description: Per-organisation issuer settings.
   - name: wsca
     description: Per-organisation WSCA holder-wallet activation and rotation.
+  - name: wallet-unit
+    description: Wallet unit attestations (WE BUILD CS-05) and their status lists.
   - name: theme
     description: Per-organisation colour scheme and logo.
   - name: notifications
@@ -3899,6 +3901,120 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/wallet-unit:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [wallet-unit]
+      summary: Get the organisation wallet unit attestation status
+      description: >-
+        Requires an administrator role. The latest wallet unit the Business Wallet
+        Provider attests (active or revoked), how many attestations it was issued
+        and when the last one was. `issued` is false when none was issued yet.
+        `keyAttestation` is present only when the org's holder keys get a key
+        attestation (SKA), with the key storage levels it states.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/wallet-unit/revoke:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [wallet-unit]
+      summary: Revoke the organisation wallet unit
+      description: >-
+        Requires an administrator role. Body `{"reason": "owner_request" |
+        "key_compromise"}`. Every attestation issued to the unit reads invalid on
+        its status list from then on. 409 if there is no active unit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orgs/{slug}/wallet-unit/activate:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [wallet-unit]
+      summary: Activate a new wallet unit after a revocation
+      description: >-
+        Requires an administrator role. Creates a new active wallet unit, so
+        attestations can be issued again. 409 if the organisation already has an
+        active one.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/wallet-unit/status-lists/{list}:
+    parameters:
+      - name: list
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Status list number.
+    get:
+      tags: [wallet-unit]
+      summary: Get a wallet unit attestation status list
+      description: >-
+        Public. The Token Status List (draft-ietf-oauth-status-list-20, 2 bits per
+        entry) a BWIA `client_status` or SKA `key_storage_status` points to, as a
+        signed `application/statuslist+jwt`. 404 for an unknown list.
+      security: []
+      responses:
+        '200':
+          description: The signed status list token.
+          content:
+            application/statuslist+jwt:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/orgs/{slug}/mandates:
     parameters:
       - name: slug

@@ -90,6 +90,8 @@ const (
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
+	WalletUnitActivated   = "wallet.unit_activated"
+	WalletUnitRevoked     = "wallet.unit_revoked"
 
 	// KVK-side decisions, recorded against the KVK register's own audit log when
 	// it consults its authentic source for a registration request.
@@ -278,6 +280,7 @@ const (
 	TargetWalletInstance  = "wallet_instance"
 	TargetRepresentation  = "wallet_representation"
 	TargetKVKRegistration = "kvk_registration"
+	TargetWalletUnit      = "wallet_unit"
 
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"

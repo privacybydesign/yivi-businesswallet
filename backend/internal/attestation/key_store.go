@@ -12,11 +12,11 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
-const keyColumns = `id, organization_id, kind, label, provider_ref, status, created_at, updated_at`
+const keyColumns = `id, organization_id, kind, label, provider_ref, status, wallet_unit_attestation, created_at, updated_at`
 
 func scanKey(row rowScanner) (Key, error) {
 	var k Key
-	if err := row.Scan(&k.ID, &k.OrganizationID, &k.Kind, &k.Label, &k.ProviderRef, &k.Status, &k.CreatedAt, &k.UpdatedAt); err != nil {
+	if err := row.Scan(&k.ID, &k.OrganizationID, &k.Kind, &k.Label, &k.ProviderRef, &k.Status, &k.WalletUnitAttestation, &k.CreatedAt, &k.UpdatedAt); err != nil {
 		return Key{}, err
 	}
 	return k, nil
@@ -49,11 +49,14 @@ func (s *Store) ListKeys(ctx context.Context, orgID uuid.UUID) ([]Key, error) {
 func (s *Store) CreateKey(ctx context.Context, orgID uuid.UUID, kind, label, providerRef string) (Key, error) {
 	var out Key
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insert = `INSERT INTO attestation_keys (organization_id, kind, label, provider_ref)
-			VALUES ($1, $2, $3, $4)
+		// A wallet_managed key is attested by the org's active wallet unit.
+		const insert = `INSERT INTO attestation_keys (organization_id, kind, label, provider_ref, wallet_unit_attestation)
+			VALUES ($1, $2, $3, $4, CASE WHEN $2 = $5 THEN
+				(SELECT jsonb_build_object('walletUnitId', id) FROM wallet_units WHERE organization_id = $1 AND status = 'active')
+			END)
 			RETURNING ` + keyColumns
 		var err error
-		out, err = scanKey(q.QueryRow(ctx, insert, orgID, kind, label, providerRef))
+		out, err = scanKey(q.QueryRow(ctx, insert, orgID, kind, label, providerRef, KeyWalletManaged))
 		if err != nil {
 			return fmt.Errorf("attestation: create key org %s: %w", orgID, err)
 		}

@@ -1,6 +1,6 @@
 module github.com/privacybydesign/yivi-businesswallet/backend
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/brianvoe/gofakeit/v7 v7.15.0
