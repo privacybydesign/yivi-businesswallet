@@ -17,7 +17,7 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.4.0
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/pressly/goose/v3 v3.27.1
-	github.com/privacybydesign/irmago v1.5.1-0.20261112131321-2a0f2d4a75d3
+	github.com/privacybydesign/irmago v1.5.1-0.20261112142826-e096d9959537
 	github.com/sirupsen/logrus v1.10.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tetratelabs/wazero v1.12.0
