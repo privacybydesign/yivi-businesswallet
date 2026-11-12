@@ -34,7 +34,9 @@ func (f fakeWSCA) Get(context.Context, uuid.UUID) (wsca.Account, error) { return
 func TestWalletUnitKeysOnlyForAnSKA(t *testing.T) {
 	t.Parallel()
 	levels := []string{"iso_18045_high"}
-	withWSCA := config.Config{AttestationHolderWSCAURL: "https://wsca.example", WalletUnitSKAKeyStorage: levels}
+	withWSCA := config.Config{AttestationHolder: config.HolderIrmago, AttestationHolderWSCAURL: "https://wsca.example", WalletUnitSKAKeyStorage: levels}
+	stubHolder := withWSCA
+	stubHolder.AttestationHolder = config.HolderStub
 	tests := []struct {
 		name    string
 		cfg     config.Config
@@ -43,7 +45,8 @@ func TestWalletUnitKeysOnlyForAnSKA(t *testing.T) {
 	}{
 		{"activated WSCA with an HSM described", withWSCA, nil, levels},
 		{"org did not activate its WSCA", withWSCA, wsca.ErrNotActivated, nil},
-		{"no HSM described", config.Config{AttestationHolderWSCAURL: "https://wsca.example"}, nil, nil},
+		{"no HSM described", config.Config{AttestationHolder: config.HolderIrmago, AttestationHolderWSCAURL: "https://wsca.example"}, nil, nil},
+		{"stub holder keeps software keys", stubHolder, nil, nil},
 		{"no WSCA on the deployment", config.Config{WalletUnitSKAKeyStorage: levels}, nil, nil},
 	}
 	for _, tc := range tests {

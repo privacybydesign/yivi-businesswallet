@@ -1023,6 +1023,7 @@ func requireProductionSettings(c *Config) error {
 		envDiplomaValidatorProvider:    c.DiplomaValidatorProvider == ProviderStub,
 		envEmploymentValidatorProvider: c.EmploymentValidatorProvider == ProviderStub,
 		envVogValidatorProvider:        c.VogValidatorProvider == ProviderStub,
+		envWalletUnitAttester:          c.WalletUnitAttester == ProviderStub,
 	} {
 		if stubbed {
 			return fmt.Errorf("config: %s stubs out a real check and needs %s=true (a local stack)", key, envDevMode)

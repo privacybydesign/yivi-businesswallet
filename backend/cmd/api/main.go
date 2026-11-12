@@ -568,7 +568,7 @@ type wscaAccountGetter interface {
 }
 
 // walletUnitKeys reports the SKA an org's holder keys get: only when the
-// deployment binds holder keys in the WSCA, describes its HSM, and the org
+// irmago holder binds holder keys in the WSCA, the deployment describes its HSM, and the org
 // activated its WSCA account. Anything else gets no SKA, so no badge.
 type walletUnitKeys struct {
 	accounts wscaAccountGetter
@@ -576,7 +576,7 @@ type walletUnitKeys struct {
 }
 
 func newWalletUnitKeys(cfg config.Config, accounts wscaAccountGetter) walletUnitKeys {
-	if cfg.AttestationHolderWSCAURL == "" {
+	if cfg.AttestationHolder != config.HolderIrmago || cfg.AttestationHolderWSCAURL == "" {
 		return walletUnitKeys{}
 	}
 	return walletUnitKeys{accounts: accounts, levels: cfg.WalletUnitSKAKeyStorage}

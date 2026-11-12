@@ -551,6 +551,7 @@ func TestLoadStubsNeedDevMode(t *testing.T) {
 		envDiplomaValidatorProvider:    {envDiplomaValidatorProvider: ProviderStub},
 		envEmploymentValidatorProvider: {envEmploymentValidatorProvider: ProviderStub},
 		envVogValidatorProvider:        {envVogValidatorProvider: ProviderStub},
+		envWalletUnitAttester:          {envWalletUnitAttester: ProviderStub},
 	} {
 		t.Run(name+" without", func(t *testing.T) {
 			if _, err := loadWith(t, env); err == nil {
@@ -588,7 +589,7 @@ func TestLoadWalletUnitAttester(t *testing.T) {
 	if cfg.WalletUnitAttester != WalletUnitAttesterLocal {
 		t.Errorf("default attester = %q, want %q", cfg.WalletUnitAttester, WalletUnitAttesterLocal)
 	}
-	cfg, err = loadWith(t, map[string]string{envWalletUnitAttester: ProviderStub})
+	cfg, err = loadWith(t, map[string]string{envWalletUnitAttester: ProviderStub, envDevMode: "true", envAppBaseURL: localStack})
 	if err != nil {
 		t.Fatalf("Load stub: %v", err)
 	}
