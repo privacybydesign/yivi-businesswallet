@@ -64,15 +64,20 @@ func TestStubAttesterIssues(t *testing.T) {
 	if bwia["ebwoid_id"] != org.EUID {
 		t.Errorf("BWIA ebwoid_id = %v, want %q", bwia["ebwoid_id"], org.EUID)
 	}
-	skaToken, err := stub.IssueSKA(context.Background(), org.ID, []*ecdsa.PublicKey{stubKey(t)})
+	nonce := "c-nonce"
+	skaToken, err := stub.IssueSKA(context.Background(), org.ID, []*ecdsa.PublicKey{stubKey(t)}, &nonce)
 	if err != nil {
 		t.Fatalf("IssueSKA: %v", err)
 	}
 	if skaToken == "" {
 		t.Fatal("no SKA for HSM-held keys")
 	}
-	if ska := stubClaims(t, skaToken); ska["certification"] != "https://cert.example" {
+	ska := stubClaims(t, skaToken)
+	if ska["certification"] != "https://cert.example" {
 		t.Errorf("SKA certification = %v", ska["certification"])
+	}
+	if ska["nonce"] != nonce {
+		t.Errorf("SKA nonce = %v, want %q", ska["nonce"], nonce)
 	}
 }
 

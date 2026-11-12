@@ -36,7 +36,7 @@ func (s *StubAttester) IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceK
 	return s.signer.sign(bwiaTyp, s.cfg.bwiaClaims("stub-"+orgID.String(), org, cnf, stubStatusIndex, s.now()))
 }
 
-func (s *StubAttester) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey) (string, error) {
+func (s *StubAttester) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error) {
 	if s.cfg.SKA == nil || len(keys) == 0 {
 		return "", nil
 	}
@@ -44,7 +44,7 @@ func (s *StubAttester) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ec
 	if err != nil {
 		return "", err
 	}
-	return s.signer.sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, s.now()))
+	return s.signer.sign(skaTyp, s.cfg.skaClaims(attested, stubStatusIndex, s.now(), nonce))
 }
 
 func (s *StubAttester) StatusList(_ context.Context, list int64) (string, error) {

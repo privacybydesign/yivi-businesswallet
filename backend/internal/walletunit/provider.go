@@ -78,7 +78,7 @@ func (c Config) normalized() Config {
 // local dev and CI (WALLET_UNIT_ATTESTER).
 type Attester interface {
 	IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (string, error)
-	IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey) (string, error)
+	IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error)
 	StatusList(ctx context.Context, list int64) (string, error)
 }
 
@@ -96,7 +96,7 @@ func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest)
 	if !req.KeysInHSM || len(req.AttestedKeys) == 0 {
 		return out, nil
 	}
-	if out.SKA, err = p.IssueSKA(ctx, orgID, req.AttestedKeys); err != nil {
+	if out.SKA, err = p.IssueSKA(ctx, orgID, req.AttestedKeys, nil); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
@@ -121,8 +121,9 @@ func (p *Provider) IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *
 }
 
 // IssueSKA attests keys as held in the WSCA/HSM. Call it only for such keys. It
-// returns "" when the deployment describes no HSM.
-func (p *Provider) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey) (string, error) {
+// returns "" when the deployment describes no HSM. A non-nil nonce (the issuer's
+// c_nonce) becomes the SKA's nonce claim.
+func (p *Provider) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error) {
 	if p.cfg.SKA == nil || len(keys) == 0 {
 		return "", nil
 	}
@@ -139,7 +140,7 @@ func (p *Provider) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.
 	if err != nil {
 		return "", err
 	}
-	return p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now))
+	return p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now, nonce))
 }
 
 // bwiaSubject checks the org can be attested and encodes instanceKey as the cnf.
@@ -225,8 +226,8 @@ func (c Config) bwiaClaims(unit string, org organization.Organization, cnf map[s
 }
 
 // skaClaims is the SKA for attested, whose status entry is idx. c.SKA is set.
-func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time) jwt.MapClaims {
-	return jwt.MapClaims{
+func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time, nonce *string) jwt.MapClaims {
+	claims := jwt.MapClaims{
 		"iat":                 now.Unix(),
 		"exp":                 now.Add(tokenTTL).Unix(),
 		"attested_keys":       attested,
@@ -235,6 +236,10 @@ func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time) j
 		"certification":       c.SKA.CertificationURL,
 		"key_storage_status":  map[string]any{"status": map[string]any{"status_list": statusRef(c.BaseURL, idx)}, "exp": now.Add(statusMaintenance).Unix()},
 	}
+	if nonce != nil {
+		claims["nonce"] = *nonce
+	}
+	return claims
 }
 
 func (c Config) statusListClaims(list int64, lst string, now time.Time) jwt.MapClaims {

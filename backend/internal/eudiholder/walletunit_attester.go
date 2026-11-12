@@ -24,7 +24,7 @@ const es256SigBytes = 64
 // organization's wallet presents when it receives a credential: walletunit.Provider.
 type WalletUnitAttester interface {
 	IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (string, error)
-	IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey) (string, error)
+	IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error)
 }
 
 // ErrNotAttestable is what a WalletUnitAttester wraps when the org's wallet unit
@@ -43,7 +43,7 @@ type orgWalletAttester struct {
 	// they be attested.
 	keysInHSM bool
 	issueBWIA func(instanceKey *ecdsa.PublicKey) (string, error)
-	issueSKA  func(keys []*ecdsa.PublicKey) (string, error)
+	issueSKA  func(keys []*ecdsa.PublicKey, nonce *string) (string, error)
 	warn      func(msg string, args ...any)
 }
 
@@ -56,8 +56,8 @@ func newOrgWalletAttester(ctx context.Context, orgID uuid.UUID, provider WalletU
 		issueBWIA: func(instanceKey *ecdsa.PublicKey) (string, error) {
 			return provider.IssueBWIA(ctx, orgID, instanceKey)
 		},
-		issueSKA: func(keys []*ecdsa.PublicKey) (string, error) {
-			return provider.IssueSKA(ctx, orgID, keys)
+		issueSKA: func(keys []*ecdsa.PublicKey, nonce *string) (string, error) {
+			return provider.IssueSKA(ctx, orgID, keys, nonce)
 		},
 		warn: func(msg string, args ...any) { slog.WarnContext(ctx, msg, args...) },
 	}
@@ -88,12 +88,12 @@ func (a *orgWalletAttester) ClientAttestation(credentialIssuer string) (*openid4
 }
 
 // KeyAttestation attests a holder key, only when it is HSM-held: an SKA for a
-// software key would be a false claim.
-func (a *orgWalletAttester) KeyAttestation(_ string, key *ecdsa.PublicKey, _ *string) (string, error) {
+// software key would be a false claim. The SKA carries the issuer's c_nonce.
+func (a *orgWalletAttester) KeyAttestation(_ string, key *ecdsa.PublicKey, nonce *string) (string, error) {
 	if !a.keysInHSM {
 		return "", nil
 	}
-	return a.issueSKA([]*ecdsa.PublicKey{key})
+	return a.issueSKA([]*ecdsa.PublicKey{key}, nonce)
 }
 
 func es256Signer(key *ecdsa.PrivateKey) func([]byte) ([]byte, error) {

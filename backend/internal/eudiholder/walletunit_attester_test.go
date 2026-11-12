@@ -15,8 +15,9 @@ import (
 )
 
 type fakeWalletUnit struct {
-	bwiaErr error
-	skaKeys [][]*ecdsa.PublicKey
+	bwiaErr   error
+	skaKeys   [][]*ecdsa.PublicKey
+	skaNonces []*string
 }
 
 func (f *fakeWalletUnit) IssueBWIA(context.Context, uuid.UUID, *ecdsa.PublicKey) (string, error) {
@@ -27,8 +28,9 @@ func (f *fakeWalletUnit) IssueBWIA(context.Context, uuid.UUID, *ecdsa.PublicKey)
 	return "e30." + payload + ".sig", nil
 }
 
-func (f *fakeWalletUnit) IssueSKA(_ context.Context, _ uuid.UUID, keys []*ecdsa.PublicKey) (string, error) {
+func (f *fakeWalletUnit) IssueSKA(_ context.Context, _ uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error) {
 	f.skaKeys = append(f.skaKeys, keys)
+	f.skaNonces = append(f.skaNonces, nonce)
 	return "ska", nil
 }
 
@@ -81,5 +83,12 @@ func TestOrgWalletAttesterKeyAttestationOnlyForHSMKeys(t *testing.T) {
 	a.keysInHSM = true
 	if ka, _ := a.KeyAttestation("https://issuer.example", &k.PublicKey, nil); ka != "ska" || len(unit.skaKeys) != 1 || !unit.skaKeys[0][0].Equal(&k.PublicKey) {
 		t.Errorf("an HSM key got %q for %v", ka, unit.skaKeys)
+	}
+	nonce := "c-nonce"
+	if _, err := a.KeyAttestation("https://issuer.example", &k.PublicKey, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	if got := unit.skaNonces; len(got) != 2 || got[0] != nil || got[1] == nil || *got[1] != nonce {
+		t.Errorf("SKA nonces = %v, want none then %q", got, nonce)
 	}
 }
