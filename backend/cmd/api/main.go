@@ -562,8 +562,8 @@ func newWalletUnitSigner(cfg config.Config) (*walletunit.Signer, error) {
 	return walletunit.NewEphemeralSigner(walletUnitName + " ephemeral provider")
 }
 
-// wscaAccounts reads an org's WSCA account (wsca.ErrNotActivated when it has none).
-type wscaAccounts interface {
+// wscaAccountGetter reads an org's WSCA account (wsca.ErrNotActivated when it has none).
+type wscaAccountGetter interface {
 	Get(ctx context.Context, orgID uuid.UUID) (wsca.Account, error)
 }
 
@@ -571,11 +571,11 @@ type wscaAccounts interface {
 // deployment binds holder keys in the WSCA, describes its HSM, and the org
 // activated its WSCA account. Anything else gets no SKA, so no badge.
 type walletUnitKeys struct {
-	accounts wscaAccounts
+	accounts wscaAccountGetter
 	levels   []string
 }
 
-func newWalletUnitKeys(cfg config.Config, accounts wscaAccounts) walletUnitKeys {
+func newWalletUnitKeys(cfg config.Config, accounts wscaAccountGetter) walletUnitKeys {
 	if cfg.AttestationHolderWSCAURL == "" {
 		return walletUnitKeys{}
 	}
