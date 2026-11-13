@@ -1,5 +1,6 @@
 import type {
   CreateRequestTemplate,
+  CredentialType,
   OutboundStatus,
   RequestTemplate,
   SendCredentialRequest,
@@ -16,10 +17,55 @@ export const MAX_TEMPLATE_NAME = 120;
 const ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WHITESPACE = /\s/;
 
-// One credential row of the request form: a type and its claim names as typed.
+// typeKey of a row whose type is typed by hand: a credential from an issuer
+// outside the catalogue (e.g. the KVK registration). A catalogue key always
+// contains "::", so it never collides. An empty typeKey is a row nobody chose a
+// type for yet.
+export const OTHER_TYPE = "other";
+
+// One credential row of the request form. A catalogue row names its type by
+// typeKey (catalogKey) and asks for the attributes in picked; an OTHER_TYPE
+// row carries the vct and claim names as typed.
 export interface CredentialRow {
+  typeKey: string;
+  picked: string[];
   vct: string;
   claims: string;
+}
+
+export const EMPTY_ROW: CredentialRow = {
+  typeKey: "",
+  picked: [],
+  vct: "",
+  claims: "",
+};
+
+// catalogKey identifies a catalogue entry. Two issuers may design the same
+// vct, so the issuer is part of it.
+export function catalogKey(type: CredentialType): string {
+  return `${type.issuer}::${type.vct}`;
+}
+
+export function findType(
+  catalog: CredentialType[],
+  typeKey: string,
+): CredentialType | undefined {
+  return catalog.find((type) => catalogKey(type) === typeKey);
+}
+
+// The credential a row asks for, or undefined when its catalogue entry is gone.
+export function rowCredential(
+  row: CredentialRow,
+  catalog: CredentialType[],
+): { vct: string; claims: string[] } | undefined {
+  if (row.typeKey === OTHER_TYPE) {
+    return { vct: row.vct.trim(), claims: parseClaimList(row.claims) };
+  }
+  const type = findType(catalog, row.typeKey);
+  if (!type) return undefined;
+  const keys = type.attributes.map((a) => a.key);
+  // Catalogue order, not the order the boxes were ticked.
+  return { vct: type.vct, claims: keys.filter((k) => row.picked.includes(k)) };
 }
 
 export type CredentialRequestError =
@@ -55,6 +101,7 @@ export function parseClaimList(raw: string): string[] {
 export function validateCredentialRequest(
   recipient: string,
   rows: CredentialRow[],
+  catalog: CredentialType[],
 ): CredentialRequestErrors {
   const errors: CredentialRequestErrors = { rows: [] };
   const to = recipient.trim();
@@ -62,12 +109,13 @@ export function validateCredentialRequest(
   else if (!ADDRESS_PATTERN.test(to)) errors.recipient = "recipientInvalid";
 
   errors.rows = rows.map((row) => {
-    const vct = row.vct.trim();
-    if (vct === "") return "vctRequired";
-    if (WHITESPACE.test(vct)) return "vctInvalid";
-    const claims = parseClaimList(row.claims);
-    if (claims.some((c) => WHITESPACE.test(c))) return "claimInvalid";
-    if (claims.length > MAX_CLAIMS) return "tooManyClaims";
+    const credential = rowCredential(row, catalog);
+    if (!credential || credential.vct === "") return "vctRequired";
+    if (WHITESPACE.test(credential.vct)) return "vctInvalid";
+    if (credential.claims.some((c) => WHITESPACE.test(c))) {
+      return "claimInvalid";
+    }
+    if (credential.claims.length > MAX_CLAIMS) return "tooManyClaims";
     return undefined;
   });
   return errors;
@@ -79,27 +127,48 @@ export function hasErrors(errors: CredentialRequestErrors): boolean {
   );
 }
 
+// buildSendPayload assumes validateCredentialRequest passed: a row whose
+// catalogue entry is gone is dropped rather than sent without a type.
 export function buildSendPayload(
   from: string,
   recipient: string,
   rows: CredentialRow[],
+  catalog: CredentialType[],
 ): SendCredentialRequest {
   return {
     ...(from !== "" ? { from } : {}),
     recipient: recipient.trim(),
-    credentials: rows.map((row) => ({
-      vct: row.vct.trim(),
-      claims: parseClaimList(row.claims),
-    })),
+    credentials: rows.flatMap((row) => {
+      const credential = rowCredential(row, catalog);
+      return credential ? [credential] : [];
+    }),
   };
 }
 
-// The form rows a picked template fills in, its claims as typed.
-export function rowsFromTemplate(template: RequestTemplate): CredentialRow[] {
-  return template.credentials.map((credential) => ({
-    vct: credential.vct,
-    claims: credential.claims.join(", "),
-  }));
+// The form rows a picked template fills in. A credential the catalogue offers,
+// with every claim one of its attributes, becomes a catalogue row; any other
+// stays as typed, so no claim is lost.
+export function rowsFromTemplate(
+  template: RequestTemplate,
+  catalog: CredentialType[],
+): CredentialRow[] {
+  return template.credentials.map((credential) => {
+    const type = catalog.find((entry) => entry.vct === credential.vct);
+    const keys = type?.attributes.map((a) => a.key) ?? [];
+    if (type && credential.claims.every((claim) => keys.includes(claim))) {
+      return {
+        ...EMPTY_ROW,
+        typeKey: catalogKey(type),
+        picked: credential.claims,
+      };
+    }
+    return {
+      ...EMPTY_ROW,
+      typeKey: OTHER_TYPE,
+      vct: credential.vct,
+      claims: credential.claims.join(", "),
+    };
+  });
 }
 
 export function validateTemplateName(
@@ -115,10 +184,11 @@ export function validateTemplateName(
 export function buildTemplatePayload(
   name: string,
   rows: CredentialRow[],
+  catalog: CredentialType[],
 ): CreateRequestTemplate {
   return {
     name: name.trim(),
-    credentials: buildSendPayload("", "", rows).credentials,
+    credentials: buildSendPayload("", "", rows, catalog).credentials,
   };
 }
 
