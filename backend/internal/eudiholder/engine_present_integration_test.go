@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v3/jwa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
-	"github.com/lestrrat-go/jwx/v3/jws"
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/privacybydesign/irmago/eudi/credentials/sdjwtvc"
 	"github.com/privacybydesign/irmago/eudi/sdjwt"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
@@ -51,7 +51,7 @@ func seedHolderKey(t *testing.T, eng *eudiholder.Engine, org uuid.UUID) (*ecdsa.
 	if err != nil {
 		t.Fatal(err)
 	}
-	privJWK, err := jwk.Import(priv)
+	privJWK, err := jwk.Import[jwk.Key](priv)
 	if err != nil {
 		t.Fatal(err)
 	}

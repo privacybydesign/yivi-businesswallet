@@ -175,8 +175,7 @@ func (s *Service) decideEngineReview(ctx context.Context, req Request, reviewer 
 		Approve: in.Approve, ErrorCode: in.ErrorCode, Reason: in.Reason, Reviewer: reviewer,
 	}
 	if err := s.ips.DecideReview(ctx, tenant, req.session.ID, req.session.Token, decision); err != nil {
-		var rejected *proofingprovider.RejectedError
-		if errors.As(err, &rejected) {
+		if _, ok := errors.AsType[*proofingprovider.RejectedError](err); ok {
 			// The engine no longer holds it under review: another decision won,
 			// or it ended. Read what it holds, so the request does not wait in
 			// review for a notice that may have been missed.

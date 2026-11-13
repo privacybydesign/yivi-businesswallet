@@ -326,8 +326,7 @@ func providerImage(img idscan.Image) proofingprovider.Image {
 // failing, and it no longer knowing the session, or answering it gone or
 // decided, as the session being over.
 func documentScanStepError(err error) error {
-	var rejected *proofingprovider.RejectedError
-	if errors.As(err, &rejected) {
+	if rejected, ok := errors.AsType[*proofingprovider.RejectedError](err); ok {
 		switch rejected.Status {
 		case http.StatusBadRequest:
 			return fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)

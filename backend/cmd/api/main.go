@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -729,8 +731,8 @@ type wiring struct {
 }
 
 func (w *wiring) close() {
-	for i := len(w.closers) - 1; i >= 0; i-- {
-		w.closers[i]()
+	for _, v := range slices.Backward(w.closers) {
+		v()
 	}
 }
 
@@ -1069,7 +1071,22 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	walletUnitStore := walletunit.NewStore(w.pool, w.recorder)
 	walletUnitAttester := newWalletUnitAttester(cfg, walletUnitStore, w.orgStore, walletUnitSigner)
 	w.walletUnitHandler = walletunit.NewHandler(walletUnitStore, walletUnitAttester, newWalletUnitKeys(cfg, wscaStore), w.requireUser, w.orgHandler.Authorize)
+	if engine, ok := attHolder.(*eudiholder.Engine); ok {
+		engine.SetWalletUnitAttester(holderWalletUnitAttester{walletUnitAttester})
+	}
 	return nil
+}
+
+// holderWalletUnitAttester lets an org whose wallet unit cannot be attested still
+// receive from issuers that require no attestation.
+type holderWalletUnitAttester struct{ walletunit.Attester }
+
+func (a holderWalletUnitAttester) IssueBWIA(ctx context.Context, orgID uuid.UUID, key *ecdsa.PublicKey) (string, error) {
+	bwia, err := a.Attester.IssueBWIA(ctx, orgID, key)
+	if errors.Is(err, walletunit.ErrNoEUID) || errors.Is(err, walletunit.ErrOrgNotActive) || errors.Is(err, walletunit.ErrUnitRevoked) {
+		return "", fmt.Errorf("%w: %w", eudiholder.ErrNotAttestable, err)
+	}
+	return bwia, err
 }
 
 // openAttestationHolder opens the holder engine, closed when run returns.

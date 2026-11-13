@@ -50,6 +50,8 @@ jobs:
       contents: read
     with:
       working-directory: backend
+      # Built with Go 1.27, which go.mod targets; v2.12.2 refuses to load the config.
+      golangci-lint-version: v2.15.0
       # `go mod tidy` also resolves the wsca-tagged import of the private
       # wallet-provider module, which only a Go workspace supplies (go-wsca
       # below), so it cannot run on a plain checkout.

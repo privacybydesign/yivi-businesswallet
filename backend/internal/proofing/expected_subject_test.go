@@ -119,16 +119,16 @@ func TestReadsIdentity(t *testing.T) {
 		"steps scan the document":  {testFlow("a", "a", []string{"document_capture", "nfc_read"}, "native"), true},
 		"steps only read the chip": {testFlow("b", "b", []string{"nfc_read"}, "native"), false},
 		"releases the outcome only": {
-			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"outcome_only"}}}, false,
+			proofingprovider.Flow{Steps: []string{"document_capture"}, RequestedAttributes: []string{"outcome_only"}}, false,
 		},
 		"requests the document data": {
-			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}}, true,
+			proofingprovider.Flow{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg1"}}, true,
 		},
 		"withholds the date of birth for the age check": {
-			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"nfc_read"}, RequestedAttributes: []string{"dg1", "age_over"}}}, false,
+			proofingprovider.Flow{Steps: []string{"nfc_read"}, RequestedAttributes: []string{"dg1", "age_over"}}, false,
 		},
 		"leaves the document data out": {
-			proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg2"}}}, false,
+			proofingprovider.Flow{Steps: []string{"document_capture"}, RequestedAttributes: []string{"dg2"}}, false,
 		},
 	} {
 		if got := readsIdentity(tc.flow); got != tc.want {

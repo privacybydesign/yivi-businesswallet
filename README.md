@@ -15,7 +15,7 @@ compose.yaml + compose.override.yaml   Docker Compose dev/prod orchestration
 
 ## Prerequisites
 
-- [Go](https://go.dev/dl/) 1.26+
+- [Go](https://go.dev/dl/) 1.27+
 - [Node.js](https://nodejs.org/) 26+
 - [Docker](https://docs.docker.com/get-docker/) with Docker Compose
 

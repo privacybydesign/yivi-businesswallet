@@ -148,8 +148,7 @@ func (d *Deliverer) send(ctx context.Context, delivery dueDelivery) (*int, error
 	req.Header.Set(SignatureHeader, webhookSignature(delivery.Secrets, d.now(), body))
 	resp, err := d.client.Do(req)
 	if err != nil {
-		var uerr *url.Error
-		if errors.As(err, &uerr) {
+		if uerr, ok := errors.AsType[*url.Error](err); ok {
 			return nil, fmt.Errorf("%s: %w", uerr.Op, uerr.Err)
 		}
 		return nil, err

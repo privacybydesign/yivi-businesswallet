@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -255,8 +256,8 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 // chain(a, b, c)(handler) == a(b(c(handler)))
 func chain(mws ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
-		for i := len(mws) - 1; i >= 0; i-- {
-			h = mws[i](h)
+		for _, mw := range slices.Backward(mws) {
+			h = mw(h)
 		}
 		return h
 	}

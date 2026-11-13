@@ -71,6 +71,7 @@ func (f *fakeStore) RecordSentFile(_ context.Context, _, _ uuid.UUID, s SentFile
 	f.recordedLinkBase = notificationLinkBase
 	return s, f.recordErr
 }
+
 func (f *fakeStore) ListSentFiles(context.Context, uuid.UUID) ([]SentFile, error) { return nil, nil }
 
 type fakeSender struct {

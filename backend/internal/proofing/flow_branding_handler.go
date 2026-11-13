@@ -64,13 +64,11 @@ func (h *Handler) saveFlowBranding(w http.ResponseWriter, r *http.Request) error
 
 	flowID := r.PathValue("flowID")
 	f, err := h.service.SaveFlowBranding(r.Context(), orgFromRequest(r), flowID, FlowBranding{
-		Custom: custom,
-		Branding: Branding{
-			DisplayName:    r.FormValue("displayName"),
-			PrimaryColor:   r.FormValue("primaryColor"),
-			SupportContact: r.FormValue("supportContact"),
-			PrivacyURL:     r.FormValue("privacyUrl"),
-		},
+		Custom:         custom,
+		DisplayName:    r.FormValue("displayName"),
+		PrimaryColor:   r.FormValue("primaryColor"),
+		SupportContact: r.FormValue("supportContact"),
+		PrivacyURL:     r.FormValue("privacyUrl"),
 	}, logo)
 	if err != nil {
 		return mapError(err)

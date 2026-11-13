@@ -1195,8 +1195,7 @@ func mapError(err error) error {
 			return &response
 		}
 	}
-	var rejected *proofingprovider.RejectedError
-	if errors.As(err, &rejected) {
+	if rejected, ok := errors.AsType[*proofingprovider.RejectedError](err); ok {
 		// The engine's own validation message (e.g. which check a step requires) is what
 		// the admin needs to fix the flow.
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "rejected_by_provider", Message: rejected.Message}

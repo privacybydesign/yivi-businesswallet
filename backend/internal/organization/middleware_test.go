@@ -41,6 +41,7 @@ func (f fakeRepo) Update(context.Context, uuid.UUID, string) (Organization, erro
 }
 func (f fakeRepo) Delete(context.Context, uuid.UUID) error                        { return nil }
 func (f fakeRepo) ListForUser(context.Context, uuid.UUID) ([]Organization, error) { return nil, nil }
+
 func (f fakeRepo) GetMembership(context.Context, uuid.UUID, uuid.UUID) (Membership, error) {
 	return f.membership, f.membershipErr
 }
@@ -66,6 +67,7 @@ func (f fakeRepo) UpdateMembership(context.Context, uuid.UUID, uuid.UUID, *strin
 }
 func (f fakeRepo) RemoveMembership(context.Context, uuid.UUID, uuid.UUID) error     { return nil }
 func (f fakeRepo) ListDepartments(context.Context, uuid.UUID) ([]Department, error) { return nil, nil }
+
 func (f fakeRepo) CreateDepartment(context.Context, uuid.UUID, string) (Department, error) {
 	return Department{}, nil
 }

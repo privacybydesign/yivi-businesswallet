@@ -131,7 +131,7 @@ func (q *countingQueue) Add(ctx context.Context, tag string, dueAt time.Time) er
 func TestDedupSkipsRepeatedAdds(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
-	inner := &countingQueue{memQueue: memQueue{entries: map[string]*Entry{}}}
+	inner := &countingQueue{entries: map[string]*Entry{}}
 	d := NewDedup(inner)
 	for range 5 {
 		_ = d.Add(ctx, "ips-a", now)
@@ -172,7 +172,7 @@ func TestSettleSweepsFromTheEnd(t *testing.T) {
 	ctx := context.Background()
 	expiry := time.Now().Add(time.Hour)
 	end := time.Now()
-	inner := &countingQueue{memQueue: memQueue{entries: map[string]*Entry{}}}
+	inner := &countingQueue{entries: map[string]*Entry{}}
 	d := NewDedup(inner)
 	if err := d.Add(ctx, "tag", expiry); err != nil {
 		t.Fatal(err)

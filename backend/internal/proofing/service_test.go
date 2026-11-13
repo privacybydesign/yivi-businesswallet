@@ -788,8 +788,8 @@ func testFlow(id, name string, steps []string, selfieLocation string) proofingpr
 		attributes = []string{attributeDocument}
 	}
 	return proofingprovider.Flow{
-		FlowSpec: proofingprovider.FlowSpec{Name: name, Steps: steps, SelfieLocation: selfieLocation, RequestedAttributes: attributes},
-		ID:       id, Version: 1, Active: true,
+		Name: name, Steps: steps, SelfieLocation: selfieLocation, RequestedAttributes: attributes,
+		ID: id, Version: 1, Active: true,
 	}
 }
 
@@ -1840,8 +1840,8 @@ func TestYiviAgeCheckAsksAgeClaim(t *testing.T) {
 	f := newFixture()
 	sent := f.sendYivi(t)
 	f.ips.flowVersions = []proofingprovider.Flow{{
-		FlowSpec: proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument, attributeAgeOver}, AgeOver: 18},
-		ID:       sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true,
+		RequestedAttributes: []string{attributeDocument, attributeAgeOver}, AgeOver: 18,
+		ID: sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true,
 	}}
 	if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
 		t.Fatalf("StartYivi: %v", err)
@@ -1858,7 +1858,7 @@ func TestAlwaysReviewed(t *testing.T) {
 	sent := f.sendYivi(t)
 	req := sent.Request
 	req.Status = StatusNeedsReview
-	pinned := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{AlwaysReview: true}, ID: req.FlowID, Version: req.FlowVersion}
+	pinned := proofingprovider.Flow{AlwaysReview: true, ID: req.FlowID, Version: req.FlowVersion}
 	later := proofingprovider.Flow{ID: req.FlowID, Version: req.FlowVersion + 1, Active: true}
 	laterReviews := proofingprovider.Flow{FlowSpec: pinned.FlowSpec, ID: req.FlowID, Version: req.FlowVersion + 2}
 	for name, tc := range map[string]struct {

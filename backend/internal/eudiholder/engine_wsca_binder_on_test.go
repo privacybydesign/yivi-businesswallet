@@ -9,7 +9,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/privacybydesign/irmago/eudi/storage/db"
 	"github.com/privacybydesign/irmago/eudi/storage/db/models"
 	"gorm.io/datatypes"
@@ -44,7 +44,7 @@ func TestWSCARowSignerResolvesReferenceFromRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, err := jwk.Import(&priv.PublicKey)
+	pub, err := jwk.Import[jwk.Key](&priv.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}

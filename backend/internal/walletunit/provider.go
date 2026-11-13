@@ -20,9 +20,9 @@ type Config struct {
 	BaseURL       string
 	WalletName    string
 	WalletVersion string
-	// CertificationInfo is the wallet solution's certification information; empty
+	// CertificationInfo is the wallet solution's certification information; nil
 	// leaves the claim out.
-	CertificationInfo string
+	CertificationInfo map[string]any
 	// SKA is nil when the deployment states no HSM certification: then no SKA is
 	// issued, as nothing honest could be said about key storage.
 	SKA *SKAConfig
@@ -77,81 +77,116 @@ func (c Config) normalized() Config {
 // Attester is the wallet unit attestation source: Provider, or StubAttester in
 // local dev and CI (WALLET_UNIT_ATTESTER).
 type Attester interface {
-	Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest) (Issued, error)
+	IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (string, error)
+	IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error)
 	StatusList(ctx context.Context, list int64) (string, error)
 }
 
 var _ Attester = (*Provider)(nil)
 
-// prepare checks the org can be attested and encodes the keys req names. The
-// attested keys are empty unless an SKA is due.
-func (c Config) prepare(ctx context.Context, orgs orgReader, orgID uuid.UUID, req IssueRequest) (organization.Organization, map[string]any, []map[string]any, error) {
-	if req.InstanceKey == nil {
-		return organization.Organization{}, nil, nil, ErrNoInstanceKey
-	}
-	org, err := orgs.GetByID(ctx, orgID)
-	if err != nil {
-		return organization.Organization{}, nil, nil, fmt.Errorf("walletunit: org %s: %w", orgID, err)
-	}
-	if org.Status != organization.StatusActive {
-		return organization.Organization{}, nil, nil, ErrOrgNotActive
-	}
-	if org.EUID == "" {
-		return organization.Organization{}, nil, nil, ErrNoEUID
-	}
-	cnf, err := ecJWK(req.InstanceKey)
-	if err != nil {
-		return organization.Organization{}, nil, nil, err
-	}
-	var attested []map[string]any
-	if c.SKA != nil && req.KeysInHSM {
-		for _, k := range req.AttestedKeys {
-			j, err := ecJWK(k)
-			if err != nil {
-				return organization.Organization{}, nil, nil, err
-			}
-			attested = append(attested, j)
-		}
-	}
-	return org, cnf, attested, nil
-}
-
 // Issue attests the org's wallet unit: a fresh BWIA for req.InstanceKey and, when
 // the keys are HSM-held and the deployment describes its HSM, an SKA. Each gets
 // its own status index, so two attestations cannot be linked by it.
 func (p *Provider) Issue(ctx context.Context, orgID uuid.UUID, req IssueRequest) (Issued, error) {
-	org, cnf, attested, err := p.cfg.prepare(ctx, p.orgs, orgID, req)
+	bwia, err := p.IssueBWIA(ctx, orgID, req.InstanceKey)
 	if err != nil {
 		return Issued{}, err
 	}
-
-	unit, err := p.store.activeUnitForIssue(ctx, orgID)
-	if err != nil {
-		return Issued{}, err
-	}
-	now := p.now()
-	exp, statusExp := now.Add(tokenTTL), now.Add(statusMaintenance)
-
-	idx, err := p.store.recordAttestation(ctx, unit.ID, KindBWIA, exp, statusExp)
-	if err != nil {
-		return Issued{}, err
-	}
-	var out Issued
-	if out.BWIA, err = p.signer.sign(bwiaTyp, p.cfg.bwiaClaims(unit.ID.String(), org, cnf, idx, now)); err != nil {
-		return Issued{}, err
-	}
-	if len(attested) == 0 {
+	out := Issued{BWIA: bwia}
+	if !req.KeysInHSM || len(req.AttestedKeys) == 0 {
 		return out, nil
 	}
-
-	idx, err = p.store.recordAttestation(ctx, unit.ID, KindSKA, exp, statusExp)
-	if err != nil {
-		return Issued{}, err
-	}
-	if out.SKA, err = p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now)); err != nil {
+	if out.SKA, err = p.IssueSKA(ctx, orgID, req.AttestedKeys, nil); err != nil {
 		return Issued{}, err
 	}
 	return out, nil
+}
+
+// IssueBWIA attests the org's wallet unit with instanceKey as its cnf.
+func (p *Provider) IssueBWIA(ctx context.Context, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (string, error) {
+	org, cnf, err := bwiaSubject(ctx, p.orgs, orgID, instanceKey)
+	if err != nil {
+		return "", err
+	}
+	unit, err := p.store.activeUnitForIssue(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	now := p.now()
+	idx, err := p.store.recordAttestation(ctx, unit.ID, KindBWIA, now.Add(tokenTTL), now.Add(statusMaintenance))
+	if err != nil {
+		return "", err
+	}
+	return p.signer.sign(bwiaTyp, p.cfg.bwiaClaims(unit.ID.String(), org, cnf, idx, now))
+}
+
+// IssueSKA attests keys as held in the WSCA/HSM. Call it only for such keys. It
+// returns "" when the deployment describes no HSM. A non-nil nonce (the issuer's
+// c_nonce) becomes the SKA's nonce claim.
+func (p *Provider) IssueSKA(ctx context.Context, orgID uuid.UUID, keys []*ecdsa.PublicKey, nonce *string) (string, error) {
+	if p.cfg.SKA == nil || len(keys) == 0 {
+		return "", nil
+	}
+	attested, err := skaSubject(ctx, p.orgs, orgID, keys)
+	if err != nil {
+		return "", err
+	}
+	unit, err := p.store.activeUnitForIssue(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	now := p.now()
+	idx, err := p.store.recordAttestation(ctx, unit.ID, KindSKA, now.Add(tokenTTL), now.Add(statusMaintenance))
+	if err != nil {
+		return "", err
+	}
+	return p.signer.sign(skaTyp, p.cfg.skaClaims(attested, idx, now, nonce))
+}
+
+// bwiaSubject checks the org can be attested and encodes instanceKey as the cnf.
+func bwiaSubject(ctx context.Context, orgs orgReader, orgID uuid.UUID, instanceKey *ecdsa.PublicKey) (organization.Organization, map[string]any, error) {
+	if instanceKey == nil {
+		return organization.Organization{}, nil, ErrNoInstanceKey
+	}
+	org, err := activeOrg(ctx, orgs, orgID)
+	if err != nil {
+		return organization.Organization{}, nil, err
+	}
+	cnf, err := ecJWK(instanceKey)
+	if err != nil {
+		return organization.Organization{}, nil, err
+	}
+	return org, cnf, nil
+}
+
+// skaSubject checks the org can be attested and encodes keys as attested_keys.
+func skaSubject(ctx context.Context, orgs orgReader, orgID uuid.UUID, keys []*ecdsa.PublicKey) ([]map[string]any, error) {
+	if _, err := activeOrg(ctx, orgs, orgID); err != nil {
+		return nil, err
+	}
+	attested := make([]map[string]any, 0, len(keys))
+	for _, k := range keys {
+		j, err := ecJWK(k)
+		if err != nil {
+			return nil, err
+		}
+		attested = append(attested, j)
+	}
+	return attested, nil
+}
+
+func activeOrg(ctx context.Context, orgs orgReader, orgID uuid.UUID) (organization.Organization, error) {
+	org, err := orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return organization.Organization{}, fmt.Errorf("walletunit: org %s: %w", orgID, err)
+	}
+	if org.Status != organization.StatusActive {
+		return organization.Organization{}, ErrOrgNotActive
+	}
+	if org.EUID == "" {
+		return organization.Organization{}, ErrNoEUID
+	}
+	return org, nil
 }
 
 // StatusList is the signed Token Status List `list`, as served at its URI.
@@ -184,15 +219,15 @@ func (c Config) bwiaClaims(unit string, org organization.Organization, cnf map[s
 		"legal_name":     org.Name,
 		"client_status":  map[string]any{"status": map[string]any{"status_list": statusRef(c.BaseURL, idx)}, "exp": now.Add(statusMaintenance).Unix()},
 	}
-	if c.CertificationInfo != "" {
+	if c.CertificationInfo != nil {
 		claims["wallet_solution_certification_information"] = c.CertificationInfo
 	}
 	return claims
 }
 
 // skaClaims is the SKA for attested, whose status entry is idx. c.SKA is set.
-func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time) jwt.MapClaims {
-	return jwt.MapClaims{
+func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time, nonce *string) jwt.MapClaims {
+	claims := jwt.MapClaims{
 		"iat":                 now.Unix(),
 		"exp":                 now.Add(tokenTTL).Unix(),
 		"attested_keys":       attested,
@@ -201,6 +236,10 @@ func (c Config) skaClaims(attested []map[string]any, idx int64, now time.Time) j
 		"certification":       c.SKA.CertificationURL,
 		"key_storage_status":  map[string]any{"status": map[string]any{"status_list": statusRef(c.BaseURL, idx)}, "exp": now.Add(statusMaintenance).Unix()},
 	}
+	if nonce != nil {
+		claims["nonce"] = *nonce
+	}
+	return claims
 }
 
 func (c Config) statusListClaims(list int64, lst string, now time.Time) jwt.MapClaims {

@@ -573,8 +573,7 @@ func (s *RequestStore) ListDue(ctx context.Context, now time.Time, limit int) ([
 		// A row whose seal does not open cannot be reconciled: logged and
 		// skipped, as ListPurgeDue does, so it does not fail the rows leased
 		// with it. Its lease brings it back, logged again.
-		var bad *unreadableRequestError
-		if errors.As(err, &bad) {
+		if bad, ok := errors.AsType[*unreadableRequestError](err); ok {
 			slog.ErrorContext(ctx, "identity proofing: cannot open request at its deadline",
 				slog.String("request_id", bad.id.String()), slog.Any("error", bad.err))
 			continue
@@ -1544,8 +1543,7 @@ func (s *RequestStore) ListPurgeDue(ctx context.Context, limit int) ([]Request, 
 	var unreadable []*unreadableRequestError
 	for rows.Next() {
 		req, err := s.scanRequest(rows)
-		var bad *unreadableRequestError
-		if errors.As(err, &bad) {
+		if bad, ok := errors.AsType[*unreadableRequestError](err); ok {
 			unreadable = append(unreadable, bad)
 			continue
 		}

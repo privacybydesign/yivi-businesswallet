@@ -118,8 +118,10 @@ func TestReserveSignDiscardsStaleCeremony(t *testing.T) {
 		t.Fatal("the stale ceremony's session entry should be discarded")
 	}
 	select {
-	case <-stale.pades.signer.errCh:
-		// abandoned as expected
+	case err := <-stale.pades.signer.errCh:
+		if !errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("abandoned with %v, want ErrSessionExpired", err)
+		}
 	default:
 		t.Fatal("the stale parked pass should have been abandoned")
 	}
