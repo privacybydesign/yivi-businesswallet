@@ -215,6 +215,8 @@ func mapError(err error) error {
 		return &respond.APIError{Status: http.StatusForbidden, Code: "not_a_representative", Message: "you are not registered as a representative of this company"}
 	case errors.Is(err, ErrUnknownKVK):
 		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "unknown_kvk", Message: "this KVK number is not in the register"}
+	case errors.Is(err, ErrEBWOIDMismatch):
+		return &respond.APIError{Status: http.StatusUnprocessableEntity, Code: "ebwoid_mismatch", Message: "the owner identification data does not match this company"}
 	case errors.Is(err, ErrAlreadyRegistered):
 		return &respond.APIError{Status: http.StatusConflict, Code: "already_registered", Message: "this company already has a business wallet"}
 	case errors.Is(err, ErrSlugTaken):

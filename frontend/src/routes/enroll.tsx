@@ -28,6 +28,9 @@ function errorMessage(error: Error, t: TFunction): string {
     if (error.status === FORBIDDEN_STATUS && code === "not_a_representative") {
       return t("enroll.notRepresentative");
     }
+    if (code === "ebwoid_mismatch") {
+      return t("enroll.ebwoidMismatch");
+    }
     if (code === "slug_taken") {
       return t("register.slugTaken");
     }

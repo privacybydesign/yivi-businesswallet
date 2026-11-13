@@ -90,6 +90,8 @@ export const en = {
       "The KVK does not list you as a representative of this company, so you can't register its wallet.",
     alreadyRegistered:
       "This company already has a business wallet. Ask an owner to invite you instead.",
+    ebwoidMismatch:
+      "The owner identification data (EBWOID) is for another company than this KVK number.",
     error: "Could not register the wallet: {{message}}",
     kind: {
       bestuurder: "Director (bestuurder)",
@@ -320,6 +322,8 @@ export const en = {
       "The KVK does not list you as a representative of this company, so you can't register its wallet.",
     alreadyRegistered:
       "This company already has a business wallet. Ask an owner to invite you instead.",
+    ebwoidMismatch:
+      "The owner identification data (EBWOID) is for another company than this KVK number.",
     error: "Registration could not be completed. Please try again.",
     back: "Back",
     haveAccount: "Already have an account? Sign in",

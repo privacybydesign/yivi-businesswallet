@@ -11,6 +11,7 @@
 const KNOWN_CREDENTIAL_NAMES: Record<string, string> = {
   "nl-yivi-supplier": "Approved supplier",
   "nl.kvk.registration": "KVK registration",
+  "uri:eu.ebw.oid.1": "Owner identification (EBWOID)",
   "eaa.received.stub": "Demo supplier credential",
 };
 
