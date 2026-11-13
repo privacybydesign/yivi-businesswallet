@@ -6495,6 +6495,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '502':
+          description: >-
+            The scan service could not hand over the scan's result (`document_scan_unavailable`);
+            the message names what it answered. Nothing reached the session: start another scan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/flows/{flowID}/hosted:
     parameters:
       - name: slug
@@ -7119,7 +7127,8 @@ paths:
         and for a check waiting for review, it also carries `photo` (the document's portrait),
         `selfie` (the live face matched against it), and `documentImage` and `documentImageBack`
         (photos of the document's front and back; a passport's back is its personal number
-        page), each `{mimeType, data}` with `data` base64, when the flow requested them; the API never does. A check
+        page), each `{mimeType, data}` with `data` base64, when the flow requested them; the API
+        carries the document's images for an approval only, and never the selfie. A check
         waiting for review holds its face photos until it is decided, also on a flow that does
         not keep them after the match. Audited `identity_proofing.result_read`
         with the administrator as actor on every read. A member's request, one erased, or a
@@ -7155,7 +7164,6 @@ paths:
                         activeAuth: valid
                         faceMatch: 0.97
                         liveness: passed
-                    diplomas: []
                     photo:
                       mimeType: image/jpeg
                       data: /9j/4AAQSkZJRgABAQAAAQABAAD
@@ -9295,6 +9303,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '502':
+          description: >-
+            The scan service could not hand over the scan's result (`document_scan_unavailable`);
+            the message names what it answered. Nothing reached the session: start another scan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/proof/{token}/data-export:
     parameters:
       - name: token
@@ -10102,8 +10118,11 @@ paths:
         approved session `identity` (`givenName`, `familyName`, `birthDate`,
         `nationality`), and `evidence` (`type` `emrtd`, `yivi_disclosure`, `reference_photo` or `document_photo`, the
         document's type, issuing state and expiry, `passiveAuth` and `activeAuth`
-        `valid`/`invalid`/`not_performed`, `faceMatch`, `liveness`). Never the document
-        number or an image. Every read is audited `identity_proofing.result_read`.
+        `valid`/`invalid`/`not_performed`, `faceMatch`, `liveness`). For an approved session
+        also the document's images the engine still holds, each `{mimeType, data}` with `data`
+        base64: `photo` (the portrait), `documentImage` and `documentImageBack` (the photos of
+        its front and back). Never the document number or the selfie. Every read is audited
+        `identity_proofing.result_read`.
       security:
         - apiKey: []
       responses:
@@ -10165,7 +10184,6 @@ paths:
                         activeAuth: valid
                         faceMatch: 0.21
                         liveness: passed
-                    diplomas: []
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
@@ -12350,7 +12368,7 @@ components:
       required: [sessions, nextCursor]
     ProofingApiResult:
       type: object
-      description: A settled session's verified identity and the evidence it rests on. Never the document number or an image.
+      description: A settled session's verified identity, the evidence it rests on and, for an approval, the document's images. Never the document number or a selfie.
       properties:
         id:
           type: string
@@ -12377,7 +12395,8 @@ components:
           type: array
           description: >-
             The extra steps the flow asks for (today the Verzekeringsbericht), each with its own
-            outcome beside the identity's: a step never changes the session's `status`.
+            outcome beside the identity's: a step never changes the session's `status`. Absent
+            when the flow asks none.
           items:
             $ref: '#/components/schemas/ProofingStep'
         verifiedAt:
@@ -12396,6 +12415,12 @@ components:
               type: string
             nationality:
               type: string
+            bsn:
+              type: string
+              description: >-
+                The person's BSN, for a flow whose BSN policy keeps it (`retrieve`, or `mask`
+                for a masked one): the registered one when the Yivi app shared the personal
+                data (DigiD), else the one the document's chip or photo carries. Absent otherwise.
             ageOver:
               type: object
               description: >-
@@ -12434,9 +12459,11 @@ components:
               passiveAuth:
                 type: string
                 enum: [valid, invalid, not_performed]
+                description: The chip's signature check; only on `emrtd` evidence.
               activeAuth:
                 type: string
                 enum: [valid, invalid, not_performed]
+                description: The chip's clone check; only on `emrtd` evidence.
               faceMatch:
                 type: number
                 description: The face match score, 0 to 1; absent when no face was matched.
@@ -12465,10 +12492,10 @@ components:
                     enum: [valid, invalid, not_performed]
                     description: Whether every field read twice (MRZ and printed text) read the same.
                 required: [verdict, fields, zones]
-            required: [type, passiveAuth, activeAuth]
+            required: [type]
         diplomas:
           type: array
-          description: The DUO diploma extracts the person added, each checked against DUO's signature and the proofed identity.
+          description: The DUO diploma extracts the person added, each checked against DUO's signature and the proofed identity. Absent when there are none.
           items:
             $ref: '#/components/schemas/ProofingDiploma'
         address:
@@ -12484,7 +12511,21 @@ components:
             The review of an address the registered (BRP) address did not confirm: `pending`
             until a reviewer confirms or rejects it, `lapsed` when nobody did within the request's
             data retention. Absent on a registered address and without an address.
-      required: [id, status, evidence, diplomas]
+        photo:
+          description: The document's portrait, for an approval; absent once the engine dropped it.
+          allOf:
+            - $ref: '#/components/schemas/ProofingImage'
+        documentImage:
+          description: The photo of the document's front, for an approval of a flow that photographs it.
+          allOf:
+            - $ref: '#/components/schemas/ProofingImage'
+        documentImageBack:
+          description: >-
+            The photo of the document's back (a residence permit's back, a passport's personal
+            number page), for an approval of a flow that photographs it.
+          allOf:
+            - $ref: '#/components/schemas/ProofingImage'
+      required: [id, status, evidence]
     ProofingApiMethodStart:
       type: object
       properties:
@@ -12544,9 +12585,9 @@ components:
         data:
           type: object
           description: >-
-            Never the person's name or photo. Only `session.diploma_added`,
-            `session.address_added` and `session.employment_added` carry a person's data: what
-            they added after their identity check. A `test` event's data is only `message`.
+            Only `session.verified` (its `result`), `session.diploma_added`,
+            `session.address_added` and `session.employment_added` carry a person's data. A
+            `test` event's data is only `message`.
           properties:
             sessionId:
               type: string
@@ -12580,6 +12621,14 @@ components:
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
+            result:
+              description: >-
+                Only on `session.verified`: the session's result as `GET
+                /proofing/sessions/{id}/result` answers it, read when the event is sent (so
+                audited `identity_proofing.result_read`), and never stored with the event.
+                Absent when the session was erased before it went out.
+              allOf:
+                - $ref: '#/components/schemas/ProofingApiResult'
             address:
               description: >-
                 Only on `session.address_added`: the address the person entered, without
@@ -13842,20 +13891,14 @@ components:
           description: The image, standard base64.
       required: [mimeType, data]
     ProofingAdminResult:
-      description: The API's result plus, for an approval, the images the flow requested.
+      description: The API's result plus, for an approval and a check in review, the selfie and the reference photo.
       allOf:
         - $ref: '#/components/schemas/ProofingApiResult'
         - type: object
           properties:
-            photo:
-              $ref: '#/components/schemas/ProofingImage'
             selfie:
               $ref: '#/components/schemas/ProofingImage'
             referencePhoto:
-              $ref: '#/components/schemas/ProofingImage'
-            documentImage:
-              $ref: '#/components/schemas/ProofingImage'
-            documentImageBack:
               $ref: '#/components/schemas/ProofingImage'
     ProofingPause:
       type: object

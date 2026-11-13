@@ -3,11 +3,14 @@ package proofingengine
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
 	pp "github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
@@ -154,6 +157,64 @@ func checkPersonalDataDisclosure(t *testing.T, fd flow.FlowDefinition, tc person
 	if !ok || doc.Number != scannedNumber || doc.Kind != pp.DocumentKindPassport {
 		t.Errorf("document %+v, want the photographed passport", decided.Result["document"])
 	}
+}
+
+// The registered BSN is the result's personal number as the flow's BSN policy
+// releases it, in the document and in the disclosure alike.
+func TestPersonalDataBSN(t *testing.T) {
+	const registered = "111222333"
+	for policy, want := range map[privacy.BSNPolicy]string{
+		privacy.BSNPolicyRetrieve: registered,
+		privacy.BSNPolicyMask:     bsn.Mask(registered),
+		privacy.BSNPolicyOmit:     "",
+	} {
+		t.Run(string(policy), func(t *testing.T) {
+			fd := personalDataFlow
+			fd.BSNPolicy = policy
+			result := personalDataResult(t, fd, map[string]string{personalDataBSN: registered})
+			if doc := result["document"].(documentInfo); doc.PersonalNumber != want {
+				t.Errorf("document's personal number %q, want %q", doc.PersonalNumber, want)
+			}
+			if got := result["disclosure"].(disclosureInfo).Attributes[personalDataBSN]; got != want {
+				t.Errorf("disclosure's bsn %q, want %q", got, want)
+			}
+		})
+	}
+	fd := personalDataFlow
+	fd.BSNPolicy = privacy.BSNPolicyRetrieve
+	result := personalDataResult(t, fd, map[string]string{personalDataBSN: "123456789"})
+	if doc := result["document"].(documentInfo); doc.PersonalNumber != "" {
+		t.Errorf("an invalid BSN gave personal number %q, want none", doc.PersonalNumber)
+	}
+}
+
+// personalDataResult photographs the passport, discloses Anna Jansen's
+// personal data with extra in a session of fd, and answers its result.
+func personalDataResult(t *testing.T, fd flow.FlowDefinition, extra map[string]string) map[string]any {
+	t.Helper()
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := session.Session{
+		ID: "ps_brp", TenantID: "org", Token: "tok-brp", Status: session.StatusCreated,
+		Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+		RequestedAttributes: fd.RequestedAttributes,
+	}
+	s, store := documentPhotoServer(sess, fd)
+	face := pp.FaceCheck{LivenessPassed: true, MatchScore: new(0.95), Selfie: &pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}}
+	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+		Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan(), Face: &face,
+	}); err != nil {
+		t.Fatalf("SubmitDocumentPhoto = %v", err)
+	}
+	attributes := map[string]string{"firstName": "Anna", "lastName": "Jansen", "dateOfBirth": "10-03-1990"}
+	maps.Copy(attributes, extra)
+	if _, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, pp.Reference{Credential: "pbdf.gemeente.personalData", Attributes: attributes}); err != nil {
+		t.Fatalf("SubmitReference = %v", err)
+	}
+	decided, _ := store.Get("org", sess.ID)
+	if decided.Status != session.StatusApproved {
+		t.Fatalf("status %q (%s), want approved", decided.Status, decided.ErrorCode)
+	}
+	return decided.Result
 }
 
 func TestSameSurname(t *testing.T) {

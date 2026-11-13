@@ -3,6 +3,7 @@ package proofing
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
 )
 
@@ -53,6 +55,43 @@ type Deliverer struct {
 	policy safehttp.Policy
 	client *http.Client
 	now    func() time.Time
+	// results reads a verified session's result into its session.verified
+	// delivery when it is sent; nil sends the event alone.
+	results resultReader
+}
+
+// SetResults makes every session.verified delivery carry the session's result,
+// read when it is sent: the outbox never stores it.
+func (d *Deliverer) SetResults(r resultReader) { d.results = r }
+
+// webhookActor is who reads a result into a webhook delivery.
+var webhookActor = audit.Actor{Label: "webhook"}
+
+// webhookResultKey is where a session.verified delivery carries the result.
+const webhookResultKey = "result"
+
+// payloadOf is the data delivery sends: for session.verified, with the
+// session's result added. A session erased meanwhile is sent without one; a
+// read that fails fails the attempt, to be retried.
+func (d *Deliverer) payloadOf(ctx context.Context, delivery dueDelivery) (json.RawMessage, error) {
+	if d.results == nil || delivery.Event != EventSessionVerified || delivery.RequestID == nil {
+		return delivery.Payload, nil
+	}
+	result, err := sessionResult(audit.ContextWithActor(ctx, webhookActor), d.results, delivery.OrgID, *delivery.RequestID)
+	if errors.Is(err, ErrRequestNotFound) {
+		return delivery.Payload, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the session's result: %w", err)
+	}
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(delivery.Payload, &data); err != nil {
+		return nil, fmt.Errorf("reading the delivery's payload: %w", err)
+	}
+	if data[webhookResultKey], err = json.Marshal(result); err != nil {
+		return nil, err
+	}
+	return json.Marshal(data)
 }
 
 // NewDeliverer builds the delivery worker. The zero policy is production:
@@ -134,7 +173,11 @@ func (d *Deliverer) send(ctx context.Context, delivery dueDelivery) (*int, error
 	if _, err := d.policy.CheckURL(delivery.URL); err != nil {
 		return nil, err
 	}
-	body, err := webhookBody(delivery.ID, delivery.Event, delivery.CreatedAt, delivery.Payload)
+	payload, err := d.payloadOf(ctx, delivery)
+	if err != nil {
+		return nil, err
+	}
+	body, err := webhookBody(delivery.ID, delivery.Event, delivery.CreatedAt, payload)
 	if err != nil {
 		return nil, err
 	}

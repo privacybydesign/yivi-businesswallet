@@ -14,6 +14,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -38,7 +39,10 @@ var (
 	ErrDocumentScanFailed = errors.New("proofing: the document scan did not finish")
 	// ErrDocumentScanPending is a Yivi disclosure before the document photo is
 	// in.
-	ErrDocumentScanPending = errors.New("proofing: the document photo is not in yet")
+	// ErrDocumentScanUnavailable is the scan service failing to hand over a
+	// scan's result: the person scans again.
+	ErrDocumentScanUnavailable = errors.New("proofing: the scan service could not give the scan's result")
+	ErrDocumentScanPending     = errors.New("proofing: the document photo is not in yet")
 )
 
 // documentScanner is the document scan service the browser takes a document
@@ -152,6 +156,13 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	res, err := s.documentScanner.Result(ctx, transactionID, resultID)
 	if errors.Is(err, idscan.ErrNoDocumentImage) {
 		return fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)
+	}
+	var cmErr *idscan.APIError
+	if errors.As(err, &cmErr) {
+		slog.ErrorContext(ctx, "identity proofing: the scan service refused a scan's result",
+			slog.String("request_id", req.ID.String()), slog.String("transaction_id", transactionID),
+			slog.String("result_id", resultID), slog.Int("idscan_status", cmErr.Status), slog.String("idscan_message", cmErr.Message))
+		return fmt.Errorf("%w: %w", ErrDocumentScanUnavailable, cmErr)
 	}
 	if err != nil {
 		return fmt.Errorf("proofing: document scan result request %s: %w", req.ID, err)
@@ -268,15 +279,19 @@ func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
 }
 
 // documentCheck is the scan service's result res in the engine's terms. The
-// personal number goes along only for a flow that keeps the BSN.
+// personal number goes along only for a flow that keeps the BSN, masked
+// before it is stored when the flow masks it.
 func documentCheck(res idscan.Result, f proofingprovider.Flow) proofingprovider.DocumentCheck {
 	doc := res.Document
 	scanned := proofingprovider.ScannedDocument{
 		Kind: documentKinds[doc.Type], IssuingState: doc.IssuingState, Nationality: doc.Nationality, Number: doc.Number,
 		Surname: doc.Surname, GivenNames: doc.GivenNames, DateOfBirth: doc.DateOfBirth, DateOfExpiry: doc.DateOfExpiry, Sex: doc.Sex,
 	}
-	if f.BSNPolicy == bsnPolicyRetrieve {
+	switch f.BSNPolicy {
+	case bsnPolicyRetrieve:
 		scanned.PersonalNumber = doc.PersonalNumber
+	case bsnPolicyMask:
+		scanned.PersonalNumber = bsn.Mask(doc.PersonalNumber)
 	}
 	return proofingprovider.DocumentCheck{
 		Verdict: documentVerdicts[res.Authenticity], Score: res.Score,

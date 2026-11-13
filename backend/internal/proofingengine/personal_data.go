@@ -36,24 +36,76 @@ const reasonPersonalDataMismatch = "personal_data_mismatch"
 // personal data the photographed one, with the BSN as the flow releases it.
 // checks is false when there is no document to hold to the flow's document
 // rules: personal data without a document photo.
-func disclosedDocument(sess session.Session, info disclosureInfo, bsnPolicy privacy.BSNPolicy, now time.Time) (doc documentInfo, checks bool) {
+// The registered BSN, when disclosed, is the document's personal number: the
+// BRP's own, over whatever the photographed document prints.
+func disclosedDocument(sess session.Session, info disclosureInfo, bsnPolicy privacy.BSNPolicy, now time.Time) (documentInfo, bool) {
 	if !disclosesPersonalData(info) {
-		return documentFromDisclosure(info), true
+		doc := documentFromDisclosure(info)
+		if scanned, ok := photographedDocument(sess, bsnPolicy, now); ok {
+			doc.PersonalNumber = scanned.PersonalNumber
+		}
+		return doc, true
 	}
+	doc, checks := personalDataDocument(sess, info, bsnPolicy, now)
+	if registered := registeredBSN(info, bsnPolicy); registered != "" {
+		doc.PersonalNumber = registered
+	}
+	return doc, checks
+}
+
+// personalDataDocument is the document of a personal data disclosure: the
+// photographed one, or without a usable photo the disclosure's own.
+func personalDataDocument(sess session.Session, info disclosureInfo, bsnPolicy privacy.BSNPolicy, now time.Time) (documentInfo, bool) {
+	if doc, ok := photographedDocument(sess, bsnPolicy, now); ok {
+		return doc, true
+	}
+	return documentFromDisclosure(info), false
+}
+
+// photographedDocument is what the session's document photo read, its
+// personal number under the BSN policy and only when DG11 is requested; ok is
+// false without a usable photo.
+func photographedDocument(sess session.Session, bsnPolicy privacy.BSNPolicy, now time.Time) (documentInfo, bool) {
 	p := sess.Steps.DocumentPhoto
 	if p == nil || p.Check == nil {
-		return documentFromDisclosure(info), false
+		return documentInfo{}, false
 	}
 	scanned := scannedDocumentInfo(p.Check.Document, now)
 	if scanned == nil {
-		return documentFromDisclosure(info), false
+		return documentInfo{}, false
 	}
-	doc = *scanned
+	doc := *scanned
 	applyBSNPolicy(&doc, bsnPolicy)
 	if !attrRequested(sess, attrDG11) {
 		doc.PersonalNumber = ""
 	}
 	return doc, true
+}
+
+// personalDataBSN is the personal data's BSN claim.
+const personalDataBSN = "bsn"
+
+// withholdDisclosedBSN keeps the disclosure's own BSN only as the flow's
+// policy releases it, since the disclosure goes in the result next to the
+// document.
+func withholdDisclosedBSN(info *disclosureInfo, policy privacy.BSNPolicy) {
+	if _, ok := info.Attributes[personalDataBSN]; !ok {
+		return
+	}
+	if released := registeredBSN(*info, policy); released != "" {
+		info.Attributes[personalDataBSN] = released
+		return
+	}
+	delete(info.Attributes, personalDataBSN)
+}
+
+// registeredBSN is the BSN the personal data disclosed, under the flow's BSN
+// policy: empty when none was disclosed, it is no valid BSN or the policy
+// omits it.
+func registeredBSN(info disclosureInfo, policy privacy.BSNPolicy) string {
+	doc := documentInfo{PersonalNumber: info.Attributes[personalDataBSN], IssuingState: dutchIssuingState}
+	applyBSNPolicy(&doc, policy)
+	return doc.PersonalNumber
 }
 
 // personalDataMatch holds the photographed document to the disclosed personal

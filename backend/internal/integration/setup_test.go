@@ -163,6 +163,10 @@ type testEnv struct {
 	// proofing stands in for the proofing engine: a test sets its Outcome,
 	// before creating a session, to have the subject finish it.
 	proofing *proofingprovider.Stub
+	// proofingService and webhooks are what cmd/api hands the webhook
+	// deliverer, for a test that sends the outbox.
+	proofingService *proofing.Service
+	webhooks        *proofing.WebhookStore
 }
 
 // presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
@@ -266,9 +270,10 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	proofingStub := proofingprovider.NewStub()
 	proofingRecorder := audit.NewDBRecorder()
 	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
+	proofingWebhooks := proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher)
 	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
 		proofingRequests,
-		proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher),
+		proofingWebhooks,
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
@@ -296,6 +301,9 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		fake:     fake,
 		verifier: verifierIdentity,
 		proofing: proofingStub,
+
+		proofingService: proofingService,
+		webhooks:        proofingWebhooks,
 	}
 }
 
