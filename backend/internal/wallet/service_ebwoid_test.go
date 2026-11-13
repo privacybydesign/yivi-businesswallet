@@ -72,7 +72,7 @@ func (nopInbox) CreateInbound(context.Context, uuid.UUID, qerdsprovider.InboundM
 }
 
 func ebwoidService(store walletStore, issuer ownerIDIssuer, holder ownerIDHolder) *Service {
-	return NewService(store, &fakeRegistry{att: validatedAttestation()}, issuer, holder, nil, nil, nopInbox{}, "qerds.localhost")
+	return NewService(store, &fakeRegistry{att: validatedAttestation()}, OwnerID{Issuer: issuer, Holder: holder}, nil, nil, nopInbox{}, "qerds.localhost")
 }
 
 func openTestWallet(svc *Service) (RegistrationResult, error) {

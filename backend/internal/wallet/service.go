@@ -23,7 +23,7 @@ import (
 // kvkSenderAddress is the QERDS "from" shown on the deposited attestation message.
 const kvkSenderAddress = "registratie@kvk.nl"
 
-// discardTimeout bounds removing an EBWOID whose registration did not go through.
+// discardTimeout bounds dropping the holder of a wallet that was not opened.
 const discardTimeout = 10 * time.Second
 
 // walletStore is the persistence surface the service coordinates.
@@ -51,7 +51,14 @@ type ownerIDIssuer interface {
 type ownerIDHolder interface {
 	registryprovider.EBWOIDHolder
 	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
-	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
+	DropOrganization(ctx context.Context, orgID uuid.UUID) error
+}
+
+// OwnerID is where a new wallet's EBWOID comes from: the issuer that obtains it
+// and the org's holder engine it is stored in and read from.
+type OwnerID struct {
+	Issuer ownerIDIssuer
+	Holder ownerIDHolder
 }
 
 // identityDiscloser resolves an OpenID4VP identity disclosure (public register
@@ -88,8 +95,7 @@ type Service struct {
 func NewService(
 	store walletStore,
 	reg registry,
-	ownerID ownerIDIssuer,
-	holder ownerIDHolder,
+	ownerID OwnerID,
 	discloser identityDiscloser,
 	users userDirectory,
 	inbox qerdsInbox,
@@ -98,8 +104,8 @@ func NewService(
 	return &Service{
 		store:         store,
 		registry:      reg,
-		ownerID:       ownerID,
-		holder:        holder,
+		ownerID:       ownerID.Issuer,
+		holder:        ownerID.Holder,
 		discloser:     discloser,
 		users:         users,
 		inbox:         inbox,
@@ -223,7 +229,7 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 		EBWOID:            ebwoid.held,
 	})
 	if err != nil {
-		s.discardEBWOID(ctx, orgID, ebwoid.held.Ref)
+		s.discardHolder(ctx, orgID)
 		return RegistrationResult{}, err
 	}
 
@@ -251,7 +257,7 @@ type heldEBWOID struct {
 func (s *Service) obtainEBWOID(ctx context.Context, orgID uuid.UUID, att registryprovider.RegistrationAttestation, registered euid.EUID) (heldEBWOID, error) {
 	held, err := s.ownerID.Obtain(ctx, s.holder, orgID, att)
 	if err != nil {
-		s.discardEBWOID(ctx, orgID, held.Ref)
+		s.discardHolder(ctx, orgID)
 		return heldEBWOID{}, fmt.Errorf("wallet: obtain EBWOID: %w", err)
 	}
 	legalName, id, err := s.readEBWOID(ctx, orgID, held.Ref)
@@ -259,7 +265,7 @@ func (s *Service) obtainEBWOID(ctx context.Context, orgID uuid.UUID, att registr
 		err = fmt.Errorf("%w: EBWOID %s, register %s", ErrEBWOIDMismatch, id, registered)
 	}
 	if err != nil {
-		s.discardEBWOID(ctx, orgID, held.Ref)
+		s.discardHolder(ctx, orgID)
 		return heldEBWOID{}, err
 	}
 	return heldEBWOID{held: held, legalName: legalName, euid: id.String()}, nil
@@ -296,16 +302,13 @@ func sameCompany(a, b euid.EUID) bool {
 	return a.Country == b.Country && a.Register == b.Register && a.Number == b.Number
 }
 
-// discardEBWOID removes an EBWOID whose wallet was not opened, so no org-less
-// credential stays in the holder. It runs detached from a possibly cancelled request.
-func (s *Service) discardEBWOID(ctx context.Context, orgID uuid.UUID, ref string) {
-	if ref == "" {
-		return
-	}
+// discardHolder drops the holder of a wallet that was not opened, so no org-less
+// EBWOID or holder schema stays behind. It runs detached from a possibly cancelled request.
+func (s *Service) discardHolder(ctx context.Context, orgID uuid.UUID) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
 	defer cancel()
-	if err := s.holder.Delete(ctx, orgID, ref); err != nil {
-		slog.ErrorContext(ctx, "wallet: discarding EBWOID of an unopened wallet failed",
+	if err := s.holder.DropOrganization(ctx, orgID); err != nil {
+		slog.ErrorContext(ctx, "wallet: dropping the holder of an unopened wallet failed",
 			slog.String("orgId", orgID.String()), slog.String("error", err.Error()))
 	}
 }

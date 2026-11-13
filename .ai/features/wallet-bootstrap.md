@@ -73,8 +73,9 @@ Data, Art 8–9): an SD-JWT VC with `vct: uri:eu.ebw.oid.1`, claims `id` (the EU
   ebwoid_mismatch`. Otherwise a valid EBWOID for any company would open this wallet.
 - `RegisterOrganization` writes the org with that id and indexes the EBWOID in
   `held_attestations` (`source = 'bootstrap'`, audited `attestation.held_received`) in
-  the same tx. When the open fails after the EBWOID was stored, it is deleted from the
-  holder again.
+  the same tx. When the open fails, the org's holder is dropped again
+  (`DropOrganization`: with the irmago engine its `holder_<org>` schema, files and
+  cached engine), so a mistyped slug leaves nothing behind.
 - The EBWOID comes from `StubEBWOIDIssuer` (`registryprovider`): an unsigned EBWOID
   built from the seeded register's name and EUID. Dev/CI only. The wallet service takes
   the issuer as a seam, so a real issuer plugs in there.

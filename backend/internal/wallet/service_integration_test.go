@@ -61,7 +61,7 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	reg := registryprovider.NewSeededRegistry(pool, audit.NewDBRecorder())
 	inbox := &captureInbox{}
 	holder := eudiholder.NewStubHolder()
-	svc := wallet.NewService(store, reg, registryprovider.StubEBWOIDIssuer{}, holder, nil, nil, inbox, "qerds.localhost")
+	svc := wallet.NewService(store, reg, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, nil, nil, inbox, "qerds.localhost")
 
 	res, err := svc.OpenWallet(ctx, requester.ID, wallet.Requester{
 		GivenNames:  "Sanne Marijke",

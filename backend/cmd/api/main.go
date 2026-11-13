@@ -944,7 +944,7 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 // Only the seeded register's stub issuer exists until KVK's issuer (YIV-622).
 func (w *wiring) buildWallet(holder eudiholder.Holder) error {
 	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
-	walletService := wallet.NewService(walletStore, w.walletRegistry, registryprovider.StubEBWOIDIssuer{}, holder, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
+	walletService := wallet.NewService(walletStore, w.walletRegistry, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
 	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 	return nil
 }

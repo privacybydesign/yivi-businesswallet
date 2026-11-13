@@ -27,7 +27,7 @@ func (f *fakeRegistry) Consult(_ context.Context, req registryprovider.ConsultRe
 // serviceWith builds a Service whose only wired dependency is the registry; the
 // bounce paths under test return before any store/inbox is touched.
 func serviceWith(reg registry) *Service {
-	return NewService(nil, reg, nil, nil, nil, nil, nil, "qerds.localhost")
+	return NewService(nil, reg, OwnerID{}, nil, nil, nil, "qerds.localhost")
 }
 
 func TestOpenWalletBouncesUnknownKVK(t *testing.T) {
