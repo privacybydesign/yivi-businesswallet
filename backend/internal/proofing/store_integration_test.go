@@ -5,6 +5,7 @@ package proofing
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -1156,6 +1157,115 @@ func TestOrgSettingsNameRetention(t *testing.T) {
 	}
 	if member.NameRetention != proofedNameRetention {
 		t.Errorf("a member's NameRetention = %v, want %v", member.NameRetention, proofedNameRetention)
+	}
+}
+
+// fakeResults answers a session's result as reading it from the engine would,
+// or err.
+type fakeResults struct {
+	identity proofingprovider.Identity
+	err      error
+}
+
+func (f fakeResults) RequestResult(_ context.Context, _, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	return Request{ID: id, Status: StatusApproved}, f.identity, f.err
+}
+
+func (fakeResults) RequestDiplomas(context.Context, []uuid.UUID) (map[uuid.UUID][]Diploma, error) {
+	return map[uuid.UUID][]Diploma{}, nil
+}
+
+// session.verified carries the session's result, read as it is sent: the
+// outbox keeps none of it, a read that fails is retried, and a session erased
+// meanwhile goes out without one.
+func TestWebhookCarriesResult(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NewDBRecorder(), cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	got := make(chan []byte, 10)
+	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- body
+	}))
+	t.Cleanup(receiver.Close)
+	if _, _, err := webhooks.Save(ctx, orgID, receiver.URL, []string{EventSessionVerified}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	approved := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
+	if err := requests.RecordOutcome(ctx, approved, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	identity := proofingprovider.Identity{
+		Result:    proofingprovider.Result{Status: proofingprovider.StatusApproved},
+		GivenName: "Anna", FamilyName: "Jansen", PersonalNumber: "111222333",
+		DocumentImage: &proofingprovider.Image{MimeType: "image/png", Base64: "ZnJvbnQ="},
+	}
+	deliverer := NewDeliverer(webhooks, safehttp.Policy{AllowInsecureHTTP: true})
+
+	deliverer.SetResults(fakeResults{err: errors.New("engine down")})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	select {
+	case body := <-got:
+		t.Fatalf("sent %s while the result could not be read", body)
+	default:
+	}
+	if deliveries, _ := webhooks.Deliveries(ctx, orgID); len(deliveries) != 1 || deliveries[0].Status != DeliveryPending {
+		t.Fatalf("deliveries = %+v, want the one pending a retry", deliveries)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
+		t.Fatalf("make due: %v", err)
+	}
+	deliverer.SetResults(fakeResults{identity: identity})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	var sent struct {
+		Data struct {
+			SessionID string `json:"sessionId"`
+			Result    struct {
+				Identity struct {
+					FamilyName string `json:"familyName"`
+					BSN        string `json:"bsn"`
+				} `json:"identity"`
+				DocumentImage struct{ Data string } `json:"documentImage"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(<-got, &sent); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if r := sent.Data.Result; sent.Data.SessionID != publicSessionID(approved.ID) || r.Identity.FamilyName != "Jansen" ||
+		r.Identity.BSN != "111222333" || r.DocumentImage.Data != "ZnJvbnQ=" {
+		t.Errorf("sent = %+v; want the session's result with its BSN and document image", sent.Data)
+	}
+	var stored string
+	if err := pool.QueryRow(ctx, `SELECT payload::text FROM identity_proofing_webhook_deliveries`).Scan(&stored); err != nil {
+		t.Fatalf("stored payload: %v", err)
+	}
+	if strings.Contains(stored, "Jansen") || strings.Contains(stored, webhookResultKey) {
+		t.Errorf("the outbox keeps the result: %s", stored)
+	}
+
+	// The same event again, the session erased meanwhile.
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
+		SET status = $1, attempts = 0, next_attempt_at = now()`, DeliveryPending); err != nil {
+		t.Fatalf("send again: %v", err)
+	}
+	deliverer.SetResults(fakeResults{err: ErrRequestNotFound})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	if body := <-got; bytes.Contains(body, []byte(`"result"`)) {
+		t.Errorf("an erased session's event carries a result: %s", body)
 	}
 }
 

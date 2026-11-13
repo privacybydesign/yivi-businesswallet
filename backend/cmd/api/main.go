@@ -1275,8 +1275,9 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	// the org's endpoint (https, public addresses only). Without the key no
 	// secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
-		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks",
-			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
+		deliverer := proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{})
+		deliverer.SetResults(proofingService)
+		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks", deliverer.Run)
 	}
 	w.proofingHandler = proofing.NewHandler(proofingService, w.requireUser, w.orgHandler.Authorize)
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)

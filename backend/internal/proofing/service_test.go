@@ -1905,6 +1905,23 @@ func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
 	}
 }
 
+// The Yivi disclosure asks the registered BSN whenever the flow keeps it, in
+// full or masked.
+func TestYiviAsksBSNOnlyWhenKept(t *testing.T) {
+	for policy, want := range map[string]bool{"": false, "omit": false, bsnPolicyMask: true, bsnPolicyRetrieve: true} {
+		f := newFixture()
+		sent := f.sendYivi(t)
+		spec := proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument}, BSNPolicy: policy}
+		f.ips.flowVersions = []proofingprovider.Flow{{FlowSpec: spec, ID: sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true}}
+		if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
+			t.Fatalf("%q: StartYivi: %v", policy, err)
+		}
+		if got := f.verifier.requests[len(f.verifier.requests)-1].BSN; got != want {
+			t.Errorf("policy %q: asks the BSN = %v, want %v", policy, got, want)
+		}
+	}
+}
+
 // The Yivi disclosure runs over OpenID4VP at the wallet's verifier; its photo
 // goes to IPS as the face reference, apart from the other claims.
 func TestYiviDisclosureOpenID4VP(t *testing.T) {

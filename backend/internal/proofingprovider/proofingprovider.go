@@ -195,7 +195,7 @@ const (
 
 // Identity is a session's outcome with who was proofed and on what evidence,
 // for a customer's result read. Only these fields are read from the engine: never
-// the document number, personal number or place of birth.
+// the document number or place of birth.
 type Identity struct {
 	Result
 	// GivenName and FamilyName are the MRZ's: a long name is cut off there.
@@ -207,6 +207,9 @@ type Identity struct {
 	FullFamilyName string
 	BirthDate      string
 	Nationality    string
+	// PersonalNumber is the BSN as the flow's BSN policy releases it; empty
+	// when it omits it or none was read.
+	PersonalNumber string
 	// AgeOver is whether the holder is the flow's age or older, derived from
 	// the chip's date of birth; nil when the flow did not request age_over.
 	AgeOver *AgeOver

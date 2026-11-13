@@ -246,11 +246,13 @@ const (
 // ProofingRequest is an identity proofing disclosure: any one of Sources, the
 // flow's accepted documents (empty is a passport, id-card or residence
 // permit), with the Claims a flow adds to a document (the photo, an age claim)
-// and, with Address, the registered address as well.
+// and, with Address, the registered address as well. BSN asks the personal
+// data's BSN too.
 type ProofingRequest struct {
 	Sources []string
 	Claims  []string
 	Address bool
+	BSN     bool
 }
 
 // defaultProofingSources are what a request naming no source asks.
@@ -271,8 +273,11 @@ func (v vcts) proofingRequestQuery(req ProofingRequest) dcqlQuery {
 		names = append(names, ClaimDateOfBirth)
 	}
 	documentClaims := claimPaths(append(names, req.Claims...)...)
-	personalClaims := claimPaths(append(
-		[]string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth},
+	personalNames := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth}
+	if req.BSN {
+		personalNames = append(personalNames, ClaimPersonalBSN)
+	}
+	personalClaims := claimPaths(append(personalNames,
 		slices.DeleteFunc(slices.Clone(req.Claims), func(c string) bool { return c == ClaimPhoto })...)...)
 
 	var q dcqlQuery

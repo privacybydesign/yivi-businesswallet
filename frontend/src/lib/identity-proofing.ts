@@ -1912,6 +1912,7 @@ const PROOFING_ERROR_KEYS = {
   document_scan_needs_page: "identityProofing.errors.documentScanNeedsPage",
   document_scan_failed: "identityProofing.errors.documentScanFailed",
   document_scan_mismatch: "identityProofing.errors.documentScanMismatch",
+  document_scan_unavailable: "identityProofing.errors.documentScanUnavailable",
   document_scan_done: "identityProofing.errors.documentScanDone",
   document_scan_pending: "identityProofing.errors.documentScanPending",
   no_document_scanner: "identityProofing.errors.noDocumentScanner",
@@ -1966,6 +1967,7 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
     case "employment_closed":
     case "document_scan_failed":
     case "document_scan_mismatch":
+    case "document_scan_unavailable":
     case "document_scan_done":
     case "document_scan_pending":
     case "seal_check_unavailable":

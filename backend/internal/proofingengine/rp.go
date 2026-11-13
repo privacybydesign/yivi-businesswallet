@@ -505,6 +505,8 @@ type resultView struct {
 			FullLastName  string `json:"fullLastName"`
 			DateOfBirth   string `json:"dateOfBirth"`
 			DateOfExpiry  string `json:"dateOfExpiry"`
+			// PersonalNumber is the BSN as the flow's BSN policy released it.
+			PersonalNumber string `json:"personalNumber"`
 		} `json:"document"`
 		ChipChecks *struct {
 			Passive *struct {
@@ -631,7 +633,7 @@ func (s *Server) SessionResult(_ context.Context, t pp.Tenant, id, token string)
 }
 
 // SessionIdentity reads who was proofed and on what evidence: never the
-// document number, personal number or place of birth.
+// document number or place of birth.
 func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token string) (pp.Identity, error) {
 	v, err := s.readResult(t, id, token)
 	if err != nil {
@@ -649,7 +651,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
 		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
-		out.BirthDate, out.Nationality = doc.DateOfBirth, doc.Nationality
+		out.BirthDate, out.Nationality, out.PersonalNumber = doc.DateOfBirth, doc.Nationality, doc.PersonalNumber
 		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, doc.DateOfExpiry
 	}
 	if chip := res.ChipChecks; chip != nil {

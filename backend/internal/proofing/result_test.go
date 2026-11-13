@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -89,5 +90,45 @@ func TestAPIResultAgeOver(t *testing.T) {
 	// A check waiting for review shows its reviewer the same identity.
 	if got := newAPIIdentity(identity); got.AgeOver == nil || *got.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
 		t.Errorf("identity in review = %+v, want ageOver 18, over", got)
+	}
+}
+
+// A result carries only what the flow produced: no empty steps or diplomas,
+// and chip checks only on a chip read.
+func TestAPIResultLeavesOutWhatTheFlowHasNot(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	for evidenceType, wantChip := range map[string]bool{
+		proofingprovider.EvidenceEMRTD:         true,
+		proofingprovider.EvidenceYivi:          false,
+		proofingprovider.EvidenceDocumentPhoto: false,
+	} {
+		identity := proofingprovider.Identity{
+			Result: proofingprovider.Result{Status: proofingprovider.StatusApproved},
+			Evidence: &proofingprovider.Evidence{
+				Type: evidenceType, PassiveAuth: proofingprovider.CheckNotPerformed, ActiveAuth: proofingprovider.CheckNotPerformed,
+			},
+		}
+		out := newAPIResultResponse(req, identity, time.Now())
+		out.Diplomas = newDiplomaResponses(nil)
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"steps", "diplomas"} {
+			if _, ok := got[key]; ok {
+				t.Errorf("%s: result carries an empty %s", evidenceType, key)
+			}
+		}
+		entry := got["evidence"].([]any)[0].(map[string]any)
+		if _, ok := entry["passiveAuth"]; ok != wantChip {
+			t.Errorf("%s: passiveAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
+		if _, ok := entry["activeAuth"]; ok != wantChip {
+			t.Errorf("%s: activeAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
 	}
 }

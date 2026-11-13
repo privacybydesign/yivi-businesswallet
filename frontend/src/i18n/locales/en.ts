@@ -590,6 +590,8 @@ export const en = {
         "The photos of the document could not be used. Try again.",
       documentScanMismatch:
         "These photos belong to another check. Photograph the document again.",
+      documentScanUnavailable:
+        "The scan service could not hand over the result of this scan. Photograph the document again.",
       documentScanDone: "The document is already photographed.",
       documentScanPending:
         "Photograph the document first, then share your data from the Yivi app.",
@@ -1905,8 +1907,6 @@ export const en = {
           hint: "The person scans their passport or ID card, holds it to their phone so the chip is read, and takes a selfie. A check that falls short is rejected.",
         },
       },
-      regula:
-        "Documents and faces are checked by Regula in the Idem app. The Yivi app shares a document already in it, with no face check.",
       advanced: {
         title: "Advanced settings",
         hint: "Steps, documents, what you receive, privacy.",

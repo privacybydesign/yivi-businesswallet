@@ -612,6 +612,8 @@ export const nl: Translation<typeof en> = {
         "De foto's van het document zijn niet bruikbaar. Probeer het opnieuw.",
       documentScanMismatch:
         "Deze foto's horen bij een andere controle. Fotografeer het document opnieuw.",
+      documentScanUnavailable:
+        "De scanservice kon het resultaat van deze scan niet doorgeven. Fotografeer het document opnieuw.",
       documentScanDone: "Het document is al gefotografeerd.",
       documentScanPending:
         "Fotografeer eerst het document en deel daarna je gegevens vanuit de Yivi-app.",
@@ -1954,8 +1956,6 @@ export const nl: Translation<typeof en> = {
           hint: "De persoon scant het paspoort of de ID-kaart, houdt het tegen de telefoon zodat de chip wordt gelezen, en maakt een selfie. Een controle die tekortschiet wordt afgewezen.",
         },
       },
-      regula:
-        "Documenten en gezichten worden gecontroleerd door Regula in de Idem-app. De Yivi-app deelt een document dat er al in staat, zonder gezichtscontrole.",
       advanced: {
         title: "Geavanceerde instellingen",
         hint: "Stappen, documenten, wat je ontvangt, privacy.",

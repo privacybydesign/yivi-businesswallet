@@ -314,7 +314,7 @@ func (c *Client) Result(ctx context.Context, transactionID, resultID string) (Re
 	var out resultResponse
 	target := c.baseURL + "/transactions/" + url.PathEscape(transactionID) + "/results/" + url.PathEscape(resultID)
 	if err := c.call(ctx, http.MethodGet, target, nil, http.StatusOK, &out); err != nil {
-		return Result{}, fmt.Errorf("idscan: result of transaction %s: %w", transactionID, err)
+		return Result{}, fmt.Errorf("idscan: result %s of transaction %s: %w", resultID, transactionID, err)
 	}
 	var files []file
 	var fields []resultField
@@ -481,6 +481,40 @@ func (c *Client) sameHost(raw string) bool {
 	return err == nil && u.Scheme == base.Scheme && strings.EqualFold(u.Host, base.Host)
 }
 
+// APIError is an answer ID Scan gave other than the one asked for, with its
+// documented error body (status, message) when it sent one.
+type APIError struct {
+	Status  int
+	Message string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("ID Scan answered %d: %s", e.Status, e.Message)
+}
+
+// maxErrorMessage bounds the message an APIError keeps of a body that is not
+// ID Scan's error JSON.
+const maxErrorMessage = 200
+
+// apiError reads an unexpected answer: its status, and the message of ID
+// Scan's error body, else the start of the body itself.
+func apiError(status int, raw []byte) *APIError {
+	var body struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &body) == nil && body.Message != "" {
+		return &APIError{Status: status, Message: body.Message}
+	}
+	text := string(bytes.TrimSpace(raw))
+	if len(text) > maxErrorMessage {
+		text = text[:maxErrorMessage]
+	}
+	if text == "" {
+		text = http.StatusText(status)
+	}
+	return &APIError{Status: status, Message: text}
+}
+
 // call sends one JSON request and decodes its answer into out.
 func (c *Client) call(ctx context.Context, method, target string, body []byte, wantStatus int, out any) error {
 	resp, err := c.do(ctx, method, target, body)
@@ -493,7 +527,7 @@ func (c *Client) call(ctx context.Context, method, target string, body []byte, w
 		return err
 	}
 	if resp.StatusCode != wantStatus {
-		return fmt.Errorf("status %d: %s", resp.StatusCode, bytes.TrimSpace(raw))
+		return apiError(resp.StatusCode, raw)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("decode answer: %w", err)

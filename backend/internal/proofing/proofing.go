@@ -1040,6 +1040,14 @@ const stepDocumentPhoto = "document_photo"
 // bsnPolicyRetrieve is the flow BSN policy that keeps the BSN; empty is omit.
 const bsnPolicyRetrieve = "retrieve"
 
+// bsnPolicyMask is the flow BSN policy that keeps only the BSN's last digits.
+const bsnPolicyMask = "mask"
+
+// keepsBSN reports whether f keeps the BSN, in full or masked.
+func keepsBSN(f proofingprovider.Flow) bool {
+	return f.BSNPolicy == bsnPolicyRetrieve || f.BSNPolicy == bsnPolicyMask
+}
+
 // takesDocumentPhoto reports whether flow f photographs the document.
 func takesDocumentPhoto(f proofingprovider.Flow) bool {
 	return slices.Contains(f.Steps, stepDocumentPhoto)

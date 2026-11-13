@@ -274,6 +274,23 @@ func TestPersonalDataSource(t *testing.T) {
 	}
 }
 
+// The personal data's BSN is asked only when the request says so.
+func TestPersonalDataBSN(t *testing.T) {
+	asksBSN := func(req ProofingRequest) bool {
+		q := stagingVCTs.proofingRequestQuery(req)
+		return slices.ContainsFunc(q.Credentials[0].Claims, func(c dcqlClaim) bool { return c.Path[0] == ClaimPersonalBSN })
+	}
+	if asksBSN(ProofingRequest{Sources: []string{SourcePersonalData}}) {
+		t.Error("asked the BSN without BSN")
+	}
+	if !asksBSN(ProofingRequest{Sources: []string{SourcePersonalData}, BSN: true}) {
+		t.Error("did not ask the BSN with BSN")
+	}
+	if asksBSN(ProofingRequest{Sources: []string{SourcePassport}, BSN: true}) {
+		t.Error("asked a passport the BSN")
+	}
+}
+
 func TestRegisteredAddress(t *testing.T) {
 	if _, ok := (Presentation{}).RegisteredAddress(); ok {
 		t.Error("RegisteredAddress answered for a presentation without it")
