@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/euid"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
@@ -22,9 +23,12 @@ import (
 // kvkSenderAddress is the QERDS "from" shown on the deposited attestation message.
 const kvkSenderAddress = "registratie@kvk.nl"
 
+// discardTimeout bounds removing an EBWOID whose registration did not go through.
+const discardTimeout = 10 * time.Second
+
 // walletStore is the persistence surface the service coordinates.
 type walletStore interface {
-	RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress, kvkContactAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error)
+	RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error)
 	SetStatus(ctx context.Context, orgID uuid.UUID, status string) (organization.Organization, error)
 	ListRepresentations(ctx context.Context, orgID uuid.UUID) ([]Representation, error)
 	ClaimRepresentation(ctx context.Context, orgID, repID, userID uuid.UUID) error
@@ -35,6 +39,19 @@ type walletStore interface {
 // whether the requester is a listed representative.
 type registry interface {
 	Consult(ctx context.Context, req registryprovider.ConsultRequest) (registryprovider.RegistrationAttestation, error)
+}
+
+// ownerIDIssuer gets the org's EBWOID (Art 8 owner identification data) into
+// its holder engine (see internal/registryprovider).
+type ownerIDIssuer interface {
+	Obtain(ctx context.Context, h registryprovider.EBWOIDHolder, orgID uuid.UUID, att registryprovider.RegistrationAttestation) (registryprovider.HeldEBWOID, error)
+}
+
+// ownerIDHolder is the org's holder engine the EBWOID is stored in and read from.
+type ownerIDHolder interface {
+	registryprovider.EBWOIDHolder
+	Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang string) (eudiholder.HeldCredential, error)
+	Delete(ctx context.Context, orgID uuid.UUID, ref string) error
 }
 
 // identityDiscloser resolves an OpenID4VP identity disclosure (public register
@@ -60,6 +77,8 @@ type qerdsInbox interface {
 type Service struct {
 	store         walletStore
 	registry      registry
+	ownerID       ownerIDIssuer
+	holder        ownerIDHolder
 	discloser     identityDiscloser
 	users         userDirectory
 	inbox         qerdsInbox
@@ -69,6 +88,8 @@ type Service struct {
 func NewService(
 	store walletStore,
 	reg registry,
+	ownerID ownerIDIssuer,
+	holder ownerIDHolder,
 	discloser identityDiscloser,
 	users userDirectory,
 	inbox qerdsInbox,
@@ -77,6 +98,8 @@ func NewService(
 	return &Service{
 		store:         store,
 		registry:      reg,
+		ownerID:       ownerID,
+		holder:        holder,
 		discloser:     discloser,
 		users:         users,
 		inbox:         inbox,
@@ -145,8 +168,9 @@ func (s *Service) findOrCreateUser(ctx context.Context, disclosed auth.Disclosed
 
 // OpenWallet registers a business wallet for the KVK number under the chosen slug:
 // it validates the slug, consults KVK with the requester's identification data
-// and — if KVK validates the requester as a listed representative — creates the
-// organization (with the register's legal name), makes them the first owner, and
+// and — if KVK validates the requester as a listed representative — gets the
+// org's EBWOID into its holder, creates the organization with the legal name and
+// EUID from that verified credential, makes the requester the first owner, and
 // deposits the attestation in the org's QERDS inbox. An unknown KVK number or a
 // requester KVK does not list is bounced as not validated; no org is created.
 func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, requester Requester, kvkNumber, slug string) (RegistrationResult, error) {
@@ -170,19 +194,36 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 	if !att.RequesterIsRepresentative {
 		return RegistrationResult{}, ErrNotRepresentative
 	}
-	id, err := euid.Parse(att.EUID)
+	registered, err := euid.Parse(att.EUID)
 	if err != nil {
 		return RegistrationResult{}, fmt.Errorf("wallet: registry EUID: %w", err)
 	}
-	att.EUID = id.String()
+	att.EUID = registered.String()
+
+	// The holder engine is per org, so the org id is fixed before the org row exists.
+	orgID := uuid.New()
+	ebwoid, err := s.obtainEBWOID(ctx, orgID, att, registered)
+	if err != nil {
+		return RegistrationResult{}, err
+	}
+	att.LegalName, att.EUID = ebwoid.legalName, ebwoid.euid
 
 	// The org's own default (sending) address is slug-based. KVK is saved as a
 	// recipient in the address book at the address it delivers the attestation
 	// from (kvkSenderAddress) — so the contact matches the message's "from" and
 	// replies reach KVK, rather than a synthetic org-derived address.
 	digitalAddress := fmt.Sprintf("%s@%s", slug, s.addressDomain)
-	org, err := s.store.RegisterOrganization(ctx, requestorUserID, slug, digitalAddress, kvkSenderAddress, att)
+	org, err := s.store.RegisterOrganization(ctx, Registration{
+		OrgID:             orgID,
+		RequestorUserID:   requestorUserID,
+		Slug:              slug,
+		DigitalAddress:    digitalAddress,
+		KVKContactAddress: kvkSenderAddress,
+		Attestation:       att,
+		EBWOID:            ebwoid.held,
+	})
 	if err != nil {
+		s.discardEBWOID(ctx, orgID, ebwoid.held.Ref)
 		return RegistrationResult{}, err
 	}
 
@@ -195,6 +236,78 @@ func (s *Service) OpenWallet(ctx context.Context, requestorUserID uuid.UUID, req
 		res.RepresentationAuthority = rep.Authority
 	}
 	return res, nil
+}
+
+// heldEBWOID is a verified EBWOID in the org's holder, with the identity read from it.
+type heldEBWOID struct {
+	held      registryprovider.HeldEBWOID
+	legalName string
+	euid      string
+}
+
+// obtainEBWOID gets the EBWOID into orgID's holder and reads the owner identity
+// from the verified credential. Its EUID must name the company the register
+// validated, or a valid credential for another company would open this wallet.
+func (s *Service) obtainEBWOID(ctx context.Context, orgID uuid.UUID, att registryprovider.RegistrationAttestation, registered euid.EUID) (heldEBWOID, error) {
+	held, err := s.ownerID.Obtain(ctx, s.holder, orgID, att)
+	if err != nil {
+		s.discardEBWOID(ctx, orgID, held.Ref)
+		return heldEBWOID{}, fmt.Errorf("wallet: obtain EBWOID: %w", err)
+	}
+	legalName, id, err := s.readEBWOID(ctx, orgID, held.Ref)
+	if err == nil && !sameCompany(id, registered) {
+		err = fmt.Errorf("%w: EBWOID %s, register %s", ErrEBWOIDMismatch, id, registered)
+	}
+	if err != nil {
+		s.discardEBWOID(ctx, orgID, held.Ref)
+		return heldEBWOID{}, err
+	}
+	return heldEBWOID{held: held, legalName: legalName, euid: id.String()}, nil
+}
+
+// readEBWOID reads the official name and EUID from the stored EBWOID's verified claims.
+func (s *Service) readEBWOID(ctx context.Context, orgID uuid.UUID, ref string) (string, euid.EUID, error) {
+	cred, err := s.holder.Claims(ctx, orgID, ref, registryprovider.EBWOIDVCT, "")
+	if err != nil {
+		return "", euid.EUID{}, fmt.Errorf("wallet: read EBWOID: %w", err)
+	}
+	var legalName, rawID string
+	for _, a := range cred.Attributes {
+		value, _ := a.Value.(string)
+		switch a.Key {
+		case registryprovider.EBWOIDClaimName:
+			legalName = strings.TrimSpace(value)
+		case registryprovider.EBWOIDClaimID:
+			rawID = value
+		}
+	}
+	if legalName == "" {
+		return "", euid.EUID{}, errors.New("wallet: EBWOID has no name")
+	}
+	id, err := euid.Parse(rawID)
+	if err != nil {
+		return "", euid.EUID{}, fmt.Errorf("wallet: EBWOID id: %w", err)
+	}
+	return legalName, id, nil
+}
+
+// sameCompany compares two EUIDs without the EBWOID's optional third part.
+func sameCompany(a, b euid.EUID) bool {
+	return a.Country == b.Country && a.Register == b.Register && a.Number == b.Number
+}
+
+// discardEBWOID removes an EBWOID whose wallet was not opened, so no org-less
+// credential stays in the holder. It runs detached from a possibly cancelled request.
+func (s *Service) discardEBWOID(ctx context.Context, orgID uuid.UUID, ref string) {
+	if ref == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+	defer cancel()
+	if err := s.holder.Delete(ctx, orgID, ref); err != nil {
+		slog.ErrorContext(ctx, "wallet: discarding EBWOID of an unopened wallet failed",
+			slog.String("orgId", orgID.String()), slog.String("error", err.Error()))
+	}
 }
 
 // depositAttestation records the KVK attestation as an inbound QERDS message in

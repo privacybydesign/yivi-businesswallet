@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerds"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/qerdsprovider"
@@ -59,7 +60,8 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	store := wallet.NewStore(pool, audit.NopRecorder{}, walletunit.NewStore(pool, audit.NopRecorder{}))
 	reg := registryprovider.NewSeededRegistry(pool, audit.NewDBRecorder())
 	inbox := &captureInbox{}
-	svc := wallet.NewService(store, reg, nil, nil, inbox, "qerds.localhost")
+	holder := eudiholder.NewStubHolder()
+	svc := wallet.NewService(store, reg, registryprovider.StubEBWOIDIssuer{}, holder, nil, nil, inbox, "qerds.localhost")
 
 	res, err := svc.OpenWallet(ctx, requester.ID, wallet.Requester{
 		GivenNames:  "Sanne Marijke",
@@ -94,6 +96,23 @@ func TestOpenWalletSucceedsForSeededRegisterCompany(t *testing.T) {
 	}
 	if role != organization.RoleAdmin {
 		t.Fatalf("owner role = %q, want admin", role)
+	}
+	// The wallet opens holding its EBWOID, and the org identity matches its claims.
+	var ref string
+	if err := pool.QueryRow(ctx, `SELECT credential_ref FROM held_attestations WHERE organization_id = $1 AND vct = $2 AND source = 'bootstrap'`,
+		org.ID, registryprovider.EBWOIDVCT).Scan(&ref); err != nil {
+		t.Fatalf("held EBWOID missing: %v", err)
+	}
+	cred, err := holder.Claims(ctx, org.ID, ref, registryprovider.EBWOIDVCT, "")
+	if err != nil {
+		t.Fatalf("EBWOID claims: %v", err)
+	}
+	claims := map[string]any{}
+	for _, a := range cred.Attributes {
+		claims[a.Key] = a.Value
+	}
+	if claims[registryprovider.EBWOIDClaimID] != org.EUID || claims[registryprovider.EBWOIDClaimName] != org.Name {
+		t.Fatalf("EBWOID claims = %v, want id %q and name %q", claims, org.EUID, org.Name)
 	}
 	if inbox.deposited != 1 {
 		t.Fatalf("deposited attestations = %d, want 1", inbox.deposited)

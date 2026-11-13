@@ -101,6 +101,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registreren van de wallet mislukt: {{message}}",
     kind: {
       bestuurder: "Bestuurder",
@@ -334,6 +336,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registratie kon niet worden voltooid. Probeer het opnieuw.",
     back: "Terug",
     haveAccount: "Heb je al een account? Inloggen",

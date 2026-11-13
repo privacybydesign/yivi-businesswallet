@@ -707,6 +707,7 @@ type wiring struct {
 	orgHandler            *organization.Handler
 	qerdsHandler          *qerds.Handler
 	walletHandler         *wallet.Handler
+	walletRegistry        registryProvider
 	postguardHandler      *postguard.Handler
 	emailHandler          *email.Handler
 	issuerSettingsHandler *issuersettings.Handler
@@ -917,9 +918,8 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 	if err := probe(ctx, qerdsProbeTimeout, registry); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
-	walletService := wallet.NewService(walletStore, registry, w.authService, w.userStore, w.qerdsStore, cfg.QerdsDefaultAddressDomain)
-	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
+	// The wallet service also needs the holder engine, so buildAttestations builds it.
+	w.walletRegistry = registry
 
 	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
 	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
@@ -936,6 +936,16 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
 		slog.String("pkgUrl", cfg.PostGuardPkgURL),
 		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
+	return nil
+}
+
+// buildWallet wires wallet registration: the KVK registry from buildMessaging and
+// the EBWOID issuer, which stores the org's owner identification data in holder.
+// Only the seeded register's stub issuer exists until KVK's issuer (YIV-622).
+func (w *wiring) buildWallet(holder eudiholder.Holder) error {
+	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
+	walletService := wallet.NewService(walletStore, w.walletRegistry, registryprovider.StubEBWOIDIssuer{}, holder, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
+	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 
@@ -965,6 +975,9 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 
 	attHolder, err := w.openAttestationHolder(ctx, wscaStore)
 	if err != nil {
+		return err
+	}
+	if err := w.buildWallet(attHolder); err != nil {
 		return err
 	}
 
