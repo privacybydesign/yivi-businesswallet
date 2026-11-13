@@ -2,6 +2,7 @@ package registryprovider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -38,6 +39,9 @@ const stubEBWOIDIssuer = "https://kvk.seeded-register.localhost"
 // stubEBWOIDLifetime matches the stub holder's received-credential lifetime.
 const stubEBWOIDLifetime = 365 * 24 * time.Hour
 
+// stubEBWOIDHeader marks the stub EBWOID's token as an unsigned SD-JWT VC.
+const stubEBWOIDHeader = `{"alg":"none","typ":"dc+sd-jwt"}`
+
 // StubEBWOIDIssuer stores an EBWOID built from the seeded register's attestation,
 // for dev / CI. It is unsigned: nothing outside this wallet should rely on it.
 type StubEBWOIDIssuer struct{}
@@ -64,6 +68,7 @@ func (StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.U
 		IssuerURL:        stubEBWOIDIssuer,
 		CredentialIssuer: stubEBWOIDIssuer,
 		Hash:             "ebwoid-" + orgID.String(),
+		RawToken:         unsignedSDJWT(payload),
 		ProcessedPayload: payload,
 		IssuedAt:         issuedAt,
 		ExpiresAt:        &expiresAt,
@@ -72,4 +77,11 @@ func (StubEBWOIDIssuer) Obtain(ctx context.Context, h EBWOIDHolder, orgID uuid.U
 		return HeldEBWOID{}, fmt.Errorf("registryprovider: store stub ebwoid: %w", err)
 	}
 	return HeldEBWOID{Ref: ref, Issuer: stubEBWOIDIssuer}, nil
+}
+
+// unsignedSDJWT is a compact SD-JWT without signature or disclosures: the irmago
+// engine refuses a credential without a raw token.
+func unsignedSDJWT(payload []byte) []byte {
+	enc := base64.RawURLEncoding
+	return []byte(enc.EncodeToString([]byte(stubEBWOIDHeader)) + "." + enc.EncodeToString(payload) + ".~")
 }
