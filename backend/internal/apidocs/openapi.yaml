@@ -12420,7 +12420,8 @@ components:
               description: >-
                 The person's BSN, for a flow whose BSN policy keeps it (`retrieve`, or `mask`
                 for a masked one): the registered one when the Yivi app shared the personal
-                data (DigiD), else the one the document's chip or photo carries. Absent otherwise.
+                data (DigiD), else the one a Dutch document's chip or photo carries. Another
+                country's personal number is never sent. Absent otherwise.
             ageOver:
               type: object
               description: >-
