@@ -158,6 +158,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys/{keyID}/secret", admin(respond.HandlerFunc(h.revealAPIKey)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.getWebhook)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
@@ -1133,6 +1134,7 @@ var errorResponses = []struct {
 	{ErrFlowNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}},
 	{ErrFlowNotCompletable, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}},
 	{ErrMemberNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}},
+	{ErrAPIKeyNotRevealable, respond.APIError{Status: http.StatusConflict, Code: "api_key_not_revealable", Message: "this API key was made before keys could be shown again: only its hash is kept, so create a new one"}},
 	{ErrAPIKeyNotFound, respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}},
 	{ErrRequestNotFound, respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}},
 	{ErrWebhookNotFound, respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}},

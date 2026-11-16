@@ -225,6 +225,7 @@ const (
 	IdentityProofingSettingsUpdated      = "identity_proofing.settings_updated"
 	IdentityProofingAPIKeyCreated        = "identity_proofing.api_key_created"
 	IdentityProofingAPIKeyRevoked        = "identity_proofing.api_key_revoked"
+	IdentityProofingAPIKeyRevealed       = "identity_proofing.api_key_revealed"
 	IdentityProofingWebhookConfigured    = "identity_proofing.webhook_configured"
 	IdentityProofingWebhookSecretRotated = "identity_proofing.webhook_secret_rotated"
 	IdentityProofingWebhookRemoved       = "identity_proofing.webhook_removed"

@@ -36,12 +36,14 @@ type apiKeyResponse struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	LastUsedAt    *time.Time `json:"lastUsedAt,omitempty"`
 	RevokedAt     *time.Time `json:"revokedAt,omitempty"`
+	// Revealable is a key an admin can read again (GET .../secret).
+	Revealable bool `json:"revealable"`
 }
 
 func newAPIKeyResponse(k APIKey) apiKeyResponse {
 	return apiKeyResponse{
 		ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scopes: k.Scopes, CreatedByName: k.CreatedByName,
-		CreatedAt: k.CreatedAt, LastUsedAt: k.LastUsedAt, RevokedAt: k.RevokedAt,
+		CreatedAt: k.CreatedAt, LastUsedAt: k.LastUsedAt, RevokedAt: k.RevokedAt, Revealable: k.Revealable,
 	}
 }
 
@@ -79,6 +81,25 @@ func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) error {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusCreated, createdAPIKeyResponse{apiKeyResponse: newAPIKeyResponse(key), Secret: secret})
+	return nil
+}
+
+// apiKeySecretResponse is a key itself, as an admin reads it again.
+type apiKeySecretResponse struct {
+	Secret string `json:"secret"`
+}
+
+func (h *Handler) revealAPIKey(w http.ResponseWriter, r *http.Request) error {
+	keyID, err := uuid.Parse(r.PathValue("keyID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: "invalid API key id"}
+	}
+	secret, err := h.service.APIKeySecret(r.Context(), orgFromRequest(r).ID, keyID)
+	if err != nil {
+		return mapError(err)
+	}
+	w.Header().Set(headerCacheControl, cacheNoStore)
+	respond.JSON(w, r, http.StatusOK, apiKeySecretResponse{Secret: secret})
 	return nil
 }
 

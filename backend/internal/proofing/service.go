@@ -132,6 +132,7 @@ type apiKeyStore interface {
 	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
 	List(ctx context.Context, orgID uuid.UUID) ([]APIKey, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (APIKey, error)
+	Secret(ctx context.Context, orgID, id uuid.UUID) (string, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
 	Touch(ctx context.Context, caller APIKeyCaller) error
 }
@@ -2562,6 +2563,11 @@ func (s *Service) CreateAPIKey(ctx context.Context, orgID, createdBy uuid.UUID, 
 // APIKeys lists the org's keys, revoked ones included.
 func (s *Service) APIKeys(ctx context.Context, orgID uuid.UUID) ([]APIKey, error) {
 	return s.apiKeys.List(ctx, orgID)
+}
+
+// APIKeySecret is one of the org's active keys itself (APIKeyStore.Secret).
+func (s *Service) APIKeySecret(ctx context.Context, orgID, id uuid.UUID) (string, error) {
+	return s.apiKeys.Secret(ctx, orgID, id)
 }
 
 // RevokeAPIKey stops one of the org's keys authenticating.

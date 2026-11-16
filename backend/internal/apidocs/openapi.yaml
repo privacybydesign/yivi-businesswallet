@@ -8402,8 +8402,9 @@ paths:
       summary: Create an API key
       description: >-
         Requires an administrator role in the organisation. `name` labels the key. The answer
-        carries the key's `secret` (`yp_live_…`), the one time it is readable: only its SHA-256
-        is kept. The organisation's backend sends it as a Bearer token to the public
+        carries the key's `secret` (`yp_live_…`). Its SHA-256 authenticates it, and the key is
+        kept sealed with the proofing encryption key, so an admin can show it again
+        (`GET .../api-keys/{keyID}/secret`). The organisation's backend sends it as a Bearer token to the public
         `/api/v1/proofing` routes. A key gets every scope: `sessions:write` (create, cancel,
         erase), `sessions:read`, `results:read` (the verified identity), `flows:read`,
         `flows:write` (create and edit flows, their hosted page and steps, the default flow),
@@ -8493,6 +8494,58 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/identity-proofing/api-keys/{keyID}/secret:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: keyID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: API key id.
+    get:
+      tags: [identity-proofing]
+      summary: Show an API key again
+      description: >-
+        Requires an administrator role in the organisation. Answers an active key itself, as
+        often as needed, each read audited `identity_proofing.api_key_revealed`; never cached
+        (`Cache-Control: no-store`). A revoked key, or one that is not the organisation's, is
+        404 `api_key_not_found`. A key made before keys were kept to be shown again has only
+        its hash: 409 `api_key_not_revealable` (`revealable: false` in the list).
+      responses:
+        '200':
+          description: The key.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                    description: The key, `yp_live_…`.
+                required: [secret]
+              example:
+                secret: yp_live_EXAMPLE_NOT_A_REAL_KEY
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The key was made before keys were kept to be shown again (`api_key_not_revealable`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/identity-proofing/webhook:
     parameters:
       - name: slug
@@ -16035,6 +16088,11 @@ components:
         revokedAt:
           type: string
           format: date-time
+        revealable:
+          type: boolean
+          description: >-
+            The key can be shown again (`GET .../api-keys/{keyID}/secret`). False for a key made
+            before keys were kept for that: only its hash is stored.
       required: [id, name, prefix, scopes, createdAt]
     ProofingApiKeyList:
       type: array

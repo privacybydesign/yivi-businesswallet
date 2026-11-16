@@ -858,8 +858,17 @@ post-review outcome stay the system's.
 
 - **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
   org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
-  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. The page calls
+  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes;
+  `prefix` tells keys apart.
+  - Authenticated by its SHA-256 (`secret_hash`).
+  - Also kept sealed with the proofing cipher (`secret_ciphertext`, migration
+    `20261116100000`), so an admin reads an active key again:
+    `GET .../api-keys/{keyID}/secret` (Show on the Developers page), audited
+    `api_key_revealed`, `no-store`. A key made before has only its hash:
+    `revealable: false`, 409 `api_key_not_revealable`. Without a cipher a key
+    is kept as its hash alone.
+
+  The page calls
   them API tokens. `createdByName` is the creator's display name, absent once
   that user is deleted. One key works
   on every flow and reaches every external request of the org. Revoke is

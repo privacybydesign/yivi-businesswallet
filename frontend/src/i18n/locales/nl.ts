@@ -572,6 +572,8 @@ export const nl: Translation<typeof en> = {
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
       apiKeyNotFound: "Dat API-token bestaat niet meer.",
+      apiKeyNotRevealable:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan.",
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
@@ -1666,7 +1668,7 @@ export const nl: Translation<typeof en> = {
       title: "API-tokens",
       nameRequired: "Vul een naam in.",
       intro:
-        "Met een token start je software controles op elke flow en leest ze de resultaten. Het wordt één keer getoond, bij het aanmaken.",
+        "Met een token start je software controles op elke flow en leest ze de resultaten. Je kunt het hier altijd opnieuw tonen.",
       create: "Token aanmaken",
       name: "Naam",
       nameHint:
@@ -1678,6 +1680,14 @@ export const nl: Translation<typeof en> = {
       actions: "Acties",
       revoke: "Intrekken",
       revokeNamed: "{{name}} intrekken",
+      show: "Tonen",
+      showNamed: "{{name}} tonen",
+      shownTitle: "Token “{{name}}”",
+      shownHint:
+        "Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend. Het tonen van een token komt in het auditlog.",
+      notRevealable: "Kan niet getoond worden",
+      notRevealableHint:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan en trek dit in om het te vervangen.",
       revokeConfirm: {
         title: "{{name}} intrekken?",
         message:
@@ -1685,8 +1695,9 @@ export const nl: Translation<typeof en> = {
       },
       createdTitle: "Kopieer je token nu",
       createdHint:
-        "Dit is de enige keer dat je het token “{{name}}” ziet. Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend.",
-      createdNote: "Kwijt? Trek het in en maak een nieuw token aan.",
+        "Bewaar het token “{{name}}” veilig, bijvoorbeeld in de geheimenopslag van je backend.",
+      createdNote:
+        "Je kunt het later opnieuw tonen met Tonen, naast het token.",
     },
     webhooks: {
       endpoint: "Webhook-endpoint",
@@ -2721,6 +2732,7 @@ export const nl: Translation<typeof en> = {
         "Instellingen voor identiteitsverificatie bijgewerkt",
       identityProofingApiKeyCreated: "API-token aangemaakt",
       identityProofingApiKeyRevoked: "API-token ingetrokken",
+      identityProofingApiKeyRevealed: "API-token getoond",
       identityProofingWebhookConfigured: "Webhook-endpoint ingesteld",
       identityProofingWebhookSecretRotated: "Webhookgeheim vernieuwd",
       identityProofingWebhookRemoved: "Webhook-endpoint verwijderd",

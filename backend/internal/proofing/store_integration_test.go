@@ -1885,7 +1885,7 @@ func TestMemberRequestNoWebhook(t *testing.T) {
 // and only the org can revoke it.
 func TestAPIKeysBelongToOrg(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewAPIKeyStore(pool, audit.NewDBRecorder())
+	store := NewAPIKeyStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	otherOrg := makeOrg(t, pool, "globex")
 	sam := makeUser(t, pool, "sam@example.org")
@@ -1913,15 +1913,50 @@ func TestAPIKeysBelongToOrg(t *testing.T) {
 	}
 
 	assertAPIKeyAuthenticates(t, store, orgID, otherOrg, ci, ciSecret, otherSecret)
+	assertAPIKeyRevealed(t, pool, store, orgID, otherOrg, ci, ciSecret)
 	assertAPIKeyRevokedByOrgOnly(t, store, orgID, otherOrg, ci.ID, ciSecret, backofficeSecret)
+	if _, err := store.Secret(ctx, orgID, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Secret of a revoked key = %v, want ErrAPIKeyNotFound", err)
+	}
 
 	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
 		t.Errorf("List after the revoke = %+v, %v; want the revoked key listed", keys, err)
 	}
-	for action, want := range map[string]int{audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1} {
+	for action, want := range map[string]int{
+		audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1, audit.IdentityProofingAPIKeyRevealed: 1,
+	} {
 		if n := auditCount(t, pool, action); n != want {
 			t.Errorf("%s audited %d times, want %d (a repeat changes nothing)", action, n, want)
 		}
+	}
+}
+
+// assertAPIKeyRevealed checks that the org reads ci back as its secret, that
+// another org cannot, and that a key kept as its hash alone says so.
+func assertAPIKeyRevealed(t *testing.T, pool *pgxpool.Pool, store *APIKeyStore, orgID, otherOrg uuid.UUID, ci APIKey, ciSecret string) {
+	t.Helper()
+	ctx := context.Background()
+	if !ci.Revealable {
+		t.Errorf("new key = %+v, want it revealable", ci)
+	}
+	if got, err := store.Secret(ctx, orgID, ci.ID); err != nil || got != ciSecret {
+		t.Errorf("Secret = %q, %v; want the key itself", got, err)
+	}
+	if _, err := store.Secret(ctx, otherOrg, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Secret from another org = %v, want ErrAPIKeyNotFound", err)
+	}
+	// A key made before keys were sealed, in an org of its own.
+	oldOrg := makeOrg(t, pool, "initech")
+	var oldID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO identity_proofing_api_keys (organization_id, name, prefix, secret_hash)
+		VALUES ($1, 'Old', 'yp_live_old0', 'hash-only') RETURNING id`, oldOrg).Scan(&oldID); err != nil {
+		t.Fatalf("insert hash-only key: %v", err)
+	}
+	if keys, err := store.List(ctx, oldOrg); err != nil || len(keys) != 1 || keys[0].Revealable {
+		t.Errorf("List of a hash-only key = %+v, %v; want it not revealable", keys, err)
+	}
+	if _, err := store.Secret(ctx, oldOrg, oldID); !errors.Is(err, ErrAPIKeyNotRevealable) {
+		t.Errorf("Secret of a hash-only key = %v, want ErrAPIKeyNotRevealable", err)
 	}
 }
 
@@ -1979,7 +2014,7 @@ func assertAPIKeyRevokedByOrgOnly(t *testing.T, store *APIKeyStore, orgID, other
 // A key shows who created it, and nothing once that user is gone.
 func TestAPIKeyShowsCreator(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewAPIKeyStore(pool, audit.NopRecorder{})
+	store := NewAPIKeyStore(pool, audit.NopRecorder{}, nil)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()

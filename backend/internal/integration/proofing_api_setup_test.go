@@ -175,6 +175,39 @@ func TestProofingAPISetupErrors(t *testing.T) {
 	wantProofingError(t, "an unknown key", env.apiCall(http.MethodGet, "/api/v1/proofing/settings", "yp_live_nope", nil), http.StatusUnauthorized, "invalid_api_key")
 }
 
+// An admin reads an active API key back as often as needed, each read
+// audited; a revoked key is not read.
+func TestProofingAPIKeyReveal(t *testing.T) {
+	env := setup(t)
+	orgID := env.createOrg("Acme", "acme")
+	me := env.login("admin@acme.test")
+	env.addMembership(me.ID, orgID, organization.RoleAdmin)
+	key := env.proofingKey("acme", "Portal")
+	base := "/api/v1/orgs/acme/identity-proofing/api-keys"
+
+	listed := decodeJSON[[]struct {
+		ID         string `json:"id"`
+		Revealable bool   `json:"revealable"`
+	}](t, env.do(http.MethodGet, base, nil))
+	if len(listed) != 1 || !listed[0].Revealable {
+		t.Errorf("keys = %+v, want the key revealable", listed)
+	}
+	for range 2 {
+		resp := env.do(http.MethodGet, base+"/"+key.ID+"/secret", nil)
+		if got := decodeJSON[struct {
+			Secret string `json:"secret"`
+		}](t, resp); got.Secret != key.Secret || resp.Header.Get("Cache-Control") != "no-store" {
+			t.Errorf("secret = %q (Cache-Control %q), want the key itself, not cached", got.Secret, resp.Header.Get("Cache-Control"))
+		}
+	}
+	if n := env.auditCount(orgID, "identity_proofing.api_key_revealed"); n != 2 {
+		t.Errorf("reveals audited %d times, want 2", n)
+	}
+
+	_ = env.do(http.MethodDelete, base+"/"+key.ID, nil).Body.Close()
+	wantProofingError(t, "a revoked key", env.do(http.MethodGet, base+"/"+key.ID+"/secret", nil), http.StatusNotFound, "api_key_not_found")
+}
+
 // A key sees and changes only its own org's flows and sessions: another org's
 // flow is not listed, not read, not edited and not sent, as in the wallet.
 func TestProofingAPIFlowsStayInOrg(t *testing.T) {
