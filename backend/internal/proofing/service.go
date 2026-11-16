@@ -529,8 +529,11 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 // combination of steps, checks and assurance level; its refusal comes back as a
 // *proofingprovider.RejectedError.
 func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = normalizeFlow(in); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	if in, err = checkEditorChoices(in, nil); err != nil {
@@ -558,8 +561,11 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 // naming dg1: an empty list would leave what it releases to the engine. A data
 // request flow is the wallet's, and not edited (ErrDataRequestFlow).
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = normalizeFlow(in); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	if err := s.refuseDataRequestFlow(ctx, org, id); err != nil {

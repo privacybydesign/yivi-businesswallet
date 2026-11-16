@@ -69,8 +69,8 @@ tags:
       ### Before you start
 
       An organisation admin creates an **API key** (`yp_live_…`) once in the wallet, under
-      **Identity proofing › Developers**, where it is shown once. It opens every route of this
-      API. Everything else can be set up in the wallet or with that key:
+      **Identity proofing › Developers**, where an admin can show it again later. It opens
+      every route of this API. Everything else can be set up in the wallet or with that key:
       - the **flows** (`POST /proofing/flows`, and the routes under
         `/proofing/flows/{flowID}`). A flow fixes what is checked: which documents and
         countries are accepted, whether the chip is read, whether the document is
@@ -263,14 +263,30 @@ tags:
 
       ### Assurance levels
 
-      A flow's `requiredAssuranceLevel` is reached only by the checks that prove it: `low` by
-      the chip read with its data proven genuine (`nfc.passive_auth`), `substantial` also by a
-      live face check matched by Regula against the chip's photo. A photo without the chip
-      read, and a face matched against your own `referencePhoto`, reach no level.
+      A flow's `requiredAssuranceLevel` is reached only by the checks that prove it, so a flow
+      never claims a level it cannot reach. When you create or edit a flow with a level, the
+      wallet adds what that level needs to what you send, as the wallet's own flow editor
+      does. A `name` and a level are enough; anything else you send stays.
+
+      | Level | What the flow gets | Apps |
+      |---|---|---|
+      | `none` (or leave it out) | nothing: any steps, no level required | any |
+      | `low` | the document scan and chip read (`document_capture`, `nfc_read`), and the check that the chip's data is genuine (`nfc.passive_auth`) | Idem app, or the Yivi app, whose sessions count as `low` |
+      | `substantial` | `low`, plus a live face check (`face_verification`) matched by Regula against the chip's photo, at a face match threshold of at least 0.75 (a lower one is raised), and the check that the chip is not a copy (`nfc.chip_auth`, `face.match`, `face.liveness`) | Idem app only: the Yivi app is not offered |
+      | `high` | refused (400 `invalid_input`): no check here reaches it | |
+
+      A document photo stays when you add it, at any level: on `substantial` its face check
+      runs with Regula. A photo without the chip read, and a face matched against your own
+      `referencePhoto`, reach no level, so a flow of only those has no level.
 
       Every session reports the level it reached in `eidasLevel`, also on a flow without one.
       A session on a flow with a level that falls short of it is `rejected` with
       `ASSURANCE_NOT_MET`.
+
+      ```
+      POST /api/v1/proofing/flows
+      { "name": "Onboarding", "requiredAssuranceLevel": "substantial" }
+      ```
 
       ### Outcomes and error codes
 
@@ -8705,7 +8721,7 @@ paths:
           format: uuid
         description: API key id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Show an API key again
       description: >-
         Requires an administrator role in the organisation. Answers an active key itself, as
@@ -15749,8 +15765,12 @@ components:
             reach. Default the deployment's. At least 0.75 on a flow requiring `substantial`.
         requiredAssuranceLevel:
           type: string
-          enum: [low, substantial]
-          description: Optional. The eIDAS level an approval must reach. Default none.
+          enum: [none, low, substantial]
+          default: none
+          description: >-
+            Optional. The eIDAS level an approval must reach. The flow gets the steps and checks
+            that level needs, added to what you send (see "Assurance levels" in the
+            introduction). `none` requires no level. `high` is refused: no check here reaches it.
         bsnPolicy:
           type: string
           enum: [retrieve, mask, omit]
