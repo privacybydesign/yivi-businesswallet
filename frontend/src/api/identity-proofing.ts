@@ -622,6 +622,8 @@ const proofingApiKeySchema = z.object({
   createdAt: z.string(),
   lastUsedAt: z.string().optional(),
   revokedAt: z.string().optional(),
+  // False for a key made before keys were kept to be shown again.
+  revealable: z.boolean(),
 });
 
 export type ProofingApiKey = z.infer<typeof proofingApiKeySchema>;
@@ -1168,6 +1170,18 @@ export function createProofingApiKey(
     body: { name },
     signal,
   });
+}
+
+// The key itself, read again; each read is audited.
+export function getProofingApiKeySecret(
+  slug: string,
+  keyId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return request(
+    `${base(slug)}/api-keys/${encodeURIComponent(keyId)}/secret`,
+    { schema: z.object({ secret: z.string() }), signal },
+  ).then((body) => body.secret);
 }
 
 export function revokeProofingApiKey(

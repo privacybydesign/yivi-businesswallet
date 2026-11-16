@@ -13,7 +13,7 @@ func NewStores(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, r
 		Settings:       NewSettingsStore(db, recorder),
 		Requests:       requests,
 		OrgSettings:    NewOrgSettingsStore(db, recorder),
-		APIKeys:        NewAPIKeyStore(db, recorder),
+		APIKeys:        NewAPIKeyStore(db, recorder, cipher),
 		Webhooks:       webhooks,
 		Events:         audit.NewReader(db),
 		Pauses:         NewPauseStore(db, recorder),

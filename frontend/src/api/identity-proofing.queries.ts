@@ -23,6 +23,7 @@ import {
   getProofingWebhook,
   getProofingWebhookDeliveries,
   removeProofingWebhook,
+  getProofingApiKeySecret,
   revokeProofingApiKey,
   rotateProofingWebhookSecret,
   saveProofingBranding,
@@ -702,6 +703,17 @@ export function useCreateApiKeyMutation(
         queryKey: proofingApiKeysQueryKey(slug),
       });
     },
+  });
+}
+
+// Reads a key again. A mutation, not a query: each read is audited, and the
+// key is never kept in the cache.
+export function useRevealApiKeyMutation(
+  slug: string,
+): UseMutationResult<string, Error, string> {
+  return useMutation({
+    mutationFn: (keyId) => getProofingApiKeySecret(slug, keyId),
+    gcTime: SECRET_MUTATION_GC_TIME_MS,
   });
 }
 

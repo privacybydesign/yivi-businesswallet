@@ -234,6 +234,7 @@ func TestProofingMemberCannotManage(t *testing.T) {
 		{http.MethodGet, base + "/api-keys", ""},
 		{http.MethodPost, base + "/api-keys", `{"name":"x"}`},
 		{http.MethodDelete, base + "/api-keys/" + noID, ""},
+		{http.MethodGet, base + "/api-keys/" + noID + "/secret", ""},
 		{http.MethodGet, base + "/webhook", ""},
 		{http.MethodPut, base + "/webhook", `{"url":"https://hooks.example.org/yivi","events":["session.verified"]}`},
 		{http.MethodDelete, base + "/webhook", ""},

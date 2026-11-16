@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/crypto"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 )
 
@@ -60,6 +61,9 @@ type APIKey struct {
 	CreatedAt      time.Time
 	LastUsedAt     *time.Time
 	RevokedAt      *time.Time
+	// Revealable is a key whose secret is kept sealed, so an admin can read it
+	// again (Secret); a key made before that has only its hash.
+	Revealable bool
 }
 
 // APIKeyActorPrefix starts the audit actor label of an API-key caller, which
@@ -80,12 +84,13 @@ type APIKeyCaller struct {
 
 // APIKeyStore persists API keys, hashed. Creating and revoking one is audited.
 type APIKeyStore struct {
-	db    database.DB
-	audit audit.Recorder
+	db     database.DB
+	audit  audit.Recorder
+	cipher *crypto.Cipher
 }
 
-func NewAPIKeyStore(db database.DB, recorder audit.Recorder) *APIKeyStore {
-	return &APIKeyStore{db: db, audit: recorder}
+func NewAPIKeyStore(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher) *APIKeyStore {
+	return &APIKeyStore{db: db, audit: recorder, cipher: cipher}
 }
 
 func newAPIKeySecret() (raw string, hash [sha256.Size]byte) {
@@ -98,14 +103,15 @@ func newAPIKeySecret() (raw string, hash [sha256.Size]byte) {
 // apiKeySelect reads a key with its creator's name; a key whose creator was
 // deleted has none.
 const apiKeySelect = `SELECT k.id, k.organization_id, k.name, k.prefix, k.scopes,
-		COALESCE(` + memberNameExpr + `, ''), k.created_at, k.last_used_at, k.revoked_at
+		COALESCE(` + memberNameExpr + `, ''), k.created_at, k.last_used_at, k.revoked_at,
+		k.secret_ciphertext IS NOT NULL
 	FROM identity_proofing_api_keys k
 	LEFT JOIN users u ON u.id = k.created_by`
 
 func scanAPIKey(row pgx.CollectableRow) (APIKey, error) {
 	var k APIKey
 	err := row.Scan(&k.ID, &k.OrganizationID, &k.Name, &k.Prefix, &k.Scopes,
-		&k.CreatedByName, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt)
+		&k.CreatedByName, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.Revealable)
 	return k, err
 }
 
@@ -114,12 +120,20 @@ func scanAPIKey(row pgx.CollectableRow) (APIKey, error) {
 func (s *APIKeyStore) Create(ctx context.Context, orgID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error) {
 	raw, hash := newAPIKeySecret()
 	prefix := raw[:apiKeyShownPrefix]
+	// Without an encryption key the key is kept as its hash alone, shown once.
+	var sealed []byte
+	if s.cipher != nil {
+		var err error
+		if sealed, err = s.cipher.Encrypt([]byte(raw)); err != nil {
+			return APIKey{}, "", fmt.Errorf("proofing: seal api key org %s: %w", orgID, err)
+		}
+	}
 	var id uuid.UUID
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		if err := q.QueryRow(ctx, `INSERT INTO identity_proofing_api_keys
-			(organization_id, name, prefix, secret_hash, created_by, scopes)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			orgID, name, prefix, hash[:], createdBy, scopes).Scan(&id); err != nil {
+			(organization_id, name, prefix, secret_hash, created_by, scopes, secret_ciphertext)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+			orgID, name, prefix, hash[:], createdBy, scopes, sealed).Scan(&id); err != nil {
 			return fmt.Errorf("proofing: create api key org %s: %w", orgID, err)
 		}
 		return s.audit.Record(ctx, q, audit.IdentityProofingAPIKeyCreated,
@@ -227,4 +241,36 @@ func (s *APIKeyStore) Touch(ctx context.Context, caller APIKeyCaller) error {
 		return fmt.Errorf("proofing: touch api key %s: %w", caller.KeyID, err)
 	}
 	return nil
+}
+
+// Secret is one of the org's active keys itself, for an admin to read again,
+// audited identity_proofing.api_key_revealed. A revoked or unknown key is
+// ErrAPIKeyNotFound; one kept as its hash alone is ErrAPIKeyNotRevealable.
+func (s *APIKeyStore) Secret(ctx context.Context, orgID, id uuid.UUID) (string, error) {
+	var name, prefix string
+	var sealed []byte
+	err := s.db.QueryRow(ctx, `SELECT name, prefix, secret_ciphertext FROM identity_proofing_api_keys
+		WHERE organization_id = $1 AND id = $2 AND revoked_at IS NULL`, orgID, id).Scan(&name, &prefix, &sealed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrAPIKeyNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("proofing: read api key %s: %w", id, err)
+	}
+	if sealed == nil {
+		return "", ErrAPIKeyNotRevealable
+	}
+	if s.cipher == nil {
+		return "", ErrNoEncryptionKey
+	}
+	raw, err := s.cipher.Decrypt(sealed)
+	if err != nil {
+		return "", fmt.Errorf("proofing: open api key %s: %w", id, err)
+	}
+	if err := s.audit.Record(ctx, s.db, audit.IdentityProofingAPIKeyRevealed,
+		audit.Target{Type: audit.TargetIdentityProofingSettings, ID: orgID.String(), OrgID: &orgID},
+		audit.Created(map[string]any{"apiKeyId": id.String(), "name": name, "prefix": prefix})); err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }

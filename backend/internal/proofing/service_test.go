@@ -468,6 +468,10 @@ func (fakeAPIKeys) Revoke(context.Context, uuid.UUID, uuid.UUID) (APIKey, error)
 	return APIKey{}, ErrAPIKeyNotFound
 }
 
+func (fakeAPIKeys) Secret(context.Context, uuid.UUID, uuid.UUID) (string, error) {
+	return "", ErrAPIKeyNotFound
+}
+
 func (fakeAPIKeys) Authenticate(context.Context, string) (APIKeyCaller, error) {
 	return APIKeyCaller{}, ErrAPIKeyInvalid
 }

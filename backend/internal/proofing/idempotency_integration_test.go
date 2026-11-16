@@ -54,7 +54,7 @@ func newIdemFixture(t *testing.T) idemFixture {
 // makeAPIKey creates an API key of the org and returns its id.
 func makeAPIKey(t *testing.T, pool *pgxpool.Pool, orgID, createdBy uuid.UUID) uuid.UUID {
 	t.Helper()
-	key, _, err := NewAPIKeyStore(pool, audit.NopRecorder{}).Create(context.Background(), orgID, createdBy, "Backend", APIKeyScopes)
+	key, _, err := NewAPIKeyStore(pool, audit.NopRecorder{}, nil).Create(context.Background(), orgID, createdBy, "Backend", APIKeyScopes)
 	if err != nil {
 		t.Fatalf("create api key: %v", err)
 	}

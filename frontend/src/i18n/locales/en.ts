@@ -1621,7 +1621,7 @@ export const en = {
       title: "API tokens",
       nameRequired: "Enter a name.",
       intro:
-        "A token lets your software start checks on any flow and read their results. It is shown once, when you create it.",
+        "A token lets your software start checks on any flow and read their results. You can show it again here at any time.",
       create: "Create token",
       name: "Name",
       nameHint:
@@ -1633,6 +1633,14 @@ export const en = {
       actions: "Actions",
       revoke: "Revoke",
       revokeNamed: "Revoke {{name}}",
+      show: "Show",
+      showNamed: "Show {{name}}",
+      shownTitle: "Token “{{name}}”",
+      shownHint:
+        "Store it somewhere safe, such as your backend's secret store. Showing a token is recorded in the audit log.",
+      notRevealable: "Cannot be shown",
+      notRevealableHint:
+        "This token was made before tokens could be shown again. Create a new one and revoke this one to replace it.",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
@@ -1640,8 +1648,8 @@ export const en = {
       },
       createdTitle: "Copy your token now",
       createdHint:
-        "This is the only time you see the token “{{name}}”. Store it somewhere safe, such as your backend's secret store.",
-      createdNote: "Lost it? Revoke it and create a new one.",
+        "Store the token “{{name}}” somewhere safe, such as your backend's secret store.",
+      createdNote: "You can show it again later with Show, next to the token.",
     },
     webhooks: {
       endpoint: "Webhook endpoint",
@@ -2657,6 +2665,7 @@ export const en = {
       identityProofingSettingsUpdated: "Updated identity proofing settings",
       identityProofingApiKeyCreated: "Created API token",
       identityProofingApiKeyRevoked: "Revoked API token",
+      identityProofingApiKeyRevealed: "Showed API token",
       identityProofingWebhookConfigured: "Configured webhook endpoint",
       identityProofingWebhookSecretRotated: "Rotated webhook secret",
       identityProofingWebhookRemoved: "Removed webhook endpoint",

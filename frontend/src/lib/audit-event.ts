@@ -140,6 +140,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.customer_removed": { icon: "delete", tone: "red" },
   "identity_proofing.api_key_created": { icon: "add", tone: "green" },
   "identity_proofing.api_key_revoked": { icon: "close", tone: "red" },
+  "identity_proofing.api_key_revealed": { icon: "view", tone: "amber" },
   "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
   "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
   "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
@@ -511,6 +512,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingApiKeyCreated");
     case "identity_proofing.api_key_revoked":
       return t("auditLog.actions.identityProofingApiKeyRevoked");
+    case "identity_proofing.api_key_revealed":
+      return t("auditLog.actions.identityProofingApiKeyRevealed");
     case "identity_proofing.webhook_configured":
       return t("auditLog.actions.identityProofingWebhookConfigured");
     case "identity_proofing.webhook_secret_rotated":

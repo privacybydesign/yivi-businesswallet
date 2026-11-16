@@ -270,13 +270,16 @@ var (
 	// ErrResultNotReady is a result read before the session has an outcome.
 	ErrResultNotReady = errors.New("proofing: the session has no outcome yet")
 	// ErrNotHosted is a headless start of a request not created hosted.
-	ErrNotHosted       = errors.New("proofing: the request was not created hosted")
-	ErrAPIKeyNotFound  = errors.New("proofing: api key not found")
-	ErrAPIKeyInvalid   = errors.New("proofing: invalid api key")
-	ErrRequestNotFound = errors.New("proofing: request not found")
-	ErrWebhookNotFound = errors.New("proofing: webhook not configured")
-	ErrNoLogo          = errors.New("proofing: organization has no logo")
-	ErrInvalidInput    = errors.New("proofing: invalid input")
+	ErrNotHosted      = errors.New("proofing: the request was not created hosted")
+	ErrAPIKeyNotFound = errors.New("proofing: api key not found")
+	// ErrAPIKeyNotRevealable is a key made before keys were kept to be read
+	// again: only its hash is stored.
+	ErrAPIKeyNotRevealable = errors.New("proofing: api key not revealable")
+	ErrAPIKeyInvalid       = errors.New("proofing: invalid api key")
+	ErrRequestNotFound     = errors.New("proofing: request not found")
+	ErrWebhookNotFound     = errors.New("proofing: webhook not configured")
+	ErrNoLogo              = errors.New("proofing: organization has no logo")
+	ErrInvalidInput        = errors.New("proofing: invalid input")
 	// ErrWrongMethod is a Yivi-only call on a request that runs in the Idem app.
 	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
 	// ErrSessionOver is a call on a request whose session can no longer run.
