@@ -257,6 +257,10 @@ const (
 	// review item): by a reviewer, or lapsed past its due time
 	IdentityProofingReviewItemDecided = "identity_proofing.review_item_decided"
 
+	// a link to the hosted review page of one session, made by an API key for
+	// the reviewer it names
+	IdentityProofingReviewLinkCreated = "identity_proofing.review_link_created"
+
 	// whether a flow asks for the UWV Verzekeringsbericht, and a statement a
 	// subject uploaded: kept (never its relations), or refused with its reason
 	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"

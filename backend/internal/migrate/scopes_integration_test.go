@@ -32,6 +32,7 @@ func TestAPIKeyScopesDefaultToEvery(t *testing.T) {
 	for _, want := range []string{
 		"sessions:write", "sessions:read", "results:read", "flows:read",
 		"flows:write", "settings:read", "settings:write", "webhooks:write",
+		"reviews:read", "reviews:write",
 	} {
 		if !slices.Contains(scopes, want) {
 			t.Errorf("scopes = %v, missing %s", scopes, want)

@@ -280,6 +280,7 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		proofingWebhooks,
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
+	proofingService.SetReviewBaseURL("http://wallet.test/r/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
 	proofingHandler.SetPlatformAdmins(admins)
 	proofingHandler.SetIdempotencyStore(proofing.NewIdempotencyStore(pool, proofingCipher))

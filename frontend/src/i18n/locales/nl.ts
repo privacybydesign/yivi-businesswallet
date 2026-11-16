@@ -2135,6 +2135,13 @@ export const nl: Translation<typeof en> = {
       },
     },
   },
+  reviewLink: {
+    reviewingAs: "Je beoordeelt als {{name}} · link geldig tot {{until}}",
+    done: "Niets van deze sessie wacht nog op jou. Je kunt deze pagina sluiten.",
+    invalid:
+      "Deze beoordelingslink is onbekend of verlopen. Vraag een nieuwe aan in je eigen systeem.",
+    error: "De beoordeling kon niet worden geladen. Probeer het zo opnieuw.",
+  },
   proofLink: {
     notFound: "Deze link bestaat niet, of is verwijderd.",
     decline: "Weigeren",
@@ -2507,6 +2514,7 @@ export const nl: Translation<typeof en> = {
     system: "Systeem",
     apiKeyActor: "API-token {{prefix}}…",
     hostedLinkActor: "Persoon, via een gehoste link",
+    reviewLinkActor: "Beoordelingslink van API-token {{prefix}}…",
     adminActor: "Een beheerder",
     columns: {
       when: "Wanneer",
@@ -2750,6 +2758,7 @@ export const nl: Translation<typeof en> = {
       identityProofingAddressAdded: "Adres ingevuld",
       identityProofingAddressReviewed: "Adres beoordeeld",
       identityProofingReviewItemDecided: "Beoordeling afgerond",
+      identityProofingReviewLinkCreated: "Beoordelingslink gemaakt",
       identityProofingFlowEmploymentConfigured:
         "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
       identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",

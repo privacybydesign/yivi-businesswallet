@@ -42,12 +42,17 @@ const (
 	ScopeSettingsRead  = "settings:read"
 	ScopeSettingsWrite = "settings:write"
 	ScopeWebhooksWrite = "webhooks:write"
+	// ScopeReviewsRead reads what waits for a reviewer, with its evidence;
+	// ScopeReviewsWrite decides it and makes a review link.
+	ScopeReviewsRead  = "reviews:read"
+	ScopeReviewsWrite = "reviews:write"
 )
 
 // APIKeyScopes are every scope, in display order; every new key gets them all.
 var APIKeyScopes = []string{
 	ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead,
 	ScopeFlowsWrite, ScopeSettingsRead, ScopeSettingsWrite, ScopeWebhooksWrite,
+	ScopeReviewsRead, ScopeReviewsWrite,
 }
 
 // APIKey is one of an org's API keys, without its secret.

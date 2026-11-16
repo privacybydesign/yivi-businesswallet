@@ -220,7 +220,7 @@ func TestIdentityReviewDecidedListed(t *testing.T) {
 		t.Fatalf("IdentityReviewedAt while waiting = %v, %v; want none", got.IdentityReviewedAt, err)
 	}
 
-	if err := requests.RecordReviewDecision(ctx, inReview, StatusApproved, "Matches", ""); err != nil {
+	if err := requests.RecordReviewDecision(ctx, inReview, StatusApproved, "Matches", "", ""); err != nil {
 		t.Fatalf("RecordReviewDecision: %v", err)
 	}
 	waiting, err := requests.Get(ctx, orgID, inReview.ID)

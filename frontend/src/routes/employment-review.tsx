@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
-import type { ProofingRequest } from "../api/identity-proofing";
+import type { ProofingRequest, ReviewTarget } from "../api/identity-proofing";
 import { useWhenFormatter } from "../lib/format-when";
 import { proofingMethodLabel, requestSubject } from "../lib/identity-proofing";
 import {
@@ -18,6 +18,7 @@ import {
   BackToReviews,
   DecisionReasons,
   ReviewSection,
+  ReviewProgress,
   SessionDecisions,
 } from "./proofing-review-parts";
 import { SessionEmployment } from "./proofing-people";
@@ -26,10 +27,10 @@ import { SessionEmployment } from "./proofing-people";
 // statement, the identity check it came with (decided already, and never
 // changed by this), and the decision.
 export function EmploymentReview({
-  slug,
+  target,
   request,
 }: Readonly<{
-  slug: string;
+  target: ReviewTarget;
   request: ProofingRequest;
 }>): React.JSX.Element {
   const { t } = useTranslation();
@@ -57,13 +58,14 @@ export function EmploymentReview({
         subtitle={subtitle}
       />
       <div className="flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
+        <ReviewProgress request={request} />
         <ReviewSection
           id="employment-review-why"
           title={t("identityProofing.reviews.employment.whyTitle")}
           hint={t(employmentWhyKey(unchecked, why))}
         >
           <UncheckedSeals
-            slug={slug}
+            target={target}
             request={request}
             kind="employment"
             canCheck={review === "pending" && !own}
@@ -82,7 +84,7 @@ export function EmploymentReview({
               </output>
             ) : (
               <StepDecision
-                slug={slug}
+                target={target}
                 request={request}
                 kind="employment"
                 confirmBlocked={unchecked}
@@ -97,7 +99,9 @@ export function EmploymentReview({
             </output>
           )}
         </ReviewSection>
-        <BackToReviews to={reviewPath(slug)} />
+        {target.kind === "org" && (
+          <BackToReviews to={reviewPath(target.slug)} />
+        )}
       </div>
     </>
   );

@@ -92,7 +92,7 @@ type requestStore interface {
 	GetBySession(ctx context.Context, sessionID string) (Request, error)
 	GetByLinkToken(ctx context.Context, hash []byte) (Request, error)
 	LapseLinks(ctx context.Context, now time.Time, limit int) (int, error)
-	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error
+	RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode, apiReviewer string) error
 	RecordHandover(ctx context.Context, req Request, expiresAt time.Time) error
 	ListPurgeDue(ctx context.Context, limit int) ([]Request, error)
 	DeferPurge(ctx context.Context, id uuid.UUID) error
@@ -105,7 +105,7 @@ type requestStore interface {
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error)
+	DecideStepReviewBy(ctx context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, reason string) (*time.Time, error)
 	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
 	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
 	NextReviewItemDue(ctx context.Context) (time.Time, error)
@@ -193,6 +193,11 @@ type Service struct {
 	// unchecked keeps the files whose seal could not be checked at upload;
 	// nil fails such an upload.
 	unchecked uncheckedDocumentStore
+	// reviewLinks holds the links to the hosted review page.
+	reviewLinks reviewLinkStore
+	// reviewBaseURL is the hosted review page a review link's token is
+	// appended to.
+	reviewBaseURL string
 	// sealRetryDelay is the wait between tries of an unreachable seal check.
 	sealRetryDelay time.Duration
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
@@ -250,6 +255,8 @@ type Stores struct {
 	// DataRequests holds each flow's kind and a data request's matches; nil
 	// makes every flow an identity check.
 	DataRequests dataRequestStore
+	// ReviewLinks holds the links to the hosted review page; nil makes none.
+	ReviewLinks reviewLinkStore
 }
 
 // NewService builds the proofing service. A nil mailer skips the e-mail (tests).
@@ -259,7 +266,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
-		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay,
+		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay, reviewLinks: stores.ReviewLinks,
 		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),

@@ -690,10 +690,13 @@ func (s *RequestStore) NextDeadline(ctx context.Context, now time.Time) (time.Ti
 // RecordReviewDecision audits identity_proofing.review_decided: a member's
 // decision on a request under review, by the actor in ctx, with its reason.
 // The outcome itself lands as any other (RecordOutcome), once the engine settled it.
-func (s *RequestStore) RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode string) error {
+func (s *RequestStore) RecordReviewDecision(ctx context.Context, req Request, decided Status, reason, errorCode, apiReviewer string) error {
 	fields := map[string]any{"decision": string(decided), "reason": reason}
 	if errorCode != "" {
 		fields["errorCode"] = errorCode
+	}
+	if apiReviewer != "" {
+		fields[auditReviewerKey] = apiReviewer
 	}
 	return database.InTx(ctx, s.db, func(q database.Querier) error {
 		if ok, err := lockUnpurged(ctx, q, req.ID); err != nil || !ok {

@@ -58,6 +58,8 @@ type StepReviewInput struct {
 	// OwnAllowed lets the reviewer decide a check they sent or are the subject
 	// of (auth.SelfReview: a platform admin on a dev stack only).
 	OwnAllowed bool
+	// APIReviewer is ReviewInput.APIReviewer.
+	APIReviewer string
 }
 
 // DecideAddressReview confirms or rejects the address of a request that waits
@@ -106,7 +108,7 @@ func (s *Service) decideStepReview(ctx context.Context, orgID, id uuid.UUID, kin
 	if in.Confirm {
 		decided = ReviewConfirmed
 	}
-	reviewedAt, err := s.requests.DecideStepReview(ctx, req, kind, in.ReviewerID, decided, reason)
+	reviewedAt, err := s.requests.DecideStepReviewBy(ctx, req, kind, stepDecider{ID: in.ReviewerID, APIReviewer: in.APIReviewer}, decided, reason)
 	if err != nil {
 		return Request{}, err
 	}
@@ -122,9 +124,14 @@ func (s *Service) decideStepReview(ctx context.Context, orgID, id uuid.UUID, kin
 // and session.step_reviewed for another step. It returns when it was decided:
 // nil, and changes nothing, when the item no longer waits.
 func (s *RequestStore) DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error) {
+	return s.DecideStepReviewBy(ctx, req, kind, stepDecider{ID: reviewerID}, decided, reason)
+}
+
+// DecideStepReviewBy is DecideStepReview by whoever by names.
+func (s *RequestStore) DecideStepReviewBy(ctx context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, reason string) (*time.Time, error) {
 	var reviewedAt *time.Time
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		at, err := s.decideReviewItem(ctx, q, req, kind, reviewerID, decided, reason)
+		at, err := s.decideReviewItem(ctx, q, req, kind, by, decided, reason)
 		if err != nil || at == nil {
 			return err
 		}

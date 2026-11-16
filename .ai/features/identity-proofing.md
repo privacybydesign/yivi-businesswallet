@@ -1492,6 +1492,9 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 - One review per session: identity, then the Verzekeringsbericht, then the
   address (`nextPart`, `lib/use-after-decision.ts`). After each decision the
   page goes on to the next part ("Next: …"), else back to the list.
+  - On top, the session's parts as steps, the same `Stepper` as the person's
+    flow (`ReviewProgress`, `reviewSteps`): what a reviewer decided, then what
+    waits, at the part the page shows. Not for a review of one part.
 - Each part's page shows "Already decided in this session"
   (`SessionDecisions`): the identity once decided, with its method and level,
   by a reviewer or automatically, and each decided step, with who, when, why.
@@ -1507,6 +1510,32 @@ decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
 - The waiting list is three reads (`useWaitingReviewsQuery`): `?status=needs_review`,
   `?reviewKind=address` and `?reviewKind=employment`, each narrowed before its
   cap of 200, longest waiting first, so the cap leaves out the newest.
+
+**Reviewing outside the wallet** (`review_api.go`, `api_review_handler.go`,
+`review_link.go`, `review_link_handler.go`):
+- **API** (scopes `reviews:read`, `reviews:write`; migration `20261116110000`
+  gives existing keys both):
+  - `GET /proofing/sessions/{id}/review`: `waiting` and `items`
+    (`reviewParts`), decisions, `sealChecks`, and the result
+    (`ExternalReview`), images only while the identity waits. `no-store`.
+  - `POST .../review-items/{kind}` `{decision, reason, reviewer, errorCode?}`
+    (`DecideExternalReview`), `POST .../review-items/{kind}/seal-check`.
+  - The `reviewer` (`apiReviewer`, at most 100 characters) is no member:
+    `ReviewInput.APIReviewer`, kept as `reviewer` in the decision's audit
+    event (`auditReviewerKey`), shown as `decidedBy` (`RequestDecisions`);
+    `decided_by` stays NULL. A reviewer's code is enforced as for a member. No
+    own-review check: the wallet does not know who sent what in the org's system.
+- **Review link** (`identity_proofing_review_links`, migration
+  `20261116110100`): `POST .../review-links` `{reviewer}` answers
+  `{url, expiresAt}`, `/r/<token>`, an hour (`reviewLinkTTL`), identity checks
+  with something waiting only (`nothing_to_review`), audited
+  `review_link_created`. Stops with its key.
+  - Public routes `/review/{token}`, `.../items/{kind}`, `.../seal-check`
+    (`limitReviewLink`), audited as `review_link:<key prefix>`.
+  - The page `routes/review-link.tsx` renders `RequestReview` with a
+    `ReviewTarget` of kind `link` (`useReviewResultQuery`, `useDecideReviewFor`,
+    …), framed by the org's redirect origins only (`reviewFramePolicy`), and
+    posts `proofing.review_completed` once nothing waits (`lib/review-link.ts`).
 
 **Always send to review, per part.**
 - The flow editor's Review section has a toggle per part: the identity proof

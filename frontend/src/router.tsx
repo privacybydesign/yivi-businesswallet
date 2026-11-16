@@ -61,6 +61,7 @@ import Signing from "./routes/signing";
 import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
 import Proof from "./routes/proof";
+import ReviewLink from "./routes/review-link";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
 import NotFound from "./routes/not-found";
@@ -214,6 +215,7 @@ export const router = createBrowserRouter([
       // An external person verifying from a hosted link: public, keyed by
       // the link's token, on the subject's own device.
       { path: "/p/:token", Component: Proof },
+      { path: "/r/:token", Component: ReviewLink },
       { path: "*", Component: NotFound },
       {
         Component: ProtectedRoute,

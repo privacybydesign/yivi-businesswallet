@@ -1271,6 +1271,7 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	// The engine tells the service about every session change; a session
 	// nobody finishes is reconciled at its cap. Neither polls.
 	proofingService.SetHostedBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/p/")
+	proofingService.SetReviewBaseURL(strings.TrimSuffix(cfg.AppBaseURL, "/") + "/r/")
 	if stub, ok := ips.(interface{ OnSessionChange(func(string)) }); ok {
 		stub.OnSessionChange(func(sessionID string) { proofingService.SessionChanged(proofingJobs, sessionID) })
 	}

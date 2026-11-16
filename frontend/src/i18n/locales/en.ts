@@ -2083,6 +2083,13 @@ export const en = {
       },
     },
   },
+  reviewLink: {
+    reviewingAs: "Reviewing as {{name}} · link valid until {{until}}",
+    done: "Nothing of this session waits for you any more. You can close this page.",
+    invalid:
+      "This review link is unknown or has expired. Ask for a new one in your own system.",
+    error: "The review could not be loaded. Try again in a moment.",
+  },
   proofLink: {
     notFound: "This link does not exist, or it was removed.",
     decline: "Decline",
@@ -2452,6 +2459,7 @@ export const en = {
     system: "System",
     apiKeyActor: "API token {{prefix}}…",
     hostedLinkActor: "Subject, through a hosted link",
+    reviewLinkActor: "Review link of API token {{prefix}}…",
     adminActor: "An admin",
     columns: {
       when: "When",
@@ -2683,6 +2691,7 @@ export const en = {
       identityProofingAddressAdded: "Entered an address",
       identityProofingAddressReviewed: "Reviewed an address",
       identityProofingReviewItemDecided: "Decided a review",
+      identityProofingReviewLinkCreated: "Made a review link",
       identityProofingFlowEmploymentConfigured:
         "Changed whether a flow asks for the Verzekeringsbericht",
       identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
