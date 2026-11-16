@@ -80,7 +80,11 @@ type Delivery struct {
 // it is signed with (the current one, then a rotated-out one still in its
 // overlap) and the lease it was claimed under, which recordAttempt checks.
 type dueDelivery struct {
-	ID          uuid.UUID
+	ID    uuid.UUID
+	OrgID uuid.UUID
+	// RequestID is the session the event is about; nil for a test delivery
+	// and once the session is gone.
+	RequestID   *uuid.UUID
 	Event       string
 	Payload     json.RawMessage
 	Attempts    int
@@ -346,7 +350,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 			endpoint_url = due.url
 		FROM due
 		WHERE d.id = due.id
-		RETURNING d.id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
+		RETURNING d.id, d.organization_id, d.request_id, d.event, d.payload, d.attempts, d.created_at, d.next_attempt_at, due.url,
 			due.secret_ciphertext, due.previous_ciphertext`,
 		DeliveryPending, limit, deliveryLease.Seconds(), perEndpoint)
 	if err != nil {
@@ -358,7 +362,7 @@ func (s *WebhookStore) claimDue(ctx context.Context, limit, perEndpoint int) ([]
 	for rows.Next() {
 		var d dueDelivery
 		var sealed, previous []byte
-		if err := rows.Scan(&d.ID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.LeasedUntil, &d.URL,
+		if err := rows.Scan(&d.ID, &d.OrgID, &d.RequestID, &d.Event, &d.Payload, &d.Attempts, &d.CreatedAt, &d.LeasedUntil, &d.URL,
 			&sealed, &previous); err != nil {
 			return nil, fmt.Errorf("proofing: scan delivery: %w", err)
 		}

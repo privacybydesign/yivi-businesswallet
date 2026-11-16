@@ -888,9 +888,12 @@ post-review outcome stay the system's.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes the name, birth date, nationality, document type, issuing state and
-  expiry, the checks, and the images: `photo`, `selfie`, `referencePhoto`,
-  `documentImage` and `documentImageBack`; never the document number),
-  audited `result_read`; 404 once erased. The public API never returns an image.
+  expiry, the BSN as the flow's BSN policy releases it, the checks, and the
+  images: `photo`, `selfie`, `referencePhoto`, `documentImage` and
+  `documentImageBack`; never the document number), audited `result_read`; 404
+  once erased. For an approval the public API adds the document's images
+  (`photo`, `documentImage`, `documentImageBack`), never the selfie or the
+  reference photo.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
@@ -983,8 +986,11 @@ post-review outcome stay the system's.
   `AddAddress`, `DecideAddressReview`, `AddEmployment`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
   request whatever is subscribed. The payload is the session id, status, flow and
-  its kind (`flowKind`), method, assurance and error code: never a name or photo (the API has the
-  name).
+  its kind (`flowKind`), method, assurance and error code: never a name or photo.
+  - `session.verified` adds `result`, the API's result read live when it is
+    sent (`Deliverer.SetResults`, `payloadOf`, audited `result_read` with
+    actor `webhook`): the outbox never stores it. A read that fails fails the
+    attempt, to be retried; a session erased meanwhile goes without one.
   - Only what the person added after the identity check carries personal data
     (`webhookPersonalKeys`, dropped once a delivery is final):
     - `session.diploma_added`: the diploma, without its PDF, name or birth date;
@@ -2456,6 +2462,9 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - None once purged: the purge erased what they read.
   - Sent as `steps` in the request responses, the public API result and
     every webhook's data.
+  - The public API result (and the webhook's `result`) leaves out what the
+    flow did not produce: `steps` and `diplomas` when empty, and
+    `passiveAuth`/`activeAuth` on evidence other than `emrtd`.
     `session.verified` and `session.review_opened` carry them `open`: the
     event's copy takes the new status and `checked_at` (`RecordOutcome`).
   - `steps_integration_test.go` holds a test per address and diploma path.
@@ -2579,9 +2588,9 @@ step runs with the Idem app or the Yivi app alike.
   | `document_scan` score, by CM's ranges: below 0.40 fake, 0.90 and up authentic, between (or -1) doubtful | fake rejects (`DOC_NOT_AUTHENTIC`); doubtful goes to review | "Document check: Genuine (97%)" |
   | field `validity` | any `invalid` rejects (`DOC_FIELDS_INVALID`) | "Printed data" |
   | field `comparison` (MRZ, printed text, barcode) | any `no_match` goes to review | "MRZ matches printed text" |
-  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy | name, date of birth, document |
+  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy, or masked before storage under a mask policy | name, date of birth, document |
   | document number | must equal the MRZ's, when the app read one (`DOCUMENT_MISMATCH`) | |
-  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes | |
+  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes. A disclosed document takes the photo's BSN, under the BSN policy and only with `dg11` requested (`photographedDocument`) | |
   | document type | the document kind (`documentKinds`) | "Document" |
 
   - The result carries `documentCheck` (verdict, score, fields, zones, kind:
@@ -2753,6 +2762,12 @@ other choice offered.
   - The wallet hands it to the engine under the document credentials' claim
     names (`disclosedIdentity`: `firstName`, `lastName` = prefix and family
     name, `dateOfBirth`).
+  - **BSN**: asked (`ProofingRequest.BSN`, claim `bsn`) only on a flow whose
+    BSN policy keeps it (`retrieve` or `mask`, `keepsBSN`). The engine makes the
+    registered BSN the document's personal number under the flow's policy
+    (`registeredBSN`), over the photographed one, without `dg11` (which comes
+    only with the chip read), and holds the disclosure's own `bsn` to the same
+    policy (`withholdDisclosedBSN`). The result's `identity.bsn` carries it.
   - **Tied to the photographed document** (`personalDataMatch`, chosen by the
     disclosed credential, `disclosesPersonalData`), as a document number ties
     a disclosed document (§18):

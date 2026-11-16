@@ -16,6 +16,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 // photoFlow photographs the document next to the chip read.
@@ -88,6 +89,25 @@ func (f fixture) sendOnScreen(t *testing.T, flowID string, method proofingprovid
 	return sent
 }
 
+// assertScanUnavailable checks that the scan service failing to hand over a
+// result is answered as 502 document_scan_unavailable naming what it said,
+// and that nothing reaches the engine.
+func assertScanUnavailable(t *testing.T, f fixture, scanner *fakeScanner, id uuid.UUID) {
+	t.Helper()
+	scanner.resultErr = &idscan.APIError{Status: http.StatusInternalServerError, Message: "Internal Server Error"}
+	err := f.svc.FinishDocumentScan(context.Background(), testOrg.ID, id, nil, "trx-1", "res-1")
+	var answer *respond.APIError
+	if !errors.Is(err, ErrDocumentScanUnavailable) || !errors.As(mapError(err), &answer) ||
+		answer.Status != http.StatusBadGateway || answer.Code != "document_scan_unavailable" ||
+		!strings.Contains(answer.Message, "500: Internal Server Error") {
+		t.Errorf("the scan service's 500: %v, answered %+v; want 502 document_scan_unavailable naming it", err, answer)
+	}
+	if len(f.ips.documentPhotos) != 0 {
+		t.Fatal("a scan without its result reached the engine")
+	}
+	scanner.resultErr = nil
+}
+
 // The on-screen page photographs the document through the scan service: the
 // photos of the scan it started go to the engine as document_photo, with the
 // BSN covered by the service, once.
@@ -118,6 +138,8 @@ func TestDocumentScanOnScreen(t *testing.T) {
 	if len(f.ips.documentPhotos) != 0 {
 		t.Fatal("an unfinished scan reached the engine")
 	}
+
+	assertScanUnavailable(t, f, scanner, id)
 
 	scanner.result = scannedResult
 	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1"); err != nil {
@@ -228,6 +250,27 @@ func checkUnfinishedScan(t *testing.T, tc unfinishedScanCase) {
 		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.failedTask())
 	case len(f.requests.scanFailures) != 1 || f.requests.scanFailures[0] != f.ips.scanFailures[0]:
 		t.Errorf("audited %+v, want the failure %+v", f.requests.scanFailures, f.ips.scanFailures[0])
+	}
+}
+
+// The scanned BSN reaches the engine only for a flow that keeps it, and
+// already masked for one that masks it.
+func TestDocumentCheckBSN(t *testing.T) {
+	res := idscan.Result{Document: idscan.Document{IssuingState: "NLD", PersonalNumber: "111222333"}}
+	for policy, want := range map[string]string{"": "", "omit": "", bsnPolicyMask: "****.**.333", bsnPolicyRetrieve: "111222333"} {
+		flow := photoFlow
+		flow.BSNPolicy = policy
+		if got := documentCheck(res, flow).Document.PersonalNumber; got != want {
+			t.Errorf("policy %q: personal number %q, want %q", policy, got, want)
+		}
+	}
+
+	// A misread number masked would pass for a BSN: it is not masked at all.
+	misread := idscan.Result{Document: idscan.Document{IssuingState: "NLD", PersonalNumber: "123456783"}}
+	flow := photoFlow
+	flow.BSNPolicy = bsnPolicyMask
+	if got := documentCheck(misread, flow).Document.PersonalNumber; got != "" {
+		t.Errorf("a number failing the 11-proef under mask: %q, want none", got)
 	}
 }
 

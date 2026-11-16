@@ -116,6 +116,36 @@ func TestCreateTransactionRefused(t *testing.T) {
 	}
 }
 
+// An answer other than the one asked for is an APIError with the status and
+// the message of ID Scan's error body, else the start of the body.
+func TestAPIError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status  int
+		body    string
+		message string
+	}{
+		"error body":      {http.StatusInternalServerError, `{"status":500,"message":"Internal Server Error"}`, "Internal Server Error"},
+		"plain text body": {http.StatusBadGateway, "upstream down\n", "upstream down"},
+		"no body":         {http.StatusServiceUnavailable, "", http.StatusText(http.StatusServiceUnavailable)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			_, err := New(testKeyID, testSecret, srv.URL, srv.Client()).Result(context.Background(), "trx-1", "res-1")
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Message != tc.message {
+				t.Errorf("Result = %v, want an APIError %d %q", err, tc.status, tc.message)
+			}
+			if !strings.Contains(err.Error(), "res-1") || !strings.Contains(err.Error(), "trx-1") {
+				t.Errorf("error %q does not name the result and the transaction", err)
+			}
+		})
+	}
+}
+
 // resultServer answers a result with body ({base} the server's own URL) and
 // serves photo at /downloads/{name}, with the name appended so each file
 // reads apart.

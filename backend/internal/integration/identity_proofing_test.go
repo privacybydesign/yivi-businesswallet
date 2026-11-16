@@ -1104,9 +1104,14 @@ func TestProofingAPIKeyScopesFlow(t *testing.T) {
 		Identity *struct {
 			FamilyName string `json:"familyName"`
 		} `json:"identity"`
+		Photo  *struct{ Data string } `json:"photo"`
+		Selfie *struct{ Data string } `json:"selfie"`
 	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+approved.ID+"/result", key.Secret, nil))
 	if result.ID != approved.ID || result.Status != "approved" || result.Identity == nil || result.Identity.FamilyName == "" {
 		t.Errorf("result = %+v; want the approved identity", result)
+	}
+	if result.Photo == nil || result.Photo.Data == "" || result.Selfie != nil {
+		t.Errorf("result images = photo %+v, selfie %+v; want the document's portrait and no selfie", result.Photo, result.Selfie)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingResultRead); n != 1 {
 		t.Errorf("result_read audits = %d, want 1", n)
@@ -1318,24 +1323,7 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	wantProofingError(t, "a flow kind other than data_request", env.do(http.MethodGet, requests+"?flowKind=identity", nil),
 		http.StatusBadRequest, "invalid_input")
 
-	// While it waits, the reviewer reads the identity and the photos it holds.
-	held := decodeJSON[struct {
-		Identity *struct {
-			FamilyName string `json:"familyName"`
-		} `json:"identity"`
-		Photo  *struct{ Data string } `json:"photo"`
-		Selfie *struct{ Data string } `json:"selfie"`
-	}](t, env.do(http.MethodGet, requests+"/"+session.ID+"/result", nil))
-	if held.Identity == nil || held.Identity.FamilyName == "" || held.Photo == nil || held.Photo.Data == "" ||
-		held.Selfie == nil || held.Selfie.Data == "" {
-		t.Errorf("result in review = %+v; want the identity, the chip's photo and the selfie", held)
-	}
-	// The API's own result does not show the identity before an approval.
-	if api := decodeJSON[struct {
-		Identity *struct{} `json:"identity"`
-	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+session.ID+"/result", key.Secret, nil)); api.Identity != nil {
-		t.Errorf("API result in review carries the identity, want none until approved")
-	}
+	assertReviewResults(t, env, requests, session.ID, key.Secret)
 
 	review := requests + "/" + session.ID + "/review"
 	resp := env.postJSON(review, map[string]any{"decision": "approve"})
@@ -1363,6 +1351,31 @@ func TestProofingReviewDecisionFlow(t *testing.T) {
 	}
 	if list := decodeJSON[[]proofingRequestResp](t, env.do(http.MethodGet, requests+"?status=needs_review", nil)); len(list) != 0 {
 		t.Errorf("requests in review after the decision = %+v, want none", list)
+	}
+}
+
+// assertReviewResults checks what a session waiting for review shows: the
+// reviewer reads the identity and the photos it holds, the API neither.
+func assertReviewResults(t *testing.T, env *testEnv, requests, sessionID, secret string) {
+	t.Helper()
+	// While it waits, the reviewer reads the identity and the photos it holds.
+	held := decodeJSON[struct {
+		Identity *struct {
+			FamilyName string `json:"familyName"`
+		} `json:"identity"`
+		Photo  *struct{ Data string } `json:"photo"`
+		Selfie *struct{ Data string } `json:"selfie"`
+	}](t, env.do(http.MethodGet, requests+"/"+sessionID+"/result", nil))
+	if held.Identity == nil || held.Identity.FamilyName == "" || held.Photo == nil || held.Photo.Data == "" ||
+		held.Selfie == nil || held.Selfie.Data == "" {
+		t.Errorf("result in review = %+v; want the identity, the chip's photo and the selfie", held)
+	}
+	// The API's own result does not show the identity or the photos before an approval.
+	if api := decodeJSON[struct {
+		Identity *struct{} `json:"identity"`
+		Photo    *struct{} `json:"photo"`
+	}](t, env.apiCall(http.MethodGet, "/api/v1/proofing/sessions/"+sessionID+"/result", secret, nil)); api.Identity != nil || api.Photo != nil {
+		t.Errorf("API result in review carries the identity or a photo, want neither until approved")
 	}
 }
 

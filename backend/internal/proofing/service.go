@@ -2120,7 +2120,7 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 		return YiviStart{}, err
 	}
 	started, err := s.verifier.StartProofing(ctx, openid4vpverifier.ProofingRequest{
-		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(),
+		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(), BSN: keepsBSN(f),
 	})
 	if err != nil {
 		return YiviStart{}, err

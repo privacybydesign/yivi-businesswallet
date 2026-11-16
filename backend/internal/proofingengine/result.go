@@ -280,11 +280,15 @@ func releasedDocumentImage(sess session.Session, docImage *documentImageInfo, re
 const dutchIssuingState = "NLD"
 
 // applyBSNPolicy applies the BSN policy to doc.PersonalNumber before doc goes
-// into any result, whatever was requested. Only Dutch documents: other
-// countries' personal numbers are not BSNs. A Dutch number failing the
-// 11-proef is dropped whatever the policy.
+// into any result, whatever was requested. Another country's personal number
+// is no BSN, and the result's personal number is only ever one: it is dropped
+// whatever the policy. A Dutch number failing the 11-proef is dropped too.
 func applyBSNPolicy(doc *documentInfo, policy privacy.BSNPolicy) {
-	if doc.PersonalNumber == "" || doc.IssuingState != dutchIssuingState {
+	if doc.PersonalNumber == "" {
+		return
+	}
+	if doc.IssuingState != dutchIssuingState {
+		doc.PersonalNumber = ""
 		return
 	}
 	if !bsn.Masked(doc.PersonalNumber) && !bsn.Valid(doc.PersonalNumber) {

@@ -100,6 +100,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 
 	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	doc, checksDocument := disclosedDocument(sess, info, bsnPolicy, time.Now())
+	withholdDisclosedBSN(&info, bsnPolicy)
 	docRedaction := redaction
 	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
 

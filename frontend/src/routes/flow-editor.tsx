@@ -45,7 +45,6 @@ const NAME_ID = "proofing-flow-name";
 const NAME_HINT_ID = "proofing-flow-name-hint";
 const NAME_ERROR_ID = "proofing-flow-name-error";
 const CHEVRON_SIZE = 18;
-const INFO_SIZE = 16;
 
 // The fields of the draft that sit under Advanced settings: an error in one of
 // them opens it.
@@ -306,11 +305,6 @@ export function FlowEditor({
               </p>
             )}
           </fieldset>
-
-          <div className="rounded-yivi bg-surface-2 text-ink-soft flex items-center gap-2.5 px-3.5 py-3 text-[13.5px]">
-            <Icon name="info" size={INFO_SIZE} />
-            {t("identityProofingFlows.editor.regula")}
-          </div>
         </div>
 
         <div className="border-line border-t">

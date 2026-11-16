@@ -18,6 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
@@ -1185,6 +1186,13 @@ func mapError(err error) error {
 	}
 	if errors.Is(err, ErrInvalidInput) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
+	}
+	var cmErr *idscan.APIError
+	if errors.Is(err, ErrDocumentScanUnavailable) && errors.As(err, &cmErr) {
+		return &respond.APIError{
+			Status: http.StatusBadGateway, Code: "document_scan_unavailable",
+			Message: fmt.Sprintf("the scan service could not give this scan's result (%d: %s): scan again", cmErr.Status, cmErr.Message),
+		}
 	}
 	if errors.Is(err, ErrReasonsMissing) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}

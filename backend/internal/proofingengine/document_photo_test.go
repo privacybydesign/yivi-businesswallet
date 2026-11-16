@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -211,6 +212,51 @@ func TestYiviDisclosureWithDocumentPhoto(t *testing.T) {
 	}
 	if rejected, _ := store.Get("org", sess.ID); rejected.Status != session.StatusRejected || rejected.ErrorCode != errCodeDocNotAuthentic {
 		t.Errorf("status %s, error %q; want rejected, %s", rejected.Status, rejected.ErrorCode, errCodeDocNotAuthentic)
+	}
+}
+
+// A document the Yivi app shares carries the BSN its photo read, as the
+// flow's BSN policy releases it and only with DG11 requested.
+func TestYiviDocumentCarriesPhotographedBSN(t *testing.T) {
+	const scannedBSN = "111222333"
+	for name, tc := range map[string]struct {
+		policy    privacy.BSNPolicy
+		requested []string
+		want      string
+	}{
+		"kept":            {privacy.BSNPolicyRetrieve, []string{attrDocument, attrDG11}, scannedBSN},
+		"masked":          {privacy.BSNPolicyMask, []string{attrDocument, attrDG11}, bsn.Mask(scannedBSN)},
+		"left out":        {privacy.BSNPolicyOmit, []string{attrDocument, attrDG11}, ""},
+		"DG11 not wanted": {privacy.BSNPolicyRetrieve, []string{attrDocument}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+			fd := chipAndPhotoFlow
+			fd.BSNPolicy, fd.RequestedAttributes = tc.policy, tc.requested
+			sess := session.Session{
+				ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
+				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+				RequestedAttributes: tc.requested,
+			}
+			s, store := documentPhotoServer(sess, fd)
+			check := authenticScan()
+			check.Document.PersonalNumber = scannedBSN
+			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: check,
+			}); err != nil {
+				t.Fatalf("SubmitDocumentPhoto = %v", err)
+			}
+			ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: map[string]string{
+				"firstName": "Anna", "lastName": "Jansen", "country": "NLD",
+			}}
+			if disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref); err != nil || !disclosure.OK {
+				t.Fatalf("SubmitReference = %+v, %v", disclosure, err)
+			}
+			decided, _ := store.Get("org", sess.ID)
+			if doc := decided.Result["document"].(documentInfo); doc.PersonalNumber != tc.want {
+				t.Errorf("personal number %q, want %q", doc.PersonalNumber, tc.want)
+			}
+		})
 	}
 }
 

@@ -458,8 +458,8 @@ func apiSessionID(r *http.Request) (uuid.UUID, error) {
 }
 
 // apiResultResponse is a settled session's result: who was proofed, on what
-// evidence. identity is set only for an approved session; never the document
-// number or an image.
+// evidence. identity and the document's images are set only for an approved
+// session; never the document number.
 type apiResultResponse struct {
 	ID             string `json:"id"`
 	Status         Status `json:"status"`
@@ -473,13 +473,13 @@ type apiResultResponse struct {
 	ReviewReason string `json:"reviewReason,omitempty"`
 	// Steps are the extra steps the flow asks for, each with its own outcome
 	// beside the identity's.
-	Steps      []StepOutcome      `json:"steps"`
+	Steps      []StepOutcome      `json:"steps,omitempty"`
 	VerifiedAt *time.Time         `json:"verifiedAt,omitempty"`
 	Identity   *apiIdentity       `json:"identity,omitempty"`
 	Evidence   []apiEvidenceEntry `json:"evidence"`
 	// Diplomas are the DUO diploma extracts the subject added, each checked
 	// against DUO's signature and the proofed identity.
-	Diplomas []diplomaResponse `json:"diplomas"`
+	Diplomas []diplomaResponse `json:"diplomas,omitempty"`
 	// Address is the postal address the subject entered after their identity
 	// was approved; as they declared it, not read off a document.
 	Address *Address `json:"address,omitempty"`
@@ -490,6 +490,11 @@ type apiResultResponse struct {
 	// AddressReview is where an address the registered address did not
 	// confirm stands with a reviewer.
 	AddressReview AddressReview `json:"addressReview,omitempty"`
+	// Photo is the document's portrait; DocumentImage and DocumentImageBack
+	// the photos of its front and back, as far as the engine still holds them.
+	Photo             *adminImage `json:"photo,omitempty"`
+	DocumentImage     *adminImage `json:"documentImage,omitempty"`
+	DocumentImageBack *adminImage `json:"documentImageBack,omitempty"`
 }
 
 type apiIdentity struct {
@@ -497,6 +502,8 @@ type apiIdentity struct {
 	FamilyName  string `json:"familyName,omitempty"`
 	BirthDate   string `json:"birthDate,omitempty"`
 	Nationality string `json:"nationality,omitempty"`
+	// BSN is the holder's BSN, for a flow whose BSN policy keeps or masks it.
+	BSN string `json:"bsn,omitempty"`
 	// AgeOver is set for a flow that requests age_over, which releases it
 	// instead of the birth date.
 	AgeOver *apiAgeOver `json:"ageOver,omitempty"`
@@ -514,8 +521,8 @@ type apiEvidenceEntry struct {
 	DocumentKind string   `json:"documentKind,omitempty"`
 	IssuingState string   `json:"issuingState,omitempty"`
 	ExpiryDate   string   `json:"expiryDate,omitempty"`
-	PassiveAuth  string   `json:"passiveAuth"`
-	ActiveAuth   string   `json:"activeAuth"`
+	PassiveAuth  string   `json:"passiveAuth,omitempty"`
+	ActiveAuth   string   `json:"activeAuth,omitempty"`
 	FaceMatch    *float64 `json:"faceMatch,omitempty"`
 	Liveness     string   `json:"liveness,omitempty"`
 	// DocumentCheck is the document scan's result on a photographed
@@ -539,17 +546,34 @@ func (h *Handler) apiSessionResult(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	caller := callerFromContext(r.Context())
-	req, identity, err := h.service.RequestResult(r.Context(), caller.Org.ID, id)
+	out, err := sessionResult(r.Context(), h.service, callerFromContext(r.Context()).Org.ID, id)
 	if err != nil {
 		return mapError(err)
 	}
-	out := newAPIResultResponse(req, identity, time.Now())
-	if out.Diplomas, err = h.diplomaResponses(r, req); err != nil {
-		return err
-	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
+}
+
+// resultReader reads an external session's result and the diplomas it holds.
+type resultReader interface {
+	RequestResult(ctx context.Context, orgID, id uuid.UUID) (Request, proofingprovider.Identity, error)
+	RequestDiplomas(ctx context.Context, requestIDs []uuid.UUID) (map[uuid.UUID][]Diploma, error)
+}
+
+// sessionResult is the org's external session id's result as the API and the
+// session.verified webhook carry it; each read is audited result_read.
+func sessionResult(ctx context.Context, results resultReader, orgID, id uuid.UUID) (apiResultResponse, error) {
+	req, identity, err := results.RequestResult(ctx, orgID, id)
+	if err != nil {
+		return apiResultResponse{}, err
+	}
+	out := newAPIResultResponse(req, identity, time.Now())
+	diplomas, err := results.RequestDiplomas(ctx, []uuid.UUID{req.ID})
+	if err != nil {
+		return apiResultResponse{}, err
+	}
+	out.Diplomas = newDiplomaResponses(diplomas[req.ID])
+	return out, nil
 }
 
 // diplomaResponses are the extracts req holds.
@@ -582,31 +606,34 @@ func (h *Handler) requestResult(w http.ResponseWriter, r *http.Request) error {
 	// then): what the reviewer compares. The API shows neither before an approval.
 	if identity.Status == proofingprovider.StatusNeedsReview {
 		out.Identity = newAPIIdentity(identity)
+		out.withDocumentImages(identity)
 	}
 	if identity.Status == proofingprovider.StatusApproved || identity.Status == proofingprovider.StatusNeedsReview {
-		out.Photo, out.Selfie = newAdminImage(identity.Photo), newAdminImage(identity.Selfie)
+		out.Selfie = newAdminImage(identity.Selfie)
 		out.ReferencePhoto = newAdminImage(identity.ReferencePhoto)
-		out.DocumentImage = newAdminImage(identity.DocumentImage)
-		out.DocumentImageBack = newAdminImage(identity.DocumentImageBack)
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
 
 // adminResultResponse is the API's result as an admin reads it in the
-// wallet: for an approval, and for a check waiting for review, also the
-// document's portrait, the live selfie matched against it and the photos of
-// the document's front and back, and for the check in review its identity.
-// The API never carries an image.
+// wallet: for an approval, and for a check waiting for review, also the live
+// selfie matched against the document, and for the check in review its
+// identity and the document's images. The API never carries a selfie.
 type adminResultResponse struct {
 	apiResultResponse
-	Photo  *adminImage `json:"photo,omitempty"`
 	Selfie *adminImage `json:"selfie,omitempty"`
 	// ReferencePhoto is the sender's own photo the selfie was matched
 	// against, for a flow without the chip read.
-	ReferencePhoto    *adminImage `json:"referencePhoto,omitempty"`
-	DocumentImage     *adminImage `json:"documentImage,omitempty"`
-	DocumentImageBack *adminImage `json:"documentImageBack,omitempty"`
+	ReferencePhoto *adminImage `json:"referencePhoto,omitempty"`
+}
+
+// withDocumentImages sets the document's portrait and the photos of its
+// front and back from identity.
+func (out *apiResultResponse) withDocumentImages(identity proofingprovider.Identity) {
+	out.Photo = newAdminImage(identity.Photo)
+	out.DocumentImage = newAdminImage(identity.DocumentImage)
+	out.DocumentImageBack = newAdminImage(identity.DocumentImageBack)
 }
 
 // adminImage is a face image, its bytes standard base64.
@@ -627,7 +654,7 @@ func newAdminImage(img *proofingprovider.Image) *adminImage {
 func newAPIIdentity(identity proofingprovider.Identity) *apiIdentity {
 	out := &apiIdentity{
 		GivenName: identity.GivenName, FamilyName: identity.FamilyName,
-		BirthDate: identity.BirthDate, Nationality: identity.Nationality,
+		BirthDate: identity.BirthDate, Nationality: identity.Nationality, BSN: identity.PersonalNumber,
 	}
 	if a := identity.AgeOver; a != nil {
 		out.AgeOver = &apiAgeOver{Age: a.Age, Over: a.Over}
@@ -652,11 +679,16 @@ func newAPIResultResponse(req Request, identity proofingprovider.Identity, now t
 	if identity.Status == proofingprovider.StatusApproved {
 		out.VerifiedAt = identity.CompletedAt
 		out.Identity = newAPIIdentity(identity)
+		out.withDocumentImages(identity)
 	}
 	if ev := identity.Evidence; ev != nil {
 		entry := apiEvidenceEntry{
 			Type: ev.Type, DocumentType: ev.DocumentType, DocumentKind: ev.DocumentKind, IssuingState: ev.IssuingState, ExpiryDate: ev.ExpiryDate,
-			PassiveAuth: ev.PassiveAuth, ActiveAuth: ev.ActiveAuth, FaceMatch: ev.FaceMatch, Liveness: ev.Liveness,
+			FaceMatch: ev.FaceMatch, Liveness: ev.Liveness,
+		}
+		// Only a chip read has chip checks; on other evidence they never apply.
+		if ev.Type == proofingprovider.EvidenceEMRTD {
+			entry.PassiveAuth, entry.ActiveAuth = ev.PassiveAuth, ev.ActiveAuth
 		}
 		if ev.DocumentVerdict != "" {
 			entry.DocumentCheck = &apiDocumentCheck{Verdict: ev.DocumentVerdict, Score: ev.DocumentScore, Fields: ev.DocumentFields, Zones: ev.DocumentZones}
