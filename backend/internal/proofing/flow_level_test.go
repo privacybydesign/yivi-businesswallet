@@ -42,6 +42,15 @@ func TestWithLevelNeeds(t *testing.T) {
 		t.Errorf("substantial = %+v; want the chip read, every check, Regula, the threshold at its floor and the Idem app", sub)
 	}
 
+	// The Yivi app reaches low: a Yivi-only flow on its personal data stays so.
+	yivi, err := withLevelNeeds(proofingprovider.FlowSpec{
+		Name: "DigiD", RequiredAssuranceLevel: eidasLow, Apps: []string{appYivi},
+		AcceptedDocumentTypes: []string{"personal_data"},
+	})
+	if err != nil || !slices.Equal(yivi.Apps, []string{appYivi}) {
+		t.Errorf("Yivi only at low = %+v, %v; want it kept to the Yivi app", yivi.Apps, err)
+	}
+
 	if _, err := withLevelNeeds(proofingprovider.FlowSpec{Name: "High", RequiredAssuranceLevel: flowLevelHigh}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("high = %v, want ErrInvalidInput", err)
 	}

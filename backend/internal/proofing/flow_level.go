@@ -61,8 +61,8 @@ func withLevelNeeds(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, er
 		in.CheckThresholds = maps.Clone(in.CheckThresholds)
 		in.CheckThresholds[checkFaceMatch] = needs.minFaceMatch
 	}
-	// The chip read runs in the Idem app.
-	if len(in.Apps) > 0 && !slices.Contains(in.Apps, appIdem) {
+	// A level the Yivi app cannot reach runs in the Idem app, which reads the chip.
+	if len(in.Apps) > 0 && !slices.Contains(in.Apps, appIdem) && !meetsAssurance(yiviEIDASLevel, in.RequiredAssuranceLevel) {
 		in.Apps = append(slices.Clone(in.Apps), appIdem)
 	}
 	return in, nil

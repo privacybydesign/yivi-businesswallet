@@ -944,7 +944,8 @@ post-review outcome stay the system's.
     `withAssuranceLevel` does: `low` the chip read and `nfc.passive_auth`;
     `substantial` also the face check with Regula, every check of
     `substantialChecks` and a face threshold of at least 0.75; the Idem app
-    added to a flow locked to other apps. `none` or no level requires
+    added to a `substantial` flow locked to other apps (the Yivi app reaches
+    `low`). `none` or no level requires
     nothing; `high` is 400. A document photo stays.
 - **Why a session ended**, on the API session and the webhooks:
   - `cancelledBy` (`cancelled_by`, migration `20261116090000`): `api_key`,
