@@ -165,11 +165,16 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
+	h.registerPublicSetupAPI(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
 }
 
 func orgFromRequest(r *http.Request) Org {
+	// An API key acts for its own org, on the routes it shares with an admin.
+	if caller, ok := r.Context().Value(apiCallerKey{}).(APIKeyCaller); ok {
+		return caller.Org
+	}
 	org := organization.OrgFromContext(r.Context())
 	return Org{ID: org.ID, Name: org.Name}
 }

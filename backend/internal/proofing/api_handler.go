@@ -209,6 +209,17 @@ type apiFlowResponse struct {
 	// flowNeedsReferencePhoto is a flow that matches the face without reading
 	// the chip: every session on it carries a referencePhoto.
 	NeedsReferencePhoto bool `json:"needsReferencePhoto"`
+	// Allowed is the flow being offered to the org's members.
+	Allowed bool `json:"allowed"`
+	// HostedEnabled is whether the flow is sent as a hosted link, and
+	// HostedReturnURL the page its links send the person back to; absent for
+	// none.
+	HostedEnabled   bool   `json:"hostedEnabled"`
+	HostedReturnURL string `json:"hostedReturnUrl,omitempty"`
+	// The steps after the identity check the flow asks for.
+	DiplomaMode    DiplomaMode    `json:"diplomaMode"`
+	AddressMode    AddressMode    `json:"addressMode"`
+	EmploymentMode EmploymentMode `json:"employmentMode"`
 }
 
 func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
@@ -230,6 +241,8 @@ func (h *Handler) apiListFlows(w http.ResponseWriter, r *http.Request) error {
 		out = append(out, apiFlowResponse{
 			ID: f.ID, Name: f.Name, Version: f.Version, RequiredAssuranceLevel: f.RequiredAssuranceLevel,
 			RequestedAttributes: attrs, AgeOver: f.AgeOver, Default: f.Default, NeedsReferencePhoto: flowNeedsReferencePhoto(f.Flow),
+			Allowed: f.Allowed, HostedEnabled: f.HostedEnabled, HostedReturnURL: f.HostedReturnURL,
+			DiplomaMode: f.Diplomas, AddressMode: f.Address, EmploymentMode: f.Employment,
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, out)

@@ -1,6 +1,9 @@
 package openid4vpverifier
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 // defaultCredentialScheme is the Yivi scheme whose credentials we request when
 // none is configured (EUDI_CREDENTIAL_SCHEME); production uses "pbdf".
@@ -222,6 +225,11 @@ var ageClaims = map[int]string{12: "over12", 16: "over16", 18: "over18", 21: "ov
 func AgeClaim(age int) (string, bool) {
 	claim, ok := ageClaims[age]
 	return claim, ok
+}
+
+// AgeClaimAges are the ages AgeClaim answers for, lowest first.
+func AgeClaimAges() []int {
+	return slices.Sorted(maps.Keys(ageClaims))
 }
 
 func isAgeClaim(claim string) bool {

@@ -35,10 +35,19 @@ const (
 	ScopeSessionsRead  = "sessions:read"
 	ScopeResultsRead   = "results:read"
 	ScopeFlowsRead     = "flows:read"
+	// ScopeFlowsWrite creates and edits flows and their hosted page, steps
+	// and which ones the org offers.
+	ScopeFlowsWrite    = "flows:write"
+	ScopeSettingsRead  = "settings:read"
+	ScopeSettingsWrite = "settings:write"
+	ScopeWebhooksWrite = "webhooks:write"
 )
 
 // APIKeyScopes are every scope, in display order; every new key gets them all.
-var APIKeyScopes = []string{ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead}
+var APIKeyScopes = []string{
+	ScopeSessionsWrite, ScopeSessionsRead, ScopeResultsRead, ScopeFlowsRead,
+	ScopeFlowsWrite, ScopeSettingsRead, ScopeSettingsWrite, ScopeWebhooksWrite,
+}
 
 // APIKey is one of an org's API keys, without its secret.
 type APIKey struct {
