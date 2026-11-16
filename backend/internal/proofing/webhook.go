@@ -175,6 +175,9 @@ func sessionEventData(req Request, status Status) map[string]any {
 	if req.ExpectsSubject {
 		data["expectedSubject"] = true
 	}
+	if status == StatusExpired {
+		data["expiryReason"] = string(req.expiryReason())
+	}
 	if steps := req.Steps(time.Now()); len(steps) > 0 {
 		data["steps"] = steps
 	}

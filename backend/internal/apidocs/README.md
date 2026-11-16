@@ -3,7 +3,8 @@
 The backend serves its own OpenAPI spec and a browsable [ReDoc](https://github.com/Redocly/redoc) page:
 
 - `GET /api/docs` — ReDoc UI (`redoc.html`)
-- `GET /api/docs/openapi.yaml` — the raw OpenAPI 3 spec (`openapi.yaml`)
+- `GET /api/docs/openapi.yaml` — the OpenAPI 3 spec (`openapi.yaml`), without
+  the wallet's own identity proofing routes (`served.go`)
 
 Both are read-only, unauthenticated, and mounted on the root mux outside the
 `/api/v1` prefix so they are never mistaken for API resources. The spec and the
@@ -24,3 +25,11 @@ So adding or removing an endpoint without updating `openapi.yaml` breaks the
 build. When that happens, edit `openapi.yaml` to match: add or remove the path
 item, keeping the existing shape (tags, `security`, path parameters, and the
 shared error responses under `components/responses`).
+
+## Identity proofing
+
+- `identity-proofing` is the API an integrator uses (`/api/v1/proofing/...` and
+  the webhook). Its tag description is the integrator's guide.
+- `identity-proofing-internal` holds the wallet's own proofing routes and the
+  hosted page's. They stay in `openapi.yaml`, so the route test covers them, and
+  are left out of what is served.

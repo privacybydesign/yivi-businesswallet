@@ -191,8 +191,8 @@ type Headless struct {
 
 // StartHeadless starts an external hosted request in method, as the subject
 // picking an app on the hosted page would, for an org building its own UI.
-// A Yivi one's disclosure starts at once and is polled through the hosted
-// link's routes. A request not created hosted is ErrNotHosted.
+// A Yivi one's disclosure starts at once and is redeemed by HeadlessStatus.
+// A request not created hosted is ErrNotHosted.
 func (s *Service) StartHeadless(ctx context.Context, orgID, id uuid.UUID, method proofingprovider.Method) (Headless, error) {
 	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
@@ -214,6 +214,33 @@ func (s *Service) StartHeadless(ctx context.Context, orgID, id uuid.UUID, method
 		out.WalletLink = started.WalletLink
 	}
 	return out, nil
+}
+
+// HeadlessStatus is a headless request in method, for its org's poll. A
+// running Yivi one is first handed the disclosure its subject finished, which
+// decides it: no page of the wallet's is open to redeem it. One still waiting
+// for the subject, or for the document photo, is answered as stored.
+func (s *Service) HeadlessStatus(ctx context.Context, orgID, id uuid.UUID, method proofingprovider.Method) (Request, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.Method != method {
+		return Request{}, ErrWrongMethod
+	}
+	_, sess, err := s.yiviSessionOf(req)
+	if err != nil {
+		// Not a Yivi session, or one already over: stored state says it all.
+		return req, nil
+	}
+	switch _, err := s.yiviDisclosure(ctx, req, sess); {
+	case err == nil:
+		return s.requests.GetExternal(ctx, orgID, id)
+	case errors.Is(err, ErrDisclosurePending), errors.Is(err, ErrDocumentScanPending), errors.Is(err, ErrSessionOver):
+		return req, nil
+	default:
+		return Request{}, err
+	}
 }
 
 // startHosted creates a hosted request's engine session for method, unless

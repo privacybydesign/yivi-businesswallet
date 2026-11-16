@@ -39,10 +39,13 @@ var (
 	ErrDocumentScanFailed = errors.New("proofing: the document scan did not finish")
 	// ErrDocumentScanPending is a Yivi disclosure before the document photo is
 	// in.
+	ErrDocumentScanPending = errors.New("proofing: the document photo is not in yet")
 	// ErrDocumentScanUnavailable is the scan service failing to hand over a
 	// scan's result: the person scans again.
 	ErrDocumentScanUnavailable = errors.New("proofing: the scan service could not give the scan's result")
-	ErrDocumentScanPending     = errors.New("proofing: the document photo is not in yet")
+	// ErrSessionNotStarted is a step of an org's own page on a hosted request
+	// it has not started in an app yet (StartHeadless).
+	ErrSessionNotStarted = errors.New("proofing: the session is not started yet")
 )
 
 // documentScanner is the document scan service the browser takes a document
@@ -91,6 +94,30 @@ func (s *Service) HostedStartDocumentScan(ctx context.Context, token, language s
 	return s.startDocumentScan(ctx, req, language)
 }
 
+// APIStartDocumentScan is StartDocumentScan for an org's own page, which
+// embeds the scan service's page itself: one of its external requests.
+func (s *Service) APIStartDocumentScan(ctx context.Context, orgID, id uuid.UUID, language string) (string, error) {
+	req, err := s.startedExternalRequest(ctx, orgID, id)
+	if err != nil {
+		return "", err
+	}
+	return s.startDocumentScan(ctx, req, language)
+}
+
+// startedExternalRequest is one of the org's external requests, refusing a
+// hosted one still waiting to be started: ErrSessionNotStarted says what to
+// do, where the missing session would read as one that ended.
+func (s *Service) startedExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.awaitingStart(s.now()) {
+		return Request{}, ErrSessionNotStarted
+	}
+	return req, nil
+}
+
 func (s *Service) startDocumentScan(ctx context.Context, req Request, language string) (string, error) {
 	sess, err := s.documentScanSession(req)
 	if err != nil {
@@ -129,6 +156,15 @@ func (s *Service) FinishDocumentScan(ctx context.Context, orgID, id uuid.UUID, r
 // HostedFinishDocumentScan is FinishDocumentScan for a hosted request.
 func (s *Service) HostedFinishDocumentScan(ctx context.Context, token, transactionID, resultID string) error {
 	req, err := s.hostedRequest(ctx, token)
+	if err != nil {
+		return err
+	}
+	return s.finishDocumentScan(ctx, req, transactionID, resultID)
+}
+
+// APIFinishDocumentScan is FinishDocumentScan for an org's own page.
+func (s *Service) APIFinishDocumentScan(ctx context.Context, orgID, id uuid.UUID, transactionID, resultID string) error {
+	req, err := s.startedExternalRequest(ctx, orgID, id)
 	if err != nil {
 		return err
 	}

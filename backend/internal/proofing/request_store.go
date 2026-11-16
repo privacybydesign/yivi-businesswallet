@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/bits"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +43,7 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
-	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
+	r.cancelled_at, COALESCE(r.cancelled_by, ''), r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
 	(SELECT min(d.created_at) FROM identity_proofing_request_diplomas d WHERE d.request_id = r.id),
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
@@ -242,7 +243,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.CheckedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
-		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
+		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.CancelledBy, &r.PurgedAt, &r.RedirectURL, &r.Language,
 		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
 		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.DiplomasReview, &r.DiplomasReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
@@ -1229,10 +1230,10 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND ips_session_ended_at IS NULL
 			AND status IN ('pending', 'in_progress')`
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
+			SET cancelled_at = now(), cancelled_by = $3, ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
 				expected_birth_date_ciphertext = NULL, updated_at = now()
-			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
+			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID, cancelledByOf(ctx))
 		if err != nil {
 			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 		}
@@ -1262,8 +1263,11 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
 			return err
 		}
-		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled,
-			sessionEventData(req, StatusCancelled))
+		data := sessionEventData(req, StatusCancelled)
+		if by := cancelledByOf(ctx); by != nil {
+			data["cancelledBy"] = string(*by)
+		}
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled, data)
 	})
 	return done, err
 }
@@ -1674,4 +1678,23 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 		return nil, fmt.Errorf("proofing: stats org %s: %w", orgID, err)
 	}
 	return out, nil
+}
+
+// cancelledByOf is who ctx's actor is as a canceller; nil for none.
+func cancelledByOf(ctx context.Context) *CancelledBy {
+	actor, ok := audit.ActorFromContext(ctx)
+	var by CancelledBy
+	switch {
+	case !ok:
+		return nil
+	case actor.UserID != uuid.Nil:
+		by = CancelledByMember
+	case actor.Label == hostedSubjectActor.Label:
+		by = CancelledBySubject
+	case strings.HasPrefix(actor.Label, APIKeyActorPrefix):
+		by = CancelledByAPIKey
+	default:
+		return nil
+	}
+	return &by
 }

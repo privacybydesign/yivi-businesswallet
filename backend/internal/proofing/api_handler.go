@@ -194,6 +194,8 @@ func (h *Handler) registerPublicAPI(mux *http.ServeMux) {
 	mux.Handle("DELETE /proofing/sessions/{sessionID}", h.requireAPIKey(ScopeSessionsWrite, h.apiPurgeSession))
 	mux.Handle("POST /proofing/sessions/{sessionID}/methods/{method}", h.requireAPIKey(ScopeSessionsWrite, h.idempotent(h.apiStartMethod)))
 	mux.Handle("GET /proofing/sessions/{sessionID}/methods/{method}/status", h.requireAPIKey(ScopeSessionsRead, h.apiMethodStatus))
+	mux.Handle("POST /proofing/sessions/{sessionID}/document-scan", h.requireAPIKey(ScopeSessionsWrite, h.apiStartDocumentScan))
+	mux.Handle("POST /proofing/sessions/{sessionID}/document-scan/finish", h.requireAPIKey(ScopeSessionsWrite, h.apiFinishDocumentScan))
 }
 
 type apiFlowResponse struct {
@@ -270,6 +272,10 @@ type apiSessionResponse struct {
 	CreatedAt      time.Time  `json:"createdAt"`
 	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 	CancelledAt    *time.Time `json:"cancelledAt,omitempty"`
+	// CancelledBy is who cancelled it; absent for one cancelled before the
+	// wallet kept it. ExpiryReason is why an expired session expired.
+	CancelledBy  CancelledBy  `json:"cancelledBy,omitempty"`
+	ExpiryReason ExpiryReason `json:"expiryReason,omitempty"`
 	// PurgedAt is when the session's data was erased (DELETE).
 	PurgedAt *time.Time `json:"purgedAt,omitempty"`
 	// ExpectedSubject is a session for one known person, created with a
@@ -293,7 +299,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		FlowVersion: req.FlowVersion, Method: string(req.Method), SubjectEmail: req.SubjectEmail, SubjectName: req.SubjectName,
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		CancelledAt: req.CancelledAt, PurgedAt: req.PurgedAt,
+		CancelledAt: req.CancelledAt, CancelledBy: req.CancelledBy, ExpiryReason: req.ExpiryReason(now), PurgedAt: req.PurgedAt,
 		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 		AddressReview: req.AddressReview,
 	}
@@ -431,8 +437,8 @@ func (h *Handler) apiStartMethod(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// apiMethodStatusResponse is a headless poll, from stored state: done once the
-// session has an outcome or ended.
+// apiMethodStatusResponse is a headless poll: done once the session has an
+// outcome or ended.
 type apiMethodStatusResponse struct {
 	ID     string `json:"id"`
 	Method string `json:"method"`
@@ -446,12 +452,9 @@ func (h *Handler) apiMethodStatus(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	caller := callerFromContext(r.Context())
-	req, err := h.service.StoredExternalRequest(r.Context(), caller.Org.ID, id)
+	req, err := h.service.HeadlessStatus(r.Context(), caller.Org.ID, id, proofingprovider.Method(r.PathValue("method")))
 	if err != nil {
 		return mapError(err)
-	}
-	if string(req.Method) != r.PathValue("method") {
-		return mapError(ErrWrongMethod)
 	}
 	status := req.EffectiveStatus(time.Now())
 	respond.JSON(w, r, http.StatusOK, apiMethodStatusResponse{

@@ -930,6 +930,14 @@ post-review outcome stay the system's.
   - `GET /proofing/flows` also lists each flow's `allowed`, `hostedEnabled`,
     `hostedReturnUrl` and step modes.
   - Audited as the key (`api_key:<prefix>`), as every API write.
+- **Why a session ended**, on the API session and the webhooks:
+  - `cancelledBy` (`cancelled_by`, migration `20261116090000`): `api_key`,
+    `member` or `subject` (declined on the hosted page), from the audit actor
+    of the cancel (`cancelledByOf`). Absent on older rows. Also on
+    `session.cancelled`.
+  - `expiryReason` (`Request.ExpiryReason`, computed): `not_started` (hosted
+    link never started), `not_finished`, `review_ended`. Also on
+    `session.expired`.
   `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
   newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
@@ -952,9 +960,20 @@ post-review outcome stay the system's.
 
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
   `hosted: true` session in that app from the org's own UI (`appLink` or
-  `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
-  answers from stored state. The hosted token is the poll token: the Yivi
-  disclosure poll and a new Idem code run through `/proof/{token}/…`.
+  `walletLink`; not hosted is 409 `not_hosted`).
+  - `GET …/methods/{m}/status` (`HeadlessStatus`) answers the stored state.
+    For a running Yivi session it first hands the engine the disclosure the
+    person finished, which decides it: no page of the wallet's is open to
+    redeem it. One still waiting for the person or the document photo is
+    answered as stored.
+  - `POST …/document-scan` and `POST …/document-scan/finish`
+    (`APIStartDocumentScan`, `APIFinishDocumentScan`) run the document photo
+    in the org's own page: the first answers the scan service's page to embed,
+    the second takes the `transactionId` and `resultId` that page posts. A
+    hosted session not started yet is 409 `session_not_started`.
+  - A new Idem code still runs through `/proof/{token}/claim-link`, and the
+    address, diplomas and Verzekeringsbericht are taken on the hosted page
+    only.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
   `public_id.go`) on the public API and in webhooks; the org routes take
   either form.

@@ -1824,12 +1824,6 @@ func (s *Service) ExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Req
 	return s.readReconciled(ctx, req)
 }
 
-// StoredExternalRequest is one of the org's external requests as stored,
-// without re-checking the engine: what a headless poll answers from.
-func (s *Service) StoredExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	return s.requests.GetExternal(ctx, orgID, id)
-}
-
 // ExternalRequestPage is a page of the org's external requests, newest first,
 // from stored state (no the engine call), and the cursor of the next page ("" at
 // the end). A cursor that does not decode is ErrInvalidInput.
