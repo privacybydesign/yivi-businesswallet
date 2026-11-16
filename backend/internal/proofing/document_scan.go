@@ -106,11 +106,15 @@ func (s *Service) APIStartDocumentScan(ctx context.Context, orgID, id uuid.UUID,
 
 // startedExternalRequest is one of the org's external requests, refusing a
 // hosted one still waiting to be started: ErrSessionNotStarted says what to
-// do, where the missing session would read as one that ended.
+// do, where the missing session would read as one that ended. A cancelled or
+// purged one is ErrSessionOver, as on the hosted page.
 func (s *Service) startedExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
 	req, err := s.requests.GetExternal(ctx, orgID, id)
 	if err != nil {
 		return Request{}, err
+	}
+	if req.CancelledAt != nil || req.PurgedAt != nil {
+		return Request{}, ErrSessionOver
 	}
 	if req.awaitingStart(s.now()) {
 		return Request{}, ErrSessionNotStarted

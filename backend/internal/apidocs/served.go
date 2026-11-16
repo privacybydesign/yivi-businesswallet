@@ -45,6 +45,7 @@ func withoutTag(full []byte, tag string) ([]byte, error) {
 			return name != nil && name.Value == tag
 		})
 	}
+	foldedAsLiteral(&doc)
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -52,6 +53,18 @@ func withoutTag(full []byte, tag string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// foldedAsLiteral re-styles every folded block scalar under n as a literal
+// one: yaml.v3 encodes a folded scalar with a blank line before each
+// more-indented line, which changes its text, and a literal keeps it.
+func foldedAsLiteral(n *yaml.Node) {
+	if n.Kind == yaml.ScalarNode && n.Style&yaml.FoldedStyle != 0 {
+		n.Style = yaml.LiteralStyle
+	}
+	for _, c := range n.Content {
+		foldedAsLiteral(c)
+	}
 }
 
 // dropOperations removes from paths every operation tagged tag, and every

@@ -2,11 +2,13 @@ package apidocs
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"gopkg.in/yaml.v3"
 )
 
 // The served docs show identity proofing as the one API an integrator uses:
@@ -55,4 +57,40 @@ func publicProofingRoutes(t *testing.T, doc *openapi3.T) int {
 		}
 	}
 	return public
+}
+
+// Every text the served docs keep reads as in openapi.yaml.
+func TestServedDocsKeepEveryText(t *testing.T) {
+	var full, kept any
+	if err := yaml.Unmarshal(Spec(), &full); err != nil {
+		t.Fatalf("decode the spec: %v", err)
+	}
+	if err := yaml.Unmarshal(served, &kept); err != nil {
+		t.Fatalf("decode the served docs: %v", err)
+	}
+	compareTexts(t, "", kept, full)
+}
+
+// compareTexts reports every string in kept that differs from the one at the
+// same place in full.
+func compareTexts(t *testing.T, at string, kept, full any) {
+	t.Helper()
+	switch k := kept.(type) {
+	case map[string]any:
+		f, _ := full.(map[string]any)
+		for key, v := range k {
+			compareTexts(t, at+"/"+key, v, f[key])
+		}
+	case []any:
+		f, _ := full.([]any)
+		for i, v := range k {
+			if i < len(f) {
+				compareTexts(t, fmt.Sprintf("%s/%d", at, i), v, f[i])
+			}
+		}
+	case string:
+		if k != full {
+			t.Errorf("%s: served %q, openapi.yaml %q", at, k, full)
+		}
+	}
 }

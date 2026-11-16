@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
@@ -102,5 +103,58 @@ func TestAPIDocumentScanNeedsTheOrgsSession(t *testing.T) {
 	sent := f.sendOnScreen(t, photoFlow.ID, proofingprovider.MethodIdem)
 	if _, err := f.svc.APIStartDocumentScan(ctx, testOrg.ID, sent.Request.ID, "en"); !errors.Is(err, ErrRequestNotFound) {
 		t.Errorf("start on a member's request = %v, want %v", err, ErrRequestNotFound)
+	}
+}
+
+// A hosted session cancelled before it started is over: the scan routes say
+// so, not that it waits to be started.
+func TestAPIDocumentScanOnCancelledSession(t *testing.T) {
+	f, _ := newScanFixture(t)
+	f.svc.SetHostedBaseURL(testHostedBase)
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
+		NewRequest{FlowID: photoFlow.ID, Channel: ChannelHosted})
+	if err != nil {
+		t.Fatalf("CreateRequest(hosted): %v", err)
+	}
+	id := sent.Request.ID
+	if _, err := f.svc.CancelRequest(ctx, testOrg.ID, id); err != nil {
+		t.Fatalf("CancelRequest: %v", err)
+	}
+	if _, err := f.svc.APIStartDocumentScan(ctx, testOrg.ID, id, "nl"); !errors.Is(err, ErrSessionOver) {
+		t.Errorf("scan on a cancelled session = %v, want %v", err, ErrSessionOver)
+	}
+	if err := f.svc.APIFinishDocumentScan(ctx, testOrg.ID, id, "trx-1", "res-1"); !errors.Is(err, ErrSessionOver) {
+		t.Errorf("finish on a cancelled session = %v, want %v", err, ErrSessionOver)
+	}
+}
+
+// On an org's own page the scan service's page posts nothing once its attempts
+// ran out: the headless poll fails the session.
+func TestHeadlessPollFailsSpentDocumentScan(t *testing.T) {
+	f, scanner := newScanFixture(t)
+	f.svc.SetHostedBaseURL(testHostedBase)
+	f.ips.noClaim = true
+	ctx := context.Background()
+	sent, err := f.svc.CreateRequest(ctx, testOrg, Requester{Name: "Portal key", APIKeyID: new(uuid.UUID)},
+		NewRequest{FlowID: photoFlow.ID, Channel: ChannelHosted})
+	if err != nil {
+		t.Fatalf("CreateRequest(hosted): %v", err)
+	}
+	id := sent.Request.ID
+	if _, err := f.svc.StartHeadless(ctx, testOrg.ID, id, proofingprovider.MethodYivi); err != nil {
+		t.Fatalf("StartHeadless: %v", err)
+	}
+	if _, err := f.svc.APIStartDocumentScan(ctx, testOrg.ID, id, "nl"); err != nil {
+		t.Fatalf("APIStartDocumentScan: %v", err)
+	}
+	scanner.status = idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{
+		Task: idscan.TaskDocumentScan, State: idscan.StateMaximumAttemptsExceeded, Attempts: 3,
+	}}
+	if _, err := f.svc.HeadlessStatus(ctx, testOrg.ID, id, proofingprovider.MethodYivi); err != nil {
+		t.Fatalf("HeadlessStatus: %v", err)
+	}
+	if len(f.ips.scanFailures) != 1 {
+		t.Errorf("failures %+v; want the session failed once the attempts ran out", f.ips.scanFailures)
 	}
 }

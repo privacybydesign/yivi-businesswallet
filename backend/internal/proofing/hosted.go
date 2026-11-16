@@ -228,6 +228,9 @@ func (s *Service) HeadlessStatus(ctx context.Context, orgID, id uuid.UUID, metho
 	if req.Method != method {
 		return Request{}, ErrWrongMethod
 	}
+	// The scan page posts nothing once the person used up its attempts, so
+	// only this poll can fail the session.
+	req = s.withSpentDocumentScan(ctx, req)
 	_, sess, err := s.yiviSessionOf(req)
 	if err != nil {
 		// Not a Yivi session, or one already over: stored state says it all.

@@ -34,15 +34,19 @@ func TestExpiryReason(t *testing.T) {
 func TestCancelledByOf(t *testing.T) {
 	member, key, subject := CancelledByMember, CancelledByAPIKey, CancelledBySubject
 	for name, tc := range map[string]struct {
-		ctx  context.Context
-		want *CancelledBy
+		actor *audit.Actor
+		want  *CancelledBy
 	}{
-		"a member":   {audit.ContextWithActor(context.Background(), audit.Actor{UserID: uuid.New()}), &member},
-		"an API key": {audit.ContextWithActor(context.Background(), audit.Actor{Label: APIKeyActorPrefix + "yp_live_ab12"}), &key},
-		"the person": {audit.ContextWithActor(context.Background(), hostedSubjectActor), &subject},
-		"no actor":   {context.Background(), nil},
+		"a member":   {&audit.Actor{UserID: uuid.New()}, &member},
+		"an API key": {&audit.Actor{Label: APIKeyActorPrefix + "yp_live_ab12"}, &key},
+		"the person": {&hostedSubjectActor, &subject},
+		"no actor":   {nil, nil},
 	} {
-		got := cancelledByOf(tc.ctx)
+		ctx := context.Background()
+		if tc.actor != nil {
+			ctx = audit.ContextWithActor(ctx, *tc.actor)
+		}
+		got := cancelledByOf(ctx)
 		if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
 			t.Errorf("%s: cancelledByOf = %v, want %v", name, got, tc.want)
 		}
