@@ -25,5 +25,6 @@ func NewStores(db database.DB, recorder audit.Recorder, cipher *crypto.Cipher, r
 		FlowAddresses:  NewFlowAddressStore(db, recorder),
 		FlowEmployment: NewFlowEmploymentStore(db, recorder),
 		DataRequests:   NewDataRequestStore(db, recorder, cipher),
+		ReviewLinks:    NewReviewLinkStore(db, recorder),
 	}
 }

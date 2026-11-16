@@ -1945,3 +1945,63 @@ export function decideProofingReview(
     { schema: proofingRequestSchema, method: "POST", body: input, signal },
   );
 }
+
+// Where a review page reads and decides: the org's own wallet, or a review
+// link the org's software made for a reviewer outside the wallet.
+export type ReviewTarget =
+  | { kind: "org"; slug: string }
+  | { kind: "link"; token: string };
+
+// What a review link's page shows: the session as the wallet's review pages
+// read it, its result while its identity waits, and who the link is for.
+const reviewLinkSchema = z.object({
+  sessionId: z.string(),
+  request: proofingRequestSchema,
+  result: proofingResultSchema.optional(),
+  reviewer: z.string(),
+  expiresAt: z.string(),
+  embedOrigins: z.array(z.string()),
+  organization: z.string(),
+});
+
+export type ReviewLinkPage = z.infer<typeof reviewLinkSchema>;
+
+function reviewLinkBase(token: string): string {
+  return `/api/v1/review/${encodeURIComponent(token)}`;
+}
+
+export function getReviewLink(
+  token: string,
+  signal?: AbortSignal,
+): Promise<ReviewLinkPage> {
+  return request(reviewLinkBase(token), { schema: reviewLinkSchema, signal });
+}
+
+// A decision through a review link: confirm or reject, as the wallet's review
+// items take it.
+export function decideReviewLinkItem(
+  token: string,
+  kind: ReviewKind,
+  input: AddressReviewInput & { errorCode?: string },
+  signal?: AbortSignal,
+): Promise<ReviewLinkPage> {
+  return request(`${reviewLinkBase(token)}/items/${kind}`, {
+    schema: reviewLinkSchema,
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+export function checkReviewLinkSeals(
+  token: string,
+  kind: "diplomas" | "employment",
+  signal?: AbortSignal,
+): Promise<ReviewLinkPage> {
+  return request(`${reviewLinkBase(token)}/items/${kind}/seal-check`, {
+    schema: reviewLinkSchema,
+    method: "POST",
+    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+    signal,
+  });
+}

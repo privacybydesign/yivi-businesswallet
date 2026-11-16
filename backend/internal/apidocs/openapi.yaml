@@ -288,6 +288,20 @@ tags:
       { "name": "Onboarding", "requiredAssuranceLevel": "substantial" }
       ```
 
+      ### Review a session in your own system
+
+      When a session waits for a reviewer (`session.review_opened`, or `status`
+      `needs_review`), either
+      - build the review yourself: `GET /proofing/sessions/{id}/review` reads what waits
+        with the evidence, and `POST /proofing/sessions/{id}/review-items/{kind}` decides each
+        part as the reviewer you name; or
+      - use the wallet's review page: `POST /proofing/sessions/{id}/review-links` answers a
+        link to it for the reviewer you name, to open or show in an iframe on an allowed
+        origin. It posts `proofing.review_completed` to your page once nothing waits.
+
+      Either way the decision is the same as one in the wallet: audited, shown there with the
+      reviewer's name, and sent as the same webhooks.
+
       ### Outcomes and error codes
 
       A session's `status` ends as `approved`, `rejected`, `needs_review` (a reviewer of the
@@ -8600,7 +8614,7 @@ paths:
                     - id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                       name: Production backend
                       prefix: yp_live_3kq7
-                      scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                      scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                       createdByName: Sam de Vries
                       createdAt: "2026-09-01T10:05:00Z"
                       lastUsedAt: "2026-10-02T09:30:00Z"
@@ -8620,7 +8634,8 @@ paths:
         erase), `sessions:read`, `results:read` (the verified identity), `flows:read`,
         `flows:write` (create and edit flows, their hosted page and steps, the default flow),
         `settings:read`, `settings:write` (the session settings and the allowed redirect
-        origins) and `webhooks:write` (the webhook endpoint). A
+        origins), `webhooks:write` (the webhook endpoint), `reviews:read` (what waits for a
+        reviewer, with its evidence) and `reviews:write` (decide it, and make a review link). A
         route the key lacks the scope for answers 403 `insufficient_scope`. An empty `name` or
         one over 100 characters is 400 `invalid_input`.
       requestBody:
@@ -8648,7 +8663,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     secret: yp_live_3kq7Vb9xR2mT8nW4cZ6hJ1pL5sD0fG7a
         '400':
@@ -8693,7 +8708,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write, reviews:read, reviews:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     lastUsedAt: "2026-10-02T09:30:00Z"
                     revokedAt: "2026-10-02T10:00:00Z"
@@ -9248,6 +9263,164 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/review/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+    get:
+      tags: [identity-proofing-internal]
+      summary: Open a review link
+      security: []
+      description: >-
+        The hosted review page, unauthenticated: the token is the whole authorization, and the
+        page is rate-limited per client address. Answers the session as the wallet's review
+        pages read it, its result while the identity waits, the reviewer the link is for, when
+        it expires, and the origins that may frame it. Never cached.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/review/{token}/items/{kind}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [identity, address, employment, diplomas, data_request]
+        description: The part decided, as the review's `waiting` lists it.
+    post:
+      tags: [identity-proofing-internal]
+      summary: Decide a part through a review link
+      security: []
+      description: >-
+        Decides one waiting part as the link's reviewer, as `POST
+        /proofing/sessions/{sessionID}/review-items/{kind}` does, audited with the link
+        (`review_link:<key prefix>`) as actor. Answers the page after the decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason]
+              properties:
+                decision:
+                  type: string
+                  enum: [confirm, reject]
+                  description: Required. Confirm or reject the part.
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Required. Why, as the audit log keeps it.
+                errorCode:
+                  type: string
+                  description: Optional, only when rejecting the identity. A reviewer's code, as for the API.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '400':
+          description: >-
+            A field is missing or invalid (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The part does not wait for a decision (`not_under_review`), or has a seal nobody checked yet (`seal_unchecked`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/review/{token}/items/{kind}/seal-check:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The review link's token, from its `url`.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [diplomas, employment]
+        description: The step whose files are checked again.
+    post:
+      tags: [identity-proofing-internal]
+      summary: Check a step's seals again through a review link
+      security: []
+      description: >-
+        As `POST /proofing/sessions/{sessionID}/review-items/{kind}/seal-check`, for the link's
+        session. Answers the page after the check.
+      responses:
+        '200':
+          description: The review page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingReviewLinkPage'
+        '400':
+          description: >-
+            The kind has no seal (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >-
+            The link is unknown, has expired, or its API key was revoked (`review_link_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The step does not wait for a decision (`not_under_review`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /api/v1/proofing/flows/{flowID}/versions:
     parameters:
       - name: flowID
@@ -12711,6 +12884,275 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The session does not run in that app (`wrong_method`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    get:
+      tags: [identity-proofing]
+      summary: Read what waits for a reviewer (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:read`. Everything a reviewer
+        decides a session on, as the wallet's Reviews page shows it: the parts that wait
+        (`waiting`, in the order the review walks them: `identity` or `data_request`, then
+        `employment`, `diplomas`, `address`), every part with where it stands (`items`), the
+        earlier decisions, and the session's `result`. While the identity waits the result also
+        carries the identity and the photos the flow captured; once decided it carries neither
+        photo. Each read of the result is audited `identity_proofing.result_read`. Never cached.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proofing/sessions/{sessionID}/review-items/{kind}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [identity, address, employment, diplomas, data_request]
+        description: The part decided, as the review's `waiting` lists it.
+    post:
+      tags: [identity-proofing]
+      summary: Decide a part of a session's review (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Confirms or rejects
+        one waiting part as the person named in `reviewer`, the one deciding in your own system.
+        The decision is audited with your key as actor and that reviewer, the wallet shows the
+        reviewer as having decided it, and the same webhooks go out as for a decision in the
+        wallet. Confirming the identity approves the session; rejecting it rejects the session.
+        A step's decision leaves the session's outcome as it is. Answers the review after the
+        decision.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason, reviewer]
+              properties:
+                decision:
+                  type: string
+                  enum: [confirm, reject]
+                  description: Required. Confirm or reject the part.
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Required. Why, as the audit log keeps it.
+                reviewer:
+                  type: string
+                  maxLength: 100
+                  description: Required. The person deciding, as your own system names them.
+                errorCode:
+                  type: string
+                  enum: [REVIEW_NOT_HOLDER, REVIEW_ALTERED, EVIDENCE_NOT_AS_REQUESTED, MANUAL_REVIEW_REJECTED]
+                  description: >-
+                    Optional, only when rejecting the identity. What was wrong: someone else's,
+                    altered, not what was asked for, or another reason. Default
+                    `MANUAL_REVIEW_REJECTED`.
+            example:
+              decision: confirm
+              reason: Document and face checked by hand
+              reviewer: Jan Jansen
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '400':
+          description: >-
+            A field is missing or invalid, or `errorCode` is not a reviewer's code or is sent with a step (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            The part does not wait for a decision (`not_under_review`, `address_not_under_review`), or a file of the step has a seal nobody checked yet (`seal_unchecked`): check it again first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review-items/{kind}/seal-check:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [diplomas, employment]
+        description: The step whose files are checked again.
+    post:
+      tags: [identity-proofing]
+      summary: Check a step's seals again (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Checks again the
+        seals of a waiting step's files that could not be checked at upload, as the trust lists
+        or the revocation server could not be reached. Each file ends kept or refused, and the
+        step can then be decided. Answers the review after the check.
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: The session's review, after the call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiReview'
+        '400':
+          description: >-
+            The kind has no seal (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            The step does not wait for a decision (`not_under_review`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: >-
+            The trust lists or the revocation server still cannot be reached (`seal_check_unavailable`); try again later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/review-links:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    post:
+      tags: [identity-proofing]
+      summary: Make a review link (public API)
+      description: >-
+        Authenticated with the organisation's API key with `reviews:write`. Answers a `url` to
+        the wallet's hosted review page for this session, for the person named in `reviewer`:
+        open it for them, or show it in an iframe on one of the organisation's allowed redirect
+        origins. The page shows the session's review as the wallet's Reviews page does, and
+        decides it as that reviewer. It lasts an hour (`expiresAt`), and stops when your key is
+        revoked. Framed, the page posts this to the parent window once nothing waits any more:
+        `{ "type": "proofing.review_completed", "session": "ps_…", "status": "approved" }`.
+        Only for an identity check: decide a data request with `POST .../review-items/data_request`.
+        Audited `identity_proofing.review_link_created`.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reviewer]
+              properties:
+                reviewer:
+                  type: string
+                  maxLength: 100
+                  description: Required. The person who reviews through the link, as your own system names them.
+            example:
+              reviewer: Petra de Wit
+      responses:
+        '201':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expiresAt]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: The hosted review page. Anyone with it can review the session until it expires; hand it only to the reviewer.
+                  expiresAt:
+                    type: string
+                    format: date-time
+              example:
+                url: https://wallet.example.org/r/EXAMPLE_NOT_A_REAL_TOKEN
+                expiresAt: "2026-11-16T12:30:00Z"
+        '400':
+          description: >-
+            `reviewer` is missing or invalid, or the session is a data request (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: >-
+            Nothing of the session waits for a review (`nothing_to_review`).
           content:
             application/json:
               schema:
@@ -16686,6 +17128,100 @@ components:
           format: byte
           description: The image, standard base64.
       required: [mimeType, data]
+    ProofingApiReview:
+      type: object
+      description: What a reviewer outside the wallet decides a session on.
+      properties:
+        id:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        status:
+          type: string
+          enum: [pending, in_progress, approved, rejected, needs_review, expired, cancelled]
+        flowKind:
+          type: string
+          enum: [identity, data_access, data_erasure]
+        waiting:
+          type: array
+          description: The parts that wait for a decision, in the order the review walks them; empty once nothing waits.
+          items:
+            type: string
+            enum: [identity, address, employment, diplomas, data_request]
+        items:
+          type: array
+          description: Every part a reviewer decides, waiting or decided.
+          items:
+            type: object
+            required: [kind, state]
+            properties:
+              kind:
+                type: string
+                enum: [identity, address, employment, diplomas, data_request]
+              state:
+                type: string
+                enum: [pending, confirmed, rejected, lapsed]
+              decidedAt:
+                type: string
+                format: date-time
+        stepReviewDueAt:
+          type: string
+          format: date-time
+          description: When the first waiting step lapses undecided; absent for none.
+        flowAlwaysReview:
+          type: boolean
+          description: In review because the flow sends every session there, not because the checks doubted it.
+        sealChecks:
+          type: array
+          description: The files whose seal could not be checked at upload, with what became of each.
+          items:
+            type: object
+        decisions:
+          type: array
+          description: What reviewers decided so far, oldest first.
+          items:
+            type: object
+            required: [kind, outcome, decidedAt]
+            properties:
+              kind:
+                type: string
+                enum: [review, address, employment, diplomas]
+              outcome:
+                type: string
+              reason:
+                type: string
+              errorCode:
+                type: string
+              decidedBy:
+                type: string
+                description: The member, or the reviewer an API key or review link named.
+              decidedAt:
+                type: string
+                format: date-time
+        result:
+          $ref: '#/components/schemas/ProofingAdminResult'
+      required: [id, status, flowKind, waiting, items, flowAlwaysReview, sealChecks, decisions]
+    ProofingReviewLinkPage:
+      type: object
+      description: What a review link's page shows.
+      properties:
+        sessionId:
+          type: string
+        request:
+          $ref: '#/components/schemas/ProofingRequest'
+        result:
+          $ref: '#/components/schemas/ProofingAdminResult'
+        reviewer:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        embedOrigins:
+          type: array
+          items:
+            type: string
+        organization:
+          type: string
+      required: [sessionId, request, reviewer, expiresAt, embedOrigins, organization]
     ProofingAdminResult:
       description: The API's result plus, for an approval and a check in review, the selfie and the reference photo.
       allOf:
@@ -17001,7 +17537,7 @@ components:
           items:
             type: string
             enum: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read,
-              settings:write, webhooks:write]
+              settings:write, webhooks:write, reviews:read, reviews:write]
         createdByName:
           type: string
           description: Who created the key; absent once that user is gone.

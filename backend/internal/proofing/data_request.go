@@ -460,7 +460,7 @@ func (s *Service) decideDataRequest(ctx context.Context, req Request, reviewer s
 		return Request{}, err
 	}
 
-	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code); err != nil {
+	if err := s.requests.RecordReviewDecision(ctx, req, decided, in.Reason, code, in.APIReviewer); err != nil {
 		return Request{}, err
 	}
 

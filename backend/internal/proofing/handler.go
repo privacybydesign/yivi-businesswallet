@@ -167,6 +167,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
 	h.registerPublicSetupAPI(mux)
+	h.registerPublicReviewAPI(mux)
+	h.registerReviewLinks(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
 }
@@ -553,8 +555,14 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 // its proofed name, and without its address, employment and diplomas unless
 // they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
+	return requestResponseLimited(req, diplomas, now, onlyStepReviews(ctx, req))
+}
+
+// requestResponseLimited is req's response, holding only its steps' reviews
+// when stepsOnly (requestResponseFor).
+func requestResponseLimited(req Request, diplomas []Diploma, now time.Time, stepsOnly bool) requestResponse {
 	out := newRequestResponse(req, now)
-	if onlyStepReviews(ctx, req) {
+	if stepsOnly {
 		out.ProofedName = ""
 		if req.AddressReview == "" {
 			out.Address = nil
@@ -1148,6 +1156,8 @@ var errorResponses = []struct {
 	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
 	{ErrAppFinished, respond.APIError{Status: http.StatusConflict, Code: "app_finished", Message: "the Idem app already did its part; carry on on this page"}},
 	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
+	{ErrReviewLinkNotFound, respond.APIError{Status: http.StatusNotFound, Code: reviewLinkNotFoundCode, Message: "this review link is unknown or has expired"}},
+	{ErrNothingToReview, respond.APIError{Status: http.StatusConflict, Code: "nothing_to_review", Message: "nothing of this session waits for a review"}},
 	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
 	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
 	{ErrSealUnchecked, respond.APIError{Status: http.StatusConflict, Code: "seal_unchecked", Message: "a document of this step has a seal nobody checked yet: check it again before confirming"}},

@@ -166,6 +166,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.address_added": { icon: "add", tone: "green" },
   "identity_proofing.address_reviewed": { icon: "valid", tone: "blue" },
   "identity_proofing.review_item_decided": { icon: "valid", tone: "blue" },
+  "identity_proofing.review_link_created": { icon: "add", tone: "blue" },
   "identity_proofing.flow_employment_configured": {
     icon: "settings",
     tone: "blue",
@@ -189,6 +190,9 @@ export function auditVisual(action: string): {
 }
 
 const API_KEY_ACTOR_PREFIX = "api_key:";
+// ReviewLinkActorPrefix in backend/internal/proofing/review_link.go: a review
+// link the org's API key made, named by that key's prefix.
+const REVIEW_LINK_ACTOR_PREFIX = "review_link:";
 // hostedSubjectActor in backend/internal/proofing/hosted.go: the subject of a
 // hosted link, who has no account.
 const HOSTED_LINK_ACTOR = "hosted_link";
@@ -210,6 +214,11 @@ export function auditActorLabel(
   if (label.startsWith(API_KEY_ACTOR_PREFIX)) {
     return t("auditLog.apiKeyActor", {
       prefix: label.slice(API_KEY_ACTOR_PREFIX.length),
+    });
+  }
+  if (label.startsWith(REVIEW_LINK_ACTOR_PREFIX)) {
+    return t("auditLog.reviewLinkActor", {
+      prefix: label.slice(REVIEW_LINK_ACTOR_PREFIX.length),
     });
   }
   if (label === HOSTED_LINK_ACTOR) {
@@ -538,6 +547,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingAddressReviewed");
     case "identity_proofing.review_item_decided":
       return t("auditLog.actions.identityProofingReviewItemDecided");
+    case "identity_proofing.review_link_created":
+      return t("auditLog.actions.identityProofingReviewLinkCreated");
     case "identity_proofing.flow_employment_configured":
       return t("auditLog.actions.identityProofingFlowEmploymentConfigured");
     case "identity_proofing.employment_added":

@@ -49,6 +49,8 @@ type fakeRequests struct {
 	// linkLookups counts GetByLinkToken reads.
 	linkLookups int
 	reviews     []string
+	// apiReviewer is who the last decision's API key or review link named.
+	apiReviewer string
 	// stored is the last request created.
 	stored *Request
 	// registeredAddress is stored's registered address, until an address is added.
@@ -137,8 +139,9 @@ func (f *fakeRequests) LapseLinks(context.Context, time.Time, int) (int, error) 
 	return 0, nil
 }
 
-func (f *fakeRequests) RecordReviewDecision(_ context.Context, _ Request, decided Status, reason, _ string) error {
+func (f *fakeRequests) RecordReviewDecision(_ context.Context, _ Request, decided Status, reason, _, apiReviewer string) error {
 	f.reviews = append(f.reviews, string(decided)+": "+reason)
+	f.apiReviewer = apiReviewer
 	return nil
 }
 
@@ -254,7 +257,8 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 	return true, nil
 }
 
-func (f *fakeRequests) DecideStepReview(_ context.Context, req Request, kind ReviewKind, _ uuid.UUID, decided ReviewState, _ string) (*time.Time, error) {
+func (f *fakeRequests) DecideStepReviewBy(_ context.Context, req Request, kind ReviewKind, by stepDecider, decided ReviewState, _ string) (*time.Time, error) {
+	f.apiReviewer = by.APIReviewer
 	if f.stored == nil || f.stored.ID != req.ID || f.stored.stepReview(kind) != ReviewPending {
 		return nil, nil
 	}

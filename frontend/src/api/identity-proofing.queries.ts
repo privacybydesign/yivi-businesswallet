@@ -6,6 +6,9 @@ import { followReviewEvents } from "./review-events";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
   activateProofingFlowVersion,
+  checkReviewLinkSeals,
+  decideReviewLinkItem,
+  getReviewLink,
   createProofingFlow,
   createProofingFlowVersion,
   createProofingRequest,
@@ -66,6 +69,8 @@ import {
 } from "./identity-proofing";
 import type {
   AddressReviewInput,
+  ReviewLinkPage,
+  ReviewTarget,
   ReviewItemCounts,
   StepReviewKind,
   ProofingSettings,
@@ -1205,4 +1210,140 @@ export function useDecideReviewMutation(
     meta: { suppressErrorToast: true },
     onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
   });
+}
+
+function reviewLinkQueryKey(token: string): readonly string[] {
+  return ["identity-proofing", "review-link", token];
+}
+
+// The page a review link opens. Never kept after it closes: it holds the
+// person's identity and photos.
+export function useReviewLinkQuery(
+  token: string,
+  enabled = true,
+): UseQueryResult<ReviewLinkPage, Error> {
+  return useQuery({
+    queryKey: reviewLinkQueryKey(token),
+    queryFn: ({ signal }) => getReviewLink(token, signal),
+    enabled: enabled && token !== "",
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+// A request's result on a review page: the wallet's audited read, or the one
+// the review link's page carries.
+export function useReviewResultQuery(
+  target: ReviewTarget,
+  requestId: string,
+  enabled: boolean,
+): {
+  data: ProofingResult | undefined;
+  isPending: boolean;
+  fetchStatus: string;
+  error: Error | null;
+  isError: boolean;
+} {
+  const org = useProofingRequestResultQuery(
+    target.kind === "org" ? target.slug : "",
+    requestId,
+    enabled && target.kind === "org",
+  );
+  const link = useReviewLinkQuery(
+    target.kind === "link" ? target.token : "",
+    enabled && target.kind === "link",
+  );
+  if (target.kind === "org") return org;
+  return {
+    data: link.data?.result,
+    isPending: link.isPending,
+    fetchStatus: link.fetchStatus,
+    error: link.error,
+    isError: link.isError,
+  };
+}
+
+// Decides a request's own review (its identity) from a review page.
+export function useDecideReviewFor(
+  target: ReviewTarget,
+  requestId: string,
+): UseMutationResult<unknown, Error, ProofingReviewInput> {
+  const queryClient = useQueryClient();
+  const org = useDecideReviewMutation(
+    target.kind === "org" ? target.slug : "",
+    requestId,
+  );
+  const link = useMutation({
+    mutationFn: (input: ProofingReviewInput) =>
+      decideReviewLinkItem(
+        target.kind === "link" ? target.token : "",
+        "identity",
+        {
+          decision: input.decision === "approve" ? "confirm" : "reject",
+          reason: input.reason,
+          errorCode: input.errorCode,
+        },
+      ),
+    meta: { suppressErrorToast: true },
+    onSuccess: (page) => {
+      if (target.kind === "link") {
+        queryClient.setQueryData(reviewLinkQueryKey(target.token), page);
+      }
+    },
+  });
+  return target.kind === "org" ? org : link;
+}
+
+// Confirms or rejects one of a request's steps from a review page.
+export function useDecideStepReviewFor(
+  target: ReviewTarget,
+  requestId: string,
+  kind: StepReviewKind,
+): UseMutationResult<unknown, Error, AddressReviewInput> {
+  const queryClient = useQueryClient();
+  const org = useDecideStepReviewMutation(
+    target.kind === "org" ? target.slug : "",
+    requestId,
+    kind,
+  );
+  const link = useMutation({
+    mutationFn: (input: AddressReviewInput) =>
+      decideReviewLinkItem(
+        target.kind === "link" ? target.token : "",
+        kind,
+        input,
+      ),
+    meta: { suppressErrorToast: true },
+    onSuccess: (page) => {
+      if (target.kind === "link") {
+        queryClient.setQueryData(reviewLinkQueryKey(target.token), page);
+      }
+    },
+  });
+  return target.kind === "org" ? org : link;
+}
+
+// Checks a step's seals again from a review page.
+export function useCheckSealsAgainFor(
+  target: ReviewTarget,
+  requestId: string,
+  kind: "diplomas" | "employment",
+): UseMutationResult<unknown, Error, void> {
+  const queryClient = useQueryClient();
+  const org = useCheckSealsAgainMutation(
+    target.kind === "org" ? target.slug : "",
+    requestId,
+    kind,
+  );
+  const link = useMutation({
+    mutationFn: () =>
+      checkReviewLinkSeals(target.kind === "link" ? target.token : "", kind),
+    meta: { suppressErrorToast: true },
+    onSuccess: (page) => {
+      if (target.kind === "link") {
+        queryClient.setQueryData(reviewLinkQueryKey(target.token), page);
+      }
+    },
+  });
+  return target.kind === "org" ? org : link;
 }

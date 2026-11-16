@@ -46,6 +46,12 @@ const frameNone = "frame-ancestors 'none'"
 // against its source's hostedSourceLimit, and an unknown link against its
 // authFailureLimit, as limitHosted counts them.
 func (h *Handler) PageHeaders(r *http.Request, header http.Header) {
+	if token, ok := strings.CutPrefix(r.URL.Path, reviewPagePrefix); ok {
+		if token != "" && !strings.Contains(token, "/") {
+			header.Set(headerCSP, h.reviewFramePolicy(r, token))
+		}
+		return
+	}
 	token, ok := strings.CutPrefix(r.URL.Path, hostedPagePrefix)
 	if !ok || token == "" || strings.Contains(token, "/") {
 		return
