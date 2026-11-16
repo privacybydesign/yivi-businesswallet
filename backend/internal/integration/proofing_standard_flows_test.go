@@ -114,7 +114,7 @@ func assertDataRequestSentByKind(t *testing.T, env *testEnv, base, access, ownID
 // ownID, switched off, shows so in the flow list.
 func assertHostedSwitchListed(t *testing.T, env *testEnv, base, ownID string) {
 	t.Helper()
-	resp := env.putJSON(base+"/flows/"+ownID+"/hosted", map[string]any{"enabled": false, "locales": []string{"en", "nl"}, "completion": "redirect"})
+	resp := env.putJSON(base+"/flows/"+ownID+"/hosted", map[string]any{"enabled": false, "locales": []string{}, "completion": "redirect"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("switch off hosted = %d, want 200", resp.StatusCode)
 	}

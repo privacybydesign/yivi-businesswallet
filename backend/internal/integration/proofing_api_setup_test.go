@@ -57,7 +57,7 @@ func TestProofingAPISetupFlow(t *testing.T) {
 	}
 
 	// A return page needs its origin allowed first.
-	hosted := map[string]any{"enabled": true, "locales": []string{"en", "nl"}, "completion": "redirect", "returnUrl": origin + "/done"}
+	hosted := map[string]any{"enabled": true, "locales": []string{}, "completion": "redirect", "returnUrl": origin + "/done"}
 	wantProofingError(t, "a return page off the allowed origins",
 		env.apiCall(http.MethodPut, flowURL+"/hosted", key.Secret, hosted), http.StatusBadRequest, "redirect_not_allowed")
 	settings := decodeJSON[struct {
@@ -166,7 +166,7 @@ func TestProofingAPISetupErrors(t *testing.T) {
 	// An origin a flow's return page is on stays until the flow moves off it.
 	const origin = "https://portal.example.org"
 	_ = env.apiCall(http.MethodPatch, "/api/v1/proofing/settings", key.Secret, map[string]any{"allowedRedirectOrigins": []string{origin}}).Body.Close()
-	_ = env.apiCall(http.MethodPut, flowURL+"/hosted", key.Secret, map[string]any{"enabled": true, "locales": []string{"en", "nl"}, "completion": "redirect", "returnUrl": origin + "/done"}).Body.Close()
+	_ = env.apiCall(http.MethodPut, flowURL+"/hosted", key.Secret, map[string]any{"enabled": true, "completion": "redirect", "returnUrl": origin + "/done"}).Body.Close()
 	wantProofingError(t, "removing an origin in use",
 		env.apiCall(http.MethodPatch, "/api/v1/proofing/settings", key.Secret, map[string]any{"allowedRedirectOrigins": []string{}}),
 		http.StatusConflict, "redirect_origin_in_use")

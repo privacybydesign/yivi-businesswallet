@@ -64,7 +64,7 @@ func TestFlowReasonsHTTPFlow(t *testing.T) {
 	}
 
 	// Nor can the page take on a language the active version has no reasons in.
-	for name, locales := range map[string][]string{"Dutch": {"nl"}, "every language": {"en", "nl"}} {
+	for name, locales := range map[string][]string{"Dutch": {"nl"}, "every language": {}} {
 		wantProofingError(t, "offer "+name+" on an English-only version",
 			env.putJSON(flowsPath+"/"+flow.ID+"/hosted", map[string]any{"enabled": true, "locales": locales, "completion": proofing.CompletionRedirect}),
 			http.StatusBadRequest, "reasons_missing")

@@ -217,7 +217,6 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 	for name, s := range map[string]FlowHosted{
 		"bad completion": {Enabled: true, Completion: "later"},
 		"bad language":   {Enabled: true, Completion: CompletionRedirect, Locales: []email.Locale{"de"}},
-		"no language":    {Enabled: true, Completion: CompletionRedirect},
 	} {
 		if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, s); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: %v, want ErrInvalidInput", name, err)
@@ -243,7 +242,7 @@ func TestFlowHostedSettingsLinks(t *testing.T) {
 		t.Errorf("an offered language: %v", err)
 	}
 
-	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{Enabled: false, Completion: CompletionRedirect, Locales: email.Locales()}); err != nil {
+	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{Enabled: false, Completion: CompletionRedirect}); err != nil {
 		t.Fatal(err)
 	}
 	if err := create(NewRequest{}); !errors.Is(err, ErrHostedDisabled) {
@@ -270,17 +269,17 @@ func TestFlowReturnPageSave(t *testing.T) {
 	f := returnPageFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Locales: email.Locales(), Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: "https://evil.example/verified",
 	}); !errors.Is(err, ErrRedirectNotAllowed) {
 		t.Errorf("a return page off the origins: %v, want ErrRedirectNotAllowed", err)
 	}
 	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Locales: email.Locales(), Completion: CompletionDone, ReturnURL: testReturnPage,
+		Enabled: true, Completion: CompletionDone, ReturnURL: testReturnPage,
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("a return page on a thank-you-page flow: %v, want ErrInvalidInput", err)
 	}
 	saved, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Locales: email.Locales(), Completion: CompletionRedirect, ReturnURL: " " + testReturnPage + " ",
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: " " + testReturnPage + " ",
 	})
 	if err != nil || saved.ReturnURL != testReturnPage {
 		t.Fatalf("SaveFlowHosted = %+v, %v; want the return page trimmed", saved, err)
@@ -291,7 +290,7 @@ func TestFlowReturnPage(t *testing.T) {
 	f := returnPageFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.SaveFlowHosted(ctx, testOrg, appFlow.ID, FlowHosted{
-		Enabled: true, Locales: email.Locales(), Completion: CompletionRedirect, ReturnURL: testReturnPage,
+		Enabled: true, Completion: CompletionRedirect, ReturnURL: testReturnPage,
 	}); err != nil {
 		t.Fatal(err)
 	}

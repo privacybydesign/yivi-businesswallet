@@ -8851,8 +8851,7 @@ paths:
         to `apps: [yivi]` must be one the Yivi app runs (no face check without `nfc_read`, no level
         above `low`); `faceProvider: idscan` always requires `face.liveness`. An edit may keep a
         value the version already has, as the editor does, and leaving out `legalBasis`,
-        `processingPurpose` and `assuranceTiers` keeps the version's. A flow's hosted page offers
-        at least one language.
+        `processingPurpose` and `assuranceTiers` keeps the version's.
       security:
         - apiKey: []
       x-codeSamples:
