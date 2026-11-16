@@ -258,6 +258,14 @@ func TestDocumentCheckBSN(t *testing.T) {
 			t.Errorf("policy %q: personal number %q, want %q", policy, got, want)
 		}
 	}
+
+	// A misread number masked would pass for a BSN: it is not masked at all.
+	misread := idscan.Result{Document: idscan.Document{IssuingState: "NLD", PersonalNumber: "123456783"}}
+	flow := photoFlow
+	flow.BSNPolicy = bsnPolicyMask
+	if got := documentCheck(misread, flow).Document.PersonalNumber; got != "" {
+		t.Errorf("a number failing the 11-proef under mask: %q, want none", got)
+	}
 }
 
 func TestDocumentScanFollowsTheFlow(t *testing.T) {

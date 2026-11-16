@@ -291,7 +291,9 @@ func documentCheck(res idscan.Result, f proofingprovider.Flow) proofingprovider.
 	case bsnPolicyRetrieve:
 		scanned.PersonalNumber = doc.PersonalNumber
 	case bsnPolicyMask:
-		scanned.PersonalNumber = bsn.Mask(doc.PersonalNumber)
+		if bsn.Valid(doc.PersonalNumber) {
+			scanned.PersonalNumber = bsn.Mask(doc.PersonalNumber)
+		}
 	}
 	return proofingprovider.DocumentCheck{
 		Verdict: documentVerdicts[res.Authenticity], Score: res.Score,
