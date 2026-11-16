@@ -90,6 +90,8 @@ const (
 	WalletRevoked         = "wallet.revoked"
 	RepresentationClaimed = "wallet.representation_claimed"
 	RepresentationRevoked = "wallet.representation_revoked"
+	WalletUnitActivated   = "wallet.unit_activated"
+	WalletUnitRevoked     = "wallet.unit_revoked"
 
 	// KVK-side decisions, recorded against the KVK register's own audit log when
 	// it consults its authentic source for a registration request.
@@ -230,6 +232,7 @@ const (
 	IdentityProofingSettingsUpdated      = "identity_proofing.settings_updated"
 	IdentityProofingAPIKeyCreated        = "identity_proofing.api_key_created"
 	IdentityProofingAPIKeyRevoked        = "identity_proofing.api_key_revoked"
+	IdentityProofingAPIKeyRevealed       = "identity_proofing.api_key_revealed"
 	IdentityProofingWebhookConfigured    = "identity_proofing.webhook_configured"
 	IdentityProofingWebhookSecretRotated = "identity_proofing.webhook_secret_rotated"
 	IdentityProofingWebhookRemoved       = "identity_proofing.webhook_removed"
@@ -257,11 +260,19 @@ const (
 	IdentityProofingAddressAdded          = "identity_proofing.address_added"
 	IdentityProofingAddressReviewed       = "identity_proofing.address_reviewed"
 
+	// a decision on one part of a session a reviewer reviews on its own (a
+	// review item): by a reviewer, or lapsed past its due time
+	IdentityProofingReviewItemDecided = "identity_proofing.review_item_decided"
+
 	// whether a flow asks for the UWV Verzekeringsbericht, and a statement a
 	// subject uploaded: kept (never its relations), or refused with its reason
 	IdentityProofingFlowEmploymentConfigured = "identity_proofing.flow_employment_configured"
 	IdentityProofingEmploymentAdded          = "identity_proofing.employment_added"
 	IdentityProofingEmploymentRejected       = "identity_proofing.employment_rejected"
+
+	// a diploma extract or Verzekeringsbericht kept for a reviewer, as its
+	// seal could not be checked at upload
+	IdentityProofingDocumentUnchecked = "identity_proofing.document_unchecked"
 )
 
 const (
@@ -277,6 +288,7 @@ const (
 	TargetWalletInstance  = "wallet_instance"
 	TargetRepresentation  = "wallet_representation"
 	TargetKVKRegistration = "kvk_registration"
+	TargetWalletUnit      = "wallet_unit"
 
 	TargetPostGuardKey           = "postguard_key"
 	TargetPostGuardEncryptionKey = "postguard_encryption_key"
@@ -427,10 +439,11 @@ func (NopRecorder) Record(context.Context, database.Querier, string, Target, map
 
 // IdentityProofingPersonalKeys are the fields of a proofing request's audit
 // events that name or describe its subject: who it is, their diplomas, and a
-// reviewer's free-text reason, which may name them.
+// reviewer's free-text reason, which may name them, and the name of a file
+// they uploaded.
 var IdentityProofingPersonalKeys = []string{
 	"subjectName", "subjectEmail",
-	"reason",
+	"reason", "fileName",
 	"documentType", "qualification", "institution", "dateAwarded", "nlqfLevel", "documentNumber",
 }
 

@@ -81,6 +81,14 @@ func TestSessionTTLRoundTrips(t *testing.T) {
 	}
 }
 
+func TestAlwaysReviewRoundTrips(t *testing.T) {
+	spec := pp.FlowSpec{Name: "x", Steps: []string{"document_capture", "nfc_read"}, AlwaysReview: true}
+	fd := toDefinition("org", "f1", spec)
+	if !fd.AlwaysReview || !toFlow(fd).AlwaysReview {
+		t.Errorf("always review lost: definition %v, flow %v", fd.AlwaysReview, toFlow(fd).AlwaysReview)
+	}
+}
+
 // A session's retention changes to a positive one, never to the engine's
 // default: 0 would drop the flow's own.
 func TestSetSessionsRetention(t *testing.T) {

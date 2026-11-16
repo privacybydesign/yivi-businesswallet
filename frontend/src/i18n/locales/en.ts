@@ -91,6 +91,8 @@ export const en = {
       "The KVK does not list you as a representative of this company, so you can't register its wallet.",
     alreadyRegistered:
       "This company already has a business wallet. Ask an owner to invite you instead.",
+    ebwoidMismatch:
+      "The owner identification data (EBWOID) is for another company than this KVK number.",
     error: "Could not register the wallet: {{message}}",
     kind: {
       bestuurder: "Director (bestuurder)",
@@ -399,6 +401,8 @@ export const en = {
       "The KVK does not list you as a representative of this company, so you can't register its wallet.",
     alreadyRegistered:
       "This company already has a business wallet. Ask an owner to invite you instead.",
+    ebwoidMismatch:
+      "The owner identification data (EBWOID) is for another company than this KVK number.",
     error: "Registration could not be completed. Please try again.",
     back: "Back",
     haveAccount: "Already have an account? Sign in",
@@ -625,6 +629,8 @@ export const en = {
         "Your organisation has no default flow. Pick a flow, or set a default on the Flows page.",
       proofingPaused: "Identity proofing is paused for this organisation.",
       apiKeyNotFound: "That API token no longer exists.",
+      apiKeyNotRevealable:
+        "This token was made before tokens could be shown again. Create a new one.",
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",
@@ -642,6 +648,7 @@ export const en = {
       sessionOver: "This session has ended. Start a new one.",
       deviceActive:
         "The Idem app still has this session open: carry on there, or close it first.",
+      appFinished: "The Idem app already did its part: carry on on this page.",
       hostedDisabled:
         "This flow's hosted page is switched off. Turn it on under Hosted page on the flow, or send the request another way.",
       redirectNotAllowed:
@@ -668,6 +675,8 @@ export const en = {
         "The photos of the document could not be used. Try again.",
       documentScanMismatch:
         "These photos belong to another check. Photograph the document again.",
+      documentScanUnavailable:
+        "The scan service could not hand over the result of this scan. Photograph the document again.",
       documentScanDone: "The document is already photographed.",
       documentScanPending:
         "Photograph the document first, then share your data from the Yivi app.",
@@ -694,6 +703,8 @@ export const en = {
       tooLarge: "The file is too large.",
       sealCheckUnavailable:
         "The seal on the file cannot be checked right now. Try again in a few minutes.",
+      sealUnchecked:
+        "A document of this step has a seal that was never checked. Check the seal again before you accept it.",
       generic: "Something went wrong. Please try again.",
     },
     address: {
@@ -730,25 +741,12 @@ export const en = {
         detail:
           "After the identity check: the diploma extracts you download from DUO, checked against DUO's signature and your name and date of birth",
       },
-      identityDone: "Your identity is verified.",
-      heading: "Now add your diploma",
-      intro:
-        "Upload the official extract of your diploma from DUO. We check that DUO issued it and that it is in your name.",
       how: {
         login: "Log in to Mijn DUO with DigiD.",
         openDuo: "Open Mijn DUO",
         download:
-          "Under “Mijn diploma's”, download the extract (uittreksel) of your diploma as a PDF.",
-        upload:
-          "Upload that PDF here, unchanged. A scan or photo of your diploma does not work.",
+          "Under “Mijn diploma's”, download the extract (uittreksel) of each diploma as a PDF.",
       },
-      choose: "Choose PDF",
-      chooseAnother: "Add another diploma",
-      checking: "Checking…",
-      closed: "The time to add diplomas is up.",
-      done: "Done",
-      needOne: "Add at least one diploma to continue.",
-      verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
       level: "level {{level}}",
       reasons: {
         notADiploma:
@@ -761,27 +759,16 @@ export const en = {
     },
     employment: {
       overview: {
-        label: "Employment history",
+        label: "Verzekeringsbericht",
         detail:
           "After the identity check: the Verzekeringsbericht you download from UWV, checked against UWV's seal and your name and date of birth",
       },
-      identityDone: "Your identity is verified.",
-      heading: "Now add your Verzekeringsbericht",
-      intro:
-        "Upload the Verzekeringsbericht from UWV. It lists your employment. We check that UWV issued it and that it is in your name.",
       how: {
         login: "Log in to Mijn UWV with DigiD.",
         openUwv: "Open Mijn UWV",
         download:
           "Under “Persoonlijke gegevens”, open “Arbeidsverleden” and download it as a PDF.",
-        upload:
-          "Upload that PDF here, exactly as you downloaded it. Do not print it to PDF, because that removes UWV's seal.",
       },
-      choose: "Choose PDF",
-      chooseAgain: "Choose another PDF",
-      checking: "Checking…",
-      closed: "The time to add your Verzekeringsbericht is up.",
-      continue: "Continue",
       kept: "Verzekeringsbericht of {{date}} accepted",
       keptChecks:
         "UWV's seal is valid, the file is unchanged, and it is in your name.",
@@ -790,11 +777,11 @@ export const en = {
       benefit: "(benefit)",
       otherIncome: "(other income)",
       review:
-        "It lists no current job. The organisation reviews your check before a decision.",
+        "It lists no current job. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reviewBenefit:
-        "It lists a current benefit. The organisation reviews your check before a decision.",
+        "It lists a current benefit. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reviewOtherIncome:
-        "It lists other current income, paid without hours worked. The organisation reviews your check before a decision.",
+        "It lists other current income, paid without hours worked. The organisation reviews your Verzekeringsbericht. Your identity check stays verified.",
       reasons: {
         notAStatement:
           "This is not a UWV Verzekeringsbericht. Download it from Mijn UWV.",
@@ -803,6 +790,40 @@ export const en = {
         holderMismatch: "This Verzekeringsbericht is in another person's name.",
         stale:
           "This Verzekeringsbericht is older than 30 days. Download a new one.",
+        duplicate: "A Verzekeringsbericht was added already.",
+      },
+    },
+    documents: {
+      identityDone: "Your identity is verified.",
+      heading: "Now add your documents",
+      intro:
+        "Upload the documents below as PDFs, all at once if you like. We check who issued each one and that it is in your name.",
+      kinds: {
+        diplomas: "Diploma extract from DUO",
+        employment: "Verzekeringsbericht from UWV",
+      },
+      needed: "Still needed",
+      added: "Added",
+      choose: "Choose PDFs",
+      chooseAnother: "Add another PDF",
+      checking: "Checking…",
+      unchanged:
+        "Upload each PDF exactly as you downloaded it. A scan, a photo or a PDF printed again does not work.",
+      closed: "The time to add documents is up.",
+      continue: "Continue",
+      needAll: "Add every document above to continue.",
+      verdictsAnnounced: "Accepted: {{accepted}}. Refused: {{refused}}.",
+      sealPending_one:
+        "We received {{count}} document but could not check its seal right now. A reviewer checks it later. You do not need to do anything.",
+      sealPending_other:
+        "We received {{count}} documents but could not check their seals right now. A reviewer checks them later. You do not need to do anything.",
+      reasons: {
+        notSupported:
+          "This is not a document we can check. Upload the original PDF, as you downloaded it.",
+        notAsked: "This document is not asked for here.",
+        tooMany: "You added the most diplomas a check takes.",
+        checkFailed:
+          "We could not check this file right now. Upload this file again.",
       },
     },
     flows: {
@@ -898,8 +919,7 @@ export const en = {
         method: "Choose an app",
         session: "Scan the QR code",
         address: "Address",
-        diplomas: "Diploma",
-        employment: "Employment",
+        documents: "Documents",
       },
       overview: {
         heading: "{{name}} wants to verify your identity",
@@ -967,6 +987,8 @@ export const en = {
         getYivi: "No Yivi app yet? Get it from the",
         appStore: "App Store",
         playStore: "Google Play",
+        yiviPrivacy: "Yivi's privacy policy",
+        yiviPrivacyUrl: "https://www.yivi.app/en/privacy",
         idemHeading: "Scan with the Idem app",
         idemHint: "Open the Idem app and scan this code from inside the app.",
         openIdem: "Open in the Idem app",
@@ -981,6 +1003,9 @@ export const en = {
         connectedHeading: "Continuing in the Idem app",
         connectedHint:
           "The phone has the session open. If the app is closed, a code to carry on appears here.",
+        finishedHeading: "The Idem app is done",
+        finishedHint:
+          "The phone did its part. The check finishes on this page.",
         awayHeading: "The Idem app was closed",
         awayHint:
           "Scan this code with the Idem app to carry on where the session was, on the same phone or another one.",
@@ -1001,6 +1026,20 @@ export const en = {
         message: "It was not finished in time, so nothing was shared.",
       },
       outcome: {
+        steps: {
+          kinds: {
+            address: "Address",
+            diplomas: "Diploma",
+            employment: "Verzekeringsbericht",
+          },
+          state: {
+            received: "Received",
+            checking: "Being checked",
+            rejected: "Not accepted",
+            missing: "Not received",
+            open: "Still to do",
+          },
+        },
         approved: {
           title: "Identity verified",
           message: "The check is complete.",
@@ -1041,6 +1080,7 @@ export const en = {
       details: "Details",
     },
     sessions: {
+      sealCheckedAgain: "After a reviewer checked the seal again",
       review: {
         reasonRequired: "Give a reason: it is kept in the audit log.",
         reasonTooLong: "Keep the reason to {{max}} characters or fewer.",
@@ -1128,7 +1168,6 @@ export const en = {
       address: {
         title: "Address",
         none: "No address entered.",
-        missing: "No address",
         declared:
           "Self-declared: as the person entered it, not checked against a document.",
         verified:
@@ -1148,27 +1187,35 @@ export const en = {
           confirmed: "A reviewer confirmed the address.",
           rejected:
             "A reviewer rejected the address. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the address in time. The identity check is not affected.",
         },
         openReview: "Open the review",
         tag: {
           pending: "Address in review",
           confirmed: "Address confirmed",
           rejected: "Address rejected",
+          lapsed: "Address review lapsed",
         },
         toReview: "Goes to a reviewer",
       },
       diplomas: {
         title: "Diplomas",
         none: "No diploma added.",
-        tag_one: "{{count}} diploma",
-        tag_other: "{{count}} diplomas",
-        missing: "No diploma",
         number: "DUO number {{number}}",
+        review: {
+          pending:
+            "Waiting for a reviewer to decide on the diplomas. The identity check is not affected.",
+          confirmed: "A reviewer accepted the diplomas.",
+          rejected:
+            "A reviewer rejected the diplomas. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the diplomas in time. The identity check is not affected.",
+        },
       },
       employment: {
-        title: "Current employment",
+        title: "Verzekeringsbericht",
         none: "No Verzekeringsbericht uploaded.",
-        missing: "No employment history",
         statementDate: "Verzekeringsbericht of {{date}}",
         noRelations: "No current employment or benefit in UWV's records",
         employed: "Currently employed: yes",
@@ -1179,6 +1226,39 @@ export const en = {
         period: "since {{from}}, last reported {{to}}",
         source:
           "From UWV's Verzekeringsbericht, checked against UWV's seal and the verified name and date of birth. Only the employment current on the statement's date is kept.",
+        review: {
+          pending:
+            "Waiting for a reviewer to decide on the Verzekeringsbericht. The identity check is not affected.",
+          confirmed: "A reviewer accepted the Verzekeringsbericht.",
+          rejected:
+            "A reviewer rejected the Verzekeringsbericht. The identity check is not affected.",
+          lapsed:
+            "Nobody reviewed the Verzekeringsbericht in time. The identity check is not affected.",
+        },
+      },
+      parts: {
+        identity: "Identity",
+        kinds: {
+          address: "Address",
+          diplomas: "Diploma",
+          employment: "Verzekeringsbericht",
+        },
+        state: {
+          not_started: "Not started",
+          open: "Waiting for the person",
+          to_review: "To review",
+          done: "Done",
+          accepted: "Accepted",
+          rejected: "Rejected",
+          lapsed: "Review lapsed",
+          not_provided: "Not provided",
+        },
+        summary: {
+          needs_review: "Needs review",
+          in_progress: "In progress",
+          incomplete: "Incomplete",
+          complete: "Complete",
+        },
       },
       purged: "Personal data purged",
       purgedSubject: "Purged",
@@ -1339,9 +1419,14 @@ export const en = {
         "Checks and data requests that wait for a person's decision. Oldest first.",
       notAllowed: "Only admins and members with the reviewer right can review.",
       tabsLabel: "Show",
+      alsoDecided: "Already decided in this session",
+      decidedAutomatically:
+        "Decided automatically by the check, without a reviewer.",
+      nextPart: "Next: {{part}}",
       tabs: {
         all: "All",
         checks: "Identity checks",
+        steps: "Extra steps",
         data: "Data requests",
         closed: "Closed",
       },
@@ -1362,15 +1447,68 @@ export const en = {
       emptyClosed: "Nothing has been closed yet.",
       identityCheck: "Identity check",
       addressCheck: "Address",
+      employmentCheck: "Verzekeringsbericht",
+      diplomasCheck: "Diplomas",
+      seal: {
+        why: "The seal could not be checked when this was uploaded, because the EU trusted lists or the issuer's revocation server could not be reached. Check it again before you decide.",
+        unchecked_one:
+          "{{count}} file still has an unchecked seal. You can only accept this step once the seal is checked.",
+        unchecked_other:
+          "{{count}} files still have an unchecked seal. You can only accept this step once every seal is checked.",
+        checkAgain: "Check seal again",
+        checked: "The seals were checked. The result is shown per file.",
+        files_one:
+          "{{count}} file went to review because its seal could not be checked at upload",
+        files_other:
+          "{{count}} files went to review because their seal could not be checked at upload",
+        states: {
+          waiting: "Seal not checked yet",
+          kept: "Seal checked, kept",
+          refused: "Refused",
+          notChecked: "Never checked",
+        },
+        reasons: {
+          signatureInvalid:
+            "The seal does not hold. The file was changed after sealing, or it was not made by the issuer.",
+          holderMismatch: "The document is in another person's name.",
+          notADocument: "This is not a readable document of the issuer.",
+          stale: "The Verzekeringsbericht is older than 30 days.",
+          duplicate:
+            "The same document was already added, so this copy was not kept.",
+        },
+      },
+      diplomas: {
+        title: "Review diplomas",
+        whyTitle: "Why this waits for you",
+        whyAlways:
+          "This flow has a reviewer approve the diplomas. DUO's seal on each extract checked out, and each one names the person.",
+        decisionTitle: "Decision",
+        confirm: "Accept diplomas",
+        reject: "Reject diplomas",
+        confirmed: "The diplomas were accepted.",
+        rejected: "The diplomas were rejected.",
+        lapsed: "Nobody reviewed the diplomas in time.",
+      },
+      employment: {
+        title: "Review a Verzekeringsbericht",
+        whyTitle: "Why this waits for you",
+        whyAlways:
+          "This flow has a reviewer approve every Verzekeringsbericht. This one lists a current job and no benefit or other income.",
+        decisionTitle: "Decision",
+        confirm: "Accept Verzekeringsbericht",
+        reject: "Reject Verzekeringsbericht",
+        confirmed: "The Verzekeringsbericht was accepted.",
+        rejected: "The Verzekeringsbericht was rejected.",
+        lapsed: "Nobody reviewed the Verzekeringsbericht in time.",
+      },
       address: {
         title: "Review an address",
         whyTitle: "Why this waits for you",
         why: "The person entered this address themselves. No register confirms that they live there, so a reviewer decides.",
         whyMismatch:
           "This address differs from the registered address (BRP) the person shared from the Yivi app. They may have moved recently, so a reviewer decides.",
-        checkTitle: "Identity check",
-        checkHint:
-          "The identity check itself is approved. Your decision only concerns the address.",
+        whyAlways:
+          "This flow has a reviewer approve every address. The registered address (BRP) the person shared confirms this one.",
         method: "Checked with",
         level: "Assurance level",
         decisionTitle: "Decision",
@@ -1378,6 +1516,7 @@ export const en = {
         reject: "Reject address",
         confirmed: "The address was confirmed.",
         rejected: "The address was rejected.",
+        lapsed: "Nobody reviewed the address in time.",
       },
       requestedBy: "Requested by {{name}}",
       provenWith: {
@@ -1394,6 +1533,10 @@ export const en = {
         data_erasure: "A reviewer approves every request to delete data",
         no_current_employment: "The Verzekeringsbericht lists no current job",
         current_benefit: "The Verzekeringsbericht lists a current UWV benefit",
+        alwaysReview: "The flow sends every identity proof to review",
+        addressAlways: "The flow sends every address to review",
+        employmentAlways: "The flow sends every Verzekeringsbericht to review",
+        diplomasAlways: "The flow sends the diplomas to review",
         current_other_income:
           "The Verzekeringsbericht lists other current income without hours worked",
       },
@@ -1403,6 +1546,13 @@ export const en = {
         rejected: "Rejected",
         confirmed: "Address confirmed",
         addressRejected: "Address rejected",
+        addressLapsed: "Address review lapsed",
+        employmentConfirmed: "Verzekeringsbericht accepted",
+        employmentRejected: "Verzekeringsbericht rejected",
+        employmentLapsed: "Verzekeringsbericht review lapsed",
+        diplomasConfirmed: "Diplomas accepted",
+        diplomasRejected: "Diplomas rejected",
+        diplomasLapsed: "Diplomas review lapsed",
       },
       footer: "Admins and members with the reviewer right see this page.",
       footerWho: "Who has it: <members>Members</members>.",
@@ -1420,9 +1570,12 @@ export const en = {
         other: "This request no longer waits for a decision.",
       },
       check: {
+        photosTitle: "Photos",
         title: "Review an identity check",
         why: {
           title: "Why this waits for you",
+          alwaysReview:
+            "This flow has a reviewer approve every identity proof. Look at the automatic checks below before you decide.",
           body: "No signature or register vouches for part of this check, so a person has to check it.",
           no_current_employment:
             "The identity is verified, but the Verzekeringsbericht lists no current job. Check the employment below.",
@@ -1518,6 +1671,10 @@ export const en = {
           data_access_other: "Open the data of {{count}} checks for download.",
           kept_one: "The other {{count}} stays.",
           kept_other: "The other {{count}} stay.",
+          erasedAlready_one:
+            "{{count}} check was already deleted automatically. Refusing keeps the rest.",
+          erasedAlready_other:
+            "{{count}} checks were already deleted automatically. Refusing keeps the rest.",
           reason: "Reason",
           reasonHint: "Required. Kept in the audit log with your name.",
           approve_data_erasure_one: "Delete {{count}} check",
@@ -1531,6 +1688,7 @@ export const en = {
             "The personal data in the checks you ticked, and in this request, is deleted at once and cannot be restored. The checks stay as a record without it.",
           approved: "The request is approved.",
           rejected: "The request is refused.",
+          restKept: "The rest is kept.",
         },
       },
     },
@@ -1544,7 +1702,7 @@ export const en = {
       title: "API tokens",
       nameRequired: "Enter a name.",
       intro:
-        "A token lets your software start checks on any flow and read their results. It is shown once, when you create it.",
+        "A token lets your software start checks on any flow and read their results. You can show it again here at any time.",
       create: "Create token",
       name: "Name",
       nameHint:
@@ -1556,6 +1714,14 @@ export const en = {
       actions: "Actions",
       revoke: "Revoke",
       revokeNamed: "Revoke {{name}}",
+      show: "Show",
+      showNamed: "Show {{name}}",
+      shownTitle: "Token “{{name}}”",
+      shownHint:
+        "Store it somewhere safe, such as your backend's secret store. Showing a token is recorded in the audit log.",
+      notRevealable: "Cannot be shown",
+      notRevealableHint:
+        "This token was made before tokens could be shown again. Create a new one and revoke this one to replace it.",
       revokeConfirm: {
         title: "Revoke {{name}}?",
         message:
@@ -1563,8 +1729,8 @@ export const en = {
       },
       createdTitle: "Copy your token now",
       createdHint:
-        "This is the only time you see the token “{{name}}”. Store it somewhere safe, such as your backend's secret store.",
-      createdNote: "Lost it? Revoke it and create a new one.",
+        "Store the token “{{name}}” somewhere safe, such as your backend's secret store.",
+      createdNote: "You can show it again later with Show, next to the token.",
     },
     webhooks: {
       endpoint: "Webhook endpoint",
@@ -1727,8 +1893,11 @@ export const en = {
       document_photo: "Photograph the document",
       face_verification: "Face check",
       address: "Enter the address",
-      diploma_upload: "Upload diplomas (DUO)",
-      employment_upload: "Upload Verzekeringsbericht (UWV)",
+      documents: "Upload documents ({{documents}})",
+    },
+    documents: {
+      diploma: "DUO diploma",
+      employment: "UWV Verzekeringsbericht",
     },
     bsnPolicies: {
       retrieve: "Keep the full BSN",
@@ -1831,8 +2000,6 @@ export const en = {
           hint: "The person scans their passport or ID card, holds it to their phone so the chip is read, and takes a selfie. A check that falls short is rejected.",
         },
       },
-      regula:
-        "Documents and faces are checked by Regula in the Idem app. The Yivi app shares a document already in it, with no face check.",
       advanced: {
         title: "Advanced settings",
         hint: "Steps, documents, what you receive, privacy.",
@@ -1859,10 +2026,13 @@ export const en = {
         faceInScan: "Check the face in the ID scan",
         faceInScanHint:
           "Right after the document photo, in the browser: the ID scan checks the person is live and compares their face with the photo on the document. Not the chip photo, so it reaches no assurance level.",
-        diplomaHint:
-          "After the identity check, in the browser. Only on screen or as a link, never by e-mail.",
-        employmentHint:
-          "After the identity check, in the browser: the person uploads the Verzekeringsbericht from Mijn UWV, checked against UWV's seal and their name and date of birth. Only on screen or as a link, never by e-mail.",
+        documents: "Upload documents",
+        documentsHint:
+          "After the identity check, in the browser: the person uploads every document ticked below as a PDF. Each file is checked against its issuer's seal and the person's name and date of birth. Only on screen or as a link, never by e-mail.",
+        diploma: "Diploma extract (DUO)",
+        diplomaHint: "From Mijn DUO, up to 10 per session.",
+        employment: "Verzekeringsbericht (UWV)",
+        employmentHint: "From Mijn UWV, one per session.",
         faceWithoutChip:
           "Without reading the chip there is no chip photo: the face is matched against your own photo of the person, which your software sends with each session through the API. Members cannot be sent this flow, it runs in the Idem app only, and it reaches no assurance level.",
         apps: "Apps",
@@ -1939,6 +2109,22 @@ export const en = {
           warning:
             "Below {{min}} is not recommended: more people who are not the document's holder get through.",
         },
+      },
+      review: {
+        title: "Review",
+        hint: "Which parts of a session wait for a reviewer, even when they pass every check.",
+        always: "Always send the identity proof to review",
+        alwaysHint:
+          "An identity proof that passes every check waits for a reviewer to approve it. A failed check still rejects it.",
+        address: "Always send the address to review",
+        addressHint:
+          "Every address waits for a reviewer, also one the registered address (BRP) confirms.",
+        employment: "Always send the Verzekeringsbericht to review",
+        employmentHint:
+          "Every kept Verzekeringsbericht waits for a reviewer, also one that lists a current job and nothing else.",
+        diplomas: "Always send the diplomas to review",
+        diplomasHint:
+          "The kept diploma extracts wait for a reviewer, also when DUO's seal checks out.",
       },
       privacy: {
         title: "Privacy",
@@ -2021,9 +2207,9 @@ export const en = {
       },
       erased: "Your data was deleted.",
       erasedPartly_one:
-        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept; its data is deleted when {{organization}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier request we could not link to you for certain was kept. Its data is deleted when {{organization}}'s retention period ends.",
       erasedPartly_other:
-        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept; their data is deleted when {{organization}}'s retention period ends.",
+        "We deleted the data we could link to you for certain. {{count}} earlier requests we could not link to you for certain were kept. Their data is deleted when {{organization}}'s retention period ends.",
       keptByLaw_one:
         "{{count}} identity check is kept until {{date}}, because the law requires {{organization}} to keep it. It is deleted then.",
       keptByLaw_other:
@@ -2252,6 +2438,8 @@ export const en = {
     onboardingAttestationsUpdated: "Onboarding attestations updated",
     wscaActivated: "Holder wallet activated",
     wscaRotated: "Wallet secret rotated",
+    walletUnitRevoked: "Wallet unit revoked",
+    walletUnitActivated: "New wallet unit activated",
     themeSaved: "Wallet theme updated",
     avatarSaved: "Profile photo saved",
     avatarRemoved: "Profile photo removed",
@@ -2374,6 +2562,7 @@ export const en = {
       qerdsAddress: "Digital address",
       qerdsContact: "Contact",
       walletInstance: "Wallet",
+      walletUnit: "Wallet unit",
       walletRepresentation: "Representation",
       kvkRegistration: "KVK registration",
       postguardKey: "PostGuard API key",
@@ -2471,6 +2660,8 @@ export const en = {
       walletRevoked: "Revoked wallet",
       representationClaimed: "Claimed representation",
       representationRevoked: "Revoked representation",
+      walletUnitActivated: "Activated wallet unit",
+      walletUnitRevoked: "Revoked wallet unit",
       kvkRegistrationValidated: "KVK validated registration",
       kvkRegistrationNotValidated: "KVK rejected registration",
       attestationSchemaCreated: "Created attestation schema",
@@ -2563,6 +2754,7 @@ export const en = {
       identityProofingSettingsUpdated: "Updated identity proofing settings",
       identityProofingApiKeyCreated: "Created API token",
       identityProofingApiKeyRevoked: "Revoked API token",
+      identityProofingApiKeyRevealed: "Showed API token",
       identityProofingWebhookConfigured: "Configured webhook endpoint",
       identityProofingWebhookSecretRotated: "Rotated webhook secret",
       identityProofingWebhookRemoved: "Removed webhook endpoint",
@@ -2577,10 +2769,13 @@ export const en = {
         "Changed whether a flow asks for the address",
       identityProofingAddressAdded: "Entered an address",
       identityProofingAddressReviewed: "Reviewed an address",
+      identityProofingReviewItemDecided: "Decided a review",
       identityProofingFlowEmploymentConfigured:
         "Changed whether a flow asks for the Verzekeringsbericht",
       identityProofingEmploymentAdded: "Added a Verzekeringsbericht",
       identityProofingEmploymentRejected: "Refused a Verzekeringsbericht",
+      identityProofingDocumentUnchecked:
+        "Kept a document whose seal could not be checked",
       identityProofingResumed: "Resumed identity proofing",
       provisioningRunCompleted: "Synced users from the directory",
       provisioningRunFailed: "Directory sync failed",
@@ -3247,6 +3442,34 @@ export const en = {
     bundleDid: "conf/dids/{{instance}}-did.json",
     bundleMetadata: "conf/metadata/{{instance}}.json",
     bundleVct: "conf/vct/{{name}}.json",
+  },
+  walletUnit: {
+    title: "Wallet unit attestation",
+    intro:
+      "As wallet provider, this deployment attests the organization's wallet unit to issuers and other business wallets (WE BUILD CS-05). Each attestation is short-lived and used once. Revoking the unit makes every attestation issued to it invalid.",
+    states: {
+      notIssued: "Not issued yet",
+      active: "Active",
+      revoked: "Revoked",
+    },
+    reasons: {
+      owner_request: "Organization request",
+      key_compromise: "Key compromise",
+    },
+    loadError: "Could not load the wallet unit: {{message}}",
+    createdAt: "Unit created",
+    issuedCount: "Attestations issued",
+    lastIssuedAt: "Last issued",
+    revokedAt: "Revoked",
+    reason: "Reason",
+    revoke: "Revoke wallet unit",
+    confirmRevoke:
+      "Every attestation issued to this wallet unit becomes invalid, and no new ones are issued until you activate a new unit. Revoke it?",
+    activateHint:
+      "Activate a new wallet unit to issue attestations again. Its keys must not be the ones that were compromised.",
+    activate: "Activate new wallet unit",
+    keysInHsm: "Keys in HSM · {{levels}}",
+    actionError: "The operation failed: {{message}}",
   },
   wscaWallet: {
     title: "Holder wallet (WSCA)",
@@ -3957,6 +4180,7 @@ export const en = {
       empty: "No contacts saved yet.",
       loadError: "Could not load contacts: {{message}}",
       taken: "A contact with that address already exists.",
+      invalidEuid: "That is not a valid EUID. Use a form like NLNHR.12345678.",
       error: "Something went wrong: {{message}}",
     },
   },

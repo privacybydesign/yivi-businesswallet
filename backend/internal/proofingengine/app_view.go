@@ -32,6 +32,9 @@ type appSessionView struct {
 	// AgeOver is the age age_over answers for, so the app can name it; absent
 	// when the flow asks none.
 	AgeOver int `json:"ageOver,omitempty"`
+	// DocumentTypes are the kinds of document the Idem app may offer to read
+	// (flow.AppDocumentKinds); absent, any.
+	DocumentTypes []string `json:"documentTypes,omitempty"`
 	// Steps is the flow's step order, which tells the app what to do, without
 	// the browser's own (flow.Location); empty without a flow.
 	Steps []flow.Step `json:"steps,omitempty"`
@@ -179,9 +182,11 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 	}
 	var steps []flow.Step
 	var ageOver int
+	var documentTypes []string
 	if resolvedFlow != nil {
 		steps = appSteps(resolvedFlow)
 		ageOver = resolvedFlow.AgeOver
+		documentTypes = resolvedFlow.AppDocumentKinds()
 	}
 	selfieLocation := flow.LocationBrowser
 	if resolvedFlow != nil {
@@ -209,7 +214,7 @@ func (s *Server) buildAppSessionView(r *http.Request, sess session.Session, role
 	return appSessionView{
 		ID: sess.ID, Method: sess.Method, RelyingParty: s.tenantDisplayName(r.Context(), sess.TenantID),
 		Branding: s.sessionBranding(r.Context(), sess.TenantID, sess.ClientReference), Status: sess.Status, Language: requestLanguage(r, sess.Language),
-		RequestedAttributes: sess.RequestedAttributes, AgeOver: ageOver, Steps: steps, ExpiresAt: sess.ExpiresAt,
+		RequestedAttributes: sess.RequestedAttributes, AgeOver: ageOver, DocumentTypes: documentTypes, Steps: steps, ExpiresAt: sess.ExpiresAt,
 		SelfieLocation: selfieLocation,
 		AAChallenge:    sess.AAChallenge, RequiredChecks: assuranceChecksFor(resolvedFlow),
 		CompletedSteps: sess.CompletedSteps(), NativeHandoff: nativeHandoff,

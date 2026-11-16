@@ -9,7 +9,11 @@ import {
 } from "./identity-proofing";
 import {
   REJECT_REASONS,
+  addressReviewWhy,
   answerBy,
+  nextPart,
+  decidedParts,
+  isClosedSession,
   askedAt,
   askedLine,
   automaticChecks,
@@ -17,17 +21,25 @@ import {
   checkDecisionProblems,
   closedAt,
   closedRequests,
+  employmentReviewWhy,
   isAddressReview,
   ownReview,
   personName,
   provenWithParts,
   reviewCounts,
   reviewTabFrom,
+  uncheckedSeals,
+  SEAL_REFUSAL_KEYS,
+  sealCheckState,
+  sealChecksOf,
+  stepReviewOf,
+  waitingParts,
   waitingOfTab,
   reasonProblem,
   waitingOldestFirst,
   WALLET_REVIEW_REASONS,
   walletReviewReason,
+  checkReviewReason,
 } from "./proofing-reviews";
 
 const t = i18n.getFixedT("en");
@@ -104,16 +116,41 @@ describe("review tabs", () => {
   const check = request({ id: "check" });
   const access = request({ id: "access", flowKind: "data_access" });
   const erasure = request({ id: "erasure", flowKind: "data_erasure" });
-  const waiting = [check, access, erasure];
+  const address = request({
+    id: "address",
+    status: "approved",
+    addressReview: "pending",
+  });
+  const waiting = [check, address, access, erasure];
 
-  it("counts checks and data requests apart", () => {
-    expect(reviewCounts(waiting)).toEqual({ all: 3, checks: 1, data: 2 });
-    expect(reviewCounts([])).toEqual({ all: 0, checks: 0, data: 0 });
+  it("counts every session once, and each tab its own", () => {
+    expect(
+      reviewCounts({
+        counts: {
+          identity: 2,
+          address: 2,
+          employment: 1,
+          diplomas: 0,
+          data_request: 2,
+        },
+        sessions: 5,
+        stepSessions: 2,
+      }),
+    ).toEqual({ all: 5, checks: 2, steps: 2, data: 2 });
+  });
+
+  it("lists a session with its identity and a step in both tabs", () => {
+    const both = request({ id: "both", addressReview: "pending" });
+    expect(waitingOfTab("checks", [both]).map((r) => r.id)).toEqual(["both"]);
+    expect(waitingOfTab("steps", [both]).map((r) => r.id)).toEqual(["both"]);
   });
 
   it("lists each kind under its own tab, and none under closed", () => {
-    expect(waitingOfTab("all", waiting)).toHaveLength(3);
+    expect(waitingOfTab("all", waiting)).toHaveLength(4);
     expect(waitingOfTab("checks", waiting).map((r) => r.id)).toEqual(["check"]);
+    expect(waitingOfTab("steps", waiting).map((r) => r.id)).toEqual([
+      "address",
+    ]);
     expect(waitingOfTab("data", waiting).map((r) => r.id)).toEqual([
       "access",
       "erasure",
@@ -269,6 +306,19 @@ describe("answerBy", () => {
     expect(answerBy(request({ flowKind: "data_erasure", purgeAt }))).toBe(
       purgeAt,
     );
+  });
+
+  it("is when a waiting step review lapses", () => {
+    const due = "2026-11-13T10:00:00Z";
+    expect(
+      answerBy(
+        request({
+          status: "approved",
+          employmentReview: "pending",
+          stepReviewDueAt: due,
+        }),
+      ),
+    ).toBe(due);
   });
 
   it("is absent for a check, and for a request already decided", () => {
@@ -463,5 +513,198 @@ describe("wallet review reasons mirror the backend", () => {
     );
     expect(walletReviewReason({ reviewReason: "other" })).toBeUndefined();
     expect(walletReviewReason({})).toBeUndefined();
+  });
+});
+
+describe("step review whys", () => {
+  const at = (
+    verification: "registered" | "registered_mismatch" | "verified",
+  ) =>
+    ({
+      street: "Kerkstraat",
+      houseNumber: "12",
+      postalCode: "6511AB",
+      city: "Nijmegen",
+      country: "Nederland",
+      verification,
+    }) as const;
+
+  it("names the registered address on a flow that reviews every one", () => {
+    expect(addressReviewWhy({ address: at("registered") })).toBe(
+      "addressAlways",
+    );
+    expect(addressReviewWhy({ address: at("registered_mismatch") })).toBe(
+      "addressMismatch",
+    );
+    expect(addressReviewWhy({ address: at("verified") })).toBe("address");
+    expect(addressReviewWhy({})).toBe("address");
+  });
+
+  it("reads the statement's reason before the flow's", () => {
+    expect(
+      employmentReviewWhy({
+        reviewReason: "current_benefit",
+        employmentMode: "always_review",
+      }),
+    ).toBe("current_benefit");
+    expect(employmentReviewWhy({ employmentMode: "always_review" })).toBe(
+      "employmentAlways",
+    );
+    expect(employmentReviewWhy({ employmentMode: "required" })).toBe(
+      "no_current_employment",
+    );
+  });
+
+  it("has copy for every why in the list and on the review pages", () => {
+    for (const why of [
+      "address",
+      "addressMismatch",
+      "addressAlways",
+      "employmentAlways",
+    ]) {
+      expect(i18n.exists(`identityProofing.reviews.why.${why}`)).toBe(true);
+    }
+    for (const key of ["why", "whyMismatch", "whyAlways"]) {
+      expect(i18n.exists(`identityProofing.reviews.address.${key}`)).toBe(true);
+    }
+    expect(i18n.exists("identityProofing.reviews.employment.whyAlways")).toBe(
+      true,
+    );
+    expect(i18n.exists("identityProofing.reviews.why.diplomasAlways")).toBe(
+      true,
+    );
+    expect(i18n.exists("identityProofing.reviews.diplomas.whyAlways")).toBe(
+      true,
+    );
+  });
+});
+
+describe("checkReviewReason", () => {
+  it("reads the flow's reason, else the engine's", () => {
+    expect(checkReviewReason({ flowAlwaysReview: true })).toBe("alwaysReview");
+    expect(checkReviewReason({ flowAlwaysReview: false })).toBeUndefined();
+    expect(checkReviewReason({})).toBeUndefined();
+  });
+
+  it("has copy for every reason in the list and on the review page", () => {
+    for (const reason of [...WALLET_REVIEW_REASONS, "alwaysReview"]) {
+      expect(i18n.exists(`identityProofing.reviews.why.${reason}`)).toBe(true);
+      expect(i18n.exists(`identityProofing.reviews.check.why.${reason}`)).toBe(
+        true,
+      );
+    }
+  });
+});
+
+describe("waitingParts", () => {
+  it("walks a session's waiting parts: identity, Verzekeringsbericht, address", () => {
+    const all = request({
+      employmentReview: "pending",
+      addressReview: "pending",
+    });
+    expect(waitingParts(all)).toEqual(["identity", "employment", "address"]);
+    expect(nextPart(all, "identity")).toBe("employment");
+    expect(
+      nextPart(
+        request({ status: "approved", addressReview: "pending" }),
+        "address",
+      ),
+    ).toBeUndefined();
+    expect(waitingParts(request({ flowKind: "data_access" }))).toEqual([]);
+  });
+
+  it("puts the diplomas between the Verzekeringsbericht and the address", () => {
+    const steps = request({
+      status: "approved",
+      employmentReview: "pending",
+      diplomasReview: "pending",
+      addressReview: "pending",
+    });
+    expect(waitingParts(steps)).toEqual(["employment", "diplomas", "address"]);
+    expect(nextPart(steps, "employment")).toBe("diplomas");
+    expect(
+      stepReviewOf(request({ status: "approved", diplomasReview: "pending" })),
+    ).toBe("diplomas");
+  });
+});
+
+describe("a closed session", () => {
+  it("is one row once every part is decided, closed at the last decision", () => {
+    const both = request({
+      status: "approved",
+      identityReviewedAt: "2026-11-06T10:00:00Z",
+      addressReview: "confirmed",
+      addressReviewedAt: "2026-11-06T10:05:00Z",
+    });
+    expect(decidedParts(both)).toEqual(["identity", "address"]);
+    expect(isClosedSession(both)).toBe(true);
+    expect(closedAt(both)).toBe("2026-11-06T10:05:00Z");
+  });
+
+  it("is not closed while a part still waits", () => {
+    const halfway = request({
+      status: "approved",
+      identityReviewedAt: "2026-11-06T10:00:00Z",
+      addressReview: "pending",
+    });
+    expect(isClosedSession(halfway)).toBe(false);
+  });
+});
+
+describe("uncheckedSeals", () => {
+  it("counts a step's files whose seal waits", () => {
+    expect(uncheckedSeals({ uncheckedDiplomas: 2 }, "diplomas")).toBe(2);
+    expect(uncheckedSeals({}, "diplomas")).toBe(0);
+    expect(uncheckedSeals({ uncheckedEmployment: true }, "employment")).toBe(1);
+    expect(uncheckedSeals({ uncheckedDiplomas: 2 }, "employment")).toBe(0);
+  });
+});
+
+describe("seal checks", () => {
+  it("lists a step's files and reads where each stands", () => {
+    const sealChecks = [
+      {
+        kind: "diplomas" as const,
+        fileName: "a.pdf",
+        outcome: "",
+        uploadedAt: "",
+      },
+      {
+        kind: "employment" as const,
+        fileName: "b.pdf",
+        outcome: "kept",
+        uploadedAt: "",
+      },
+      {
+        kind: "diplomas" as const,
+        fileName: "c.pdf",
+        outcome: "signature_invalid",
+        uploadedAt: "",
+      },
+    ];
+    expect(
+      sealChecksOf({ sealChecks }, "diplomas").map((c) => c.fileName),
+    ).toEqual(["a.pdf", "c.pdf"]);
+    expect(sealChecksOf({}, "employment")).toEqual([]);
+    expect(sealCheckState("")).toBe("waiting");
+    expect(sealCheckState("kept")).toBe("kept");
+    expect(sealCheckState("not_checked")).toBe("notChecked");
+    expect(sealCheckState("duplicate")).toBe("refused");
+  });
+
+  it("explains every refusal the checks give", () => {
+    const t = i18n.getFixedT("en");
+    for (const reason of [
+      "signature_invalid",
+      "holder_mismatch",
+      "not_a_diploma",
+      "not_a_statement",
+      "stale",
+      "duplicate",
+    ]) {
+      const key = SEAL_REFUSAL_KEYS[reason];
+      expect(key).toBeDefined();
+      if (key !== undefined) expect(t(key)).not.toBe(key);
+    }
   });
 });

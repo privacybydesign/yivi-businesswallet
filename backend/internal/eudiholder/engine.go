@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -76,7 +77,7 @@ type Engine struct {
 	engines map[uuid.UUID]irmastorage.Storage
 	// opening holds a per-org lock that serializes concurrent cold opens of the
 	// same org (so two callers don't both AutoMigrate it). One entry per org ever
-	// seen — bounded by org count, so it is never pruned.
+	// seen — bounded by org count, pruned only by DropOrganization.
 	opening map[uuid.UUID]*sync.Mutex
 
 	// redeem configures the OpenID4VCI holder-redemption path (QERDS receive).
@@ -677,6 +678,37 @@ func (e *Engine) engineFor(ctx context.Context, orgID uuid.UUID) (irmastorage.St
 	return st, nil
 }
 
+// DropOrganization closes and evicts the org's cached engine, then drops its
+// schema and its filesystem storage.
+func (e *Engine) DropOrganization(ctx context.Context, orgID uuid.UUID) error {
+	e.mu.Lock()
+	lock := e.openLock(orgID)
+	e.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+
+	e.mu.Lock()
+	st, ok := e.engines[orgID]
+	delete(e.engines, orgID)
+	e.mu.Unlock()
+	if ok {
+		if err := st.Close(); err != nil {
+			return fmt.Errorf("eudiholder: close engine org %s: %w", orgID, err)
+		}
+	}
+	schema := e.schemaFor(orgID)
+	if err := e.execOnDefault(ctx, `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`); err != nil {
+		return fmt.Errorf("eudiholder: drop schema %s: %w", schema, err)
+	}
+	if err := os.RemoveAll(filepath.Join(e.storageDir, schema)); err != nil {
+		return fmt.Errorf("eudiholder: remove storage org %s: %w", orgID, err)
+	}
+	e.mu.Lock()
+	delete(e.opening, orgID)
+	e.mu.Unlock()
+	return nil
+}
+
 // openLock returns the per-org open lock, creating it on first use. The caller
 // must hold e.mu.
 func (e *Engine) openLock(orgID uuid.UUID) *sync.Mutex {
@@ -714,19 +746,24 @@ func (e *Engine) open(ctx context.Context, schema string, key [32]byte) (irmasto
 // the default schema (irmago's AutoMigrate can only create tables in a schema
 // that already exists).
 func (e *Engine) ensureSchema(ctx context.Context, schema string) error {
+	if err := e.execOnDefault(ctx, `CREATE SCHEMA IF NOT EXISTS "`+schema+`"`); err != nil {
+		return fmt.Errorf("eudiholder: create schema %s: %w", schema, err)
+	}
+	return nil
+}
+
+// execOnDefault runs one statement on a short-lived connection to the default schema.
+func (e *Engine) execOnDefault(ctx context.Context, stmt string) error {
 	db, err := gorm.Open(postgres.Open(e.dsn), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("eudiholder: open for schema create: %w", err)
+		return fmt.Errorf("eudiholder: open default schema: %w", err)
 	}
 	defer func() {
 		if sqlDB, err := db.DB(); err == nil {
 			_ = sqlDB.Close()
 		}
 	}()
-	if err := db.WithContext(ctx).Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"`).Error; err != nil {
-		return fmt.Errorf("eudiholder: create schema %s: %w", schema, err)
-	}
-	return nil
+	return db.WithContext(ctx).Exec(stmt).Error
 }
 
 // schemaFor is the per-org schema name: holder_<orgid-hex-without-hyphens>, a

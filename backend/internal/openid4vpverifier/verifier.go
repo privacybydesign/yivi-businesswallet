@@ -45,6 +45,7 @@ const (
 	ClaimPersonalPrefix      = "prefix"
 	ClaimPersonalFamilyName  = "familyname"
 	ClaimPersonalDateOfBirth = "dateofbirth"
+	ClaimPersonalBSN         = "bsn"
 
 	// pbdf.vog claim keys (#242 §4). Named distinctly from the identity claims
 	// above even where the value happens to coincide (ClaimDateOfBirth), because

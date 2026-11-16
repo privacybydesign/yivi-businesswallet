@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -77,7 +78,6 @@ type requestStore interface {
 	Purge(ctx context.Context, req Request, endSession func(context.Context) error) error
 	Member(ctx context.Context, orgID, userID uuid.UUID) (Member, error)
 	RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
-	RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error
 	SetYiviTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	SetDocumentScanTransaction(ctx context.Context, req Request, sessionID, transactionID string) error
 	MarkDocumentScanned(ctx context.Context, req Request, sessionID, transactionID string) error
@@ -104,10 +104,12 @@ type requestStore interface {
 	AddAddress(ctx context.Context, req Request, addr Address) (bool, error)
 	AddEmployment(ctx context.Context, req Request, emp Employment) (bool, error)
 	RecordEmploymentRejected(ctx context.Context, req Request, reason, failedCheck string) error
-	RejectMissingEmployment(ctx context.Context, now time.Time, limit int) (int, error)
-	NextMissingEmployment(ctx context.Context, now time.Time) (time.Time, error)
 	SetRegisteredAddress(ctx context.Context, req Request, addr *Address) error
-	DecideAddressReview(ctx context.Context, req Request, reviewerID uuid.UUID, decided AddressReview, reason string) (*time.Time, error)
+	DecideStepReview(ctx context.Context, req Request, kind ReviewKind, reviewerID uuid.UUID, decided ReviewState, reason string) (*time.Time, error)
+	RejectPendingReviewItems(ctx context.Context, orgID uuid.UUID, code, reason string) error
+	LapseReviewItems(ctx context.Context, now time.Time, limit int) (int, error)
+	NextReviewItemDue(ctx context.Context) (time.Time, error)
+	ReviewCounts(ctx context.Context, orgID uuid.UUID) (ReviewTally, error)
 	RegisteredAddress(ctx context.Context, id uuid.UUID) (*Address, error)
 }
 
@@ -130,6 +132,7 @@ type apiKeyStore interface {
 	Create(ctx context.Context, orgID, createdBy uuid.UUID, name string, scopes []string) (APIKey, string, error)
 	List(ctx context.Context, orgID uuid.UUID) ([]APIKey, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (APIKey, error)
+	Secret(ctx context.Context, orgID, id uuid.UUID) (string, error)
 	Authenticate(ctx context.Context, raw string) (APIKeyCaller, error)
 	Touch(ctx context.Context, caller APIKeyCaller) error
 }
@@ -187,6 +190,11 @@ type Service struct {
 	flowDiplomaSettings flowDiplomaStore
 	diplomas            diplomaStore
 	diplomaChecker      diplomaChecker
+	// unchecked keeps the files whose seal could not be checked at upload;
+	// nil fails such an upload.
+	unchecked uncheckedDocumentStore
+	// sealRetryDelay is the wait between tries of an unreachable seal check.
+	sealRetryDelay time.Duration
 	// flowAddressSettings is each flow's AddressMode; nil asks for none.
 	flowAddressSettings flowAddressStore
 	// flowEmploymentSettings is each flow's EmploymentMode; nil asks for none.
@@ -208,6 +216,9 @@ type Service struct {
 	dataRequests dataRequestStore
 	// addressLookup is the Dutch address register; nil checks no address.
 	addressLookup addressFinder
+	// detectDocument tells which document an upload is; nil reads its seal
+	// (sealedDocument).
+	detectDocument func(pdf []byte) DocumentKind
 }
 
 // Stores are the service's persistence, one store per concern.
@@ -229,6 +240,9 @@ type Stores struct {
 	// requests hold; nil asks for none.
 	FlowDiplomas flowDiplomaStore
 	Diplomas     diplomaStore
+	// Unchecked keeps the files whose seal could not be checked at upload;
+	// nil fails such an upload.
+	Unchecked uncheckedDocumentStore
 	// FlowAddresses holds each flow's AddressMode; nil asks for none.
 	FlowAddresses flowAddressStore
 	// FlowEmployment holds each flow's EmploymentMode; nil asks for none.
@@ -245,6 +259,7 @@ func NewService(stores Stores, ips Provider, verifier verifier, mailer Mailer) *
 		webhooks: stores.Webhooks, events: stores.Events, pauses: stores.Pauses, flowHostedSettings: stores.FlowHosted,
 		flowBrandings:       stores.FlowBranding,
 		flowDiplomaSettings: stores.FlowDiplomas, diplomas: stores.Diplomas, dataRequests: stores.DataRequests,
+		unchecked: stores.Unchecked, sealRetryDelay: sealCheckRetryDelay,
 		flowAddressSettings: stores.FlowAddresses, flowEmploymentSettings: stores.FlowEmployment,
 		ips: ips, verifier: verifier, mailer: mailer, now: time.Now,
 		readChecks: newReadThrottle(readReconcileEvery),
@@ -514,8 +529,14 @@ func (s *Service) validSelection(ctx context.Context, org Org, sel FlowSelection
 // combination of steps, checks and assurance level; its refusal comes back as a
 // *proofingprovider.RejectedError.
 func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = normalizeFlow(in); err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = checkEditorChoices(in, nil); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	// A new flow's hosted page has the defaults until its admin sets it.
@@ -540,11 +561,21 @@ func (s *Service) CreateFlow(ctx context.Context, org Org, in proofingprovider.F
 // naming dg1: an empty list would leave what it releases to the engine. A data
 // request flow is the wallet's, and not edited (ErrDataRequestFlow).
 func (s *Service) EditFlow(ctx context.Context, org Org, id string, in proofingprovider.FlowSpec) (proofingprovider.Flow, error) {
-	in, err := normalizeFlow(in)
+	in, err := withLevelNeeds(in)
 	if err != nil {
 		return proofingprovider.Flow{}, err
 	}
+	if in, err = normalizeFlow(in); err != nil {
+		return proofingprovider.Flow{}, err
+	}
 	if err := s.refuseDataRequestFlow(ctx, org, id); err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	current, err := s.orgFlow(ctx, org, id)
+	if err != nil {
+		return proofingprovider.Flow{}, err
+	}
+	if in, err = checkEditorChoices(in, &current.FlowSpec); err != nil {
 		return proofingprovider.Flow{}, err
 	}
 	required, err := s.identityRequired(ctx, org.ID, id)
@@ -635,10 +666,21 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 	if !sessionTTLAllowed(in.SessionTTLSeconds) {
 		return in, fmt.Errorf("%w: the session lifetime must be 2, 5 or 10 minutes", ErrInvalidInput)
 	}
+	steps, err := editorSteps(in.Steps)
+	if err != nil {
+		return in, err
+	}
+	in.Steps = steps
+	if err := checkRequestedAttributes(in); err != nil {
+		return in, err
+	}
+	if err := checkFaceMatchThreshold(in); err != nil {
+		return in, err
+	}
 	in.SelfieLocation = ""
 	if !hasFaceStep(in.Steps) {
 		in.FaceProvider = ""
-		return in, nil
+		return in, checkYiviOnly(in)
 	}
 	in.SelfieLocation = selfieLocationNative
 	if in.FaceProvider == "" {
@@ -654,8 +696,178 @@ func normalizeFlow(in proofingprovider.FlowSpec) (proofingprovider.FlowSpec, err
 			return in, fmt.Errorf("%w: the face is checked in the document scan only with the document photo", ErrInvalidInput)
 		}
 		in.SelfieLocation = selfieLocationBrowser
+		// ID Scan matches only a face its liveness check passed.
+		if !slices.Contains(in.RequiredChecks, checkFaceLiveness) {
+			in.RequiredChecks = append(slices.Clone(in.RequiredChecks), checkFaceLiveness)
+		}
+	}
+	return in, checkYiviOnly(in)
+}
+
+// editorStepOrder is every step the flow editor offers, in the order it sends
+// them: the order the Idem app runs them in.
+var editorStepOrder = []string{stepDocumentCapture, stepDocumentPhoto, stepNFCRead, stepFaceVerification}
+
+// editorSteps is steps in editorStepOrder; a step the editor does not offer,
+// or one named twice, is refused.
+func editorSteps(steps []string) ([]string, error) {
+	for i, step := range steps {
+		if !slices.Contains(editorStepOrder, step) {
+			return nil, fmt.Errorf("%w: unknown step %q: a flow takes %s", ErrInvalidInput, step, strings.Join(editorStepOrder, ", "))
+		}
+		if slices.Contains(steps[:i], step) {
+			return nil, fmt.Errorf("%w: step %q is named twice", ErrInvalidInput, step)
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(editorStepOrder), func(step string) bool { return !slices.Contains(steps, step) }), nil
+}
+
+// attributeSteps are the requested items the editor offers, each with the
+// steps that produce it; an item is only requested next to one of them.
+var attributeSteps = map[string][]string{
+	attributeDocument:      {stepDocumentCapture, stepDocumentPhoto},
+	attributeAgeOver:       {stepNFCRead, stepDocumentPhoto},
+	attributeChipChecks:    {stepNFCRead},
+	attributeDG11:          {stepNFCRead},
+	attributeFacePhoto:     {stepNFCRead},
+	attributeBiometrics:    {stepFaceVerification},
+	attributeSelfie:        {stepFaceVerification},
+	attributeDocumentImage: {stepDocumentPhoto},
+}
+
+// checkRequestedAttributes refuses an item the editor does not offer, and one
+// none of in's steps produces. outcome_only stands alone.
+func checkRequestedAttributes(in proofingprovider.FlowSpec) error {
+	for _, attribute := range in.RequestedAttributes {
+		if attribute == attributeOutcomeOnly {
+			if len(in.RequestedAttributes) > 1 {
+				return fmt.Errorf("%w: %q releases nothing else, so it stands alone", ErrInvalidInput, attributeOutcomeOnly)
+			}
+			continue
+		}
+		steps, ok := attributeSteps[attribute]
+		if !ok {
+			return fmt.Errorf("%w: unknown requested attribute %q", ErrInvalidInput, attribute)
+		}
+		if !slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(in.Steps, step) }) {
+			return fmt.Errorf("%w: %q needs one of the steps %s", ErrInvalidInput, attribute, strings.Join(steps, ", "))
+		}
+	}
+	return nil
+}
+
+// faceMatchThresholdSteps is how many steps the editor's face match slider
+// has from 0 to 1: a threshold is a whole hundredth.
+const faceMatchThresholdSteps = 100
+
+// checkFaceMatchThreshold refuses a face match threshold the editor's slider
+// cannot set.
+func checkFaceMatchThreshold(in proofingprovider.FlowSpec) error {
+	threshold, ok := in.CheckThresholds[checkFaceMatch]
+	if !ok {
+		return nil
+	}
+	scaled := threshold * faceMatchThresholdSteps
+	if math.Abs(scaled-math.Round(scaled)) > faceMatchThresholdTolerance {
+		return fmt.Errorf("%w: the face match threshold is a whole hundredth, such as 0.75", ErrInvalidInput)
+	}
+	return nil
+}
+
+// faceMatchThresholdTolerance absorbs the float error of a hundredth sent as
+// JSON (0.29 * 100 is 28.999999999999996).
+const faceMatchThresholdTolerance = 1e-9
+
+// flowRetentionDays are the retentions the editor offers a flow, besides
+// following the org's (0).
+var flowRetentionDays = []int{1, 30, 90}
+
+// checkEditorChoices refuses what the flow editor offers no choice for, unless
+// current, the active version being edited (nil for a new flow), already has
+// it: the editor keeps a stored value as it is. A setting the editor does not
+// show is carried over from current when in leaves it out.
+func checkEditorChoices(in proofingprovider.FlowSpec, current *proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
+	var was proofingprovider.FlowSpec
+	if current != nil {
+		was = *current
+	}
+	if err := checkAgeChoice(in, was); err != nil {
+		return in, err
+	}
+	if err := checkRetentionChoice(in, was); err != nil {
+		return in, err
+	}
+	types, err := editorDocumentTypesChoice(in.AcceptedDocumentTypes, was.AcceptedDocumentTypes)
+	if err != nil {
+		return in, err
+	}
+	in.AcceptedDocumentTypes = types
+	return carryUnshownSettings(in, was)
+}
+
+func checkAgeChoice(in, was proofingprovider.FlowSpec) error {
+	if !slices.Contains(in.RequestedAttributes, attributeAgeOver) || in.AgeOver == was.AgeOver {
+		return nil
+	}
+	if _, ok := openid4vpverifier.AgeClaim(in.AgeOver); !ok {
+		return fmt.Errorf("%w: the age check asks one of the ages %v", ErrInvalidInput, openid4vpverifier.AgeClaimAges())
+	}
+	return nil
+}
+
+func checkRetentionChoice(in, was proofingprovider.FlowSpec) error {
+	if in.RetentionOverrideSeconds == 0 || in.RetentionOverrideSeconds == was.RetentionOverrideSeconds ||
+		slices.ContainsFunc(flowRetentionDays, func(days int) bool { return in.RetentionOverrideSeconds == days*secondsPerDay }) {
+		return nil
+	}
+	return fmt.Errorf("%w: a flow keeps its data for %v days, or follows the organisation", ErrInvalidInput, flowRetentionDays)
+}
+
+// editorDocumentTypesChoice is types as the editor stores them, refusing a
+// type it does not offer unless was already has it.
+func editorDocumentTypesChoice(types, was []string) ([]string, error) {
+	for _, t := range types {
+		if !slices.Contains(editorDocumentTypes, t) && !slices.Contains(was, t) {
+			return types, fmt.Errorf("%w: unknown accepted document type %q: a flow takes %s", ErrInvalidInput, t, strings.Join(editorDocumentTypes, ", "))
+		}
+	}
+	// Every kind and nothing else is any document, which an empty list says.
+	if !slices.Equal(types, was) && len(types) == len(documentKindNames) &&
+		!slices.ContainsFunc(documentKindNames, func(kind string) bool { return !slices.Contains(types, kind) }) {
+		return nil, nil
+	}
+	return types, nil
+}
+
+// carryUnshownSettings carries the settings the editor does not show over from
+// was when in leaves them all out, and refuses a change to them.
+func carryUnshownSettings(in, was proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
+	if in.LegalBasis == "" && in.ProcessingPurpose == "" && in.AssuranceTiers == nil {
+		in.LegalBasis, in.ProcessingPurpose, in.AssuranceTiers = was.LegalBasis, was.ProcessingPurpose, was.AssuranceTiers
+	}
+	if in.LegalBasis != was.LegalBasis || in.ProcessingPurpose != was.ProcessingPurpose || !slices.Equal(in.AssuranceTiers, was.AssuranceTiers) {
+		return in, fmt.Errorf("%w: legalBasis, processingPurpose and assuranceTiers are not set on a flow", ErrInvalidInput)
 	}
 	return in, nil
+}
+
+// documentKindNames are the document kinds the editor offers; editorDocumentTypes
+// adds the registered personal data.
+var (
+	documentKindNames = []string{
+		proofingprovider.DocumentKindPassport, proofingprovider.DocumentKindIdentityCard,
+		proofingprovider.DocumentKindResidencePermit, proofingprovider.DocumentKindDrivingLicence,
+	}
+	editorDocumentTypes = append(slices.Clone(documentKindNames), openid4vpverifier.SourcePersonalData)
+)
+
+// checkYiviOnly refuses a flow locked to the Yivi app that the Yivi app cannot
+// run: no app could start it.
+func checkYiviOnly(in proofingprovider.FlowSpec) error {
+	if len(in.Apps) == 1 && in.Apps[0] == appYivi && !yiviAppAvailable(proofingprovider.Flow{FlowSpec: in}) {
+		return fmt.Errorf("%w: the Yivi app cannot run this flow (a face check without the chip read, or a level above low), so it cannot be its only app", ErrInvalidInput)
+	}
+	return nil
 }
 
 // flowSessionTTL is how long a session of f runs: the flow's own lifetime when
@@ -1264,10 +1476,10 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	// What the engine reports is the subject's doing and the wallet's record of it, not
 	// that of whoever's read happened to trigger the check.
 	ctx = audit.WithoutActor(ctx)
-	// A review the wallet opened after the engine approved, its decision, and
-	// a rejection for a missing Verzekeringsbericht are the wallet's alone:
-	// the engine still reports the approval.
-	if req.ReviewReason != "" || req.ErrorCode == ErrorEmploymentNotProvided {
+	// A rejection for a missing Verzekeringsbericht, from before the step had
+	// its own outcome, is the wallet's alone: the engine still reports the
+	// approval.
+	if req.ErrorCode == ErrorEmploymentNotProvided {
 		return req, nil
 	}
 	req, res, ok, err := s.readSession(ctx, tenant, req)
@@ -1294,11 +1506,7 @@ func (s *Service) tryReconcile(ctx context.Context, tenant proofingprovider.Tena
 	if next == req.Status {
 		return req, nil
 	}
-	reviewed := req.Status == StatusNeedsReview
 	req, err = s.recordDecision(ctx, tenant, req, next, res)
-	if err == nil && reviewed && next == StatusApproved && req.Employment.asked() {
-		return s.reviewKeptEmployment(ctx, req)
-	}
 	if err != nil || next != StatusNeedsReview {
 		return req, err
 	}
@@ -1518,28 +1726,6 @@ func (s *Service) recordDecision(ctx context.Context, tenant proofingprovider.Te
 	return req, nil
 }
 
-// reviewKeptEmployment reads req again once the engine approved it after its
-// review: a statement kept during that review opened the wallet's own then
-// (recordOutcome), which a paused org cannot decide either.
-func (s *Service) reviewKeptEmployment(ctx context.Context, req Request) (Request, error) {
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
-	if err != nil {
-		slog.WarnContext(ctx, "identity proofing: read the approved request again failed",
-			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return req, err
-	}
-	if fresh.Status != StatusNeedsReview {
-		return fresh, nil
-	}
-	decided, err := s.rejectIfPaused(audit.WithoutActor(ctx), fresh)
-	if err != nil {
-		slog.WarnContext(ctx, "identity proofing: reject the review of a paused org failed",
-			slog.String("request_id", req.ID.String()), slog.Any("error", err))
-		return fresh, err
-	}
-	return decided, nil
-}
-
 // settleReview decides at once a review its org cannot: a paused org's is
 // rejected, an erasure goes as the org set.
 func (s *Service) settleReview(ctx context.Context, req Request) (Request, error) {
@@ -1643,12 +1829,6 @@ func (s *Service) ExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Req
 		return Request{}, err
 	}
 	return s.readReconciled(ctx, req)
-}
-
-// StoredExternalRequest is one of the org's external requests as stored,
-// without re-checking the engine: what a headless poll answers from.
-func (s *Service) StoredExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	return s.requests.GetExternal(ctx, orgID, id)
 }
 
 // ExternalRequestPage is a page of the org's external requests, newest first,
@@ -1787,14 +1967,9 @@ func (s *Service) requestResult(ctx context.Context, req Request) (Request, proo
 // approval the wallet rejected (errorAssuranceNotMet, errorIdentityMismatch)
 // is read as that rejection, without the person or their images. A mismatch
 // is someone other than the expected person, whose identity is never shown.
-// An approval in a review the wallet opened is read as that review.
 func heldToVerdict(req Request, identity proofingprovider.Identity) proofingprovider.Identity {
 	if identity.Status != proofingprovider.StatusApproved || req.Status == StatusApproved ||
 		(req.FlowKind.dataRequest() && req.Status == StatusNeedsReview) {
-		return identity
-	}
-	if req.Status == StatusNeedsReview && req.ReviewReason != "" {
-		identity.Status = proofingprovider.StatusNeedsReview
 		return identity
 	}
 	return proofingprovider.Identity{
@@ -1894,11 +2069,7 @@ func (s *Service) lapseReview(ctx context.Context, req Request) error {
 	if req.Status != StatusNeedsReview || req.session == nil {
 		return nil
 	}
-	record := s.requests.RecordOutcome
-	if req.ReviewReason != "" {
-		record = s.requests.RecordWalletOutcome
-	}
-	return record(ctx, req, req.session.ID, StatusRejected,
+	return s.requests.RecordOutcome(ctx, req, req.session.ID, StatusRejected,
 		proofingprovider.Result{Status: proofingprovider.StatusRejected, ErrorCode: errorReviewLapsed})
 }
 
@@ -1958,6 +2129,30 @@ func (s *Service) withAppDone(ctx context.Context, req Request) (Request, error)
 	}
 	req.appDone = res.AppDone
 	return req, nil
+}
+
+// AlwaysReviewed is which of reqs wait for review because the flow version
+// each pinned sends every session to review, read once per flow.
+func (s *Service) AlwaysReviewed(ctx context.Context, reqs []Request, now time.Time) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	versions := map[string][]proofingprovider.Flow{}
+	for _, req := range reqs {
+		if req.FlowVersion == 0 || req.FlowKind.dataRequest() || req.EffectiveStatus(now) != StatusNeedsReview {
+			continue
+		}
+		flows, read := versions[req.FlowID]
+		if !read {
+			var err error
+			flows, err = s.ips.ListFlowVersions(ctx, requestTenant(req), req.FlowID)
+			if err != nil && !errors.Is(err, proofingprovider.ErrNotFound) {
+				return nil, fmt.Errorf("proofing: flow versions of request %s: %w", req.ID, err)
+			}
+			versions[req.FlowID] = flows
+		}
+		i := slices.IndexFunc(flows, func(f proofingprovider.Flow) bool { return f.Version == req.FlowVersion })
+		out[req.ID] = i >= 0 && flows[i].AlwaysReview
+	}
+	return out, nil
 }
 
 // RequestIf is Request for a caller whose scope the caller decides: allow sees the
@@ -2047,7 +2242,8 @@ func (s *Service) App(ctx context.Context, orgID, id uuid.UUID, requestedBy *uui
 
 // ClaimLink is a fresh vcmrtd link for a sent Idem request: a new claim once
 // the first lapsed unscanned, or a handover to another phone once the app that
-// held the session left. An app still active is ErrDeviceActive.
+// held the session left. An app still active is ErrDeviceActive, one that did
+// its part ErrAppFinished.
 func (s *Service) ClaimLink(ctx context.Context, orgID, id uuid.UUID, requestedBy *uuid.UUID) (proofingprovider.Claim, error) {
 	req, err := s.sentRequest(ctx, orgID, id, requestedBy)
 	if err != nil {
@@ -2070,6 +2266,8 @@ func (s *Service) claimLink(ctx context.Context, req Request) (proofingprovider.
 	switch {
 	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeDeviceActive:
 		return proofingprovider.Claim{}, ErrDeviceActive
+	case errors.As(err, &rejected) && rejected.Code == proofingprovider.CodeAppFinished:
+		return proofingprovider.Claim{}, ErrAppFinished
 	case errors.As(err, &rejected):
 		return proofingprovider.Claim{}, ErrSessionOver
 	case err != nil:
@@ -2115,7 +2313,7 @@ func (s *Service) startYivi(ctx context.Context, req Request, sess *ipsSession) 
 		return YiviStart{}, err
 	}
 	started, err := s.verifier.StartProofing(ctx, openid4vpverifier.ProofingRequest{
-		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(),
+		Sources: yiviSources(f), Claims: claims, Address: req.Address.asked(), BSN: keepsBSN(f),
 	})
 	if err != nil {
 		return YiviStart{}, err
@@ -2365,6 +2563,11 @@ func (s *Service) CreateAPIKey(ctx context.Context, orgID, createdBy uuid.UUID, 
 // APIKeys lists the org's keys, revoked ones included.
 func (s *Service) APIKeys(ctx context.Context, orgID uuid.UUID) ([]APIKey, error) {
 	return s.apiKeys.List(ctx, orgID)
+}
+
+// APIKeySecret is one of the org's active keys itself (APIKeyStore.Secret).
+func (s *Service) APIKeySecret(ctx context.Context, orgID, id uuid.UUID) (string, error) {
+	return s.apiKeys.Secret(ctx, orgID, id)
 }
 
 // RevokeAPIKey stops one of the org's keys authenticating.

@@ -8,6 +8,7 @@
 package attestation
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -139,8 +140,11 @@ type Key struct {
 	Label          string    `json:"label"`
 	ProviderRef    string    `json:"providerRef,omitempty"`
 	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	// WalletUnitAttestation names the wallet unit attesting a wallet_managed key;
+	// nil for a qualified_certificate key.
+	WalletUnitAttestation json.RawMessage `json:"walletUnitAttestation,omitempty"`
+	CreatedAt             time.Time       `json:"createdAt"`
+	UpdatedAt             time.Time       `json:"updatedAt"`
 }
 
 // Template is a named issuance preset over a schema, enriched for the list view

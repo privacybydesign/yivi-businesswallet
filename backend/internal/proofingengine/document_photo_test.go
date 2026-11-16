@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/flow"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/privacy"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/session"
@@ -141,6 +142,14 @@ func TestAppSubmitWaitsForDocumentPhoto(t *testing.T) {
 	if err != nil || !status.AppDone {
 		t.Fatalf("SessionStatus = %+v, %v; want the app done", status, err)
 	}
+	if status.App != pp.AppFinished {
+		t.Errorf("SessionStatus app = %q, want %q: the phone no longer holds the session", status.App, pp.AppFinished)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if !errors.As(err, &refused) || refused.Code != pp.CodeAppFinished {
+		t.Errorf("SessionHandover after the app's part = %v, want %s", err, pp.CodeAppFinished)
+	}
 
 	photo := pp.DocumentPhoto{Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: authenticScan()}
 	if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, photo); err != nil {
@@ -203,6 +212,51 @@ func TestYiviDisclosureWithDocumentPhoto(t *testing.T) {
 	}
 	if rejected, _ := store.Get("org", sess.ID); rejected.Status != session.StatusRejected || rejected.ErrorCode != errCodeDocNotAuthentic {
 		t.Errorf("status %s, error %q; want rejected, %s", rejected.Status, rejected.ErrorCode, errCodeDocNotAuthentic)
+	}
+}
+
+// A document the Yivi app shares carries the BSN its photo read, as the
+// flow's BSN policy releases it and only with DG11 requested.
+func TestYiviDocumentCarriesPhotographedBSN(t *testing.T) {
+	const scannedBSN = "111222333"
+	for name, tc := range map[string]struct {
+		policy    privacy.BSNPolicy
+		requested []string
+		want      string
+	}{
+		"kept":            {privacy.BSNPolicyRetrieve, []string{attrDocument, attrDG11}, scannedBSN},
+		"masked":          {privacy.BSNPolicyMask, []string{attrDocument, attrDG11}, bsn.Mask(scannedBSN)},
+		"left out":        {privacy.BSNPolicyOmit, []string{attrDocument, attrDG11}, ""},
+		"DG11 not wanted": {privacy.BSNPolicyRetrieve, []string{attrDocument}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+			fd := chipAndPhotoFlow
+			fd.BSNPolicy, fd.RequestedAttributes = tc.policy, tc.requested
+			sess := session.Session{
+				ID: "ps_yivi", TenantID: "org", Token: "tok-yivi", Status: session.StatusCreated,
+				Method: session.MethodBiometricBoundLogin, Flow: "flow", FlowVersion: 1, ExpiresAt: time.Now().Add(time.Hour),
+				RequestedAttributes: tc.requested,
+			}
+			s, store := documentPhotoServer(sess, fd)
+			check := authenticScan()
+			check.Document.PersonalNumber = scannedBSN
+			if err := s.SubmitDocumentPhoto(ctx, tenant, sess.ID, sess.Token, pp.DocumentPhoto{
+				Front: pp.Image{Base64: checkerboardPNG(t), MimeType: "image/png"}, Check: check,
+			}); err != nil {
+				t.Fatalf("SubmitDocumentPhoto = %v", err)
+			}
+			ref := pp.Reference{Credential: "pbdf-staging.pbdf.passport", Attributes: map[string]string{
+				"firstName": "Anna", "lastName": "Jansen", "country": "NLD",
+			}}
+			if disclosure, err := s.SubmitReference(ctx, tenant, sess.ID, sess.Token, ref); err != nil || !disclosure.OK {
+				t.Fatalf("SubmitReference = %+v, %v", disclosure, err)
+			}
+			decided, _ := store.Get("org", sess.ID)
+			if doc := decided.Result["document"].(documentInfo); doc.PersonalNumber != tc.want {
+				t.Errorf("personal number %q, want %q", doc.PersonalNumber, tc.want)
+			}
+		})
 	}
 }
 
@@ -564,5 +618,45 @@ func TestFailDocumentScanWithoutPhotoStep(t *testing.T) {
 	err := s.FailDocumentScan(context.Background(), pp.Tenant{ID: "org"}, sess.ID, sess.Token, pp.DocumentScanFailure{Task: pp.DocumentScanTaskDocument})
 	if !errors.As(err, &refused) || refused.Status != http.StatusConflict {
 		t.Errorf("FailDocumentScan = %v, want 409", err)
+	}
+}
+
+// Until the app did its part, its phone holds the session and can hand it on.
+func TestAppHoldsSessionUntilItsPartIsDone(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
+	sess.Steps.Document = &session.DocumentStepEvidence{}
+	s, _ := documentPhotoServer(sess, chipAndPhotoFlow)
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || status.App == pp.AppFinished || status.AppDone {
+		t.Fatalf("SessionStatus = %+v, %v; want the app not finished before the chip read", status, err)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if errors.As(err, &refused) && refused.Code == pp.CodeAppFinished {
+		t.Errorf("SessionHandover before the chip read = %v, want no %s", err, pp.CodeAppFinished)
+	}
+}
+
+// With no browser step after the chip read, the app still has to submit: its
+// phone holds the session until it did.
+func TestAppHoldsSessionUntilItSubmits(t *testing.T) {
+	ctx, tenant := context.Background(), pp.Tenant{ID: "org"}
+	sess := deviceSession("ps_1")
+	sess.Method = session.MethodNFCPassport
+	sess.Steps.Document = &session.DocumentStepEvidence{}
+	sess.Steps.NFC = &session.NFCStepEvidence{}
+	chipOnly := chipAndPhotoFlow
+	chipOnly.Steps = []flow.Step{flow.StepDocumentCapture, flow.StepNFCRead}
+	s, _ := documentPhotoServer(sess, chipOnly)
+	status, err := s.SessionStatus(ctx, tenant, sess.ID, sess.Token)
+	if err != nil || status.App == pp.AppFinished {
+		t.Fatalf("SessionStatus = %+v, %v; want the app not finished before its submit", status, err)
+	}
+	_, err = s.SessionHandover(ctx, tenant, sess.ID, sess.Token)
+	var refused *pp.RejectedError
+	if errors.As(err, &refused) && refused.Code == pp.CodeAppFinished {
+		t.Errorf("SessionHandover before the app's submit = %v, want no %s", err, pp.CodeAppFinished)
 	}
 }

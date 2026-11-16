@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
 import {
   useClosedReviewsQuery,
+  useReviewItemCountsQuery,
   useWaitingReviewsQuery,
 } from "../api/identity-proofing.queries";
 import type { ProofingRequest } from "../api/identity-proofing";
@@ -19,23 +20,28 @@ import {
   requestedBy,
 } from "../lib/identity-proofing";
 import {
+  reviewOfStep,
+  addressReviewWhy,
+  employmentReviewWhy,
   DEFAULT_REVIEW_TAB,
+  REVIEW_PART_KEYS,
   REVIEW_TABS,
   answerBy,
   closedAt,
   closedRequests,
-  isAddressReview,
-  isDecidedAddress,
+  stepReviewOf,
   personName,
   reviewCounts,
   reviewPath,
   reviewTabFrom,
   waitingOfTab,
+  waitingParts,
+  decidedParts,
   waitingOldestFirst,
   waitingSince,
-  walletReviewReason,
+  checkReviewReason,
 } from "../lib/proofing-reviews";
-import type { ReviewTab } from "../lib/proofing-reviews";
+import type { ReviewPart, ReviewTab } from "../lib/proofing-reviews";
 import { blockingError } from "../lib/query-state";
 import { Card, StatusText, Table, TopBar } from "../ui";
 import { PRIMARY_LINK, SECONDARY_LINK } from "./proofing-review-parts";
@@ -58,10 +64,8 @@ export default function ProofingReviews(): React.JSX.Element {
   const [searchParams] = useSearchParams();
   const tab = reviewTabFrom(searchParams.get(SHOW_PARAM));
   const waitingNow = waitingOldestFirst(waiting.data?.requests ?? []);
-  const counts = reviewCounts(waitingNow);
-  // The backend lists at most the 200 longest in review: past that the counts
-  // are lower bounds.
-  const capped = waiting.data?.capped === true;
+  const itemCounts = useReviewItemCountsQuery(slug, { enabled: canReview });
+  const counts = itemCounts.data && reviewCounts(itemCounts.data);
   // What shows instead of the reviews to anyone without the right, and until
   // the org is known.
   const notice = org.isPending
@@ -76,7 +80,7 @@ export default function ProofingReviews(): React.JSX.Element {
       />
       {canReview ? (
         <>
-          <ReviewTabs active={tab} counts={counts} capped={capped} />
+          <ReviewTabs active={tab} counts={counts} />
           <div className="flex flex-col gap-4 p-4 sm:p-8">
             <Card className="overflow-hidden">
               {tab === "closed" ? (
@@ -122,17 +126,17 @@ export default function ProofingReviews(): React.JSX.Element {
 function ReviewTabs({
   active,
   counts,
-  capped,
 }: Readonly<{
   active: ReviewTab;
-  counts: ReturnType<typeof reviewCounts>;
-  capped: boolean;
+  // Absent until the backend counted.
+  counts: ReturnType<typeof reviewCounts> | undefined;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const countOf: Record<ReviewTab, number | undefined> = {
-    all: counts.all,
-    checks: counts.checks,
-    data: counts.data,
+    all: counts?.all,
+    checks: counts?.checks,
+    steps: counts?.steps,
+    data: counts?.data,
     closed: undefined,
   };
   return (
@@ -159,7 +163,7 @@ function ReviewTabs({
             {t(`identityProofing.reviews.tabs.${tab}`)}
             {countOf[tab] !== undefined && (
               <span className="text-ink-soft font-normal">
-                {listedCount(countOf[tab], capped, t)}
+                {listedCount(countOf[tab], false, t)}
               </span>
             )}
           </Link>
@@ -222,17 +226,22 @@ function WaitingTable({
   );
 }
 
-// Why a row waits: its address, or what put the session in review.
+// Why a row waits: its step (the address, the Verzekeringsbericht), or what
+// put the session in review.
 function reviewWhy(request: ProofingRequest, t: TFunction): string {
-  if (!isAddressReview(request)) {
+  const step = stepReviewOf(request);
+  if (step === "employment") {
+    return t(`identityProofing.reviews.why.${employmentReviewWhy(request)}`);
+  }
+  if (step === "diplomas") {
+    return t("identityProofing.reviews.why.diplomasAlways");
+  }
+  if (step !== "address") {
     return t(
-      `identityProofing.reviews.why.${walletReviewReason(request) ?? request.flowKind}`,
+      `identityProofing.reviews.why.${checkReviewReason(request) ?? request.flowKind}`,
     );
   }
-  if (request.address?.verification === "registered_mismatch") {
-    return t("identityProofing.reviews.why.addressMismatch");
-  }
-  return t("identityProofing.reviews.why.address");
+  return t(`identityProofing.reviews.why.${addressReviewWhy(request)}`);
 }
 
 // How a data request's person was proven: the app, and the level reached.
@@ -280,10 +289,36 @@ function WhatCell({
       </Table.Cell>
     );
   }
-  if (isAddressReview(request)) {
+  const waiting = waitingParts(request);
+  const decided = decidedParts(request);
+  const parts = waiting.length > 0 ? waiting : decided;
+  if (waiting.length > 0 && decided.length > 0) {
     return (
       <Table.Cell>
-        {t("identityProofing.reviews.addressCheck")}
+        {waiting.map((part) => t(REVIEW_PART_KEYS[part])).join(" + ")}
+        {decided.map((part) => (
+          <div key={part} className={SUB_LINE}>
+            {t(REVIEW_PART_KEYS[part])} ·{" "}
+            <PartOutcome request={request} part={part} />
+          </div>
+        ))}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
+  if (parts.length > 1) {
+    return (
+      <Table.Cell>
+        {parts.map((part) => t(REVIEW_PART_KEYS[part])).join(" + ")}
+        <div className={SUB_LINE}>{request.flowName}</div>
+      </Table.Cell>
+    );
+  }
+  const step = stepReviewOf(request);
+  if (step !== undefined) {
+    return (
+      <Table.Cell>
+        {t(REVIEW_PART_KEYS[step])}
         <div className={SUB_LINE}>{request.flowName}</div>
       </Table.Cell>
     );
@@ -409,10 +444,10 @@ function ClosedRow({
       </PersonCell>
       <WhatCell request={request} />
       <Table.Cell>
-        {isDecidedAddress(request) ? (
-          <AddressOutcome request={request} />
-        ) : (
+        {isDataRequest(request.flowKind) ? (
           <DataRequestOutcome request={request} />
+        ) : (
+          <SessionOutcome request={request} />
         )}
       </Table.Cell>
       <Table.Cell className="whitespace-nowrap">
@@ -431,21 +466,79 @@ function ClosedRow({
   );
 }
 
-// What a reviewer decided on the address.
-function AddressOutcome({
+// The outcome text of a decided step, per step and state.
+const STEP_OUTCOME_KEYS = {
+  address: {
+    confirmed: "identityProofing.reviews.outcome.confirmed",
+    rejected: "identityProofing.reviews.outcome.addressRejected",
+    lapsed: "identityProofing.reviews.outcome.addressLapsed",
+  },
+  employment: {
+    confirmed: "identityProofing.reviews.outcome.employmentConfirmed",
+    rejected: "identityProofing.reviews.outcome.employmentRejected",
+    lapsed: "identityProofing.reviews.outcome.employmentLapsed",
+  },
+  diplomas: {
+    confirmed: "identityProofing.reviews.outcome.diplomasConfirmed",
+    rejected: "identityProofing.reviews.outcome.diplomasRejected",
+    lapsed: "identityProofing.reviews.outcome.diplomasLapsed",
+  },
+} as const;
+
+const STEP_OUTCOME_TONES = {
+  confirmed: "green",
+  rejected: "red",
+  lapsed: "amber",
+} as const;
+
+// What a reviewer decided on each part of the session, or that nobody did in
+// time; with more than one part, each named.
+function SessionOutcome({
   request,
 }: Readonly<{
   request: ProofingRequest;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const confirmed = request.addressReview === "confirmed";
+  const parts = decidedParts(request);
   return (
-    <StatusText tone={confirmed ? "green" : "red"}>
-      {t(
-        confirmed
-          ? "identityProofing.reviews.outcome.confirmed"
-          : "identityProofing.reviews.outcome.addressRejected",
-      )}
+    <div className="flex flex-col gap-0.5">
+      {parts.map((part) => (
+        <span key={part}>
+          {parts.length > 1 && <>{t(REVIEW_PART_KEYS[part])} · </>}
+          <PartOutcome request={request} part={part} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PartOutcome({
+  request,
+  part,
+}: Readonly<{
+  request: ProofingRequest;
+  part: ReviewPart;
+}>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (part === "identity") {
+    const approved = request.status === "approved";
+    return (
+      <StatusText tone={approved ? "green" : "red"}>
+        {t(
+          approved
+            ? "identityProofing.reviews.outcome.approved"
+            : "identityProofing.reviews.outcome.rejected",
+        )}
+      </StatusText>
+    );
+  }
+  const state = reviewOfStep(request, part);
+  if (state === undefined || state === "pending") {
+    return null;
+  }
+  return (
+    <StatusText tone={STEP_OUTCOME_TONES[state]}>
+      {t(STEP_OUTCOME_KEYS[part][state])}
     </StatusText>
   );
 }

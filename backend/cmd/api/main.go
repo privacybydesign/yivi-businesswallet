@@ -70,6 +70,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/verification"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/vog"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wallet"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wsca"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/wscawallet"
 )
@@ -543,6 +544,84 @@ func newRequesterCA(cfg config.Config) (*relyingparty.CA, error) {
 	return relyingparty.NewCA("Yivi Business Wallet ephemeral requester CA")
 }
 
+// walletUnitName is the wallet_name every BWIA states.
+const walletUnitName = "Yivi Business Wallet"
+
+// newWalletUnitSigner is the Business Wallet Provider signer from
+// WALLET_UNIT_PROVIDER_CERT/KEY, or an ephemeral one when unset: then no relying
+// party trusts the attestations, and they stop verifying after a restart.
+func newWalletUnitSigner(cfg config.Config) (*walletunit.Signer, error) {
+	if cfg.WalletUnitProviderCert != "" {
+		signer, err := walletunit.LoadSigner([]byte(cfg.WalletUnitProviderCert), []byte(cfg.WalletUnitProviderKey))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", "WALLET_UNIT_PROVIDER_CERT", err)
+		}
+		return signer, nil
+	}
+	slog.Warn("WALLET_UNIT_PROVIDER_CERT not set; wallet unit attestations are signed under an ephemeral " +
+		"certificate that nobody trusts and that changes on restart")
+	return walletunit.NewEphemeralSigner(walletUnitName + " ephemeral provider")
+}
+
+// wscaAccountGetter reads an org's WSCA account (wsca.ErrNotActivated when it has none).
+type wscaAccountGetter interface {
+	Get(ctx context.Context, orgID uuid.UUID) (wsca.Account, error)
+}
+
+// walletUnitKeys reports the SKA an org's holder keys get: only when the
+// irmago holder binds holder keys in the WSCA, the deployment describes its HSM, and the org
+// activated its WSCA account. Anything else gets no SKA, so no badge.
+type walletUnitKeys struct {
+	accounts wscaAccountGetter
+	levels   []string
+}
+
+func newWalletUnitKeys(cfg config.Config, accounts wscaAccountGetter) walletUnitKeys {
+	if cfg.AttestationHolder != config.HolderIrmago || cfg.AttestationHolderWSCAURL == "" {
+		return walletUnitKeys{}
+	}
+	return walletUnitKeys{accounts: accounts, levels: cfg.WalletUnitSKAKeyStorage}
+}
+
+func (k walletUnitKeys) KeyAttestation(ctx context.Context, orgID uuid.UUID) (*walletunit.KeyAttestation, error) {
+	if len(k.levels) == 0 {
+		return nil, nil
+	}
+	_, err := k.accounts.Get(ctx, orgID)
+	if errors.Is(err, wsca.ErrNotActivated) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &walletunit.KeyAttestation{Levels: k.levels}, nil
+}
+
+// newWalletUnitAttester is the wallet unit attestation source WALLET_UNIT_ATTESTER selects.
+func newWalletUnitAttester(cfg config.Config, store *walletunit.Store, orgs *organization.Store, signer *walletunit.Signer) walletunit.Attester {
+	if cfg.WalletUnitAttester == config.ProviderStub {
+		return walletunit.NewStubAttester(orgs, signer, walletUnitConfig(cfg))
+	}
+	return walletunit.NewProvider(store, orgs, signer, walletUnitConfig(cfg))
+}
+
+func walletUnitConfig(cfg config.Config) walletunit.Config {
+	out := walletunit.Config{
+		BaseURL:           cfg.AppBaseURL,
+		WalletName:        walletUnitName,
+		WalletVersion:     cfg.WalletUnitVersion,
+		CertificationInfo: cfg.WalletUnitCertificationInfo,
+	}
+	if cfg.WalletUnitSKACertificationURL != "" {
+		out.SKA = &walletunit.SKAConfig{
+			CertificationURL:   cfg.WalletUnitSKACertificationURL,
+			KeyStorage:         cfg.WalletUnitSKAKeyStorage,
+			UserAuthentication: cfg.WalletUnitSKAUserAuth,
+		}
+	}
+	return out
+}
+
 // chainedInboundConsumer notifies each QERDS inbound consumer in turn. Every
 // consumer already ignores an envelope type it does not recognise (see
 // attestation.OfferReceiver, openid4vppresenter.Receiver), so trying them in
@@ -629,6 +708,7 @@ type wiring struct {
 	orgHandler            *organization.Handler
 	qerdsHandler          *qerds.Handler
 	walletHandler         *wallet.Handler
+	walletRegistry        registryProvider
 	postguardHandler      *postguard.Handler
 	emailHandler          *email.Handler
 	issuerSettingsHandler *issuersettings.Handler
@@ -639,6 +719,7 @@ type wiring struct {
 	attestationHandler    *attestation.Handler
 	verificationHandler   *verification.Handler
 	wscaWalletHandler     *wscawallet.Handler
+	walletUnitHandler     *walletunit.Handler
 	notificationsHandler  *notifications.Handler
 	slackHandler          *slackchannel.Handler
 	teamsHandler          *teamschannel.Handler
@@ -839,9 +920,8 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 	if err := probe(ctx, qerdsProbeTimeout, registry); err != nil {
 		return fmt.Errorf("wallet registry ping: %w", err)
 	}
-	walletStore := wallet.NewStore(w.pool, w.recorder)
-	walletService := wallet.NewService(walletStore, registry, w.authService, w.userStore, w.qerdsStore, cfg.QerdsDefaultAddressDomain)
-	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
+	// The wallet service also needs the holder engine, so buildAttestations builds it.
+	w.walletRegistry = registry
 
 	// PostGuard is an optional org capability; unlike the verifier/QERDS/registry
 	// it has no fatal boot gate (a send surfaces a clear error if unconfigured).
@@ -858,6 +938,16 @@ func (w *wiring) buildMessaging(ctx context.Context) error {
 		slog.String("websiteUrl", cfg.PostGuardWebsiteURL),
 		slog.String("pkgUrl", cfg.PostGuardPkgURL),
 		slog.String("cryptifyUrl", cfg.PostGuardCryptifyURL))
+	return nil
+}
+
+// buildWallet wires wallet registration: the KVK registry from buildMessaging and
+// the EBWOID issuer, which stores the org's owner identification data in holder.
+// Only the seeded register's stub issuer exists until KVK's issuer (YIV-622).
+func (w *wiring) buildWallet(holder eudiholder.Holder) error {
+	walletStore := wallet.NewStore(w.pool, w.recorder, walletunit.NewStore(w.pool, w.recorder))
+	walletService := wallet.NewService(walletStore, w.walletRegistry, wallet.OwnerID{Issuer: registryprovider.StubEBWOIDIssuer{}, Holder: holder}, w.authService, w.userStore, w.qerdsStore, w.cfg.QerdsDefaultAddressDomain)
+	w.walletHandler = wallet.NewHandler(walletService, w.sessionIssuer, w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 
@@ -887,6 +977,9 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 
 	attHolder, err := w.openAttestationHolder(ctx, wscaStore)
 	if err != nil {
+		return err
+	}
+	if err := w.buildWallet(attHolder); err != nil {
 		return err
 	}
 
@@ -978,6 +1071,14 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 		wscaStore,
 	)
 	w.wscaWalletHandler = wscawallet.NewHandler(wscaActivator, w.requireUser, w.orgHandler.Authorize)
+
+	walletUnitSigner, err := newWalletUnitSigner(cfg)
+	if err != nil {
+		return err
+	}
+	walletUnitStore := walletunit.NewStore(w.pool, w.recorder)
+	walletUnitAttester := newWalletUnitAttester(cfg, walletUnitStore, w.orgStore, walletUnitSigner)
+	w.walletUnitHandler = walletunit.NewHandler(walletUnitStore, walletUnitAttester, newWalletUnitKeys(cfg, wscaStore), w.requireUser, w.orgHandler.Authorize)
 	return nil
 }
 
@@ -1197,8 +1298,9 @@ func (w *wiring) buildProofing(ctx context.Context) error {
 	// the org's endpoint (https, public addresses only). Without the key no
 	// secret opens, so the deliverer does not run at all.
 	if proofingCipher != nil {
-		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks",
-			proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{}).Run)
+		deliverer := proofing.NewDeliverer(proofingWebhooks, safehttp.Policy{})
+		deliverer.SetResults(proofingService)
+		database.RunOnNotify(proofingJobs, w.pool, proofing.WebhookChannel, "identity_proofing_webhooks", deliverer.Run)
 	}
 	w.proofingHandler = proofing.NewHandler(proofingService, w.requireUser, w.orgHandler.Authorize)
 	proofingIdempotency := proofing.NewIdempotencyStore(w.pool, proofingCipher)
@@ -1271,6 +1373,7 @@ func (w *wiring) httpServer() *http.Server {
 		w.attestationHandler,
 		w.verificationHandler,
 		w.wscaWalletHandler,
+		w.walletUnitHandler,
 		w.notificationsHandler,
 		w.slackHandler,
 		w.teamsHandler,

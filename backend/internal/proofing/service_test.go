@@ -218,11 +218,15 @@ func (f *fakeRequests) RecordResultRead(context.Context, Request) error {
 	return nil
 }
 
-func (f *fakeRequests) Purge(ctx context.Context, _ Request, endSession func(context.Context) error) error {
+func (f *fakeRequests) Purge(ctx context.Context, req Request, endSession func(context.Context) error) error {
 	if endSession != nil {
 		if err := endSession(ctx); err != nil {
 			return err
 		}
+	}
+	// A matched session's purge leaves the stored request alone.
+	if f.stored == nil || f.stored.ID != req.ID {
+		return nil
 	}
 	now := time.Now()
 	f.stored.PurgedAt, f.stored.ProofedName = &now, ""
@@ -244,19 +248,32 @@ func (f *fakeRequests) AddAddress(_ context.Context, req Request, addr Address) 
 		return false, nil
 	}
 	f.stored.SubjectAddress, f.registeredAddress = &addr, nil
-	if review := addressReviewOf(addr); review != nil {
+	if review := addressReviewOf(addr, f.stored.Address); review != nil {
 		f.stored.AddressReview = *review
 	}
 	return true, nil
 }
 
-func (f *fakeRequests) DecideAddressReview(_ context.Context, req Request, _ uuid.UUID, decided AddressReview, _ string) (*time.Time, error) {
-	if f.stored == nil || f.stored.ID != req.ID || f.stored.AddressReview != AddressReviewPending {
+func (f *fakeRequests) DecideStepReview(_ context.Context, req Request, kind ReviewKind, _ uuid.UUID, decided ReviewState, _ string) (*time.Time, error) {
+	if f.stored == nil || f.stored.ID != req.ID || f.stored.stepReview(kind) != ReviewPending {
 		return nil, nil
 	}
 	now := time.Now()
-	f.stored.AddressReview, f.stored.AddressReviewedAt = decided, &now
+	f.stored.setStepReview(kind, decided, &now)
 	return &now, nil
+}
+
+func (f *fakeRequests) RejectPendingReviewItems(context.Context, uuid.UUID, string, string) error {
+	if f.stored == nil {
+		return nil
+	}
+	for _, kind := range []ReviewKind{ReviewKindAddress, ReviewKindEmployment} {
+		if f.stored.stepReview(kind) == ReviewPending {
+			now := time.Now()
+			f.stored.setStepReview(kind, ReviewRejected, &now)
+		}
+	}
+	return nil
 }
 
 func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employment) (bool, error) {
@@ -264,25 +281,25 @@ func (f *fakeRequests) AddEmployment(_ context.Context, req Request, emp Employm
 		(f.stored.Status != StatusApproved && f.stored.Status != StatusNeedsReview) {
 		return false, nil
 	}
-	f.stored.SubjectEmployment = &emp
-	if reason := emp.reviewReason(); reason != "" && f.stored.Status == StatusApproved {
-		f.stored.Status, f.stored.ReviewReason = StatusNeedsReview, reason
+	now := time.Now()
+	f.stored.SubjectEmployment, f.stored.EmploymentAddedAt = &emp, &now
+	f.stored.ReviewReason = emp.reviewReason()
+	if emp.reviewed(f.stored.Employment) {
+		f.stored.EmploymentReview = ReviewPending
 	}
 	return true, nil
 }
 
-func (f *fakeRequests) RejectMissingEmployment(_ context.Context, now time.Time, _ int) (int, error) {
-	r := f.stored
-	if r == nil || r.Employment != EmploymentRequired || r.Status != StatusApproved || r.SubjectEmployment != nil ||
-		r.CheckedAt == nil || now.Before(r.CheckedAt.Add(missingEmploymentDue)) {
-		return 0, nil
-	}
-	r.Status, r.ErrorCode = StatusRejected, ErrorEmploymentNotProvided
-	return 1, nil
+func (f *fakeRequests) LapseReviewItems(context.Context, time.Time, int) (int, error) {
+	return 0, nil
 }
 
-func (f *fakeRequests) NextMissingEmployment(context.Context, time.Time) (time.Time, error) {
+func (f *fakeRequests) NextReviewItemDue(context.Context) (time.Time, error) {
 	return time.Time{}, nil
+}
+
+func (f *fakeRequests) ReviewCounts(context.Context, uuid.UUID) (ReviewTally, error) {
+	return ReviewTally{}, nil
 }
 
 func (f *fakeRequests) RecordEmploymentRejected(_ context.Context, _ Request, reason, _ string) error {
@@ -374,10 +391,6 @@ func (f *fakeRequests) GetExternal(_ context.Context, _, id uuid.UUID) (Request,
 	return *f.stored, nil
 }
 
-func (f *fakeRequests) RecordWalletOutcome(ctx context.Context, _ Request, _ string, status Status, res proofingprovider.Result) error {
-	return f.recordOutcome(ctx, status, res)
-}
-
 func (f *fakeRequests) Get(_ context.Context, _, id uuid.UUID) (Request, error) {
 	if f.stored == nil || f.stored.ID != id {
 		return Request{}, ErrRequestNotFound
@@ -453,6 +466,10 @@ func (fakeAPIKeys) List(context.Context, uuid.UUID) ([]APIKey, error) { return n
 
 func (fakeAPIKeys) Revoke(context.Context, uuid.UUID, uuid.UUID) (APIKey, error) {
 	return APIKey{}, ErrAPIKeyNotFound
+}
+
+func (fakeAPIKeys) Secret(context.Context, uuid.UUID, uuid.UUID) (string, error) {
+	return "", ErrAPIKeyNotFound
 }
 
 func (fakeAPIKeys) Authenticate(context.Context, string) (APIKeyCaller, error) {
@@ -1774,6 +1791,10 @@ func TestClaimLink(t *testing.T) {
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrDeviceActive) {
 		t.Errorf("ClaimLink while the app is active = %v, want %v", err, ErrDeviceActive)
 	}
+	f.ips.handoverErr = &proofingprovider.RejectedError{Status: http.StatusConflict, Code: proofingprovider.CodeAppFinished}
+	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrAppFinished) {
+		t.Errorf("ClaimLink once the app did its part = %v, want %v", err, ErrAppFinished)
+	}
 	f.ips.handoverErr = &proofingprovider.RejectedError{Status: http.StatusGone, Code: "session_expired"}
 	if _, err := f.svc.ClaimLink(ctx, testOrg.ID, sent.Request.ID, nil); !errors.Is(err, ErrSessionOver) {
 		t.Errorf("ClaimLink after IPS ended it = %v, want %v", err, ErrSessionOver)
@@ -1834,6 +1855,37 @@ func TestYiviAgeCheckAsksAgeClaim(t *testing.T) {
 	}
 }
 
+// AlwaysReviewed answers for the flow version a request in review pinned,
+// not the flow's active one.
+func TestAlwaysReviewed(t *testing.T) {
+	f := newFixture()
+	sent := f.sendYivi(t)
+	req := sent.Request
+	req.Status = StatusNeedsReview
+	pinned := proofingprovider.Flow{FlowSpec: proofingprovider.FlowSpec{AlwaysReview: true}, ID: req.FlowID, Version: req.FlowVersion}
+	later := proofingprovider.Flow{ID: req.FlowID, Version: req.FlowVersion + 1, Active: true}
+	laterReviews := proofingprovider.Flow{FlowSpec: pinned.FlowSpec, ID: req.FlowID, Version: req.FlowVersion + 2}
+	for name, tc := range map[string]struct {
+		versions []proofingprovider.Flow
+		version  int
+		status   Status
+		want     bool
+	}{
+		"pinned version reviews": {[]proofingprovider.Flow{pinned, later}, req.FlowVersion, StatusNeedsReview, true},
+		"later version reviews":  {[]proofingprovider.Flow{later, laterReviews}, req.FlowVersion, StatusNeedsReview, false},
+		"version unknown":        {[]proofingprovider.Flow{pinned}, 0, StatusNeedsReview, false},
+		"pinned version missing": {[]proofingprovider.Flow{later}, req.FlowVersion, StatusNeedsReview, false},
+		"not in review":          {[]proofingprovider.Flow{pinned}, req.FlowVersion, StatusApproved, false},
+	} {
+		f.ips.flowVersions = tc.versions
+		req.FlowVersion, req.Status = tc.version, tc.status
+		got, err := f.svc.AlwaysReviewed(context.Background(), []Request{req}, time.Now())
+		if err != nil || got[req.ID] != tc.want {
+			t.Errorf("%s: AlwaysReviewed = %v, %v; want %v", name, got[req.ID], err, tc.want)
+		}
+	}
+}
+
 // The Yivi disclosure asks for the photo only when the flow keeps it.
 func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
 	keep := true
@@ -1853,6 +1905,23 @@ func TestYiviAsksPhotoOnlyWhenKept(t *testing.T) {
 		}
 		if got := f.verifier.claims[len(f.verifier.claims)-1]; !slices.Equal(got, tc.want) {
 			t.Errorf("%s: claims = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// The Yivi disclosure asks the registered BSN whenever the flow keeps it, in
+// full or masked.
+func TestYiviAsksBSNOnlyWhenKept(t *testing.T) {
+	for policy, want := range map[string]bool{"": false, "omit": false, bsnPolicyMask: true, bsnPolicyRetrieve: true} {
+		f := newFixture()
+		sent := f.sendYivi(t)
+		spec := proofingprovider.FlowSpec{RequestedAttributes: []string{attributeDocument}, BSNPolicy: policy}
+		f.ips.flowVersions = []proofingprovider.Flow{{FlowSpec: spec, ID: sent.Request.FlowID, Version: sent.Request.FlowVersion, Active: true}}
+		if _, err := f.svc.StartYivi(context.Background(), testOrg.ID, sent.Request.ID, nil); err != nil {
+			t.Fatalf("%q: StartYivi: %v", policy, err)
+		}
+		if got := f.verifier.requests[len(f.verifier.requests)-1].BSN; got != want {
+			t.Errorf("policy %q: asks the BSN = %v, want %v", policy, got, want)
 		}
 	}
 }
@@ -2232,13 +2301,13 @@ func TestReviewScopeReachesAddress(t *testing.T) {
 	if ReviewScopeReviews.reaches(pending) || ReviewScopeReviews.reaches(decided) {
 		t.Error("a reviewer reaches the result of an approved check whose address is reviewed")
 	}
-	if !ReviewScopeReviews.reachesAddress(pending) {
+	if !ReviewScopeReviews.reachesStepReview(pending) {
 		t.Error("a reviewer does not reach an address that waits")
 	}
-	if !ReviewScopeReviews.reachesAddress(decided) {
+	if !ReviewScopeReviews.reachesStepReview(decided) {
 		t.Error("a reviewer does not reach an address that was decided")
 	}
-	if ReviewScopeReviews.reachesAddress(unreviewed) {
+	if ReviewScopeReviews.reachesStepReview(unreviewed) {
 		t.Error("a reviewer reaches an approved check whose address was never reviewed")
 	}
 }

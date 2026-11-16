@@ -13,6 +13,7 @@ import {
   getProofingFlowVersions,
   getProofingFlows,
   getProofingOverview,
+  getClosedReviews,
   getProofingRequests,
   getProofingStats,
   setProofingFlowSelection,
@@ -22,6 +23,7 @@ import {
   getProofingWebhook,
   getProofingWebhookDeliveries,
   removeProofingWebhook,
+  getProofingApiKeySecret,
   revokeProofingApiKey,
   rotateProofingWebhookSecret,
   saveProofingBranding,
@@ -31,7 +33,9 @@ import {
   getProofingRequest,
   getProofingApp,
   getHostedProofing,
-  decideAddressReview,
+  decideReviewItem,
+  checkSealsAgain,
+  getReviewItemCounts,
   decideProofingReview,
   getProofingDataMatches,
   getDataRequestFlows,
@@ -56,13 +60,14 @@ import {
   startProofingYivi,
   startProofingDocumentScan,
   finishProofingDocumentScan,
-  uploadProofingDiplomas,
   submitProofingAddress,
   lookUpAddress,
-  uploadProofingEmployment,
+  uploadProofingDocuments,
 } from "./identity-proofing";
 import type {
   AddressReviewInput,
+  ReviewItemCounts,
+  StepReviewKind,
   ProofingSettings,
   ProofingSettingsUpdate,
   ProofingFlow,
@@ -97,12 +102,11 @@ import type {
   ProofingFlowBrandingInput,
   ProofingFlowHosted,
   DiplomaMode,
-  DiplomaVerdict,
   AddressMode,
   RegisterAddress,
   ProofingAddressInput,
   EmploymentMode,
-  EmploymentVerdict,
+  DocumentVerdict,
   ProofingDataMatch,
   ProofingOverview,
 } from "./identity-proofing";
@@ -502,47 +506,50 @@ export function useWaitingReviewsQuery(
 ): UseQueryResult<WaitingReviews, Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "waiting"],
-    // Two reads: the checks and data requests in review, and the addresses
-    // waiting for a reviewer, each under its own cap.
+    // Four reads: the checks and data requests in review, and the addresses,
+    // the Verzekeringsberichten and the diplomas waiting for a reviewer, each
+    // under its own cap.
     queryFn: async ({ signal }) => {
-      const [inReview, addresses] = await Promise.all([
+      const reads = await Promise.all([
         getProofingRequests(slug, { status: "needs_review" }, signal),
-        getProofingRequests(slug, { addressReview: "pending" }, signal),
+        getProofingRequests(slug, { reviewKind: "address" }, signal),
+        getProofingRequests(slug, { reviewKind: "employment" }, signal),
+        getProofingRequests(slug, { reviewKind: "diplomas" }, signal),
       ]);
+      // A request waits once, whatever more of it waits.
+      const byId = new Map(reads.flat().map((r) => [r.id, r]));
       return {
-        requests: [...inReview, ...addresses],
-        capped: requestListCapped(inReview) || requestListCapped(addresses),
+        requests: [...byId.values()],
+        capped: reads.some(requestListCapped),
       };
     },
     enabled: options.enabled && slug !== "",
   });
 }
 
-// What was closed: the data requests that ended, approved or rejected, and the
-// addresses a reviewer confirmed or rejected. Four reads, each narrowed by the
-// backend before its cap, so a busy org's identity checks never push them
-// off. Under the requests key, so a decision refreshes it.
+// How many items of each kind wait, counted by the backend, so nothing is
+// capped. Under the requests key, so a decision, and the review stream
+// (useReviewEvents), refresh it.
+export function useReviewItemCountsQuery(
+  slug: string,
+  options: { enabled: boolean },
+): UseQueryResult<ReviewItemCounts, Error> {
+  return useQuery({
+    queryKey: [...proofingRequestsQueryKey(slug), "review-counts"],
+    queryFn: ({ signal }) => getReviewItemCounts(slug, signal),
+    enabled: options.enabled && slug !== "",
+  });
+}
+
+// What was closed: the sessions whose review is over and the data requests
+// that ended, in one read. Under the requests key, so a decision refreshes it.
 export function useClosedReviewsQuery(
   slug: string,
   options: { enabled: boolean },
 ): UseQueryResult<ProofingRequest[], Error> {
   return useQuery({
     queryKey: [...proofingRequestsQueryKey(slug), "closed"],
-    queryFn: async ({ signal }) => {
-      const reads = await Promise.all([
-        ...(["approved", "rejected"] as const).map((status) =>
-          getProofingRequests(
-            slug,
-            { status, flowKind: "data_request" },
-            signal,
-          ),
-        ),
-        ...(["confirmed", "rejected"] as const).map((addressReview) =>
-          getProofingRequests(slug, { addressReview }, signal),
-        ),
-      ]);
-      return reads.flat();
-    },
+    queryFn: ({ signal }) => getClosedReviews(slug, signal),
     enabled: options.enabled && slug !== "",
   });
 }
@@ -696,6 +703,17 @@ export function useCreateApiKeyMutation(
         queryKey: proofingApiKeysQueryKey(slug),
       });
     },
+  });
+}
+
+// Reads a key again. A mutation, not a query: each read is audited, and the
+// key is never kept in the cache.
+export function useRevealApiKeyMutation(
+  slug: string,
+): UseMutationResult<string, Error, string> {
+  return useMutation({
+    mutationFn: (keyId) => getProofingApiKeySecret(slug, keyId),
+    gcTime: SECRET_MUTATION_GC_TIME_MS,
   });
 }
 
@@ -1037,16 +1055,6 @@ export function useYiviDisclosureQuery(
   });
 }
 
-// Checks uploaded diploma extracts; each verdict says what became of a file.
-export function useUploadDiplomasMutation(
-  target: VerifyTarget,
-): UseMutationResult<DiplomaVerdict[], Error, File[]> {
-  return useMutation({
-    mutationFn: (files) => uploadProofingDiplomas(target, files),
-    meta: { suppressErrorToast: true },
-  });
-}
-
 // The Dutch addresses at a postal code and house number; asked only for a
 // Dutch postal code and a house number that starts with a number.
 export function useAddressLookupQuery(
@@ -1086,13 +1094,13 @@ export function useSubmitAddressMutation(
   });
 }
 
-// Checks an uploaded Verzekeringsbericht. The step shows what was kept until
-// the subject continues, as the diploma step does.
-export function useUploadEmploymentMutation(
+// Checks uploaded documents, each as the one its seal names. The step shows
+// what was kept until the subject continues.
+export function useUploadDocumentsMutation(
   target: VerifyTarget,
-): UseMutationResult<EmploymentVerdict, Error, File> {
+): UseMutationResult<DocumentVerdict[], Error, File[]> {
   return useMutation({
-    mutationFn: (file) => uploadProofingEmployment(target, file),
+    mutationFn: (files) => uploadProofingDocuments(target, files),
     meta: { suppressErrorToast: true },
   });
 }
@@ -1153,16 +1161,36 @@ export function refreshAfterReviewDecision(
   });
 }
 
-// Confirms or rejects an address waiting for a reviewer; the lists follow.
-export function useDecideAddressReviewMutation(
+// Confirms or rejects a step waiting for a reviewer (an address, a
+// Verzekeringsbericht); the lists follow.
+export function useDecideStepReviewMutation(
   slug: string,
   requestId: string,
+  kind: StepReviewKind,
 ): UseMutationResult<ProofingRequest, Error, AddressReviewInput> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input) => decideAddressReview(slug, requestId, input),
+    mutationFn: (input) => decideReviewItem(slug, requestId, kind, input),
     meta: { suppressErrorToast: true },
     onSuccess: () => refreshAfterReviewDecision(queryClient, slug, requestId),
+  });
+}
+
+// Checks again the seals of a step's files that could not be checked at
+// upload; the request is read again.
+export function useCheckSealsAgainMutation(
+  slug: string,
+  requestId: string,
+  kind: "diplomas" | "employment",
+): UseMutationResult<ProofingRequest, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => checkSealsAgain(slug, requestId, kind),
+    meta: { suppressErrorToast: true },
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: proofingRequestsQueryKey(slug),
+      }),
   });
 }
 

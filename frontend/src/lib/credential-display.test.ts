@@ -16,6 +16,12 @@ describe("credentialDisplayName", () => {
     );
   });
 
+  it("names the EBWOID instead of humanising its URN", () => {
+    expect(credentialDisplayName("uri:eu.ebw.oid.1")).toBe(
+      "Owner identification (EBWOID)",
+    );
+  });
+
   it("recognises a known final segment regardless of issuer host", () => {
     expect(
       credentialDisplayName(

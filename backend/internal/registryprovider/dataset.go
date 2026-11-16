@@ -12,7 +12,7 @@ const (
 	RegisterKVKNumber = "90000000"
 	RegisterSlug      = "kvk"
 	RegisterLegalName = "Kamer van Koophandel"
-	RegisterEUID      = "NL.KVK." + RegisterKVKNumber
+	RegisterEUID      = "NLNHR." + RegisterKVKNumber
 )
 
 // Registration is one company's entry in KVK's register — a single "row" of the
@@ -41,34 +41,34 @@ type Registration struct {
 // (TestRegisterOnlyCompanyIsOpenable, and the OpenWallet-success integration test).
 var DemoRegistrations = []Registration{
 	{
-		KVKNumber: "90000010", LegalName: "Yivi B.V.", EUID: "NL.KVK.90000010",
+		KVKNumber: "90000010", LegalName: "Yivi B.V.", EUID: "NLNHR.90000010",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Johannes Hendrik", FamilyName: "Janssen", DateOfBirth: "1979-05-14", Authority: AuthoritySole},
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
-		KVKNumber: "90000020", LegalName: "Firsty.app B.V.", EUID: "NL.KVK.90000020",
+		KVKNumber: "90000020", LegalName: "Firsty.app B.V.", EUID: "NLNHR.90000020",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Thijs Adriaan", FamilyName: "de Vries", DateOfBirth: "1985-11-22", Authority: AuthorityJointly},
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
-		KVKNumber: "90000030", LegalName: "Radboud Universiteit (Demo)", EUID: "NL.KVK.90000030",
+		KVKNumber: "90000030", LegalName: "Radboud Universiteit (Demo)", EUID: "NLNHR.90000030",
 		Representatives: []Representative{
 			{Kind: KindGevolmachtigde, GivenNames: "Anke", FamilyName: "Bakker", DateOfBirth: "1990-02-17", Authority: AuthorityBeperkt},
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
-		KVKNumber: "09220932", LegalName: "Gemeente Nijmegen", EUID: "NL.KVK.09220932",
+		KVKNumber: "09220932", LegalName: "Gemeente Nijmegen", EUID: "NLNHR.09220932",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
 	},
 	{
-		KVKNumber: "90000150", LegalName: "Waalstad Bewindvoering B.V. (Demo)", EUID: "NL.KVK.90000150",
+		KVKNumber: "90000150", LegalName: "Waalstad Bewindvoering B.V. (Demo)", EUID: "NLNHR.90000150",
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},
 		},
@@ -76,7 +76,7 @@ var DemoRegistrations = []Registration{
 	{
 		// Register-only: validatable but not seeded as an org, so a validated
 		// requester can actually open its wallet (see the type comment above).
-		KVKNumber: OpenableKVKNumber, LegalName: "Zonnedael B.V.", EUID: "NL.KVK." + OpenableKVKNumber,
+		KVKNumber: OpenableKVKNumber, LegalName: "Zonnedael B.V.", EUID: "NLNHR." + OpenableKVKNumber,
 		Representatives: []Representative{
 			{Kind: KindBestuurder, GivenNames: "Sanne Marijke", FamilyName: "Visser", DateOfBirth: "1983-07-08", Authority: AuthoritySole},
 			{Kind: KindBestuurder, GivenNames: "Dibran", FamilyName: "Mulder", DateOfBirth: "1991-05-14", Authority: AuthoritySole},

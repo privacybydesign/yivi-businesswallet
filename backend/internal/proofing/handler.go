@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/diploma"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/email"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/ratelimit"
@@ -139,8 +141,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/diplomas", member(respond.HandlerFunc(h.addDiplomas)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address", member(respond.HandlerFunc(h.addAddress)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/employment", member(respond.HandlerFunc(h.addEmployment)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/documents", member(respond.HandlerFunc(h.addDocuments)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/address/lookup", member(respond.HandlerFunc(h.lookUpAddress)))
-	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/address/review", reviewer(respond.HandlerFunc(h.decideAddressReview)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}", reviewer(respond.HandlerFunc(h.decideReviewItem)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review-items/{kind}/seal-check", reviewer(respond.HandlerFunc(h.checkSealsAgain)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/counts", reviewer(respond.HandlerFunc(h.reviewItemCounts)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/review-items/closed", reviewer(respond.HandlerFunc(h.closedReviews)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/requests/{requestID}/review", reviewer(respond.HandlerFunc(h.decideReview)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/result", reviewer(respond.HandlerFunc(h.requestResult)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/requests/{requestID}/data-matches", reviewer(respond.HandlerFunc(h.dataMatches)))
@@ -152,6 +158,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/api-keys/{keyID}", admin(respond.HandlerFunc(h.revokeAPIKey)))
+	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys/{keyID}/secret", admin(respond.HandlerFunc(h.revealAPIKey)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.getWebhook)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.saveWebhook)))
 	mux.Handle("DELETE /orgs/{slug}/identity-proofing/webhook", admin(respond.HandlerFunc(h.removeWebhook)))
@@ -159,11 +166,16 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /orgs/{slug}/identity-proofing/webhook/test", admin(respond.HandlerFunc(h.testWebhook)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/webhook/deliveries", admin(respond.HandlerFunc(h.listWebhookDeliveries)))
 	h.registerPublicAPI(mux)
+	h.registerPublicSetupAPI(mux)
 	h.registerHosted(mux)
 	h.registerPause(mux)
 }
 
 func orgFromRequest(r *http.Request) Org {
+	// An API key acts for its own org, on the routes it shares with an admin.
+	if caller, ok := r.Context().Value(apiCallerKey{}).(APIKeyCaller); ok {
+		return caller.Org
+	}
 	org := organization.OrgFromContext(r.Context())
 	return Org{ID: org.ID, Name: org.Name}
 }
@@ -379,6 +391,10 @@ type requestResponse struct {
 	AddressReview AddressReview `json:"addressReview,omitempty"`
 	// AddressReviewedAt is when a reviewer decided it.
 	AddressReviewedAt *time.Time `json:"addressReviewedAt,omitempty"`
+	// StepReviewDueAt is when the first waiting step review lapses.
+	StepReviewDueAt *time.Time `json:"stepReviewDueAt,omitempty"`
+	// IdentityReviewedAt is when a reviewer last decided the identity.
+	IdentityReviewedAt *time.Time `json:"identityReviewedAt,omitempty"`
 	// Decisions are the reviewers' decisions, with their reasons: only on
 	// GET .../requests/{id}, for an admin or a reviewer (decisionsFor).
 	Decisions []decisionResponse `json:"decisions,omitempty"`
@@ -392,10 +408,30 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
-	// ReviewReason is why the wallet put the request in review after the
-	// identity was approved (no_current_employment, current_benefit,
-	// current_other_income); absent otherwise.
-	ReviewReason string `json:"reviewReason,omitempty"`
+	// ReviewReason is why the kept Verzekeringsbericht went to review
+	// (no_current_employment, current_benefit, current_other_income); absent
+	// otherwise. EmploymentReview is where that review stands, and
+	// EmploymentReviewedAt when it was decided or lapsed.
+	ReviewReason         string      `json:"reviewReason,omitempty"`
+	EmploymentReview     ReviewState `json:"employmentReview,omitempty"`
+	EmploymentReviewedAt *time.Time  `json:"employmentReviewedAt,omitempty"`
+	// DiplomasReview is where the kept extracts' review stands, and
+	// DiplomasReviewedAt when it was decided or lapsed.
+	DiplomasReview     ReviewState `json:"diplomasReview,omitempty"`
+	DiplomasReviewedAt *time.Time  `json:"diplomasReviewedAt,omitempty"`
+	// UncheckedDiplomas is how many extracts, and UncheckedEmployment whether
+	// the statement, wait for a reviewer to check their seal again: it could
+	// not be checked at upload. Their step cannot be confirmed before.
+	UncheckedDiplomas   int  `json:"uncheckedDiplomas,omitempty"`
+	UncheckedEmployment bool `json:"uncheckedEmployment,omitempty"`
+	// SealChecks are those files, waiting or decided, by name and outcome.
+	SealChecks []SealCheck `json:"sealChecks,omitempty"`
+	// Steps are the extra steps the flow asks for, each with its own outcome
+	// beside the identity's.
+	Steps []StepOutcome `json:"steps"`
+	// FlowAlwaysReview is a request in review whose flow version sends every
+	// session to review.
+	FlowAlwaysReview bool `json:"flowAlwaysReview,omitempty"`
 	// FlowKind is what the session is for; a data request goes to review once
 	// the person is proven. DataExportUntil is until when an approved "see my
 	// data" request's data downloads.
@@ -419,8 +455,9 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 	return requestResponse{
 		DiplomaMode: diplomaModeOf(req), Diplomas: []diplomaResponse{}, DiplomasUntil: diplomasUntil(req),
 		AddressMode: addressModeOf(req), Address: req.SubjectAddress, AddressUntil: addressUntil(req), AddressReview: req.AddressReview,
-		AddressReviewedAt: req.AddressReviewedAt,
-		EmploymentMode:    employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
+		AddressReviewedAt: req.AddressReviewedAt, StepReviewDueAt: req.StepReviewDueAt,
+		IdentityReviewedAt: req.IdentityReviewedAt,
+		EmploymentMode:     employmentModeOf(req), Employment: req.SubjectEmployment, EmploymentUntil: employmentUntil(req),
 		ID: req.ID, RequestedByID: req.RequestedBy, RequestedByName: req.RequestedByName, APIKeyName: req.APIKeyName, SubjectUserID: req.SubjectUserID,
 		External:    req.External(),
 		SubjectName: req.SubjectName, SubjectEmail: req.SubjectEmail, ProofedName: req.ProofedName,
@@ -429,8 +466,12 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
-		ReviewReason: req.ReviewReason,
-		FlowKind:     req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
+		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,
+		UncheckedDiplomas: req.UncheckedDiplomas, UncheckedEmployment: req.UncheckedEmployment,
+		SealChecks: req.SealChecks,
+		Steps:      req.Steps(now),
+		FlowKind:   req.FlowKind, DataExportUntil: req.DataExportUntil,
 	}
 }
 
@@ -468,6 +509,21 @@ func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// closedReviews is the Reviews page's Closed tab in one read (ClosedReviews):
+// the org's, for an admin and for a reviewer, as the page lists it.
+func (h *Handler) closedReviews(w http.ResponseWriter, r *http.Request) error {
+	reqs, err := h.service.Requests(r.Context(), orgFromRequest(r).ID, RequestFilter{ClosedReviews: true})
+	if err != nil {
+		return mapError(err)
+	}
+	out, err := h.listedResponses(r.Context(), reqs)
+	if err != nil {
+		return err
+	}
+	respond.JSON(w, r, http.StatusOK, out)
+	return nil
+}
+
 // listedResponses is reqs as a list shows them, each with its diplomas.
 func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]requestResponse, error) {
 	ids := make([]uuid.UUID, 0, len(reqs))
@@ -479,30 +535,47 @@ func (h *Handler) listedResponses(ctx context.Context, reqs []Request) ([]reques
 		return nil, mapError(err)
 	}
 	now := time.Now()
+	always, err := h.service.AlwaysReviewed(ctx, reqs, now)
+	if err != nil {
+		return nil, mapError(err)
+	}
 	out := make([]requestResponse, 0, len(reqs))
 	for _, req := range reqs {
-		out = append(out, requestResponseFor(ctx, req, diplomas[req.ID], now))
+		res := requestResponseFor(ctx, req, diplomas[req.ID], now)
+		res.FlowAlwaysReview = always[req.ID]
+		out = append(out, res)
 	}
 	return out, nil
 }
 
 // requestResponseFor is req's response as the caller sees it: a member who
-// reaches it only for its reviewed address (onlyAddress) gets it
-// without its diplomas, proofed name and employment, which deciding the
-// address does not need.
+// reaches it only for its steps' reviews (onlyStepReviews) gets it without
+// its proofed name, and without its address, employment and diplomas unless
+// they review that step: deciding a step needs only the step.
 func requestResponseFor(ctx context.Context, req Request, diplomas []Diploma, now time.Time) requestResponse {
 	out := newRequestResponse(req, now)
-	if onlyAddress(ctx, req) {
-		out.ProofedName, out.Employment = "", nil
-		return out
+	if onlyStepReviews(ctx, req) {
+		out.ProofedName = ""
+		if req.AddressReview == "" {
+			out.Address = nil
+		}
+		if req.EmploymentReview == "" {
+			out.Employment = nil
+		}
+		out.SealChecks = slices.DeleteFunc(slices.Clone(out.SealChecks), func(c SealCheck) bool {
+			return req.stepReview(c.Kind) == ""
+		})
+		if req.DiplomasReview == "" {
+			return out
+		}
 	}
 	return out.withDiplomas(diplomas)
 }
 
-// onlyAddress reports whether the caller reaches req only for its reviewed
-// address: not an admin, not its sender, and not on the Reviews page for the
+// onlyStepReviews reports whether the caller reaches req only for its steps'
+// reviews: not an admin, not its sender, and not on the Reviews page for the
 // request itself.
-func onlyAddress(ctx context.Context, req Request) bool {
+func onlyStepReviews(ctx context.Context, req Request) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return false
 	}
@@ -544,31 +617,39 @@ func requestFilterFrom(query url.Values) (RequestFilter, error) {
 		}
 		filter.DataRequests = true
 	}
-	review, err := addressReviewFilterFrom(query.Get("addressReview"))
-	if err != nil {
+	if err := reviewFilterFrom(query, &filter); err != nil {
 		return RequestFilter{}, err
 	}
-	filter.AddressReview = review
 	return filter, nil
 }
 
-// addressReviewFilterFrom reads ?addressReview: nil when absent.
-func addressReviewFilterFrom(raw string) (*AddressReview, error) {
-	if raw == "" {
-		return nil, nil
+// reviewFilterFrom reads ?reviewKind and ?reviewState, which needs a kind.
+func reviewFilterFrom(query url.Values, filter *RequestFilter) error {
+	if raw := query.Get("reviewKind"); raw != "" {
+		kind := ReviewKind(raw)
+		if !kind.known() {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewKind must be identity, address, employment or data_request"}
+		}
+		filter.ReviewKind = &kind
 	}
-	review := AddressReview(raw)
-	if review != AddressReviewPending && review != AddressReviewConfirmed && review != AddressReviewRejected {
-		return nil, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "addressReview must be pending, confirmed or rejected"}
+	if raw := query.Get("reviewState"); raw != "" {
+		state := ReviewState(raw)
+		if !state.known() {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewState must be pending, confirmed, rejected or lapsed"}
+		}
+		if filter.ReviewKind == nil {
+			return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "reviewState needs a reviewKind"}
+		}
+		filter.ReviewState = &state
 	}
-	return &review, nil
+	return nil
 }
 
 // listsEveryRequest reports whether the caller lists the org's requests whoever
 // sent them: an admin always, a reviewer only a list ReviewScopeReviews holds
 // whole, the requests waiting for review (?status=needs_review) or the data
-// requests (?flowKind=data_request), or the addresses a reviewer reviews,
-// waiting or decided (?addressReview=). Any other list is the ones they sent.
+// requests (?flowKind=data_request), or the review items of a kind, waiting
+// or decided (?reviewKind=). Any other list is the ones they sent.
 func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 	if organization.ActsAsAdmin(ctx) {
 		return true
@@ -577,7 +658,7 @@ func listsEveryRequest(ctx context.Context, filter RequestFilter) bool {
 		return false
 	}
 	return filter.DataRequests || (filter.Status != nil && *filter.Status == StatusNeedsReview) ||
-		filter.AddressReview != nil
+		filter.ReviewKind != nil
 }
 
 // reviewScope is the requests the caller reaches on a review route, which
@@ -623,7 +704,7 @@ func mayOpen(ctx context.Context, req Request, caller uuid.UUID) bool {
 	if req.RequestedBy != nil && *req.RequestedBy == caller {
 		return true
 	}
-	return organization.MayReview(ctx) && ReviewScopeReviews.reachesAddress(req)
+	return organization.MayReview(ctx) && ReviewScopeReviews.reachesStepReview(req)
 }
 
 // getRequest is one request, re-checked in the engine: what the on-screen page polls.
@@ -646,6 +727,11 @@ func (h *Handler) getRequest(w http.ResponseWriter, r *http.Request) error {
 	if out.Decisions, err = h.decisionsFor(r.Context(), req); err != nil {
 		return mapError(err)
 	}
+	always, err := h.service.AlwaysReviewed(r.Context(), []Request{req}, time.Now())
+	if err != nil {
+		return mapError(err)
+	}
+	out.FlowAlwaysReview = always[req.ID]
 	respond.JSON(w, r, http.StatusOK, out)
 	return nil
 }
@@ -663,8 +749,9 @@ type decisionResponse struct {
 // decisionsFor is what reviewers decided on req, with their reasons, for an
 // admin or a reviewer: those who read the reasons in its timeline and on the
 // Reviews page. A member who only sent it gets none, as their timeline leaves
-// the reasons out. One reached only for its address (onlyAddress) gets the
-// address decisions alone.
+// the reasons out. One reached only for its steps' reviews (onlyStepReviews)
+// gets the steps' decisions alone, plus the identity's once a reviewer decided
+// it, as the Reviews page lists that check as closed.
 func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResponse, error) {
 	if !organization.ActsAsAdmin(ctx) && !organization.MayReview(ctx) {
 		return nil, nil
@@ -673,10 +760,10 @@ func (h *Handler) decisionsFor(ctx context.Context, req Request) ([]decisionResp
 	if err != nil {
 		return nil, err
 	}
-	addressOnly := onlyAddress(ctx, req)
+	stepsOnly := onlyStepReviews(ctx, req) && req.IdentityReviewedAt == nil
 	out := []decisionResponse{}
 	for _, d := range decisions {
-		if addressOnly && d.Kind != DecisionAddress {
+		if stepsOnly && d.Kind == DecisionReview {
 			continue
 		}
 		out = append(out, decisionResponse(d))
@@ -721,19 +808,25 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// addressReviewRequest is a reviewer's decision on an address waiting for
-// review: decision "confirm" or "reject", and the required reason.
-type addressReviewRequest struct {
-	Decision string `json:"decision"`
-	Reason   string `json:"reason"`
+// reviewItemRequest is a reviewer's decision on a review item: decision
+// "confirm" or "reject", the required reason, and for rejecting a session's
+// own review an optional errorCode.
+type reviewItemRequest struct {
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	ErrorCode string `json:"errorCode"`
 }
 
-func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) error {
+func (h *Handler) decideReviewItem(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseRequestID(r.PathValue("requestID"))
 	if err != nil {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
 	}
-	var body addressReviewRequest
+	kind := ReviewKind(r.PathValue("kind"))
+	if !kind.known() {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no such review item kind"}
+	}
+	var body reviewItemRequest
 	if err := decode(r, &body); err != nil {
 		return err
 	}
@@ -741,14 +834,55 @@ func (h *Handler) decideAddressReview(w http.ResponseWriter, r *http.Request) er
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "decision is confirm or reject"}
 	}
 	caller := auth.UserFromContext(r.Context())
-	req, err := h.service.DecideAddressReview(r.Context(), orgFromRequest(r).ID, id, AddressReviewInput{
-		Confirm: body.Decision == "confirm", Reason: body.Reason, ReviewerID: caller.ID,
+	req, err := h.service.DecideReviewItem(r.Context(), orgFromRequest(r).ID, id, kind, string(caller.Email), ReviewItemInput{
+		Confirm: body.Decision == "confirm", Reason: body.Reason, ErrorCode: body.ErrorCode, ReviewerID: caller.ID,
 		Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
 	})
 	if err != nil {
 		return mapError(err)
 	}
 	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
+	return nil
+}
+
+// checkSealsAgain checks the seals of a step's files that could not be
+// checked at upload, for the reviewer of its waiting item.
+func (h *Handler) checkSealsAgain(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseRequestID(r.PathValue("requestID"))
+	if err != nil {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_id", Message: invalidRequestIDMessage}
+	}
+	kind := ReviewKind(r.PathValue("kind"))
+	if !kind.known() {
+		return &respond.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "no such review item kind"}
+	}
+	caller := auth.UserFromContext(r.Context())
+	req, err := h.service.CheckSealsAgain(r.Context(), orgFromRequest(r).ID, id, kind, StepReviewInput{
+		ReviewerID: caller.ID, Scope: reviewScope(r.Context()), OwnAllowed: h.selfReview.Allows(caller.Email),
+	})
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, requestResponseFor(r.Context(), req, nil, time.Now()))
+	return nil
+}
+
+// reviewItemCountsResponse is what waits: sessions per kind, all of them, and
+// those waiting for a step, each once.
+type reviewItemCountsResponse struct {
+	Counts       map[ReviewKind]int `json:"counts"`
+	Sessions     int                `json:"sessions"`
+	StepSessions int                `json:"stepSessions"`
+}
+
+func (h *Handler) reviewItemCounts(w http.ResponseWriter, r *http.Request) error {
+	tally, err := h.service.ReviewCounts(r.Context(), orgFromRequest(r).ID)
+	if err != nil {
+		return mapError(err)
+	}
+	respond.JSON(w, r, http.StatusOK, reviewItemCountsResponse{
+		Counts: tally.Kinds, Sessions: tally.Sessions, StepSessions: tally.StepSessions,
+	})
 	return nil
 }
 
@@ -1000,6 +1134,7 @@ var errorResponses = []struct {
 	{ErrFlowNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_found", Message: "the selected flow does not exist"}},
 	{ErrFlowNotCompletable, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_completable", Message: "this flow cannot be finished from the wallet: its face step needs the NFC chip read to compare against and must run in the app"}},
 	{ErrMemberNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "member_not_found", Message: "that person is not a member of this organization"}},
+	{ErrAPIKeyNotRevealable, respond.APIError{Status: http.StatusConflict, Code: "api_key_not_revealable", Message: "this API key was made before keys could be shown again: only its hash is kept, so create a new one"}},
 	{ErrAPIKeyNotFound, respond.APIError{Status: http.StatusNotFound, Code: "api_key_not_found", Message: "this API key does not exist"}},
 	{ErrRequestNotFound, respond.APIError{Status: http.StatusNotFound, Code: "session_not_found", Message: "this session does not exist"}},
 	{ErrWebhookNotFound, respond.APIError{Status: http.StatusNotFound, Code: "webhook_not_found", Message: "this organization has no webhook endpoint"}},
@@ -1008,11 +1143,14 @@ var errorResponses = []struct {
 	{ErrFlowNotAllowed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}},
 	{ErrWrongMethod, respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}},
 	{ErrNotHosted, respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}},
+	{ErrSessionNotStarted, respond.APIError{Status: http.StatusConflict, Code: "session_not_started", Message: "start the session first: POST /proofing/sessions/{id}/methods/{method}"}},
 	{ErrResultNotReady, respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}},
 	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
+	{ErrAppFinished, respond.APIError{Status: http.StatusConflict, Code: "app_finished", Message: "the Idem app already did its part; carry on on this page"}},
 	{ErrSessionOver, respond.APIError{Status: http.StatusConflict, Code: "session_over", Message: "this session has ended"}},
 	{ErrNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "not_under_review", Message: "this request is not under review"}},
 	{ErrAddressNotUnderReview, respond.APIError{Status: http.StatusConflict, Code: "address_not_under_review", Message: "this address does not wait for a review"}},
+	{ErrSealUnchecked, respond.APIError{Status: http.StatusConflict, Code: "seal_unchecked", Message: "a document of this step has a seal nobody checked yet: check it again before confirming"}},
 	{ErrOwnReview, respond.APIError{Status: http.StatusForbidden, Code: "own_review", Message: "you sent this check or it is about you: another reviewer decides it"}},
 	{ErrLinkStarted, respond.APIError{Status: http.StatusConflict, Code: "link_started", Message: "this link was started already"}},
 	{ErrDiplomasNotAsked, respond.APIError{Status: http.StatusConflict, Code: "diplomas_not_asked", Message: "this session asks for no diplomas"}},
@@ -1020,6 +1158,7 @@ var errorResponses = []struct {
 	{ErrAddressNotAsked, respond.APIError{Status: http.StatusConflict, Code: "address_not_asked", Message: "this session asks for no address"}},
 	{ErrAddressClosed, respond.APIError{Status: http.StatusConflict, Code: "address_closed", Message: "the address can be entered once, for a while after the identity check: " + AddressWindow.String()}},
 	{ErrEmploymentNotAsked, respond.APIError{Status: http.StatusConflict, Code: "employment_not_asked", Message: "this session asks for no Verzekeringsbericht"}},
+	{ErrDocumentsNotAsked, respond.APIError{Status: http.StatusConflict, Code: "documents_not_asked", Message: "this session asks for no document"}},
 	{ErrEmploymentClosed, respond.APIError{Status: http.StatusConflict, Code: "employment_closed", Message: "a Verzekeringsbericht is kept once, for a while after the identity check: " + EmploymentWindow.String()}},
 	{ErrAddressNotFound, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_not_found", Message: "this address is not in the Dutch address register: check the postal code, house number and street"}},
 	{ErrAddressLookupUnavailable, respond.APIError{Status: http.StatusServiceUnavailable, Code: "address_lookup_unavailable", Message: "the Dutch address register cannot be reached; enter the address in full"}},
@@ -1055,6 +1194,13 @@ func mapError(err error) error {
 	}
 	if errors.Is(err, ErrInvalidInput) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: strings.TrimPrefix(err.Error(), ErrInvalidInput.Error()+": ")}
+	}
+	var cmErr *idscan.APIError
+	if errors.Is(err, ErrDocumentScanUnavailable) && errors.As(err, &cmErr) {
+		return &respond.APIError{
+			Status: http.StatusBadGateway, Code: "document_scan_unavailable",
+			Message: fmt.Sprintf("the scan service could not give this scan's result (%d: %s): scan again", cmErr.Status, cmErr.Message),
+		}
 	}
 	if errors.Is(err, ErrReasonsMissing) {
 		return &respond.APIError{Status: http.StatusBadRequest, Code: "reasons_missing", Message: strings.TrimPrefix(err.Error(), ErrReasonsMissing.Error()+": ")}

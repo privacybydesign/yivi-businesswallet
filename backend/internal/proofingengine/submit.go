@@ -176,7 +176,13 @@ const (
 	reasonCheckFailed         = "check_failed"
 	reasonAssuranceNotMet     = "assurance_not_met"
 	reasonDocumentDoubtful    = "document_doubtful"
+	reasonFlowAlwaysReview    = "flow_always_review"
 )
+
+// alwaysReviews reports whether fd sends every session it would approve to review.
+func alwaysReviews(fd *flow.FlowDefinition) bool {
+	return fd != nil && fd.AlwaysReview
+}
 
 // documentPhotoOutcome is what sess's document scan decides: errorCode rejects
 // the session (a fake document, a field that failed its check, or a document
@@ -228,7 +234,7 @@ func scannedDocumentInfo(d session.ScannedDocument, now time.Time) *documentInfo
 // cloned chip or a fake document, a submission outside what fd accepts, a face
 // step that did not verify the person, or an achieved eIDAS level below fd's
 // required one, in that order; in review for a doubtful document scan
-// (documentPhotoOutcome); approved otherwise. The required level is only that minimum: it
+// (documentPhotoOutcome) or a flow that always reviews; approved otherwise. The required level is only that minimum: it
 // neither raises nor caps achieved, which is computed without it.
 func sessionOutcome(fd *flow.FlowDefinition, sess session.Session, req appResultRequest, checks *chipChecksInfo, achieved flow.AssuranceLevel, now time.Time) (status session.Status, errorCode, reason string) {
 	if failed, code := authenticityFailure(fd, checks); failed {
@@ -258,6 +264,9 @@ func sessionOutcome(fd *flow.FlowDefinition, sess session.Session, req appResult
 	}
 	if doubtful {
 		return session.StatusNeedsReview, "", reasonDocumentDoubtful
+	}
+	if alwaysReviews(fd) {
+		return session.StatusNeedsReview, "", reasonFlowAlwaysReview
 	}
 	return session.StatusApproved, "", ""
 }

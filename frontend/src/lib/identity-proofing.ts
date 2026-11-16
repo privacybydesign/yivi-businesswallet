@@ -19,6 +19,7 @@ import type {
   FlowKind,
   ProofingBranding,
   ProofingChannel,
+  ProofingDataMatch,
   ProofingEmployment,
   ProofingFlow,
   ProofingFlowBranding,
@@ -30,6 +31,7 @@ import type {
   ProofingMethod,
   ProofingRequest,
   RegisterAddress,
+  StepReviewKind,
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
@@ -66,36 +68,29 @@ export function isProofingLive(status: string): boolean {
 // (403), or it is gone (404). Polling on would only repeat the refusal.
 const FINAL_POLL_STATUSES: ReadonlySet<number> = new Set([403, 404]);
 
-// Whether a verify page keeps polling its progress: until the first read,
-// while the session is live, and while an approved session still owes its
-// Verzekeringsbericht past the window, until the backend rejects it for that
-// (EMPLOYMENT_NOT_PROVIDED); unless a read was refused for good.
+// Whether a verify page keeps polling its progress: until the first read, and
+// while the session is live; unless a read was refused for good.
 export function progressPollContinues(
-  progress: { status: string; employmentUntil?: string } | undefined,
+  progress: { status: string } | undefined,
   error: Error | null,
-  now: number = Date.now(),
 ): boolean {
   if (refusedForGood(error)) {
     return false;
   }
-  return (
-    progress === undefined ||
-    isProofingLive(progress.status) ||
-    (employmentOwed(progress) &&
-      Date.parse(progress.employmentUntil ?? "") <= now)
-  );
+  return progress === undefined || isProofingLive(progress.status);
 }
 
-// Whether the backend still waits for an approved session's
-// Verzekeringsbericht: it settles once one is kept (approved or to review) or
-// the window passed without one (rejected), and only that read may be handed
-// back as the outcome.
-export function employmentOwed(progress: {
-  status: string;
-  employmentUntil?: string;
-}): boolean {
+// Whether an approved session's Verzekeringsbericht can still be given: its
+// window is open and none was kept. The step's outcome is its own, so the
+// session's never waits on it.
+export function employmentOwed(
+  progress: { status: string; employmentUntil?: string },
+  now: number = Date.now(),
+): boolean {
   return (
-    progress.status === "approved" && progress.employmentUntil !== undefined
+    progress.status === "approved" &&
+    progress.employmentUntil !== undefined &&
+    Date.parse(progress.employmentUntil) > now
   );
 }
 
@@ -481,6 +476,8 @@ export interface ProofingFlowDraft {
   bsnPolicy: BsnPolicy;
   blackOutBsn: boolean;
   keepFacePhotos: boolean;
+  // A session the checks would approve waits for a reviewer instead.
+  alwaysReview: boolean;
   // Whole seconds the flow keeps its finished sessions; 0 follows the org's.
   retentionSeconds: number;
   // How long a session of the flow runs; 0 follows the org's.
@@ -714,6 +711,7 @@ export function emptyFlowDraft(): ProofingFlowDraft {
     bsnPolicy: NEW_FLOW_BSN_POLICY,
     blackOutBsn: true,
     keepFacePhotos: false,
+    alwaysReview: false,
     retentionSeconds: FOLLOW_ORG,
     sessionTtlSeconds: FOLLOW_ORG,
     carried: {},
@@ -780,6 +778,7 @@ export function draftFromFlow(flow: EditableFlow): ProofingFlowDraft {
     bsnPolicy: oneOf(BSN_POLICIES, flow.bsnPolicy) || UNSET_BSN_POLICY,
     blackOutBsn: flow.blurBsn ?? false,
     keepFacePhotos: flow.keepFacePhotos ?? false,
+    alwaysReview: flow.alwaysReview ?? false,
     retentionSeconds: flow.retentionOverrideSeconds ?? FOLLOW_ORG,
     sessionTtlSeconds: flow.sessionTtlSeconds ?? FOLLOW_ORG,
     carried: {
@@ -972,6 +971,7 @@ export function flowSpecFromDraft(draft: ProofingFlowDraft): ProofingFlowSpec {
     bsnPolicy: draft.bsnPolicy,
     blurBsn: draft.blackOutBsn,
     keepFacePhotos: draft.keepFacePhotos,
+    alwaysReview: draft.alwaysReview,
   };
   applyDraftOverrides(spec, draft, requestedAttributes);
   return spec;
@@ -1197,6 +1197,18 @@ export function matchTickedByDefault(kind: FlowKind, level: string): boolean {
   );
 }
 
+// The sure matches an automatic erasure deleted already: with any, a refusal
+// keeps the rest instead (proofing.refusesPartlyErased).
+export function erasedSureMatches(
+  kind: FlowKind,
+  matches: readonly ProofingDataMatch[],
+): number {
+  if (kind !== "data_erasure") return 0;
+  return matches.filter(
+    (m) => m.purgedAt !== undefined && matchTickedByDefault(kind, m.level),
+  ).length;
+}
+
 // The backend's own message for an error whose text is meant for the reader:
 // invalid input, or the proofing service's explanation of why it refused a flow.
 function serverMessage(error: unknown): string | null {
@@ -1357,23 +1369,21 @@ export type VerifyStage =
   | "method"
   | "session"
   | "address"
-  | "diplomas"
-  | "employment";
+  | "documents";
 
 export function verifyStages({
   app = true,
   document = false,
   address = false,
-  diplomas,
-  employment = false,
+  documents,
 }: {
   // False for a flow the browser runs alone: there is no app to choose.
   app?: boolean;
   // A flow that photographs the document, after the app's part.
   document?: boolean;
   address?: boolean;
-  diplomas: boolean;
-  employment?: boolean;
+  // A flow that asks for diplomas or the Verzekeringsbericht.
+  documents: boolean;
 }): VerifyStage[] {
   return [
     "overview",
@@ -1381,8 +1391,7 @@ export function verifyStages({
     "session",
     ...(document ? (["document"] as const) : []),
     ...(address ? (["address"] as const) : []),
-    ...(diplomas ? (["diplomas"] as const) : []),
-    ...(employment ? (["employment"] as const) : []),
+    ...(documents ? (["documents"] as const) : []),
   ];
 }
 
@@ -1419,42 +1428,36 @@ export function stageIndex(
   return stage === "done" ? stages.length : stages.indexOf(stage);
 }
 
-// The stage a verify page is at: the address, diploma or employment step
-// while it is open, else the page's own step.
+// The stage a verify page is at: the address or document step while it is
+// open, else the page's own step.
 export function currentStage({
   step,
   inAddress,
-  inDiplomas,
-  inEmployment,
+  inDocuments,
 }: {
   step: VerifyStage | "done";
   inAddress: boolean;
-  inDiplomas: boolean;
-  inEmployment: boolean;
+  inDocuments: boolean;
 }): VerifyStage | "done" {
   if (inAddress) {
     return "address";
   }
-  if (inDiplomas) {
-    return "diplomas";
-  }
-  if (inEmployment) {
-    return "employment";
+  if (inDocuments) {
+    return "documents";
   }
   return step;
 }
 
 // What a verify page's running session shows: once its identity check
-// finished (approved, or in review) and it asks for them, the address step,
-// the diploma step and then the employment step until the subject is done with
-// each, else the outcome once settled, the expiry once an unstarted session's
-// link ran out, or the session itself. The employment step stays while the
-// backend still owes it (employmentOwed): the outcome it hands back is only
-// ever the one read after the statement.
+// finished (approved, or in review) and it asks for them, the address step
+// and then the document step until the subject is done with each, else the
+// outcome once settled, the expiry once an unstarted session's link ran out,
+// or the session itself. The document step stays while the backend still
+// owes the statement (employmentOwed): the outcome it hands back is only ever
+// the one read after it.
 export type SessionView =
   | "address"
-  | "diplomas"
-  | "employment"
+  | "documents"
   | "outcome"
   | "expired"
   | "running";
@@ -1466,10 +1469,9 @@ export function sessionView({
   addressDone,
   diplomaMode,
   diplomasUntil,
-  diplomasDone,
   employmentMode,
   employmentUntil,
-  employmentDone,
+  documentsDone,
   employmentOwed = false,
   secondsLeft,
 }: {
@@ -1479,10 +1481,9 @@ export function sessionView({
   addressDone: boolean;
   diplomaMode: DiplomaMode;
   diplomasUntil: string | undefined;
-  diplomasDone: boolean;
   employmentMode: EmploymentMode;
   employmentUntil: string | undefined;
-  employmentDone: boolean;
+  documentsDone: boolean;
   employmentOwed?: boolean;
   secondsLeft: number;
 }): SessionView {
@@ -1490,13 +1491,12 @@ export function sessionView({
     if (addressMode !== "off" && addressUntil !== undefined && !addressDone) {
       return "address";
     }
-    if (diplomaMode !== "off" && diplomasUntil !== undefined && !diplomasDone) {
-      return "diplomas";
-    }
-    return employmentMode !== "off" &&
-      employmentUntil !== undefined &&
-      (!employmentDone || employmentOwed)
-      ? "employment"
+    const diplomasOpen = diplomaMode !== "off" && diplomasUntil !== undefined;
+    const statementOpen =
+      employmentMode !== "off" && employmentUntil !== undefined;
+    const open = diplomasOpen || statementOpen;
+    return open && (!documentsDone || (statementOpen && employmentOwed))
+      ? "documents"
       : "outcome";
   }
   return secondsLeft === 0 && status === "pending" ? "expired" : "running";
@@ -1768,10 +1768,77 @@ export function diplomaRejectionReason(reason: string, t: TFunction): string {
   }
 }
 
-// Whether the diploma step can end: once an extract is held, or the time to
-// add one is up.
-export function diplomaStepDone(held: number, secondsLeft: number): boolean {
-  return held > 0 || secondsLeft === 0;
+// Whether the document step can end: every document the flow asks for has a
+// kept file, or the time to add them is up.
+export function documentStepDone({
+  diplomasAsked,
+  diplomasHeld,
+  statementAsked,
+  statementKept,
+  secondsLeft,
+}: {
+  diplomasAsked: boolean;
+  diplomasHeld: number;
+  statementAsked: boolean;
+  statementKept: boolean;
+  secondsLeft: number;
+}): boolean {
+  if (secondsLeft === 0) return true;
+  return (
+    (!diplomasAsked || diplomasHeld > 0) && (!statementAsked || statementKept)
+  );
+}
+
+// Why an uploaded document was not kept, from its verdict: what the step
+// refuses before a check, else that document's own reason.
+export function documentRejectionReason(
+  verdict: { kind?: string; reason?: string },
+  t: TFunction,
+): string {
+  const reason = verdict.reason ?? "";
+  switch (reason) {
+    case "not_supported":
+      return t("identityProofing.documents.reasons.notSupported");
+    case "not_asked":
+      return t("identityProofing.documents.reasons.notAsked");
+    case "too_many":
+      return t("identityProofing.documents.reasons.tooMany");
+    case "check_failed":
+      return t("identityProofing.documents.reasons.checkFailed");
+  }
+  if (verdict.kind === "employment") {
+    return reason === "duplicate"
+      ? t("identityProofing.employment.reasons.duplicate")
+      : employmentRejectionReason(reason, t);
+  }
+  return diplomaRejectionReason(reason, t);
+}
+
+// The reason of a file whose seal could not be checked at upload: not
+// refused but kept for a reviewer, so the subject has given it.
+export const SEAL_CHECK_PENDING = "seal_check_pending";
+
+// What one document upload decided: the files a reviewer checks the seal of,
+// and those refused.
+export function splitVerdicts<
+  V extends { accepted: boolean; kind?: string; reason?: string },
+>(
+  verdicts: V[],
+): {
+  uncheckedDiplomas: number;
+  statementUnchecked: boolean;
+  unchecked: V[];
+  refused: V[];
+} {
+  const unchecked = verdicts.filter((v) => v.reason === SEAL_CHECK_PENDING);
+  return {
+    uncheckedDiplomas: unchecked.filter((v) => v.kind === "diploma").length,
+    statementUnchecked: unchecked.some((v) => v.kind === "employment"),
+    unchecked,
+    refused: verdicts.filter(
+      (v) => !v.accepted && v.reason !== SEAL_CHECK_PENDING,
+    ),
+  };
 }
 
 // Why an uploaded Verzekeringsbericht was not kept, from its verdict's
@@ -1792,15 +1859,6 @@ export function employmentRejectionReason(
     default:
       return reason;
   }
-}
-
-// Whether the employment step can end: once a statement is kept, or the time
-// to upload one is up.
-export function employmentStepDone(
-  kept: ProofingEmployment | undefined,
-  secondsLeft: number,
-): boolean {
-  return kept !== undefined || secondsLeft === 0;
 }
 
 // Why a kept statement sends the session to review, as the wallet decides it:
@@ -1828,6 +1886,7 @@ const PROOFING_ERROR_KEYS = {
   no_default_flow: "identityProofing.errors.noDefaultFlow",
   proofing_paused: "identityProofing.errors.proofingPaused",
   api_key_not_found: "identityProofing.errors.apiKeyNotFound",
+  api_key_not_revealable: "identityProofing.errors.apiKeyNotRevealable",
   session_not_found: "identityProofing.errors.sessionNotFound",
   not_under_review: "identityProofing.errors.notUnderReview",
   address_not_under_review: "identityProofing.errors.addressNotUnderReview",
@@ -1838,6 +1897,7 @@ const PROOFING_ERROR_KEYS = {
   link_started: "identityProofing.errors.linkStarted",
   session_over: "identityProofing.errors.sessionOver",
   device_active: "identityProofing.errors.deviceActive",
+  app_finished: "identityProofing.errors.appFinished",
   diplomas_need_page: "identityProofing.errors.diplomasNeedPage",
   hosted_disabled: "identityProofing.errors.hostedDisabled",
   redirect_not_allowed: "identityProofing.errors.redirectNotAllowed",
@@ -1853,6 +1913,7 @@ const PROOFING_ERROR_KEYS = {
   document_scan_needs_page: "identityProofing.errors.documentScanNeedsPage",
   document_scan_failed: "identityProofing.errors.documentScanFailed",
   document_scan_mismatch: "identityProofing.errors.documentScanMismatch",
+  document_scan_unavailable: "identityProofing.errors.documentScanUnavailable",
   document_scan_done: "identityProofing.errors.documentScanDone",
   document_scan_pending: "identityProofing.errors.documentScanPending",
   no_document_scanner: "identityProofing.errors.noDocumentScanner",
@@ -1860,6 +1921,7 @@ const PROOFING_ERROR_KEYS = {
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
   seal_check_unavailable: "identityProofing.errors.sealCheckUnavailable",
+  seal_unchecked: "identityProofing.errors.sealUnchecked",
   flow_no_identity: "identityProofing.errors.flowNoIdentity",
   data_flow_for_member: "identityProofing.errors.dataFlowForMember",
   export_unavailable: "identityProofing.errors.exportUnavailable",
@@ -1901,10 +1963,12 @@ export function hostedErrorMessage(error: unknown, t: TFunction): string {
       return t("identityProofing.errors.generic");
     case "link_started":
     case "device_active":
+    case "app_finished":
     case "diplomas_closed":
     case "employment_closed":
     case "document_scan_failed":
     case "document_scan_mismatch":
+    case "document_scan_unavailable":
     case "document_scan_done":
     case "document_scan_pending":
     case "seal_check_unavailable":
@@ -2027,6 +2091,12 @@ export function isProofingStep(value: string): value is ProofingStep {
   return PROOFING_STEPS.has(value);
 }
 
+// Whether a flow asks for a step of its own: required, or always reviewed.
+// EmploymentMode and DiplomaMode have the same values.
+export function stepAsked(mode: AddressMode | undefined): boolean {
+  return mode !== undefined && mode !== "off";
+}
+
 // A flow version's steps in words, in the order the app runs them; a step the
 // wallet has no copy for shows as it is.
 export function flowStepLabels(
@@ -2034,6 +2104,7 @@ export function flowStepLabels(
     steps: readonly string[];
     diplomaMode?: DiplomaMode;
     addressMode?: AddressMode;
+    employmentMode?: EmploymentMode;
   },
   t: TFunction,
 ): string[] {
@@ -2041,11 +2112,23 @@ export function flowStepLabels(
     isProofingStep(step) ? t(`identityProofingFlows.steps.${step}`) : step,
   );
   // The wallet's own steps, after the app's: given in the browser.
-  if (flow.addressMode === "required") {
+  if (stepAsked(flow.addressMode)) {
     labels.push(t("identityProofingFlows.steps.address"));
   }
-  if (flow.diplomaMode === "required") {
-    labels.push(t("identityProofingFlows.steps.diploma_upload"));
+  const documents = [
+    ...(stepAsked(flow.diplomaMode)
+      ? [t("identityProofingFlows.documents.diploma")]
+      : []),
+    ...(stepAsked(flow.employmentMode)
+      ? [t("identityProofingFlows.documents.employment")]
+      : []),
+  ];
+  if (documents.length > 0) {
+    labels.push(
+      t("identityProofingFlows.steps.documents", {
+        documents: documents.join(", "),
+      }),
+    );
   }
   return labels;
 }
@@ -2529,8 +2612,68 @@ export function sessionEventDetail(
       t("identityProofingFlows.versionShort", { version: fields.flowVersion }),
     );
   }
-  return [...parts, ...decisionEventDetail(fields, t)];
+  return [
+    ...parts,
+    ...documentEventDetail(fields, t),
+    ...decisionEventDetail(fields, t),
+  ];
 }
+
+// What an uploaded document's event adds: which document went to a reviewer
+// as its seal could not be checked, that a refusal or keep came from a
+// reviewer checking that seal again, and the file.
+function documentEventDetail(
+  fields: Record<string, unknown>,
+  t: TFunction,
+): string[] {
+  const parts: string[] = [];
+  if (
+    fields.sealUnchecked === true &&
+    (fields.kind === "diplomas" || fields.kind === "employment")
+  ) {
+    parts.push(t(`identityProofing.documents.kinds.${fields.kind}`));
+  }
+  if (fields.sealCheckedAgain === true) {
+    parts.push(t("identityProofing.sessions.sealCheckedAgain"));
+  }
+  if (typeof fields.fileName === "string" && fields.fileName !== "") {
+    parts.push(fields.fileName);
+  }
+  return parts;
+}
+
+// The reviewer's copy for why a diploma or Verzekeringsbericht was refused; undefined for a
+// reason it does not know, shown as is.
+export const SEAL_REFUSAL_KEYS: Record<
+  string,
+  `identityProofing.reviews.seal.reasons.${
+    | "signatureInvalid"
+    | "holderMismatch"
+    | "notADocument"
+    | "stale"
+    | "duplicate"}`
+> = {
+  signature_invalid: "identityProofing.reviews.seal.reasons.signatureInvalid",
+  holder_mismatch: "identityProofing.reviews.seal.reasons.holderMismatch",
+  not_a_diploma: "identityProofing.reviews.seal.reasons.notADocument",
+  not_a_statement: "identityProofing.reviews.seal.reasons.notADocument",
+  stale: "identityProofing.reviews.seal.reasons.stale",
+  duplicate: "identityProofing.reviews.seal.reasons.duplicate",
+};
+
+// What an employment or diplomas review's decision reads as, per state.
+const STEP_OUTCOME_KEYS = {
+  employment: {
+    confirmed: "employmentConfirmed",
+    rejected: "employmentRejected",
+    lapsed: "employmentLapsed",
+  },
+  diplomas: {
+    confirmed: "diplomasConfirmed",
+    rejected: "diplomasRejected",
+    lapsed: "diplomasLapsed",
+  },
+} as const;
 
 // What a review or address event adds: that an entered address goes to a
 // reviewer, what a reviewer decided, and why. The backend leaves the reason
@@ -2557,9 +2700,34 @@ function decisionEventDetail(
       t(`identityProofing.sessions.address.tag.${fields.addressReview}`),
     );
   }
-  if (typeof fields.reason === "string" && fields.reason !== "") {
+  if (
+    (fields.kind === "address" ||
+      fields.kind === "employment" ||
+      fields.kind === "diplomas") &&
+    (fields.state === "confirmed" ||
+      fields.state === "rejected" ||
+      fields.state === "lapsed")
+  ) {
     parts.push(
-      t("identityProofing.reviews.decided.reason", { reason: fields.reason }),
+      fields.kind === "address"
+        ? t(`identityProofing.sessions.address.tag.${fields.state}`)
+        : t(
+            `identityProofing.reviews.outcome.${STEP_OUTCOME_KEYS[fields.kind][fields.state]}`,
+          ),
+    );
+  }
+  if (typeof fields.reason === "string" && fields.reason !== "") {
+    // A check's own refusal, not a reviewer's free text.
+    const refusal =
+      fields.state === undefined && fields.decision === undefined
+        ? SEAL_REFUSAL_KEYS[fields.reason]
+        : undefined;
+    parts.push(
+      refusal === undefined
+        ? t("identityProofing.reviews.decided.reason", {
+            reason: fields.reason,
+          })
+        : t(refusal),
     );
   }
   return parts;
@@ -2675,19 +2843,28 @@ export function timelineActor(
   return detail.length > 0 ? null : t("auditLog.system");
 }
 
-// The last decision on a session's address in its timeline: who decided, when
-// and why (absent for a reader the backend leaves the reason out for).
-export interface AddressDecision {
+// The last decision on a session's step (its address, its Verzekeringsbericht)
+// in its timeline: who decided, when and why (absent for a reader the backend
+// leaves the reason out for).
+export interface StepReviewDecision {
   by: string | null;
   at: string;
   reason?: string;
 }
 
-export function latestAddressDecision(
+export function latestStepDecision(
   events: readonly AuditEvent[],
-): AddressDecision | undefined {
+  kind: StepReviewKind,
+): StepReviewDecision | undefined {
   const event = events.findLast(
-    (e) => e.action === "identity_proofing.address_reviewed",
+    (e) =>
+      (e.action === "identity_proofing.review_item_decided" &&
+        typeof e.metadata.after === "object" &&
+        e.metadata.after !== null &&
+        "kind" in e.metadata.after &&
+        e.metadata.after.kind === kind) ||
+      // An address decided before review items.
+      (kind === "address" && e.action === "identity_proofing.address_reviewed"),
   );
   if (event === undefined) {
     return undefined;

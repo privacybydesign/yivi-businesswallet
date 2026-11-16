@@ -25,15 +25,15 @@ export type ProofingAssuranceTier = z.infer<typeof assuranceTierSchema>;
 // Whether a flow has the diploma step: once their identity is approved, its
 // subject must add their DUO diploma extracts (the PDFs from mijn.duo.nl),
 // checked by the wallet.
-export const DIPLOMA_MODES = ["off", "required"] as const;
+export const DIPLOMA_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required: the page then asks for diplomas rather
 // than silently skipping a step the backend enforces.
 const diplomaModeSchema = z.enum(DIPLOMA_MODES).catch("required");
 
 // Whether a flow has the address step: once their identity is approved, its
 // subject enters their postal address. It is what they declare, not read off
-// a document.
-const ADDRESS_MODES = ["off", "required"] as const;
+// a document. always_review also sends every address to a reviewer.
+const ADDRESS_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required, as diplomaModeSchema.
 const addressModeSchema = z.enum(ADDRESS_MODES).catch("required");
 export type AddressMode = z.infer<typeof addressModeSchema>;
@@ -53,13 +53,46 @@ export type AddressVerification = (typeof ADDRESS_VERIFICATIONS)[number];
 
 // Where an address that waits for a reviewer stands: a self-declared one, or
 // one other than the registered address. An unknown state reads as none.
-export const ADDRESS_REVIEWS = ["pending", "confirmed", "rejected"] as const;
+export const ADDRESS_REVIEWS = [
+  "pending",
+  "confirmed",
+  "rejected",
+  "lapsed",
+] as const;
 export type AddressReviewState = (typeof ADDRESS_REVIEWS)[number];
 
-// A reviewer's decision on a request: its session's review or its address,
-// the outcome, why, by whom and when.
+// The parts of a session a reviewer decides on: the identity as a whole, a
+// data request, or an extra step.
+export const REVIEW_KINDS = [
+  "identity",
+  "address",
+  "employment",
+  "diplomas",
+  "data_request",
+] as const;
+export type ReviewKind = (typeof REVIEW_KINDS)[number];
+// The kinds a step's own review is of, beside the session's outcome.
+export type StepReviewKind = Extract<
+  ReviewKind,
+  "address" | "employment" | "diplomas"
+>;
+
+// An extra step of a session: where it stands, until when it takes input
+// while open, and why one did not pass.
+const proofingStepSchema = z.object({
+  kind: z.string(),
+  state: z.string(),
+  until: z.string().optional(),
+  code: z.string().optional(),
+  reviewed: z.boolean().optional(),
+});
+
+export type ProofingStep = z.infer<typeof proofingStepSchema>;
+
+// A reviewer's decision on a request: its session's review or a step's (its
+// address, its Verzekeringsbericht), the outcome, why, by whom and when.
 const proofingDecisionSchema = z.object({
-  kind: z.enum(["review", "address"]),
+  kind: z.enum(["review", "address", "employment", "diplomas"]),
   outcome: z.string(),
   reason: z.string().optional(),
   errorCode: z.string().optional(),
@@ -101,8 +134,9 @@ export type RegisterAddress = z.infer<typeof registerAddressSchema>;
 
 // Whether a flow has the employment step: once their identity is approved,
 // its subject uploads their UWV Verzekeringsbericht (the sealed PDF from
-// mijn.uwv.nl), checked by the wallet.
-const EMPLOYMENT_MODES = ["off", "required"] as const;
+// mijn.uwv.nl), checked by the wallet. always_review also sends every kept
+// statement to a reviewer.
+const EMPLOYMENT_MODES = ["off", "required", "always_review"] as const;
 // An unknown mode reads as required, as diplomaModeSchema.
 const employmentModeSchema = z.enum(EMPLOYMENT_MODES).catch("required");
 export type EmploymentMode = z.infer<typeof employmentModeSchema>;
@@ -233,6 +267,7 @@ const proofingFlowSchema = z.object({
   assuranceTiers: z.array(assuranceTierSchema).optional(),
   legalBasis: z.string().optional(),
   processingPurpose: z.string().optional(),
+  alwaysReview: z.boolean().optional(),
   createdAt: z.string(),
   // False for a flow a recipient cannot finish with only the vcmrtd app.
   completable: z.boolean(),
@@ -323,6 +358,10 @@ const proofingRequestSchema = z.object({
   addressReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
   // When a reviewer decided it.
   addressReviewedAt: z.string().optional(),
+  // When the first waiting step review lapses unanswered.
+  stepReviewDueAt: z.string().optional(),
+  // When a reviewer last decided the identity.
+  identityReviewedAt: z.string().optional(),
   // What reviewers decided, with their reasons, oldest first: only on the
   // single request, for an admin or a reviewer.
   decisions: z.array(proofingDecisionSchema).optional(),
@@ -337,10 +376,39 @@ const proofingRequestSchema = z.object({
   documentScan: documentScanSchema,
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone: z.boolean().optional(),
-  // Why the wallet put the session in review after the identity was
-  // approved (no_current_employment, current_benefit,
-  // current_other_income); absent otherwise.
+  // Why the kept Verzekeringsbericht went to review (no_current_employment,
+  // current_benefit, current_other_income); absent otherwise. Its review
+  // waits or was decided as employmentReview, beside the session's outcome.
   reviewReason: z.string().optional(),
+  employmentReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  employmentReviewedAt: z.string().optional(),
+  // Where the kept diploma extracts' review stands, on a flow that sends
+  // them to one, and when it was decided or lapsed.
+  diplomasReview: z.enum(ADDRESS_REVIEWS).optional().catch(undefined),
+  diplomasReviewedAt: z.string().optional(),
+  // How many extracts, and whether the statement, wait for a reviewer to
+  // check their seal again: it could not be checked at upload. Their step
+  // cannot be confirmed before.
+  uncheckedDiplomas: z.number().optional(),
+  uncheckedEmployment: z.boolean().optional(),
+  // Those files, waiting or decided: outcome is empty while one waits, then
+  // kept, not_checked, or why it was refused.
+  sealChecks: z
+    .array(
+      z.object({
+        kind: z.enum(["diplomas", "employment"]),
+        fileName: z.string(),
+        outcome: z.string(),
+        uploadedAt: z.string(),
+        checkedAt: z.string().nullable().optional(),
+      }),
+    )
+    .optional()
+    .catch(undefined),
+  // The extra steps the flow asks for, each with its own outcome.
+  steps: z.array(proofingStepSchema).optional(),
+  // A request in review whose flow version sends every session to review.
+  flowAlwaysReview: z.boolean().optional(),
   // A request for one known person: only subjectName, born on the date it
   // was sent with, is approved (IDENTITY_MISMATCH otherwise).
   expectedSubject: z.boolean(),
@@ -391,6 +459,7 @@ export interface ProofingFlowSpec {
   assuranceTiers?: ProofingAssuranceTier[];
   legalBasis?: string;
   processingPurpose?: string;
+  alwaysReview?: boolean;
 }
 
 export interface ProofingFlowSelection {
@@ -553,6 +622,8 @@ const proofingApiKeySchema = z.object({
   createdAt: z.string(),
   lastUsedAt: z.string().optional(),
   revokedAt: z.string().optional(),
+  // False for a key made before keys were kept to be shown again.
+  revealable: z.boolean(),
 });
 
 export type ProofingApiKey = z.infer<typeof proofingApiKeySchema>;
@@ -912,7 +983,8 @@ export function getProofingRequests(
     flowId?: string;
     status?: ListedStatus;
     flowKind?: "data_request";
-    addressReview?: AddressReviewState;
+    reviewKind?: ReviewKind;
+    reviewState?: AddressReviewState;
   },
   signal?: AbortSignal,
 ): Promise<ProofingRequest[]> {
@@ -922,9 +994,22 @@ export function getProofingRequests(
   if (filter.flowId) params.set("flowId", filter.flowId);
   if (filter.status) params.set("status", filter.status);
   if (filter.flowKind) params.set("flowKind", filter.flowKind);
-  if (filter.addressReview) params.set("addressReview", filter.addressReview);
+  if (filter.reviewKind) params.set("reviewKind", filter.reviewKind);
+  if (filter.reviewState) params.set("reviewState", filter.reviewState);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return request(`${base(slug)}/requests${query}`, {
+    schema: z.array(proofingRequestSchema),
+    signal,
+  });
+}
+
+// What the Reviews page lists as closed, in one read: the sessions whose
+// review is over and the data requests that ended, the latest first.
+export function getClosedReviews(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ProofingRequest[]> {
+  return request(`${base(slug)}/review-items/closed`, {
     schema: z.array(proofingRequestSchema),
     signal,
   });
@@ -1085,6 +1170,18 @@ export function createProofingApiKey(
     body: { name },
     signal,
   });
+}
+
+// The key itself, read again; each read is audited.
+export function getProofingApiKeySecret(
+  slug: string,
+  keyId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return request(`${base(slug)}/api-keys/${encodeURIComponent(keyId)}/secret`, {
+    schema: z.object({ secret: z.string() }),
+    signal,
+  }).then((body) => body.secret);
 }
 
 export function revokeProofingApiKey(
@@ -1354,6 +1451,8 @@ export interface ProofingProgress {
   linkExpiresAt: string;
   // Until when the subject can add diploma extracts, once approved.
   diplomasUntil?: string;
+  // How many of the extracts wait for a reviewer to check their seal.
+  uncheckedDiplomas?: number;
   // A hosted data request's: until when approved data downloads, and how many
   // sessions an approved erasure kept.
   dataExportUntil?: string;
@@ -1375,6 +1474,8 @@ export interface ProofingProgress {
   documentScan?: "pending" | "done";
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone?: boolean;
+  // Where each of the flow's extra steps stands.
+  steps?: ProofingStep[];
 }
 
 export function startProofingYivi(
@@ -1400,7 +1501,7 @@ export type ProofingClaimLink = z.infer<typeof proofingClaimLinkSchema>;
 // Where a running on-screen Idem request's phone is: no phone scanned yet, the
 // app holds the session, or it was closed and a claim link hands it over.
 const proofingAppSchema = z.object({
-  app: z.enum(["waiting", "connected", "away"]).catch("waiting"),
+  app: z.enum(["waiting", "connected", "away", "finished"]).catch("waiting"),
 });
 
 export type ProofingApp = z.infer<typeof proofingAppSchema>["app"];
@@ -1541,14 +1642,19 @@ const hostedProgressSchema = z.object({
   addressUntil: z.string().optional(),
   addressGiven: z.boolean(),
   // Until when the subject can upload their Verzekeringsbericht; absent while
-  // they cannot, and once one is kept (employmentGiven).
+  // they cannot, and once one is kept or waits for a reviewer to check its
+  // seal (employmentGiven).
   employmentUntil: z.string().optional(),
   employmentGiven: z.boolean(),
+  // How many of the subject's extracts wait for a reviewer to check their
+  // seal.
+  uncheckedDiplomas: z.number().optional(),
   // Whether the document photo is still to be taken in the browser; absent
   // when the flow takes none.
   documentScan: documentScanSchema,
   // An Idem session whose app did its part: the ID scan, after it, is next.
   appDone: z.boolean().optional(),
+  steps: z.array(proofingStepSchema).optional(),
   // Until when an approved "see my data" request's data downloads.
   dataExportUntil: z.string().optional(),
   // How many sessions an approved erasure kept, not deleted.
@@ -1676,63 +1782,37 @@ export function declineHostedProofing(
   });
 }
 
-// What became of one uploaded file: kept, or refused with a reason
-// (not_a_diploma, signature_invalid, holder_mismatch, duplicate).
-const diplomaVerdictSchema = z.object({
-  fileName: z.string(),
-  accepted: z.boolean(),
-  diploma: proofingDiplomaSchema.optional(),
-  reason: z.string().optional(),
-  failedCheck: z.string().optional(),
-});
-
-export type DiplomaVerdict = z.infer<typeof diplomaVerdictSchema>;
-
 // An upload checks a signature per file and may load the EU trusted lists.
 const DIPLOMA_UPLOAD_TIMEOUT_MS = 120_000;
 
-// Uploads DUO diploma extracts on a verify page, after an approved identity.
-export function uploadProofingDiplomas(
-  target: VerifyTarget,
-  files: File[],
-  signal?: AbortSignal,
-): Promise<DiplomaVerdict[]> {
-  const form = new FormData();
-  for (const file of files) {
-    form.append("file", file);
-  }
-  return request(`${verifyPath(target)}/diplomas`, {
-    schema: z.array(diplomaVerdictSchema),
-    method: "POST",
-    body: form,
-    timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
-    signal,
-  });
-}
-
-// What became of an uploaded Verzekeringsbericht: kept, or refused with a
-// reason (not_a_statement, signature_invalid, holder_mismatch, stale).
-const employmentVerdictSchema = z.object({
+// What became of one file of a document upload: the document its seal names
+// (none for one the step does not take), and the diploma or statement kept,
+// or why it was refused.
+const documentVerdictSchema = z.object({
   fileName: z.string(),
+  kind: z.enum(["diploma", "employment"]).optional().catch(undefined),
   accepted: z.boolean(),
+  diploma: proofingDiplomaSchema.optional(),
   employment: proofingEmploymentSchema.optional(),
   reason: z.string().optional(),
   failedCheck: z.string().optional(),
 });
 
-export type EmploymentVerdict = z.infer<typeof employmentVerdictSchema>;
+export type DocumentVerdict = z.infer<typeof documentVerdictSchema>;
 
-// Uploads a UWV Verzekeringsbericht on a verify page, after an approved
-// identity. Its seal is checked as a diploma's signature is.
-export function uploadProofingEmployment(
+// Uploads documents on a verify page, after an approved identity: each file
+// is read as the document its seal names, and checked as that one.
+export function uploadProofingDocuments(
   target: VerifyTarget,
-  file: File,
+  files: File[],
   signal?: AbortSignal,
-): Promise<EmploymentVerdict> {
+): Promise<DocumentVerdict[]> {
   const form = new FormData();
-  form.append("file", file);
-  return request(`${verifyPath(target)}/employment`, {
-    schema: employmentVerdictSchema,
+  for (const file of files) {
+    form.append("file", file);
+  }
+  return request(`${verifyPath(target)}/documents`, {
+    schema: z.array(documentVerdictSchema),
     method: "POST",
     body: form,
     timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
@@ -1790,14 +1870,15 @@ export interface AddressReviewInput {
   reason: string;
 }
 
-export function decideAddressReview(
+export function decideReviewItem(
   slug: string,
   requestId: string,
+  kind: ReviewKind,
   input: AddressReviewInput,
   signal?: AbortSignal,
 ): Promise<ProofingRequest> {
   return request(
-    `${base(slug)}/requests/${encodeURIComponent(requestId)}/address/review`,
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/review-items/${kind}`,
     {
       schema: proofingRequestSchema,
       method: "POST",
@@ -1805,6 +1886,52 @@ export function decideAddressReview(
       signal,
     },
   );
+}
+
+// Checks again the seals of a step's files that could not be checked at
+// upload, as the reviewer of its waiting item.
+export function checkSealsAgain(
+  slug: string,
+  requestId: string,
+  kind: "diplomas" | "employment",
+  signal?: AbortSignal,
+): Promise<ProofingRequest> {
+  return request(
+    `${base(slug)}/requests/${encodeURIComponent(requestId)}/review-items/${kind}/seal-check`,
+    {
+      schema: proofingRequestSchema,
+      method: "POST",
+      timeoutMs: DIPLOMA_UPLOAD_TIMEOUT_MS,
+      signal,
+    },
+  );
+}
+
+const reviewItemCountsSchema = z.object({
+  // Sessions waiting per kind: one waiting for its identity and its address
+  // counts under both.
+  counts: z.object({
+    identity: z.number(),
+    address: z.number(),
+    employment: z.number(),
+    diplomas: z.number(),
+    data_request: z.number(),
+  }),
+  // The sessions that wait, and those waiting for a step, each once.
+  sessions: z.number(),
+  stepSessions: z.number(),
+});
+export type ReviewItemCounts = z.infer<typeof reviewItemCountsSchema>;
+
+// What waits for a decision.
+export function getReviewItemCounts(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ReviewItemCounts> {
+  return request(`${base(slug)}/review-items/counts`, {
+    schema: reviewItemCountsSchema,
+    signal,
+  });
 }
 
 export function decideProofingReview(

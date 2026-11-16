@@ -1,9 +1,12 @@
 import { isDataRequest } from "../api/identity-proofing";
 import type { Me } from "../api/auth";
 import type {
+  AddressReviewState,
   ProofingRequest,
   ProofingResult,
   ProofingReviewInput,
+  ReviewItemCounts,
+  StepReviewKind,
 } from "../api/identity-proofing";
 import type { TFunction } from "i18next";
 import {
@@ -40,7 +43,13 @@ export function askedLine(
 
 // The Reviews page's views: what waits, narrowed to one kind, and what is
 // closed.
-export const REVIEW_TABS = ["all", "checks", "data", "closed"] as const;
+export const REVIEW_TABS = [
+  "all",
+  "checks",
+  "steps",
+  "data",
+  "closed",
+] as const;
 export type ReviewTab = (typeof REVIEW_TABS)[number];
 export const DEFAULT_REVIEW_TAB: ReviewTab = "all";
 
@@ -48,14 +57,116 @@ export function reviewTabFrom(raw: string | null): ReviewTab {
   return REVIEW_TABS.find((tab) => tab === raw) ?? DEFAULT_REVIEW_TAB;
 }
 
+// The steps a reviewer decides, in the order the review walks through them:
+// the Verzekeringsbericht, the diplomas, then the address.
+const STEP_REVIEW_ORDER = ["employment", "diplomas", "address"] as const;
+
+// Where a step's review stands; undefined for none.
+export function reviewOfStep(
+  request: ProofingRequest,
+  step: StepReviewKind,
+): AddressReviewState | undefined {
+  switch (step) {
+    case "employment":
+      return request.employmentReview;
+    case "diplomas":
+      return request.diplomasReview;
+    case "address":
+      return request.addressReview;
+  }
+}
+
+// When a step's review was decided or lapsed.
+function stepReviewedAt(
+  request: ProofingRequest,
+  step: StepReviewKind,
+): string | undefined {
+  switch (step) {
+    case "employment":
+      return request.employmentReviewedAt;
+    case "diplomas":
+      return request.diplomasReviewedAt;
+    case "address":
+      return request.addressReviewedAt;
+  }
+}
+
+// The step a request is reviewed for, apart from the check itself, which is
+// decided: the first waiting in STEP_REVIEW_ORDER, else the first decided.
+// Undefined for none.
+export function stepReviewOf(
+  request: ProofingRequest,
+): StepReviewKind | undefined {
+  if (request.flowKind !== "identity" || request.status === "needs_review") {
+    return undefined;
+  }
+  return (
+    STEP_REVIEW_ORDER.find((s) => reviewOfStep(request, s) === "pending") ??
+    STEP_REVIEW_ORDER.find((s) => reviewOfStep(request, s) !== undefined)
+  );
+}
+
+// What a reviewer decides on an identity check's session, in the order the
+// review walks through it: the identity, then its steps (STEP_REVIEW_ORDER).
+// Only what waits.
+export type ReviewPart = "identity" | StepReviewKind;
+
+export function waitingParts(request: ProofingRequest): ReviewPart[] {
+  if (request.flowKind !== "identity") return [];
+  return [
+    ...(request.status === "needs_review" ? (["identity"] as const) : []),
+    ...STEP_REVIEW_ORDER.filter((s) => reviewOfStep(request, s) === "pending"),
+  ];
+}
+
+// What a reviewer decided on an identity check's session, in the same order.
+export function decidedParts(request: ProofingRequest): ReviewPart[] {
+  if (request.flowKind !== "identity") return [];
+  const identityDecided =
+    request.identityReviewedAt !== undefined &&
+    request.status !== "needs_review";
+  return [
+    ...(identityDecided ? (["identity"] as const) : []),
+    ...STEP_REVIEW_ORDER.filter((s) => {
+      const state = reviewOfStep(request, s);
+      return state !== undefined && state !== "pending";
+    }),
+  ];
+}
+
+// Whether a session's review is over: something was decided and nothing waits.
+export function isClosedSession(request: ProofingRequest): boolean {
+  return waitingParts(request).length === 0 && decidedParts(request).length > 0;
+}
+
+// The label of each part, as the Reviews page names it.
+export const REVIEW_PART_KEYS = {
+  identity: "identityProofing.reviews.identityCheck",
+  employment: "identityProofing.reviews.employmentCheck",
+  diplomas: "identityProofing.reviews.diplomasCheck",
+  address: "identityProofing.reviews.addressCheck",
+} as const satisfies Record<ReviewPart, string>;
+
+// The part the review goes on with once decided was decided, if any.
+export function nextPart(
+  request: ProofingRequest,
+  decided: ReviewPart,
+): ReviewPart | undefined {
+  return waitingParts(request).find((part) => part !== decided);
+}
+
 // Whether the request waits for a decision on its self-declared address
 // alone: the check itself is decided.
 export function isAddressReview(request: ProofingRequest): boolean {
-  return (
-    request.flowKind === "identity" &&
-    request.status !== "needs_review" &&
-    request.addressReview !== undefined
-  );
+  return stepReviewOf(request) === "address";
+}
+
+// Where the step's review a request is reviewed for stands.
+export function stepReviewState(
+  request: ProofingRequest,
+): AddressReviewState | undefined {
+  const step = stepReviewOf(request);
+  return step === undefined ? undefined : reviewOfStep(request, step);
 }
 
 // Whether the check itself waits for a decision. A purged one has no person
@@ -64,11 +175,12 @@ function isInReview(request: ProofingRequest): boolean {
   return request.status === "needs_review" && request.purgedAt === undefined;
 }
 
-// Whether the request waits for a decision: in review, or its address is.
+// Whether the request waits for a decision: in review, or one of its steps is.
 function isWaiting(request: ProofingRequest): boolean {
   return (
     isInReview(request) ||
-    (request.addressReview === "pending" && request.purgedAt === undefined)
+    (STEP_REVIEW_ORDER.some((s) => reviewOfStep(request, s) === "pending") &&
+      request.purgedAt === undefined)
   );
 }
 
@@ -100,14 +212,24 @@ export function waitingOldestFirst(
 interface ReviewCounts {
   all: number;
   checks: number;
+  steps: number;
   data: number;
 }
 
-export function reviewCounts(
-  waiting: readonly ProofingRequest[],
-): ReviewCounts {
-  const data = waiting.filter((r) => isDataRequest(r.flowKind)).length;
-  return { all: waiting.length, checks: waiting.length - data, data };
+// The tabs' counts: every session once, those whose identity waits, those
+// with a step waiting (a session with both is in each), and data requests.
+export function reviewCounts(waiting: ReviewItemCounts): ReviewCounts {
+  return {
+    all: waiting.sessions,
+    checks: waiting.counts.identity,
+    steps: waiting.stepSessions,
+    data: waiting.counts.data_request,
+  };
+}
+
+// How many items wait, of every kind.
+export function waitingCount(waiting: ReviewItemCounts): number {
+  return reviewCounts(waiting).all;
 }
 
 // The requests a tab lists; Closed has its own list, so no waiting ones.
@@ -119,7 +241,11 @@ export function waitingOfTab(
     case "all":
       return [...waiting];
     case "checks":
-      return waiting.filter((r) => !isDataRequest(r.flowKind));
+      return waiting.filter((r) => waitingParts(r).includes("identity"));
+    case "steps":
+      return waiting.filter((r) =>
+        waitingParts(r).some((part) => part !== "identity"),
+      );
     case "data":
       return waiting.filter((r) => isDataRequest(r.flowKind));
     case "closed":
@@ -127,35 +253,47 @@ export function waitingOfTab(
   }
 }
 
-// Whether a reviewer confirmed or rejected the request's address.
-export function isDecidedAddress(request: ProofingRequest): boolean {
-  return (
-    request.addressReview === "confirmed" ||
-    request.addressReview === "rejected"
-  );
+// The key, under a step's review texts, of what became of its decided review.
+export const STEP_DECIDED_KEYS = {
+  confirmed: "confirmed",
+  rejected: "rejected",
+  lapsed: "lapsed",
+} as const;
+
+// Whether a reviewer confirmed or rejected the step the request is reviewed
+// for (its address, its Verzekeringsbericht), or nobody did in time.
+export function isDecidedStep(request: ProofingRequest): boolean {
+  const state = stepReviewState(request);
+  return state !== undefined && state !== "pending";
 }
 
-// When a closed request closed: its address was decided, or it ended.
+// When a closed request closed: its last part was decided or lapsed, or it
+// ended.
 export function closedAt(request: ProofingRequest): string {
-  if (isDecidedAddress(request) && request.addressReviewedAt) {
-    return request.addressReviewedAt;
-  }
-  return request.completedAt ?? request.createdAt;
+  const decided = decidedParts(request)
+    .map((part) =>
+      part === "identity"
+        ? request.identityReviewedAt
+        : stepReviewedAt(request, part),
+    )
+    .filter((when): when is string => when !== undefined)
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
+  return decided[0] ?? request.completedAt ?? request.createdAt;
 }
 
-// What was closed, the latest first: the addresses a reviewer decided, and the
-// data requests that ended, whoever ended them: a reviewer, or no one (the
-// engine rejected the person, the review lapsed, the org paused, the law keeps
-// the data). A data request carries no mark of which, so the page claims no
-// decision and shows each one's error code. Identity checks themselves are not
-// listed: a decided one is closed to a reviewer.
+// What was closed, the latest first: the sessions whose review is over (its
+// identity, its steps, each decided), and the data requests that ended,
+// whoever ended them: a reviewer, or no one (the engine rejected the person,
+// the review lapsed, the org paused, the law keeps the data). A data request
+// carries no mark of which, so the page claims no decision and shows each
+// one's error code.
 export function closedRequests(
   requests: readonly ProofingRequest[],
 ): ProofingRequest[] {
   return requests
     .filter(
       (r) =>
-        isDecidedAddress(r) ||
+        isClosedSession(r) ||
         (isDataRequest(r.flowKind) &&
           (r.status === "approved" || r.status === "rejected")),
     )
@@ -164,11 +302,15 @@ export function closedRequests(
 
 // Until when a data request in review can be answered: its review lapses then
 // (REVIEW_LAPSED, purge_at), a calendar month after it went there (askedAt).
-// Absent for a check, or once decided.
+// A step review lapses at its own due time. Absent for an identity check, or
+// once decided.
 export function answerBy(request: ProofingRequest): string | undefined {
-  return isDataRequest(request.flowKind) && isWaiting(request)
-    ? request.purgeAt
-    : undefined;
+  if (isDataRequest(request.flowKind)) {
+    return isWaiting(request) ? request.purgeAt : undefined;
+  }
+  return stepReviewOf(request) === undefined
+    ? undefined
+    : request.stepReviewDueAt;
 }
 
 // What a reviewer may find wrong with a check, and the error code the
@@ -185,10 +327,10 @@ export const REJECT_REASONS = [
 export type RejectReasonKey = (typeof REJECT_REASONS)[number]["key"];
 export const DEFAULT_REJECT_REASON: RejectReasonKey = "someoneElse";
 
-// Why the wallet itself held an approved check for review
+// Why a kept Verzekeringsbericht went to review
 // (proofing.ReviewNoCurrentEmployment, ReviewCurrentBenefit,
-// ReviewCurrentOtherIncome): the Verzekeringsbericht lists no current job, or
-// a current UWV benefit or other income beside one.
+// ReviewCurrentOtherIncome): it lists no current job, or a current UWV
+// benefit or other income beside one.
 export const WALLET_REVIEW_REASONS = [
   "no_current_employment",
   "current_benefit",
@@ -202,6 +344,88 @@ export function walletReviewReason(
   return WALLET_REVIEW_REASONS.find(
     (reason) => reason === request.reviewReason,
   );
+}
+
+// Why an address waits: it differs from the registered address (BRP), it is
+// the registered one on a flow that reviews every address, or no register
+// confirms it.
+export type AddressReviewWhy = "addressMismatch" | "addressAlways" | "address";
+
+export function addressReviewWhy(
+  request: Pick<ProofingRequest, "address">,
+): AddressReviewWhy {
+  switch (request.address?.verification) {
+    case "registered_mismatch":
+      return "addressMismatch";
+    case "registered":
+      return "addressAlways";
+    default:
+      return "address";
+  }
+}
+
+// How many of a step's files wait for a reviewer to check their seal again:
+// it could not be checked at upload, and the step cannot be confirmed before.
+export function uncheckedSeals(
+  request: Pick<ProofingRequest, "uncheckedDiplomas" | "uncheckedEmployment">,
+  kind: "diplomas" | "employment",
+): number {
+  if (kind === "diplomas") return request.uncheckedDiplomas ?? 0;
+  return request.uncheckedEmployment === true ? 1 : 0;
+}
+
+export type SealCheckFile = NonNullable<ProofingRequest["sealChecks"]>[number];
+
+export { SEAL_REFUSAL_KEYS } from "./identity-proofing";
+
+// The files of a step that went to a reviewer as their seal could not be
+// checked at upload, oldest first.
+export function sealChecksOf(
+  request: Pick<ProofingRequest, "sealChecks">,
+  kind: "diplomas" | "employment",
+): SealCheckFile[] {
+  return (request.sealChecks ?? []).filter((c) => c.kind === kind);
+}
+
+// Where one such file stands: its seal still waits, it was kept, refused,
+// or its step's review closed before anyone checked it.
+export function sealCheckState(
+  outcome: string,
+): "waiting" | "kept" | "refused" | "notChecked" {
+  switch (outcome) {
+    case "":
+      return "waiting";
+    case "kept":
+      return "kept";
+    case "not_checked":
+      return "notChecked";
+    default:
+      return "refused";
+  }
+}
+
+// Why a Verzekeringsbericht waits: what it lists, else its flow reviewing
+// every statement.
+export function employmentReviewWhy(
+  request: Pick<ProofingRequest, "reviewReason" | "employmentMode">,
+): WalletReviewReason | "employmentAlways" {
+  const reason = walletReviewReason(request);
+  if (reason !== undefined) {
+    return reason;
+  }
+  return request.employmentMode === "always_review"
+    ? "employmentAlways"
+    : "no_current_employment";
+}
+
+// Why an identity check waits: its flow sending every session to review;
+// undefined is the engine's doubt.
+export type CheckReviewReason = "alwaysReview";
+
+export function checkReviewReason(
+  request: Pick<ProofingRequest, "flowAlwaysReview">,
+): CheckReviewReason | undefined {
+  return request.flowAlwaysReview === true ? "alwaysReview" : undefined;
 }
 
 // Why the reader may not decide an identity check: they sent it, or it is

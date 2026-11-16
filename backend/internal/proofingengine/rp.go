@@ -43,7 +43,7 @@ func toDefinition(tenantID, flowID string, in pp.FlowSpec) flow.FlowDefinition {
 		RetentionOverride: time.Duration(in.RetentionOverrideSeconds) * time.Second,
 		SessionTTL:        time.Duration(in.SessionTTLSeconds) * time.Second,
 		LegalBasis:        privacyBasis(in.LegalBasis), ProcessingPurpose: in.ProcessingPurpose,
-		AgeOver: in.AgeOver,
+		AgeOver: in.AgeOver, AlwaysReview: in.AlwaysReview,
 	}
 	for _, app := range in.Apps {
 		fd.Apps = append(fd.Apps, flow.App(app))
@@ -81,7 +81,7 @@ func toFlow(fd flow.FlowDefinition) pp.Flow {
 		RequiredAssuranceLevel: string(fd.RequiredAssuranceLevel), BSNPolicy: string(fd.BSNPolicy),
 		KeepFacePhotos: fd.KeepFacePhotos, BlurBSN: fd.BlurBSN, RetentionOverrideSeconds: int(fd.RetentionOverride / time.Second),
 		SessionTTLSeconds: int(fd.SessionTTL / time.Second), LegalBasis: string(fd.LegalBasis), ProcessingPurpose: fd.ProcessingPurpose,
-		AgeOver: fd.AgeOver,
+		AgeOver: fd.AgeOver, AlwaysReview: fd.AlwaysReview,
 	}
 	for _, app := range fd.Apps {
 		spec.Apps = append(spec.Apps, string(app))
@@ -420,6 +420,10 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 		return pp.Result{}, err
 	}
 	res := pp.Result{Status: out.Status, ErrorCode: out.ErrorCode, CompletedAt: out.CompletedAt, ExpiresAt: sess.ExpiresAt}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	}
 	var roles []string
 	for _, d := range out.Devices {
 		roles = append(roles, d.Role)
@@ -433,9 +437,10 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	if res.App == "" {
 		res.App = pp.AppWaiting
 	}
-	if res.AppDone, err = s.idemAppDone(ctx, sess); err != nil {
-		return pp.Result{}, fmt.Errorf("proofingengine: session status: %w", err)
+	if appFinished(sess, fd) {
+		res.App = pp.AppFinished
 	}
+	res.AppDone = fd != nil && documentPhotoMissing(sess, fd)
 	res.Method = methodOf(roles)
 	if out.Disclosure {
 		res.Method = pp.MethodYivi
@@ -449,17 +454,21 @@ func (s *Server) SessionStatus(ctx context.Context, t pp.Tenant, id, token strin
 	return res, nil
 }
 
-// idemAppDone reports whether sess is a running Idem session whose app did
-// every step it runs, the document photo still to come (pp.Result.AppDone).
-func (s *Server) idemAppDone(ctx context.Context, sess session.Session) (bool, error) {
+// idemFlow is the flow of a running Idem session, nil for any other session.
+func (s *Server) idemFlow(ctx context.Context, sess session.Session) (*flow.FlowDefinition, error) {
 	if sess.Method != session.MethodNFCPassport || sess.Status.Terminal() {
-		return false, nil
+		return nil, nil
 	}
-	fd, err := s.resolveSessionFlow(ctx, sess)
-	if err != nil {
-		return false, err
-	}
-	return fd != nil && documentPhotoMissing(sess, fd), nil
+	return s.resolveSessionFlow(ctx, sess)
+}
+
+// appFinished reports whether a phone claimed sess and its app did every
+// step it runs: the phone no longer holds the session, whatever the browser
+// still does. With no browser step left the app still has to submit, so it
+// holds the session until it did.
+func appFinished(sess session.Session, fd *flow.FlowDefinition) bool {
+	return fd != nil && sess.Access.Native != nil && !nativeHandoffPending(sess, fd) &&
+		(sess.Status == session.StatusNeedsReview || !requiredStepsComplete(sess, fd))
 }
 
 // methodOf is how the subject took part on a device: the slots of the
@@ -496,6 +505,8 @@ type resultView struct {
 			FullLastName  string `json:"fullLastName"`
 			DateOfBirth   string `json:"dateOfBirth"`
 			DateOfExpiry  string `json:"dateOfExpiry"`
+			// PersonalNumber is the BSN as the flow's BSN policy released it.
+			PersonalNumber string `json:"personalNumber"`
 		} `json:"document"`
 		ChipChecks *struct {
 			Passive *struct {
@@ -622,7 +633,7 @@ func (s *Server) SessionResult(_ context.Context, t pp.Tenant, id, token string)
 }
 
 // SessionIdentity reads who was proofed and on what evidence: never the
-// document number, personal number or place of birth.
+// document number or place of birth.
 func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token string) (pp.Identity, error) {
 	v, err := s.readResult(t, id, token)
 	if err != nil {
@@ -640,7 +651,7 @@ func (s *Server) SessionIdentity(_ context.Context, t pp.Tenant, id, token strin
 	if doc := res.Document; doc != nil {
 		out.GivenName, out.FamilyName = strings.TrimSpace(doc.FirstName), strings.TrimSpace(doc.LastName)
 		out.FullGivenName, out.FullFamilyName = strings.TrimSpace(doc.FullFirstName), strings.TrimSpace(doc.FullLastName)
-		out.BirthDate, out.Nationality = doc.DateOfBirth, doc.Nationality
+		out.BirthDate, out.Nationality, out.PersonalNumber = doc.DateOfBirth, doc.Nationality, doc.PersonalNumber
 		ev.DocumentType, ev.DocumentKind, ev.IssuingState, ev.ExpiryDate = doc.Type, doc.Kind, doc.IssuingState, doc.DateOfExpiry
 	}
 	if chip := res.ChipChecks; chip != nil {
@@ -827,10 +838,12 @@ var errWrongSessionToken = errors.New("the session token does not match")
 // errDeviceActive refuses a handover of a slot whose device is still there.
 var errDeviceActive = errors.New("the device holding this slot is still active; only it can hand the session over")
 
+var errAppFinished = errors.New("the Idem app did every step it runs; there is nothing left to hand over")
+
 // SessionHandover gives a fresh Idem app link for the native slot: its claim
 // while empty, a handover once its app left (inactive or stale). An app
 // still active is refused with pp.CodeDeviceActive.
-func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
+func (s *Server) SessionHandover(ctx context.Context, t pp.Tenant, id, token string) (pp.Claim, error) {
 	sess, err := s.session(t, id, token)
 	if err != nil {
 		return pp.Claim{}, err
@@ -838,12 +851,19 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	if sess.Method != session.MethodNFCPassport {
 		return pp.Claim{}, rejected(http.StatusConflict, "only Idem-app sessions have device slots")
 	}
+	fd, err := s.idemFlow(ctx, sess)
+	if err != nil {
+		return pp.Claim{}, fmt.Errorf("proofingengine: session handover: %w", err)
+	}
 	role := session.DeviceRoleNative
 	var grant string
 	slotClaimed := false
 	updated, err := s.sessions.Update(sess.TenantID, sess.ID, func(sess *session.Session) error {
 		if err := sessionOpenForDevices(*sess); err != nil {
 			return err
+		}
+		if appFinished(*sess, fd) {
+			return errAppFinished
 		}
 		ttl := s.cfg.ClaimTokenTTL
 		if d := sess.Access.Slot(role); d != nil {
@@ -859,6 +879,8 @@ func (s *Server) SessionHandover(_ context.Context, t pp.Tenant, id, token strin
 	switch {
 	case errors.Is(err, errDeviceActive):
 		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeDeviceActive}
+	case errors.Is(err, errAppFinished):
+		return pp.Claim{}, &pp.RejectedError{Status: http.StatusConflict, Message: err.Error(), Code: pp.CodeAppFinished}
 	case errors.Is(err, errSessionExpired):
 		return pp.Claim{}, &pp.RejectedError{Status: http.StatusGone, Message: err.Error(), Code: errCodeSessionExpired}
 	case errors.Is(err, errSessionComplete):

@@ -264,16 +264,22 @@ var (
 	// ErrDeviceActive is a new claim link refused while the Idem app holding
 	// the session is still active.
 	ErrDeviceActive = errors.New("proofing: the app holding the session is still active")
+	// ErrAppFinished is a new claim link refused once the Idem app did its
+	// part: no phone holds the session any more.
+	ErrAppFinished = errors.New("proofing: the Idem app already did its part")
 	// ErrResultNotReady is a result read before the session has an outcome.
 	ErrResultNotReady = errors.New("proofing: the session has no outcome yet")
 	// ErrNotHosted is a headless start of a request not created hosted.
-	ErrNotHosted       = errors.New("proofing: the request was not created hosted")
-	ErrAPIKeyNotFound  = errors.New("proofing: api key not found")
-	ErrAPIKeyInvalid   = errors.New("proofing: invalid api key")
-	ErrRequestNotFound = errors.New("proofing: request not found")
-	ErrWebhookNotFound = errors.New("proofing: webhook not configured")
-	ErrNoLogo          = errors.New("proofing: organization has no logo")
-	ErrInvalidInput    = errors.New("proofing: invalid input")
+	ErrNotHosted      = errors.New("proofing: the request was not created hosted")
+	ErrAPIKeyNotFound = errors.New("proofing: api key not found")
+	// ErrAPIKeyNotRevealable is a key made before keys were kept to be read
+	// again: only its hash is stored.
+	ErrAPIKeyNotRevealable = errors.New("proofing: api key not revealable")
+	ErrAPIKeyInvalid       = errors.New("proofing: invalid api key")
+	ErrRequestNotFound     = errors.New("proofing: request not found")
+	ErrWebhookNotFound     = errors.New("proofing: webhook not configured")
+	ErrNoLogo              = errors.New("proofing: organization has no logo")
+	ErrInvalidInput        = errors.New("proofing: invalid input")
 	// ErrWrongMethod is a Yivi-only call on a request that runs in the Idem app.
 	ErrWrongMethod = errors.New("proofing: the request does not run in the Yivi app")
 	// ErrSessionOver is a call on a request whose session can no longer run.
@@ -345,7 +351,10 @@ type Request struct {
 	LegalNotice *LegalNotice
 	// CancelledAt is when an API caller cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
-	CancelledAt     *time.Time
+	CancelledAt *time.Time
+	// CancelledBy is who cancelled it (CancelledByAPIKey, …); empty for one
+	// cancelled before the wallet kept it.
+	CancelledBy     CancelledBy
 	PurgedAt        *time.Time
 	RequestedBy     *uuid.UUID
 	RequestedByName string
@@ -409,6 +418,19 @@ type Request struct {
 	// Diplomas is whether the request asks for DUO diploma extracts once the
 	// identity check finished: its flow's DiplomaMode when it was sent.
 	Diplomas DiplomaMode
+	// DiplomasAddedAt is when the first extract was kept; nil for none, and
+	// once purged.
+	DiplomasAddedAt *time.Time
+	// UncheckedDiplomas is how many extracts wait for a reviewer to check
+	// their seal, and UncheckedEmployment whether a statement does
+	// (keepUnchecked).
+	UncheckedDiplomas   int
+	UncheckedEmployment bool
+	// uncheckedStatements is how many statements wait so.
+	uncheckedStatements int
+	// SealChecks are the files kept for a reviewer as their seal could not be
+	// checked at upload, waiting or decided; nil once purged.
+	SealChecks []SealCheck
 	// Address is whether the request asks for the subject's postal address
 	// once the identity check finished: its flow's AddressMode when it was sent.
 	// SubjectAddress is the address they entered, decrypted, at
@@ -427,10 +449,23 @@ type Request struct {
 	Employment        EmploymentMode
 	SubjectEmployment *Employment
 	EmploymentAddedAt *time.Time
-	// ReviewReason is why the wallet itself put the request in review after
-	// the engine approved it (Employment.reviewReason); "" for a review the
-	// engine opened, and for none. Such a review is decided in the wallet.
+	// ReviewReason is why the kept statement went to review
+	// (Employment.reviewReason); "" for none.
 	ReviewReason string
+	// EmploymentReview is the statement's review item; empty for none.
+	EmploymentReview ReviewState
+	// EmploymentReviewedAt is when it was decided or lapsed; nil while it waits.
+	EmploymentReviewedAt *time.Time
+	// DiplomasReview is the kept extracts' review item; empty for none.
+	DiplomasReview ReviewState
+	// DiplomasReviewedAt is when it was decided or lapsed; nil while it waits.
+	DiplomasReviewedAt *time.Time
+	// StepReviewDueAt is when the first of its waiting step reviews (address,
+	// employment, diplomas) lapses; nil while none waits.
+	StepReviewDueAt *time.Time
+	// IdentityReviewedAt is when a reviewer last decided its identity; nil
+	// when none did.
+	IdentityReviewedAt *time.Time
 	// ExpectsSubject is a request for one known person: only an identity that
 	// is SubjectName, born on expectedBirthDate, is approved (matchSubject).
 	ExpectsSubject bool
@@ -477,6 +512,37 @@ func (r Request) liveSession(now time.Time) *ipsSession {
 		return nil
 	}
 	return r.session
+}
+
+// ExpiryReason is why a request expired.
+type ExpiryReason string
+
+const (
+	// ExpiryNotStarted is a hosted link nobody started before it lapsed.
+	ExpiryNotStarted ExpiryReason = "not_started"
+	// ExpiryNotFinished is a session the person did not finish in time.
+	ExpiryNotFinished ExpiryReason = "not_finished"
+	// ExpiryReviewEnded is a review the engine ended before anyone decided it.
+	ExpiryReviewEnded ExpiryReason = "review_ended"
+)
+
+// ExpiryReason is why r reads as expired at now; empty when it does not.
+func (r Request) ExpiryReason(now time.Time) ExpiryReason {
+	if r.EffectiveStatus(now) != StatusExpired {
+		return ""
+	}
+	return r.expiryReason()
+}
+
+// expiryReason is why r expired, given that it did.
+func (r Request) expiryReason() ExpiryReason {
+	switch {
+	case r.Status == StatusNeedsReview:
+		return ExpiryReviewEnded
+	case r.session == nil:
+		return ExpiryNotStarted
+	}
+	return ExpiryNotFinished
 }
 
 // EffectiveStatus is Status with an unfinished request whose session is over
@@ -645,9 +711,22 @@ type RequestFilter struct {
 	// DataRequests narrows to data requests (FlowDataAccess, FlowDataErasure);
 	// the list's cap then counts only those.
 	DataRequests bool
-	// AddressReview narrows to the requests whose address stands so with a
-	// reviewer; pending ones are listed the longest waiting first.
-	AddressReview *AddressReview
+	// ReviewKind narrows to the requests with a review item of that kind in
+	// ReviewState (pending when nil): waiting ones the longest waiting first,
+	// decided ones the latest decision first.
+	ReviewKind  *ReviewKind
+	ReviewState *ReviewState
+	// ClosedReviews narrows to what the Reviews page lists as closed: the
+	// sessions whose review is over (something decided, nothing waiting) and
+	// the data requests that ended, the latest closed first.
+	ClosedReviews bool
+}
+
+func (f RequestFilter) reviewState() ReviewState {
+	if f.ReviewState == nil {
+		return ReviewPending
+	}
+	return *f.ReviewState
 }
 
 // NewRequest is a sender's ask to proof someone on a flow: another member
@@ -987,6 +1066,24 @@ const (
 	attributeFaceImage = "face_image"
 )
 
+// The face checks a flow requires: the match against the document's photo,
+// and the liveness check.
+const (
+	checkFaceMatch    = "face.match"
+	checkFaceLiveness = "face.liveness"
+)
+
+// secondsPerDay converts a flow's retention in days to its seconds.
+const secondsPerDay = 24 * 60 * 60
+
+// The chip's extra data, the live selfie and the document photos, as a flow
+// requests them.
+const (
+	attributeDG11          = "dg11"
+	attributeSelfie        = "selfie"
+	attributeDocumentImage = "document_image"
+)
+
 // attributeAgeOver is the age check, which withholds the date of birth from
 // the document data next to it.
 const attributeAgeOver = "age_over"
@@ -997,6 +1094,14 @@ const stepDocumentPhoto = "document_photo"
 
 // bsnPolicyRetrieve is the flow BSN policy that keeps the BSN; empty is omit.
 const bsnPolicyRetrieve = "retrieve"
+
+// bsnPolicyMask is the flow BSN policy that keeps only the BSN's last digits.
+const bsnPolicyMask = "mask"
+
+// keepsBSN reports whether f keeps the BSN, in full or masked.
+func keepsBSN(f proofingprovider.Flow) bool {
+	return f.BSNPolicy == bsnPolicyRetrieve || f.BSNPolicy == bsnPolicyMask
+}
 
 // takesDocumentPhoto reports whether flow f photographs the document.
 func takesDocumentPhoto(f proofingprovider.Flow) bool {
@@ -1051,3 +1156,13 @@ var referencePhotoTypes = []string{"image/jpeg", "image/png", "image/webp"}
 func hasFaceStep(steps []string) bool {
 	return slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(faceSteps, step) })
 }
+
+// CancelledBy is who cancelled a request.
+type CancelledBy string
+
+const (
+	CancelledByAPIKey CancelledBy = "api_key"
+	CancelledByMember CancelledBy = "member"
+	// CancelledBySubject is the person declining on the hosted page.
+	CancelledBySubject CancelledBy = "subject"
+)

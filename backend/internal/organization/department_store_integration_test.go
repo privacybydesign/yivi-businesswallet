@@ -43,7 +43,7 @@ func makeOrg(t *testing.T, pool *pgxpool.Pool, name, slug string) organization.O
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address) VALUES ($1, $2, $3, $4, $5)`,
-		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost"); err != nil {
+		name, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost"); err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(context.Background(), slug)

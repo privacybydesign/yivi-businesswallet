@@ -39,6 +39,7 @@ import {
   supportContactLink,
   verifyStages,
   firstMethod,
+  stepAsked,
 } from "../lib/identity-proofing";
 import { Button, Card, ConfirmDialog, Stepper } from "../ui";
 import { BrandMark } from "./proofing-ui";
@@ -125,8 +126,7 @@ function HostedFlow({
   const dataRequest = isDataRequest(flow.kind);
   const methods = methodChoices(flow.yiviAvailable, flow.idemAvailable);
   const [inAddress, setInAddress] = useState(false);
-  const [inDiplomas, setInDiplomas] = useState(false);
-  const [inEmployment, setInEmployment] = useState(false);
+  const [inDocuments, setInDocuments] = useState(false);
   const [step, setStep] = useState<Step>(initialStep(page));
   const [method, setMethod] = useState<ProofingMethod>(() => {
     if (flow.browserOnly) return "browser";
@@ -143,9 +143,8 @@ function HostedFlow({
     app: !flow.browserOnly && methods.length > 1,
     document: page.documentScan !== undefined,
     // The Yivi app shares the registered address: the person enters none.
-    address: flow.addressMode === "required" && method !== "yivi_app",
-    diplomas: flow.diplomaMode === "required",
-    employment: flow.employmentMode === "required",
+    address: stepAsked(flow.addressMode) && method !== "yivi_app",
+    documents: stepAsked(flow.diplomaMode) || stepAsked(flow.employmentMode),
   });
   const [sessionStage, setSessionStage] = useState<
     "document" | "method" | "session" | "done"
@@ -226,8 +225,7 @@ function HostedFlow({
   const stage = currentStage({
     step: step === "session" ? sessionStage : step,
     inAddress,
-    inDiplomas,
-    inEmployment,
+    inDocuments,
   });
   const showsEnded =
     step === "session" && (sessionEnded || page.status === "expired");
@@ -323,11 +321,10 @@ function HostedFlow({
               onMethod={setMethod}
               diplomaMode={flow.diplomaMode}
               diplomas={page.diplomas}
-              onDiplomaStep={setInDiplomas}
               addressMode={flow.addressMode}
               onAddressStep={setInAddress}
               employmentMode={flow.employmentMode}
-              onEmploymentStep={setInEmployment}
+              onDocumentStep={setInDocuments}
               renderEnded={(progress) => (
                 <HostedCheckEnded
                   name={organization.name}

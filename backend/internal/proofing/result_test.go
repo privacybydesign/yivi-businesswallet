@@ -2,6 +2,7 @@ package proofing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -40,9 +41,9 @@ func TestAdminRequestResult(t *testing.T) {
 	}
 }
 
-// A review the wallet opened on an approval shows its reviewer the identity, and
-// the API none of it.
-func TestWalletReviewResult(t *testing.T) {
+// A statement in review leaves the identity's approval: the API result shows
+// the approved identity, with the employment step in review beside it.
+func TestEmploymentReviewResult(t *testing.T) {
 	f := newFixture()
 	ctx := context.Background()
 	sent, err := f.svc.CreateRequest(ctx, testOrg, sam,
@@ -50,15 +51,18 @@ func TestWalletReviewResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	f.requests.stored.Status = StatusNeedsReview
-	f.requests.stored.ReviewReason = ReviewNoCurrentEmployment
+	checked := time.Now()
+	f.requests.stored.Status, f.requests.stored.CheckedAt, f.requests.stored.Employment = StatusApproved, &checked, EmploymentRequired
+	f.requests.stored.ReviewReason, f.requests.stored.EmploymentReview = ReviewNoCurrentEmployment, ReviewPending
 	f.ips.result = proofingprovider.Result{Status: proofingprovider.StatusApproved}
 	req, identity, err := f.svc.AdminRequestResult(ctx, testOrg.ID, sent.Request.ID, ReviewScopeAll)
-	if err != nil || identity.Status != proofingprovider.StatusNeedsReview || identity.FamilyName != "Jansen" {
-		t.Fatalf("AdminRequestResult = %+v, %v; want IPS's identity in review", identity, err)
+	if err != nil || identity.Status != proofingprovider.StatusApproved || identity.FamilyName != "Jansen" {
+		t.Fatalf("AdminRequestResult = %+v, %v; want IPS's approved identity", identity, err)
 	}
-	if out := newAPIResultResponse(req, identity, time.Now()); out.Identity != nil || out.Status != StatusNeedsReview {
-		t.Errorf("API result = %s, %+v; want needs_review without identity", out.Status, out.Identity)
+	out := newAPIResultResponse(req, identity, time.Now())
+	if out.Identity == nil || out.Status != StatusApproved || len(out.Steps) != 1 || out.Steps[0].State != StepInReview {
+		t.Errorf("API result = %s, %+v, steps %+v; want approved with the identity, the employment step in review",
+			out.Status, out.Identity, out.Steps)
 	}
 }
 
@@ -86,5 +90,45 @@ func TestAPIResultAgeOver(t *testing.T) {
 	// A check waiting for review shows its reviewer the same identity.
 	if got := newAPIIdentity(identity); got.AgeOver == nil || *got.AgeOver != (apiAgeOver{Age: 18, Over: true}) {
 		t.Errorf("identity in review = %+v, want ageOver 18, over", got)
+	}
+}
+
+// A result carries only what the flow produced: no empty steps or diplomas,
+// and chip checks only on a chip read.
+func TestAPIResultLeavesOutWhatTheFlowHasNot(t *testing.T) {
+	req := Request{ID: uuid.New(), Status: StatusApproved}
+	for evidenceType, wantChip := range map[string]bool{
+		proofingprovider.EvidenceEMRTD:         true,
+		proofingprovider.EvidenceYivi:          false,
+		proofingprovider.EvidenceDocumentPhoto: false,
+	} {
+		identity := proofingprovider.Identity{
+			Result: proofingprovider.Result{Status: proofingprovider.StatusApproved},
+			Evidence: &proofingprovider.Evidence{
+				Type: evidenceType, PassiveAuth: proofingprovider.CheckNotPerformed, ActiveAuth: proofingprovider.CheckNotPerformed,
+			},
+		}
+		out := newAPIResultResponse(req, identity, time.Now())
+		out.Diplomas = newDiplomaResponses(nil)
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"steps", "diplomas"} {
+			if _, ok := got[key]; ok {
+				t.Errorf("%s: result carries an empty %s", evidenceType, key)
+			}
+		}
+		entry := got["evidence"].([]any)[0].(map[string]any)
+		if _, ok := entry["passiveAuth"]; ok != wantChip {
+			t.Errorf("%s: passiveAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
+		if _, ok := entry["activeAuth"]; ok != wantChip {
+			t.Errorf("%s: activeAuth present = %v, want %v", evidenceType, ok, wantChip)
+		}
 	}
 }

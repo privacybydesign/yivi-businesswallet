@@ -212,6 +212,15 @@ func (h *StubHolder) Delete(_ context.Context, orgID uuid.UUID, ref string) erro
 	return nil
 }
 
+// DropOrganization forgets everything the org holds.
+func (h *StubHolder) DropOrganization(_ context.Context, orgID uuid.UUID) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.creds, orgID)
+	delete(h.displays, orgID)
+	return nil
+}
+
 // stubPresentationToken is the placeholder the stub returns per requested
 // credential: it runs no DCQL match and signs nothing, so the token only proves
 // the inbound flow reached the holder seam in dev / CI.

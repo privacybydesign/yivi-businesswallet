@@ -100,6 +100,7 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 
 	bsnPolicy, redaction := effectivePrivacyPolicy(fd)
 	doc, checksDocument := disclosedDocument(sess, info, bsnPolicy, time.Now())
+	withholdDisclosedBSN(&info, bsnPolicy)
 	docRedaction := redaction
 	docRedaction.BlurBSN = coversDocumentBSN(redaction, flow.IssuingStateCode(doc.IssuingState))
 
@@ -130,6 +131,11 @@ func (s *Server) acceptReference(ctx context.Context, sess session.Session, ref 
 		details[detailReason] = disclosureCodeFaceNotVerified
 		s.boundLoginFinish(sess, session.StatusRejected, code, nil, details, docRedaction)
 		return proofingprovider.YiviDisclosure{OK: false, Code: disclosureCodeFaceNotVerified}, nil
+	}
+
+	if decided == session.StatusApproved && alwaysReviews(fd) {
+		decided = session.StatusNeedsReview
+		details[detailReason] = reasonFlowAlwaysReview
 	}
 
 	result := buildBoundLoginResult(sess, info, doc, s.disclosedPhoto(sess, ref.Photo, redaction), ageOver)

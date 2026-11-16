@@ -6,6 +6,7 @@ import { ApiError, ApiValidationError } from "../api/http";
 import i18n, { SUPPORTED_LANGUAGES } from "../i18n";
 import type {
   ProofingBranding,
+  ProofingDataMatch,
   ProofingFlow,
   ProofingFlowBranding,
   ProofingFlowHosted,
@@ -13,6 +14,7 @@ import type {
 } from "../api/identity-proofing";
 import {
   ADDRESS_REVIEWS,
+  REVIEW_KINDS,
   ADDRESS_VERIFICATIONS,
   DATA_REQUEST_KINDS,
   DIPLOMA_MODES,
@@ -46,10 +48,12 @@ import {
   savedLocales,
   selectedLocales,
   diplomaRejectionReason,
-  diplomaStepDone,
+  documentStepDone,
+  splitVerdicts,
+  SEAL_CHECK_PENDING,
+  documentRejectionReason,
   employmentRejectionReason,
   employmentReview,
-  employmentStepDone,
   OUTCOME_ONLY,
   MAX_ATTRIBUTE_REASON_CHARS,
   collectedAttributes,
@@ -75,9 +79,11 @@ import {
   reviewPollContinues,
   reviewSubmitStep,
   matchTickedByDefault,
+  erasedSureMatches,
   externalFlows,
   flowPurgeDays,
   flowStepLabels,
+  stepAsked,
   attributeAvailable,
   draftFromFlow,
   draftSteps,
@@ -124,7 +130,7 @@ import {
   ownEndpointDeliveries,
   proofingMethodLabel,
   yiviAppAvailable,
-  latestAddressDecision,
+  latestStepDecision,
   sessionEventDetail,
   readableTextOn,
   SESSION_TTL_OPTIONS_SECONDS,
@@ -377,6 +383,7 @@ describe("flowSpecFromDraft", () => {
         bsnPolicy: "mask",
         blackOutBsn: false,
         keepFacePhotos: true,
+        alwaysReview: true,
         retentionSeconds: 3600,
         sessionTtlSeconds: 300,
       }),
@@ -388,6 +395,7 @@ describe("flowSpecFromDraft", () => {
       bsnPolicy: "mask",
       blurBsn: false,
       keepFacePhotos: true,
+      alwaysReview: true,
       retentionOverrideSeconds: 3600,
       sessionTtlSeconds: 300,
     });
@@ -608,6 +616,7 @@ describe("what a stored flow without a setting shows", () => {
       bsnPolicy: "omit",
       blackOutBsn: false,
       keepFacePhotos: false,
+      alwaysReview: false,
       retentionSeconds: 0,
       sessionTtlSeconds: 0,
     });
@@ -620,6 +629,7 @@ describe("what a stored flow without a setting shows", () => {
         bsnPolicy: "mask",
         blurBsn: true,
         keepFacePhotos: true,
+        alwaysReview: true,
         retentionOverrideSeconds: 86_400,
         sessionTtlSeconds: 120,
       }),
@@ -627,6 +637,7 @@ describe("what a stored flow without a setting shows", () => {
       bsnPolicy: "mask",
       blackOutBsn: true,
       keepFacePhotos: true,
+      alwaysReview: true,
       retentionSeconds: 86_400,
       sessionTtlSeconds: 120,
     });
@@ -1742,6 +1753,15 @@ describe("flowPurgeDays", () => {
   });
 });
 
+describe("stepAsked", () => {
+  it("asks a step that is required or always reviewed", () => {
+    expect(stepAsked("required")).toBe(true);
+    expect(stepAsked("always_review")).toBe(true);
+    expect(stepAsked("off")).toBe(false);
+    expect(stepAsked(undefined)).toBe(false);
+  });
+});
+
 describe("flowStepLabels", () => {
   it("names each step in the order given", () => {
     expect(
@@ -1758,10 +1778,34 @@ describe("flowStepLabels", () => {
         { steps: ["face_verification"], diplomaMode: "required" },
         t,
       ),
-    ).toEqual(["Face check", "Upload diplomas (DUO)"]);
+    ).toEqual(["Face check", "Upload documents (DUO diploma)"]);
     expect(
       flowStepLabels({ steps: ["face_verification"], diplomaMode: "off" }, t),
     ).toEqual(["Face check"]);
+    expect(
+      flowStepLabels(
+        { steps: ["face_verification"], diplomaMode: "always_review" },
+        t,
+      ),
+    ).toEqual(["Face check", "Upload documents (DUO diploma)"]);
+  });
+
+  it("names every document the upload step asks for", () => {
+    expect(
+      flowStepLabels(
+        { steps: [], diplomaMode: "required", employmentMode: "always_review" },
+        t,
+      ),
+    ).toEqual(["Upload documents (DUO diploma, UWV Verzekeringsbericht)"]);
+    expect(
+      flowStepLabels({ steps: [], employmentMode: "required" }, t),
+    ).toEqual(["Upload documents (UWV Verzekeringsbericht)"]);
+  });
+
+  it("names an always reviewed address as an asked one", () => {
+    expect(
+      flowStepLabels({ steps: [], addressMode: "always_review" }, t),
+    ).toEqual(["Enter the address"]);
   });
 
   it("adds the address entry before the diploma upload", () => {
@@ -1774,7 +1818,11 @@ describe("flowStepLabels", () => {
         },
         t,
       ),
-    ).toEqual(["Face check", "Enter the address", "Upload diplomas (DUO)"]);
+    ).toEqual([
+      "Face check",
+      "Enter the address",
+      "Upload documents (DUO diploma)",
+    ]);
   });
 
   it("shows a step it has no copy for as it is", () => {
@@ -1996,6 +2044,41 @@ describe("session method and timeline", () => {
     expect(sessionEventDetail({}, t)).toEqual([]);
   });
 
+  it("names a document whose seal waits, and a refusal of its check again", () => {
+    expect(
+      sessionEventDetail(
+        { after: { kind: "diplomas", fileName: "a.pdf", sealUnchecked: true } },
+        t,
+      ),
+    ).toEqual(["Diploma extract from DUO", "a.pdf"]);
+    expect(
+      sessionEventDetail(
+        {
+          after: {
+            reason: "signature_invalid",
+            failedCheck: "cms_signature",
+            sealCheckedAgain: true,
+            fileName: "nep.pdf",
+          },
+        },
+        t,
+      ),
+    ).toEqual([
+      "After a reviewer checked the seal again",
+      "nep.pdf",
+      t("identityProofing.reviews.seal.reasons.signatureInvalid"),
+    ]);
+    // A reviewer's own words stay theirs.
+    expect(
+      sessionEventDetail(
+        { after: { kind: "diplomas", state: "rejected", reason: "duplicate" } },
+        t,
+      ),
+    ).toContain(
+      t("identityProofing.reviews.decided.reason", { reason: "duplicate" }),
+    );
+  });
+
   it("says an entered address goes to a reviewer, and what was decided", () => {
     expect(
       sessionEventDetail({ after: { verification: "registered_mismatch" } }, t),
@@ -2198,19 +2281,27 @@ describe("address reviews mirror backend/internal/proofing", () => {
   const source = readFileSync(
     fileURLToPath(
       new URL(
-        "../../../backend/internal/proofing/address_review.go",
+        "../../../backend/internal/proofing/review_items.go",
         import.meta.url,
       ),
     ),
     "utf8",
   );
   const backend = [
-    ...source.matchAll(/AddressReview\w+\s+AddressReview = "(\w+)"/g),
+    ...source.matchAll(/Review\w+\s+ReviewState = "(\w+)"/g),
+  ].map((m) => m[1]);
+  const kinds = [
+    ...source.matchAll(/ReviewKind\w+\s+ReviewKind = "(\w+)"/g),
   ].map((m) => m[1]);
 
   it("has every backend review state and no other", () => {
     expect(backend.length).toBeGreaterThan(0);
     expect([...ADDRESS_REVIEWS].sort()).toEqual([...backend].sort());
+  });
+
+  it("has every backend review kind and no other", () => {
+    expect(kinds.length).toBeGreaterThan(0);
+    expect([...REVIEW_KINDS].sort()).toEqual([...kinds].sort());
   });
 });
 
@@ -2268,10 +2359,9 @@ describe("sessionView", () => {
     addressDone: false,
     diplomaMode: "off" as const,
     diplomasUntil: undefined,
-    diplomasDone: false,
     employmentMode: "off" as const,
     employmentUntil: undefined,
-    employmentDone: false,
+    documentsDone: false,
     secondsLeft: 60,
   };
 
@@ -2298,49 +2388,71 @@ describe("sessionView", () => {
     }
   });
 
-  it("asks for diplomas after a settled session that has the step", () => {
+  it("asks for the documents after a settled session that has the step", () => {
+    const settled = { ...running, status: "approved" };
     expect(
       sessionView({
-        ...running,
-        status: "approved",
+        ...settled,
         diplomaMode: "required",
         diplomasUntil: until,
       }),
-    ).toBe("diplomas");
+    ).toBe("documents");
+    expect(
+      sessionView({
+        ...settled,
+        employmentMode: "required",
+        employmentUntil: until,
+      }),
+    ).toBe("documents");
+    expect(
+      sessionView({
+        ...running,
+        status: "needs_review",
+        employmentMode: "always_review",
+        employmentUntil: until,
+      }),
+    ).toBe("documents");
   });
 
-  it("shows the outcome once the diplomas are done", () => {
+  it("shows the outcome once the documents are done", () => {
     expect(
       sessionView({
         ...running,
         status: "approved",
         diplomaMode: "required",
         diplomasUntil: until,
-        diplomasDone: true,
+        employmentMode: "required",
+        employmentUntil: until,
+        documentsDone: true,
       }),
     ).toBe("outcome");
   });
 
-  it("skips the diploma step without a deadline or on a flow without it", () => {
+  it("skips the document step without a deadline or on a flow without it", () => {
     expect(
       sessionView({ ...running, status: "rejected", diplomaMode: "required" }),
     ).toBe("outcome");
     expect(
       sessionView({ ...running, status: "approved", diplomasUntil: until }),
     ).toBe("outcome");
+    expect(
+      sessionView({ ...running, status: "approved", employmentUntil: until }),
+    ).toBe("outcome");
   });
 
-  it("does not ask for diplomas while the session is live", () => {
+  it("does not ask for documents while the session is live", () => {
     expect(
       sessionView({
         ...running,
         diplomaMode: "required",
         diplomasUntil: until,
+        employmentMode: "required",
+        employmentUntil: until,
       }),
     ).toBe("running");
   });
 
-  it("asks for the address before the diplomas", () => {
+  it("asks for the address before the documents", () => {
     const settled = {
       ...running,
       status: "approved",
@@ -2350,70 +2462,32 @@ describe("sessionView", () => {
       diplomasUntil: until,
     };
     expect(sessionView(settled)).toBe("address");
-    expect(sessionView({ ...settled, addressDone: true })).toBe("diplomas");
+    expect(sessionView({ ...settled, addressDone: true })).toBe("documents");
     expect(
-      sessionView({ ...settled, addressUntil: undefined, diplomasDone: true }),
+      sessionView({ ...settled, addressUntil: undefined, documentsDone: true }),
     ).toBe("outcome");
   });
 
-  it("asks for the Verzekeringsbericht after the diplomas", () => {
-    const settled = {
+  // The subject continued, but what the page read still owes the statement:
+  // the outcome waits for a read after it (kept, or the window's rejection).
+  it("holds the document step while the backend still owes the statement", () => {
+    const done = {
       ...running,
       status: "approved",
       diplomaMode: "required" as const,
       diplomasUntil: until,
       employmentMode: "required" as const,
       employmentUntil: until,
+      documentsDone: true,
     };
-    expect(sessionView(settled)).toBe("diplomas");
-    expect(sessionView({ ...settled, diplomasDone: true })).toBe("employment");
-    expect(
-      sessionView({ ...settled, diplomasDone: true, employmentDone: true }),
-    ).toBe("outcome");
-    expect(
-      sessionView({
-        ...settled,
-        diplomasDone: true,
-        employmentUntil: undefined,
-      }),
-    ).toBe("outcome");
-  });
-
-  it("asks for the Verzekeringsbericht in review too", () => {
-    expect(
-      sessionView({
-        ...running,
-        status: "needs_review",
-        employmentMode: "required",
-        employmentUntil: until,
-      }),
-    ).toBe("employment");
-  });
-
-  // The subject continued, but what the page read still owes the statement:
-  // the outcome waits for a read after it (kept, or the window's rejection).
-  it("holds the Verzekeringsbericht step while the backend still owes it", () => {
-    const done = {
-      ...running,
-      status: "approved",
-      employmentMode: "required" as const,
-      employmentUntil: until,
-      employmentDone: true,
-    };
-    expect(sessionView({ ...done, employmentOwed: true })).toBe("employment");
+    expect(sessionView({ ...done, employmentOwed: true })).toBe("documents");
     expect(sessionView({ ...done, employmentOwed: false })).toBe("outcome");
-  });
-
-  it("does not ask for the Verzekeringsbericht while live or unasked", () => {
     expect(
       sessionView({
-        ...running,
-        employmentMode: "required",
-        employmentUntil: until,
+        ...done,
+        employmentUntil: undefined,
+        employmentOwed: true,
       }),
-    ).toBe("running");
-    expect(
-      sessionView({ ...running, status: "approved", employmentUntil: until }),
     ).toBe("outcome");
   });
 });
@@ -2426,7 +2500,7 @@ describe("app step", () => {
   // A flow with one app still shows the app step, with that one app to tap.
   it("offers the Idem app alone otherwise, still as a step of its own", () => {
     expect(methodChoices(false)).toEqual(["idem_app"]);
-    expect(verifyStages({ diplomas: false })).toContain("method");
+    expect(verifyStages({ documents: false })).toContain("method");
   });
 
   // One app has nothing to pick: the session starts in it, with no app step.
@@ -2446,26 +2520,26 @@ describe("app step", () => {
   });
 
   it("puts the document photo after the app's part", () => {
-    expect(verifyStages({ document: true, diplomas: false })).toEqual([
+    expect(verifyStages({ document: true, documents: false })).toEqual([
       "overview",
       "method",
       "session",
       "document",
     ]);
     expect(
-      verifyStages({ document: true, address: true, diplomas: true }),
+      verifyStages({ document: true, address: true, documents: true }),
     ).toEqual([
       "overview",
       "method",
       "session",
       "document",
       "address",
-      "diplomas",
+      "documents",
     ]);
   });
 
   it("places a done page past the last stage", () => {
-    const stages = verifyStages({ document: true, diplomas: false });
+    const stages = verifyStages({ document: true, documents: false });
     expect(stageIndex(stages, "method")).toBe(1);
     expect(stageIndex(stages, "document")).toBe(3);
     expect(stageIndex(stages, "done")).toBe(stages.length);
@@ -2473,18 +2547,13 @@ describe("app step", () => {
 
   it("stays done once the session's outcome shows", () => {
     expect(
-      currentStage({
-        step: "done",
-        inAddress: false,
-        inDiplomas: false,
-        inEmployment: false,
-      }),
+      currentStage({ step: "done", inAddress: false, inDocuments: false }),
     ).toBe("done");
   });
 
   // A flow the browser runs alone has no app to choose.
   it("leaves the app step out for a flow with no app", () => {
-    expect(verifyStages({ app: false, diplomas: false })).toEqual([
+    expect(verifyStages({ app: false, documents: false })).toEqual([
       "overview",
       "session",
     ]);
@@ -2505,28 +2574,27 @@ describe("app step", () => {
 });
 
 describe("address step", () => {
-  it("adds the address stage after the session, before the diplomas", () => {
-    expect(verifyStages({ address: true, diplomas: true })).toEqual([
+  it("adds the address stage after the session, before the documents", () => {
+    expect(verifyStages({ address: true, documents: true })).toEqual([
       "overview",
       "method",
       "session",
       "address",
-      "diplomas",
+      "documents",
     ]);
   });
 
-  it("is at the address or diploma step while it is open", () => {
+  it("is at the address or document step while it is open", () => {
     const at = {
       step: "session",
       inAddress: false,
-      inDiplomas: false,
-      inEmployment: false,
+      inDocuments: false,
     } as const;
     expect(currentStage(at)).toBe("session");
-    expect(currentStage({ ...at, inAddress: true, inDiplomas: true })).toBe(
+    expect(currentStage({ ...at, inAddress: true, inDocuments: true })).toBe(
       "address",
     );
-    expect(currentStage({ ...at, inDiplomas: true })).toBe("diplomas");
+    expect(currentStage({ ...at, inDocuments: true })).toBe("documents");
   });
 
   it("mails only a flow that takes no document photo", () => {
@@ -2550,49 +2618,6 @@ describe("address step", () => {
 });
 
 describe("employment step", () => {
-  it("adds the employment stage after the diplomas", () => {
-    expect(
-      verifyStages({ address: true, diplomas: true, employment: true }),
-    ).toEqual([
-      "overview",
-      "method",
-      "session",
-      "address",
-      "diplomas",
-      "employment",
-    ]);
-    expect(verifyStages({ diplomas: false, employment: true })).toEqual([
-      "overview",
-      "method",
-      "session",
-      "employment",
-    ]);
-  });
-
-  it("is at the employment step while it is open", () => {
-    const at = {
-      step: "session",
-      inAddress: false,
-      inDiplomas: false,
-      inEmployment: false,
-    } as const;
-    expect(currentStage({ ...at, inEmployment: true })).toBe("employment");
-    expect(currentStage({ ...at, inDiplomas: true, inEmployment: true })).toBe(
-      "diplomas",
-    );
-  });
-
-  it("ends the step once a statement is kept or the time is up", () => {
-    const kept = {
-      statementDate: "2026-10-15",
-      employed: true,
-      relations: [],
-    };
-    expect(employmentStepDone(undefined, 60)).toBe(false);
-    expect(employmentStepDone(kept, 60)).toBe(true);
-    expect(employmentStepDone(undefined, 0)).toBe(true);
-  });
-
   it("sends a statement without a job or with a benefit to review", () => {
     const relation = (kind: string) => ({
       kind,
@@ -2661,27 +2686,110 @@ describe("employment step", () => {
   });
 });
 
+describe("document step", () => {
+  it("adds one document stage after the session when the flow has it", () => {
+    expect(verifyStages({ documents: true })).toEqual([
+      "overview",
+      "method",
+      "session",
+      "documents",
+    ]);
+    expect(verifyStages({ documents: false })).toEqual([
+      "overview",
+      "method",
+      "session",
+    ]);
+  });
+
+  it("ends once every asked document is in, or the time is up", () => {
+    const both = {
+      diplomasAsked: true,
+      diplomasHeld: 0,
+      statementAsked: true,
+      statementKept: false,
+      secondsLeft: 60,
+    };
+    expect(documentStepDone(both)).toBe(false);
+    expect(documentStepDone({ ...both, diplomasHeld: 2 })).toBe(false);
+    expect(documentStepDone({ ...both, statementKept: true })).toBe(false);
+    expect(
+      documentStepDone({ ...both, diplomasHeld: 1, statementKept: true }),
+    ).toBe(true);
+    expect(documentStepDone({ ...both, secondsLeft: 0 })).toBe(true);
+    expect(
+      documentStepDone({ ...both, statementAsked: false, diplomasHeld: 1 }),
+    ).toBe(true);
+    expect(
+      documentStepDone({ ...both, diplomasAsked: false, statementKept: true }),
+    ).toBe(true);
+  });
+
+  it("counts a file whose seal waits as given, not refused", () => {
+    const split = splitVerdicts([
+      { fileName: "a.pdf", kind: "diploma", accepted: true },
+      {
+        fileName: "b.pdf",
+        kind: "diploma",
+        accepted: false,
+        reason: SEAL_CHECK_PENDING,
+      },
+      {
+        fileName: "c.pdf",
+        kind: "employment",
+        accepted: false,
+        reason: SEAL_CHECK_PENDING,
+      },
+      {
+        fileName: "d.pdf",
+        kind: "diploma",
+        accepted: false,
+        reason: "holder_mismatch",
+      },
+    ]);
+    expect(split.uncheckedDiplomas).toBe(1);
+    expect(split.statementUnchecked).toBe(true);
+    expect(split.unchecked.map((v) => v.fileName)).toEqual(["b.pdf", "c.pdf"]);
+    expect(split.refused.map((v) => v.fileName)).toEqual(["d.pdf"]);
+  });
+
+  it("names the reason the backend gives a file whose seal waits", () => {
+    const source = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../../backend/internal/proofing/unchecked_documents.go",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    expect(source).toContain(
+      `DocumentReasonSealPending = "${SEAL_CHECK_PENDING}"`,
+    );
+  });
+
+  it("explains every refusal, by the document the file is", () => {
+    const t = i18n.getFixedT("en");
+    for (const reason of [
+      "not_supported",
+      "not_asked",
+      "too_many",
+      "check_failed",
+    ]) {
+      expect(documentRejectionReason({ reason }, t)).not.toBe(reason);
+    }
+    expect(
+      documentRejectionReason({ kind: "diploma", reason: "duplicate" }, t),
+    ).toBe("This diploma was added already.");
+    expect(
+      documentRejectionReason({ kind: "employment", reason: "duplicate" }, t),
+    ).toBe("A Verzekeringsbericht was added already.");
+    expect(
+      documentRejectionReason({ kind: "employment", reason: "stale" }, t),
+    ).toBe(employmentRejectionReason("stale", t));
+  });
+});
+
 describe("diploma step", () => {
-  it("adds the diploma stage after the session when the flow has it", () => {
-    expect(verifyStages({ diplomas: true })).toEqual([
-      "overview",
-      "method",
-      "session",
-      "diplomas",
-    ]);
-    expect(verifyStages({ diplomas: false })).toEqual([
-      "overview",
-      "method",
-      "session",
-    ]);
-  });
-
-  it("ends the step once an extract is held or the time is up", () => {
-    expect(diplomaStepDone(0, 60)).toBe(false);
-    expect(diplomaStepDone(1, 60)).toBe(true);
-    expect(diplomaStepDone(0, 0)).toBe(true);
-  });
-
   it("mails only a flow that asks for no diplomas", () => {
     expect(sendableByMail(undefined)).toBe(true);
     expect(sendableByMail({})).toBe(true);
@@ -2895,6 +3003,18 @@ describe("data request review", () => {
     }
   });
 
+  it("counts only the sure matches an erasure deleted already", () => {
+    const at = "2026-11-06T10:00:00Z";
+    const matches = [
+      { requestId: "a", level: "strong", purgedAt: at },
+      { requestId: "b", level: "probable", purgedAt: at },
+      { requestId: "c", level: "email", purgedAt: at },
+      { requestId: "d", level: "strong" },
+    ] as ProofingDataMatch[];
+    expect(erasedSureMatches("data_erasure", matches)).toBe(2);
+    expect(erasedSureMatches("data_access", matches)).toBe(0);
+  });
+
   it("confirms an erasure before approving it", () => {
     expect(
       reviewSubmitStep({
@@ -2969,30 +3089,16 @@ describe("progress poll", () => {
     expect(progressPollContinues({ status: "approved" }, null)).toBe(false);
   });
 
-  it("polls an approved session owing its Verzekeringsbericht once the window passed", () => {
+  it("owes the statement only while approved, asked and in its window", () => {
     const until = "2026-10-12T12:00:00Z";
-    const owing = { status: "approved", employmentUntil: until };
     const before = Date.parse(until) - 1000;
     const after = Date.parse(until) + 1000;
-    expect(progressPollContinues(owing, null, before)).toBe(false);
-    expect(progressPollContinues(owing, null, after)).toBe(true);
-    expect(progressPollContinues({ status: "rejected" }, null, after)).toBe(
-      false,
-    );
     expect(
-      progressPollContinues(
-        { status: "needs_review", employmentUntil: until },
-        null,
-        after,
-      ),
+      employmentOwed({ status: "approved", employmentUntil: until }, before),
+    ).toBe(true);
+    expect(
+      employmentOwed({ status: "approved", employmentUntil: until }, after),
     ).toBe(false);
-  });
-
-  it("owes the statement only while approved and asked", () => {
-    const until = "2026-10-12T12:00:00Z";
-    expect(employmentOwed({ status: "approved", employmentUntil: until })).toBe(
-      true,
-    );
     expect(employmentOwed({ status: "approved" })).toBe(false);
     expect(
       employmentOwed({ status: "needs_review", employmentUntil: until }),
@@ -3317,7 +3423,7 @@ describe("hosted page languages", () => {
   });
 });
 
-describe("latestAddressDecision", () => {
+describe("latestStepDecision", () => {
   const event = (over: Partial<AuditEvent>): AuditEvent => ({
     id: "e",
     occurredAt: "2026-10-29T10:00:00Z",
@@ -3331,15 +3437,18 @@ describe("latestAddressDecision", () => {
   });
 
   it("is the last address decision, with its reason", () => {
-    const got = latestAddressDecision([
-      event({ id: "a", metadata: { after: { reason: "first" } } }),
-      event({ id: "x", action: "identity_proofing.result_read" }),
-      event({
-        id: "b",
-        occurredAt: "2026-10-29T11:00:00Z",
-        metadata: { after: { addressReview: "rejected", reason: "moved" } },
-      }),
-    ]);
+    const got = latestStepDecision(
+      [
+        event({ id: "a", metadata: { after: { reason: "first" } } }),
+        event({ id: "x", action: "identity_proofing.result_read" }),
+        event({
+          id: "b",
+          occurredAt: "2026-10-29T11:00:00Z",
+          metadata: { after: { addressReview: "rejected", reason: "moved" } },
+        }),
+      ],
+      "address",
+    );
     expect(got).toEqual({
       by: null,
       at: "2026-10-29T11:00:00Z",
@@ -3349,9 +3458,21 @@ describe("latestAddressDecision", () => {
 
   it("has no reason where the backend left it out, and none without a decision", () => {
     expect(
-      latestAddressDecision([event({ metadata: { after: {} } })])?.reason,
+      latestStepDecision([event({ metadata: { after: {} } })], "address")
+        ?.reason,
     ).toBeUndefined();
-    expect(latestAddressDecision([])).toBeUndefined();
+    expect(latestStepDecision([], "address")).toBeUndefined();
+  });
+
+  it("is the step's own review item decision", () => {
+    const item = (kind: string, reason: string): AuditEvent =>
+      event({
+        action: "identity_proofing.review_item_decided",
+        metadata: { after: { kind, state: "rejected", reason } },
+      });
+    const events = [item("employment", "benefit"), item("address", "moved")];
+    expect(latestStepDecision(events, "employment")?.reason).toBe("benefit");
+    expect(latestStepDecision(events, "address")?.reason).toBe("moved");
   });
 });
 

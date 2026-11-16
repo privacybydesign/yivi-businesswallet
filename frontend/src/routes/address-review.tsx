@@ -1,24 +1,30 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useMeQuery } from "../api/auth.queries";
 import type {
   AddressReviewInput,
   ProofingRequest,
+  StepReviewKind,
 } from "../api/identity-proofing";
-import { useDecideAddressReviewMutation } from "../api/identity-proofing.queries";
+import { useDecideStepReviewMutation } from "../api/identity-proofing.queries";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   addressVerificationNote,
-  assuranceLevelLabel,
   proofingErrorMessage,
   proofingMethodLabel,
   requestSubject,
   REVIEW_REASON_MAX_CHARS,
 } from "../lib/identity-proofing";
 import { toast } from "../lib/toast";
-import { ownReview, reasonProblem, reviewPath } from "../lib/proofing-reviews";
+import {
+  addressReviewWhy,
+  nextPart,
+  ownReview,
+  reasonProblem,
+  reviewPath,
+  STEP_DECIDED_KEYS,
+} from "../lib/proofing-reviews";
 import { Button, TopBar } from "../ui";
 import {
   BackToReviews,
@@ -27,14 +33,16 @@ import {
   REVIEW_FIELD_LABEL,
   REVIEW_HINT,
   REVIEW_TEXTAREA,
-  ReviewFacts,
   ReviewSection,
+  SessionDecisions,
 } from "./proofing-review-parts";
+import { useAfterDecision } from "../lib/use-after-decision";
 import { PostalAddress } from "./proofing-ui";
 
-const DECIDED_KEYS = {
-  confirmed: "confirmed",
-  rejected: "rejected",
+const ADDRESS_WHY_HINT = {
+  addressMismatch: "identityProofing.reviews.address.whyMismatch",
+  addressAlways: "identityProofing.reviews.address.whyAlways",
+  address: "identityProofing.reviews.address.why",
 } as const;
 
 // An address that waits for a person, or was decided: the address (and the
@@ -74,11 +82,7 @@ export function AddressReview({
         <ReviewSection
           id="address-review-why"
           title={t("identityProofing.reviews.address.whyTitle")}
-          hint={t(
-            address?.verification === "registered_mismatch"
-              ? "identityProofing.reviews.address.whyMismatch"
-              : "identityProofing.reviews.address.why",
-          )}
+          hint={t(ADDRESS_WHY_HINT[addressReviewWhy(request)])}
         >
           {address === undefined ? (
             <p className={REVIEW_HINT}>
@@ -99,26 +103,7 @@ export function AddressReview({
             </>
           )}
         </ReviewSection>
-        <ReviewSection
-          id="address-review-check"
-          title={t("identityProofing.reviews.address.checkTitle")}
-          hint={t("identityProofing.reviews.address.checkHint")}
-        >
-          <ReviewFacts
-            rows={[
-              {
-                label: t("identityProofing.reviews.address.method"),
-                value: proofingMethodLabel(request.method, t),
-              },
-              {
-                label: t("identityProofing.reviews.address.level"),
-                value: request.eidasLevel
-                  ? assuranceLevelLabel(request.eidasLevel, t)
-                  : "—",
-              },
-            ]}
-          />
-        </ReviewSection>
+        <SessionDecisions request={request} except="address" />
         <ReviewSection
           id="address-review-decision"
           title={t("identityProofing.reviews.address.decisionTitle")}
@@ -129,11 +114,13 @@ export function AddressReview({
                 {t(`identityProofing.reviews.check.own.${own}`)}
               </output>
             ) : (
-              <AddressDecision slug={slug} requestId={request.id} />
+              <StepDecision slug={slug} request={request} kind="address" />
             ))}
           {review !== undefined && review !== "pending" && (
             <output className="border-line bg-surface-2 text-ink rounded-yivi block border px-4 py-3 text-[13.5px]">
-              {t(`identityProofing.reviews.address.${DECIDED_KEYS[review]}`)}
+              {t(
+                `identityProofing.reviews.address.${STEP_DECIDED_KEYS[review]}`,
+              )}
               <DecisionReasons request={request} kind="address" />
             </output>
           )}
@@ -144,22 +131,29 @@ export function AddressReview({
   );
 }
 
-// Confirm or reject, with a reason the audit log keeps. A decided address
-// leaves the reader's reach, so the page goes back to the Reviews page.
-function AddressDecision({
+// Confirm or reject a step (the address, the Verzekeringsbericht), with a
+// reason the audit log keeps. The review then goes on to the session's next
+// part waiting, else back to the Reviews page.
+export function StepDecision({
   slug,
-  requestId,
+  request,
+  kind,
+  confirmBlocked = false,
 }: Readonly<{
   slug: string;
-  requestId: string;
+  request: ProofingRequest;
+  kind: StepReviewKind;
+  // A file whose seal nobody checked yet: rejecting is all that remains.
+  confirmBlocked?: boolean;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const decide = useDecideAddressReviewMutation(slug, requestId);
+  const afterDecision = useAfterDecision(slug);
+  const requestId = request.id;
+  const decide = useDecideStepReviewMutation(slug, requestId, kind);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const problem = reasonProblem(reason);
-  const idPrefix = `address-review-${requestId}`;
+  const idPrefix = `${kind}-review-${requestId}`;
 
   function submit(decision: AddressReviewInput["decision"]): void {
     setTouched(true);
@@ -171,11 +165,11 @@ function AddressDecision({
           toast.success(
             t(
               decision === "confirm"
-                ? "identityProofing.reviews.address.confirmed"
-                : "identityProofing.reviews.address.rejected",
+                ? `identityProofing.reviews.${kind}.confirmed`
+                : `identityProofing.reviews.${kind}.rejected`,
             ),
           );
-          void navigate(reviewPath(slug));
+          afterDecision(nextPart(request, kind));
         },
       },
     );
@@ -214,10 +208,10 @@ function AddressDecision({
       <div className="flex flex-wrap gap-2">
         <Button
           loading={decide.isPending && decide.variables?.decision === "confirm"}
-          disabled={decide.isPending}
+          disabled={decide.isPending || confirmBlocked}
           onClick={() => submit("confirm")}
         >
-          {t("identityProofing.reviews.address.confirm")}
+          {t(`identityProofing.reviews.${kind}.confirm`)}
         </Button>
         <Button
           variant="secondary"
@@ -225,7 +219,7 @@ function AddressDecision({
           disabled={decide.isPending}
           onClick={() => submit("reject")}
         >
-          {t("identityProofing.reviews.address.reject")}
+          {t(`identityProofing.reviews.${kind}.reject`)}
         </Button>
       </div>
       {decide.isError && (

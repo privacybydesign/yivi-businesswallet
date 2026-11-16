@@ -102,8 +102,8 @@ tags), `proofing-pause.tsx` (the paused notice), `hosted*.go` +
 step) + `routes/proofing-verify-steps.tsx` (the upload) (DUO diplomas, §12),
 `matchSubject` in `service.go` (one known person, §13), `address*.go` +
 `routes/proofing-verify-steps.tsx` (`AddressStep`) (the postal address, §16),
-`employment*.go` + `internal/employment` + `EmploymentStep` (the UWV
-Verzekeringsbericht, §17).
+`employment*.go` + `internal/employment` (the UWV Verzekeringsbericht, §17),
+`documents*.go` + `DocumentStep` (the one upload step for both, §20).
 **Depends on:** the Regula Face API (`REGULA_FACE_API_URL`) for every face
 check, and the Idem app's `/api/v1/app/{token}/...` contract
 (`vcmrtd/idem/lib/services/proofing_session_client.dart`).
@@ -394,6 +394,11 @@ documented under the `idem-app` tag, though only the app calls them), and the de
     empty list, any document: `DocumentKindOf` leaves some cards without a
     kind (a foreigner's card coded `ID` is a residence permit in Belgium, an
     identity card in Estonia), which a list of all four would refuse.
+    - The Idem app offers only these: the app session view's
+      `documentTypes` (`flow.AppDocumentKinds`), absent for any. A code
+      stands for every kind carrying it (`ID`: identity card and residence
+      permit), and an unknown code offers all. With one kind and no matching
+      document saved on the phone, the app skips the document choice.
   - **Whose identity:** the engine reads the document (name, number, dates,
     nationality, DG11's full name, BSN and place of birth) off the chip
     evidence itself, `documentFromEvidence` in `proofingengine/chipdocument.go`:
@@ -853,8 +858,17 @@ post-review outcome stay the system's.
 
 - **API keys** (`identity_proofing_api_keys`, `apikey_store.go`) belong to the
   org: `GET` and `POST /orgs/{slug}/identity-proofing/api-keys`, and
-  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes,
-  stored as SHA-256 only, shown once; `prefix` tells keys apart. The page calls
+  `DELETE .../api-keys/{keyID}`, admin only. `yp_live_` + 32 random bytes;
+  `prefix` tells keys apart.
+  - Authenticated by its SHA-256 (`secret_hash`).
+  - Also kept sealed with the proofing cipher (`secret_ciphertext`, migration
+    `20261116100000`), so an admin reads an active key again:
+    `GET .../api-keys/{keyID}/secret` (Show on the Developers page), audited
+    `api_key_revealed`, `no-store`. A key made before has only its hash:
+    `revealable: false`, 409 `api_key_not_revealable`. Without a cipher a key
+    is kept as its hash alone.
+
+  The page calls
   them API tokens. `createdByName` is the creator's display name, absent once
   that user is deleted. One key works
   on every flow and reaches every external request of the org. Revoke is
@@ -883,9 +897,12 @@ post-review outcome stay the system's.
   `GET /proofing/sessions/{id}/result` (scope `results:read`) reads a settled
   session's identity and evidence from the engine on each call (`SessionIdentity`
   decodes the name, birth date, nationality, document type, issuing state and
-  expiry, the checks, and the images: `photo`, `selfie`, `referencePhoto`,
-  `documentImage` and `documentImageBack`; never the document number),
-  audited `result_read`; 404 once erased. The public API never returns an image.
+  expiry, the BSN as the flow's BSN policy releases it, the checks, and the
+  images: `photo`, `selfie`, `referencePhoto`, `documentImage` and
+  `documentImageBack`; never the document number), audited `result_read`; 404
+  once erased. For an approval the public API adds the document's images
+  (`photo`, `documentImage`, `documentImageBack`), never the selfie or the
+  reference photo.
   An org admin reads the same shape in the wallet at
   `GET /orgs/{slug}/identity-proofing/requests/{id}/result`
   (`AdminRequestResult`, sharing `requestResult`), audited `result_read` with the
@@ -902,9 +919,42 @@ post-review outcome stay the system's.
   it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
-  `flows:read`); every key gets all four, and only a signed-in org admin
+  `flows:read`, `flows:write`, `settings:read`, `settings:write`,
+  `webhooks:write`); every key gets all of them (migration `20261116090100`
+  gave the keys made before the last four), and only a signed-in org admin
   creates one. A missing scope is 403
   `insufficient_scope`.
+- **Setup over the API** (`api_setup_handler.go`): a key sets up what an admin
+  sets up in the wallet, on the admin's own handlers. `orgFromRequest` answers
+  the key's org on them.
+
+  | Route under `/proofing` | Scope |
+  |---|---|
+  | `POST flows`, `POST flows/{id}/versions`, `.../versions/{v}/activate`, `PUT flow-selection` | `flows:write` |
+  | `GET flows/{id}/versions` | `flows:read` |
+  | `GET`/`PUT flows/{id}/{hosted,address,diplomas,employment}` | `flows:read` / `flows:write` |
+  | `GET`/`PATCH settings` (no branding: wallet only) | `settings:read` / `settings:write` |
+  | `GET`/`PUT`/`DELETE webhook`, `POST webhook/{rotate-secret,test}`, `GET webhook/deliveries` | `webhooks:write` |
+
+  - `GET /proofing/flows` also lists each flow's `allowed`, `hostedEnabled`,
+    `hostedReturnUrl` and step modes.
+  - Audited as the key (`api_key:<prefix>`), as every API write.
+  - A flow's level fills in what it needs (`withLevelNeeds`, `flow_level.go`,
+    on every create and edit, the wallet's too), as the editor's
+    `withAssuranceLevel` does: `low` the chip read and `nfc.passive_auth`;
+    `substantial` also the face check with Regula, every check of
+    `substantialChecks` and a face threshold of at least 0.75; the Idem app
+    added to a `substantial` flow locked to other apps (the Yivi app reaches
+    `low`). `none` or no level requires
+    nothing; `high` is 400. A document photo stays.
+- **Why a session ended**, on the API session and the webhooks:
+  - `cancelledBy` (`cancelled_by`, migration `20261116090000`): `api_key`,
+    `member` or `subject` (declined on the hosted page), from the audit actor
+    of the cancel (`cancelledByOf`). Absent on older rows. Also on
+    `session.cancelled`.
+  - `expiryReason` (`Request.ExpiryReason`, computed): `not_started` (hosted
+    link never started), `not_finished`, `review_ended`. Also on
+    `session.expired`.
   `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
   newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,
@@ -927,9 +977,20 @@ post-review outcome stay the system's.
 
   Headless: `POST /proofing/sessions/{id}/methods/{idem_app|yivi_app}` starts a
   `hosted: true` session in that app from the org's own UI (`appLink` or
-  `walletLink`; not hosted is 409 `not_hosted`); `GET …/methods/{m}/status`
-  answers from stored state. The hosted token is the poll token: the Yivi
-  disclosure poll and a new Idem code run through `/proof/{token}/…`.
+  `walletLink`; not hosted is 409 `not_hosted`).
+  - `GET …/methods/{m}/status` (`HeadlessStatus`) answers the stored state.
+    For a running Yivi session it first hands the engine the disclosure the
+    person finished, which decides it: no page of the wallet's is open to
+    redeem it. One still waiting for the person or the document photo is
+    answered as stored.
+  - `POST …/document-scan` and `POST …/document-scan/finish`
+    (`APIStartDocumentScan`, `APIFinishDocumentScan`) run the document photo
+    in the org's own page: the first answers the scan service's page to embed,
+    the second takes the `transactionId` and `resultId` that page posts. A
+    hosted session not started yet is 409 `session_not_started`.
+  - A new Idem code still runs through `/proof/{token}/claim-link`, and the
+    address, diplomas and Verzekeringsbericht are taken on the hosted page
+    only.
   Sessions are named by an opaque `ps_` id (base32 of the request UUID,
   `public_id.go`) on the public API and in webhooks; the org routes take
   either form.
@@ -971,24 +1032,35 @@ post-review outcome stay the system's.
     the API says so once at boot. Events
   `session.created` / `.started` / `.handover` / `.verified` / `.failed` /
   `.review_opened` / `.expired` / `.cancelled` / `.purged` / `.diploma_added` /
-  `.address_added` / `.address_reviewed` (`WebhookEvents`) are written to the
+  `.address_added` / `.address_reviewed` / `.employment_added` (`WebhookEvents`) are written to the
   outbox (`identity_proofing_webhook_deliveries`, keyed by org) in the same transaction as the
   change (`AttachSession`, `MarkStarted`, `RecordHandover`, `RecordOutcome`,
   `EndSession`, `LapseLinks`, `Cancel`, `Purge`, `DiplomaStore.Add`,
-  `AddAddress`, `DecideAddressReview`); an
+  `AddAddress`, `DecideAddressReview`, `AddEmployment`); an
   endpoint saved before an event existed is not subscribed to it. `test` is sent on
-  request whatever is subscribed. The payload is the session id, status, flow,
-  method, assurance and error code: never a name or photo (the API has the
-  name).
-  - Only `session.address_added` carries personal data: the address the person
-    entered, without the registered (BRP) one (`Address.forIntegrator`).
+  request whatever is subscribed. The payload is the session id, status, flow and
+  its kind (`flowKind`), method, assurance and error code: never a name or photo.
+  - `session.verified` adds `result`, the API's result read live when it is
+    sent (`Deliverer.SetResults`, `payloadOf`, audited `result_read` with
+    actor `webhook`): the outbox never stores it. A read that fails fails the
+    attempt, to be retried; a session erased meanwhile goes without one.
+  - Only what the person added after the identity check carries personal data
+    (`webhookPersonalKeys`, dropped once a delivery is final):
+    - `session.diploma_added`: the diploma, without its PDF, name or birth date;
+    - `session.address_added`: the address entered, without the registered (BRP)
+      one (`Address.forIntegrator`);
+    - `session.employment_added`: the statement's current relations.
+  - Delivery is at least once and unordered: a retry can overtake a later
+    event, and a session decided before a poll saw it start sends no
+    `session.started`. Receivers deduplicate on the delivery id.
   - `session.address_reviewed` carries the decision as `addressReview`.
   A delivery's `sessionId` is the `ps_` id (absent for a `test` delivery). Each outbox insert
   `pg_notify`s `identity_proofing_webhooks`, so the deliverer sends as the change
   commits; it then sleeps until the next retry or lapsed lease. It leases due rows (`FOR UPDATE SKIP LOCKED`, 5-minute lease).
   - Per batch (`deliveryBatch` 20) `claimDue` takes at most `endpointWorkers`
-    (2) of one endpoint's deliveries, its oldest (a `row_number()` per
-    org over everything due, held rows counted, so across replicas too).
+    (2) of one endpoint's deliveries, its oldest, counting the ones still
+    leased (`leased_until`, cleared by `recordAttempt`) and the ones a
+    concurrent claim has locked, so across replicas too.
     `deliveryWorkers` (10) send at once, `sendFair` keeping to 2 per URL. The
     next batch waits for the last, so an endpoint that never answers costs
     every other org one `safehttp.RequestTimeout` per batch, not its backlog.
@@ -1368,35 +1440,96 @@ A session in review (`needs_review`) waits for a decision (or for the engine to
 end it, §3). An admin, or a member with the reviewer right (below), decides it on
 Identity proofing › Reviews (`routes/proofing-reviews.tsx`; the sidebar and the
 overview count what waits).
-The page lists what waits, oldest first (waiting since = `completed_at`, when it
-went to review), under All, Identity checks and Data requests, and beside them
-the addresses waiting for review (§16). Closed lists:
-- the addresses a reviewer confirmed or rejected, by `addressReviewedAt`;
-- the data requests that ended, whoever ended them.
 
-A data request carries no mark of a reviewer's decision (the audit event is not read), and a data request is also
-rejected with no reviewer: the engine rejects the person (`FACE_NO_MATCH`, ...),
-the review lapses (`REVIEW_LAPSED`), the org pauses (`ORG_PAUSED`) or must keep the
-data (`LEGAL_RETENTION`). So the tab and a closed request's page say it ended, not
-that a reviewer decided, and the Outcome column shows the error code in words.
-A decided identity check is not listed: it is closed to a reviewer. A data
-request shows "Answer by" = `purge_at`, a calendar month after it went to review
-(`completed_at`, which "Asked on" shows while it waits), when it lapses (§15).
-The list is two reads, `GET .../requests?status=needs_review` and
-`?addressReview=pending` (`useWaitingReviewsQuery`): each filter is applied
-before its read's cap of 200, and each read is the longest waiting first, so the
-cap leaves out the newest, never the most overdue. A count shows "200+" when
-either read hit its cap (`capped`, returned with the joined list), on the tabs
-and the sidebar. Closed reads
-`?flowKind=data_request&status=approved`, `...&status=rejected`,
-`?addressReview=confirmed` and `...=rejected` (`useClosedReviewsQuery`), each
-narrowed before its cap.
+**Review items** (`review_items.go`): one item per part of a session a reviewer
+decides, of a `kind` (`identity`, `address`, `employment`, `data_request`) in a
+`state` (`pending`, `confirmed`, `rejected`, `lapsed`).
+- **Stored** in `identity_proofing_review_items` (migration `20261105120000`):
+  the extra steps' reviews, the address (§16) and the Verzekeringsbericht
+  (§17). At most one pending item per request and kind.
+  - `due_at` is the request's retention (`NameRetention`) from when it opened.
+    `ReconcileDue` lapses a pending one past it (`LapseReviewItems`, wakes at
+    `NextReviewItemDue`): `lapsed`, `REVIEW_LAPSED`, audited with no actor.
+    The session keeps its outcome.
+  - A paused org rejects its pending items with `ORG_PAUSED`
+    (`RejectPendingReviewItems`, from `rejectOpenReviews`), and one opened
+    while it is paused at once (`rejectStepReviewsIfPaused`), so no review
+    stays open under a pause (§8).
+  - `Purge` deletes the pending items and the reasons of the decided ones.
+- **A request's own review** (`needs_review`) is an item too, read from the
+  request, never stored (`sessionReviewKindColumn`, `Request.reviewKind`):
+  `data_request` for a data request, `identity` otherwise. It waits while the request reads `needs_review` and is
+  not erased (`sessionReviewWaits`).
+- `POST .../requests/{id}/review-items/{kind}` `{decision: confirm|reject,
+  reason, errorCode?}` (`DecideReviewItem`): a step's item goes to
+  `decideStepReview` (no `errorCode`; webhook `session.address_reviewed` for
+  the address, `session.step_reviewed` for another step); `identity` and
+  `data_request` to `DecideReview` with `ReviewInput.Kind`, 409
+  `not_under_review` when the request's review is of another kind.
+  `.../review` still decides a request's own review.
+- `GET .../review-items/counts` (`ReviewCounts`, `ReviewTally`): sessions
+  waiting per kind (one waiting for its identity and its address counts under
+  both), `sessions` (each once) and `stepSessions` (those with a step waiting).
+  The sidebar and the tabs read it (`useReviewItemCountsQuery`), so a count is
+  never capped.
+- `GET .../review-items/closed` (`RequestFilter.ClosedReviews`): what Closed
+  lists, in one read (many parallel reads made the tab slow, as the Overview
+  was before `.../overview`).
+- `GET .../requests?reviewKind=&reviewState=` (`pending` by default, a state
+  needs a kind) lists the requests with such an item: waiting ones the longest
+  waiting first, decided ones the latest decision first. `identity` with
+  `confirmed`/`rejected` is a check a reviewer decided, read from its
+  `review_decided` audit event (`identityReviewDecided`, `identityReviewedAt`).
+
+**The Reviews page** (`routes/proofing-reviews.tsx`, `lib/proofing-reviews.ts`):
+- One row per session, oldest waiting first (waiting since = `completed_at`).
+  - Tabs: All, Identity checks, Extra steps, Data requests, Closed. A session
+    waiting for its identity and a step is in both tabs, once under All.
+  - The row names every part that waits ("Identity check + Address"), with
+    what was already decided under it (`waitingParts`, `decidedParts`).
+  - "Answer by": a data request's `purge_at`; a step review's `due_at`
+    (`stepReviewDueAt`, the first waiting one).
+- One review per session: identity, then the Verzekeringsbericht, then the
+  address (`nextPart`, `lib/use-after-decision.ts`). After each decision the
+  page goes on to the next part ("Next: …"), else back to the list.
+- Each part's page shows "Already decided in this session"
+  (`SessionDecisions`): the identity once decided, with its method and level,
+  by a reviewer or automatically, and each decided step, with who, when, why.
+- The identity review shows the photos the flow captured (`IdentityPhotos`).
+- Closed: one row per session whose review is over (`isClosedSession`), each
+  part's outcome, closed at its last decision; and the data requests that
+  ended. A data request carries no mark of a reviewer's decision, so it shows
+  that it ended and its error code in words. A closed session always opens as
+  its identity check, every decision listed under "Already decided in this
+  session" (`SessionDecisions` without `except`), none on top.
+- The identity review shows only the identity: no Verzekeringsbericht, which
+  has its own review page.
+- The waiting list is three reads (`useWaitingReviewsQuery`): `?status=needs_review`,
+  `?reviewKind=address` and `?reviewKind=employment`, each narrowed before its
+  cap of 200, longest waiting first, so the cap leaves out the newest.
+
+**Always send to review, per part.**
+- The flow editor's Review section has a toggle per part: the identity proof
+  (`alwaysReview` on a flow version, below), and the address and the
+  Verzekeringsbericht while the flow asks for them (their `always_review`
+  mode, §16, §17). Diplomas have no review yet.
+
+**Always send the identity proof to review (`alwaysReview` on a flow version).**
+- The engine sends a session it would
+  approve to `needs_review` (audit reason `flow_always_review`): in
+  `sessionOutcome` for the Idem app and the browser, in `acceptReference` for Yivi.
+- Every rejection still rejects (chip, document, face, level not met).
+- The whole session is reviewed as one. The extra steps open while it waits (`stepsUntil`).
+- Request reads carry `flowAlwaysReview` for a row in review whose pinned version
+  sets it (`Service.AlwaysReviewed`, one `ListFlowVersions` per flow). The list's
+  and the review page's "why" read it (`checkReviewReason`). A wallet reason
+  (`reviewReason`) goes first.
 
 **Live updates, no polling.**
 - A trigger on `identity_proofing_requests` (migration `20261029100000`) sends
   `pg_notify('identity_proofing_reviews', organization_id)` when `status`,
-  `address_review`, `purged_at` or `ips_session_ended_at` changes, whoever writes
-  the row.
+  `purged_at` or `ips_session_ended_at` changes, whoever writes the row. One on
+  `identity_proofing_review_items` sends it on every insert, update and delete.
 - `proofing.ReviewFeed` holds one LISTEN per API process (`database.Listen`) and
   tells that org's subscribers. Each (re)connect of the LISTEN tells all of them.
 - `GET .../identity-proofing/reviews/events` (reviewer route) is a Server-Sent
@@ -1448,18 +1581,20 @@ right is a member's: a PUT on an admin is 409 `admin_reviews`, a role change
 clears it (audited too), so an admin made a member again has to be given it
 anew, and `memberships_can_review_member` holds every row to that.
 `organization.MayReview` is an admin whose mandate is not withdrawn, or a member
-with the right, and `organization.RequireReviewer` gates the five `reviewer(...)`
-routes in `proofing/handler.go`: `review`, `address/review`, `result`,
-`data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
+with the right, and `organization.RequireReviewer` gates the `reviewer(...)`
+routes in `proofing/handler.go`: `review`, `review-items/{kind}`,
+`review-items/counts`, `review-items/closed`, `result`, `data-matches` and `data-export`. Everything else stays a member's. A reviewer who is not an admin
 reaches org-wide only what the Reviews page shows (`ReviewScopeReviews`): a
 request waiting for review, and a data request (`data_access`, `data_erasure`)
 in any status. An identity check that is not waiting holds a person's identity
 and photos the right was never given for. So `GET .../requests` lists every
-request in the org only for `?status=needs_review` and `?addressReview=` (Waiting
-reads `pending`, Closed `confirmed` and `rejected`) and for
+request in the org only for `?status=needs_review` and `?reviewKind=` (Waiting
+reads `pending`, Closed `confirmed`, `rejected` and `lapsed`) and for
 `?flowKind=data_request` (Closed reads it with `status=approved` and
 `rejected`); any other list is the requests they sent. So
 are the stats, All people and the member routes.
+- A check whose identity a reviewer decided stays reachable as closed
+  (`reachesStepReview`): its decisions, never its result, photos or proofed name.
 - `GET .../requests/{id}` opens one they sent or one in the wider
   `reachesAddress` scope: that scope plus a check whose address is reviewed,
   waiting or decided (`mayOpen`, judged on the stored request through
@@ -1721,8 +1856,8 @@ only: the engine knows nothing of it.
   spec must name `dg1`) and `ActivateFlowVersion` too (a data request flow is
   never edited, §15); the editor locks Name and document details on
   and saves a setting that lifts the rule before a version that drops `dg1`.
-  The flow editor shows it as the last step, "Upload diplomas (DUO)": a step
-  for the admin, never sent to the engine (its steps are the app's, and it
+  The flow editor shows it as a document under the "Upload documents" step
+  (§20): a step for the admin, never sent to the engine (its steps are the app's, and it
   would refuse one it does not know). It is saved after the flow, so a new flow
   gets it once it has an id; the flow list's summary appends it to the
   engine's steps. The flow list carries it as
@@ -1734,7 +1869,7 @@ only: the engine knows nothing of it.
   deep link (`diplomas_need_page`, 422): on screen or hosted only. The send
   form switches to on-screen by itself (`sendableByMail`).
 - **Upload** (`POST .../requests/{id}/diplomas`, `POST /proof/{token}/diplomas`,
-  multipart `file` parts): only once the identity check finished, approved or
+  multipart `file` parts; the page uploads through `.../documents`, §20): only once the identity check finished, approved or
   in review, within `DiplomaUploadWindow` (1 h) of it (`checked_at`,
   `stepsOpen`; `diplomasUntil` in the request, hosted progress), at most 10 per request, 5 MiB each; the hosted
   route reads a body only as large as the extracts the request still takes
@@ -1784,7 +1919,8 @@ only: the engine knows nothing of it.
 - **Kept**: what DUO printed about the qualification (type, name, profiles,
   institution, place and date, NLQF/EQF, the number duo.nl/diplomacontrole
   checks, signing time) in `identity_proofing_request_diplomas`. Never the
-  PDF, the holder's name or birth date. Audited `diploma_added` (webhook
+  PDF, the holder's name or birth date, except while a seal waits for a
+  reviewer (§20, "Seal not checkable"). Audited `diploma_added` (webhook
   `session.diploma_added`) and `diploma_rejected` (reason only:
   `not_a_diploma`, `signature_invalid`, `holder_mismatch`, `duplicate`).
   Shown in the request responses, the public API's `result`, and the
@@ -2002,6 +2138,9 @@ hosted page.
     request is approved and purged then (reviewer `automatic`); with them it
     waits for a reviewer, who decides only those (the erased ones show
     "Erased" and stay ticked).
+    - A reviewer's refusal there is recorded as an approval that keeps the
+      rest (`refusesPartlyErased`), so the person's page shows what was erased
+      and what was kept. A pause or legal retention refusal keeps its own code.
   What the law makes an org keep (Art. 17(3)(b)) is its legal retention, not a
   handling: `keep`, which refused every erasure, is gone. A failure there
   leaves the request in review. An approved erasure stores how
@@ -2055,8 +2194,10 @@ BAG; a Yivi app request takes the registered (BRP) address from the app
 instead, and asks none.
 
 - **Per flow** (`identity_proofing_flow_settings.address`, `FlowAddressStore`,
-  `PUT .../flows/{id}/address`, admin): `off` (the default) or `required`,
-  audited `flow_address_configured`.
+  `PUT .../flows/{id}/address`, admin): `off` (the default), `required`, or
+  `always_review` (`required`, and every address waits for a reviewer, the
+  `registered` one too), audited `flow_address_configured`.
+  - The subject's page reads `always_review` as `required` (`forSubject`).
   - The flow editor shows it as "Enter the address", before the diploma step;
     saved after the flow and before the diplomas' follow-up save.
   - The flow list carries it as `addressMode`; a single version's answer omits
@@ -2141,40 +2282,46 @@ instead, and asks none.
     Idem request is always self-declared. `address_added` audits the result
     as `verification`, never the address.
 - **Address review**: any address but `registered` waits for a reviewer
-  (`address_review` = `pending`, set by `AddAddress`, `addressReviewOf`),
-  `registered_mismatch` included: the person may have moved.
+  (a pending `address` review item, §9, opened by `AddAddress`,
+  `addressReviewOf`), `registered_mismatch` included: the person may have moved.
+  Under `always_review` the `registered` one waits too, on the page and from
+  the Yivi disclosure (`keepRegisteredAddress`).
+  Migration `20261105120100` moved the `address_review*` columns onto items.
   - Only the address is reviewed: the session keeps its outcome, and the
     engine's session review is untouched (`address_review.go`).
-  - `POST .../requests/{id}/address/review` `{decision: confirm|reject,
+  - `POST .../requests/{id}/review-items/address` `{decision: confirm|reject,
     reason}`, reviewer route. The reason is required (at most 500
     characters) and audited.
     - `ownReview` applies to everyone in a deployment, a platform admin too.
       On a dev stack (`DEV_MODE`) a platform admin may decide their own
       checks, session and address, to test a review alone (`auth.SelfReview`,
       `reviewsOwn` on `GET /me`, which drops the "another reviewer decides" note).
-    - A decided or erased one is 409 `address_not_under_review`.
+    - A decided, lapsed or erased one is 409 `address_not_under_review`.
     - The page leaves for Reviews after a decision, with a toast.
-    - `addressReviewedAt` (`address_reviewed_at`, returned by the update) is
-      when it was decided.
+    - `addressReviewedAt` (the item's `decided_at`) is when it was decided or
+      lapsed.
+  - Nobody deciding it within the request's retention lapses it (§9):
+    "Address review lapsed", listed under Closed. The session keeps its outcome.
   - A reviewer reaches a reviewed address, pending or decided, through
     `ReviewScope.reachesAddress` (the request and this decision), never
     `reaches`: that one opens the result, data-matches and export, so the
     check's identity and photos. A decided one stays listed under Closed and
     opens read-only, still without `proofedName`, `employment` and diplomas.
-  - `Purge` clears a pending review (`NULLIF(address_review, 'pending')`),
-    keeping a decided one, so no reader masks it; migration
-    `20261028150000` clears the ones purged before.
-  - Audited `address_reviewed`, webhook `session.address_reviewed`
-    (`addressReview` in its data).
+  - `Purge` deletes a pending item, keeping a decided one without its reason,
+    so no reader masks it; migration `20261028150000` cleared the ones purged
+    before.
+  - Audited `review_item_decided` (`kind`, `state`, `reason`; `address_reviewed`
+    before review items), webhook `session.address_reviewed` (`addressReview`
+    in its data). A lapse sends no webhook.
   - Decided on the Reviews page, never on the Sessions page:
-    - The waiting list reads `?addressReview=pending` beside
+    - The waiting list reads `?reviewKind=address` beside
       `?status=needs_review` (`useWaitingReviewsQuery`); a reviewer lists it
       org-wide (`listsEveryRequest`). It counts under "Identity checks".
     - `isAddressReview` sends its page to `routes/address-review.tsx`: the
       address, the approved check, Confirm / Reject.
     - The Sessions page shows where it stands, next to the session's status,
-      which is the identity's: "Address in review", "Address confirmed" or
-      "Address rejected" (`AddressNote`). The expanded row adds a link to the
+      which is the identity's: "Address in review", "Address confirmed",
+      "Address rejected" or "Address review lapsed" (`AddressNote`). The expanded row adds a link to the
       review while it waits.
     - The session's timeline says an entered address goes to a reviewer, and
       what a reviewer decided, the address or the session review, with the
@@ -2184,7 +2331,8 @@ instead, and asks none.
       `audit.StripFields` does on a purge.
   - **Decisions with their reasons.** `GET .../requests/{id}` returns
     `decisions` (`RequestDecisions`, read from the request's
-    `review_decided` and `address_reviewed` events, oldest first): kind,
+    `review_decided`, `address_reviewed` and address `review_item_decided`
+    events, oldest first): kind,
     outcome, reason, reviewer, time.
     - Only for an admin or a reviewer (`decisionsFor`); one who reaches the
       check only for its address gets the address decisions alone.
@@ -2248,14 +2396,17 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     does not tell them apart.
 - **Per flow** (`identity_proofing_flow_settings.employment`,
   `FlowEmploymentStore`, `PUT .../flows/{id}/employment`, admin): `off` (the
-  default) or `required`, audited `flow_employment_configured`.
-  - `required` needs a flow that reads `dg1` (`flow_no_identity`), and keeps
+  default), `required`, or `always_review` (`required`, and every kept
+  statement waits for a reviewer), audited `flow_employment_configured`.
+  - The subject's page reads `always_review` as `required` (`forSubject`).
+  - `required` (and `always_review`) needs a flow that reads `dg1` (`flow_no_identity`), and keeps
     an edit or older version from dropping it (`identityRequired`).
   - The flow list carries it as `employmentMode`. A data request flow asks for
     none. A request snapshots it at send (`identity_proofing_requests.employment`).
 - **A page, never a mail**: `employment_needs_page` (422), as §16.
 - **Upload** (`POST .../requests/{id}/employment`, `POST /proof/{token}/employment`,
-  one multipart `file`, 5 MiB, read as one diploma extract):
+  one multipart `file`, 5 MiB, read as one diploma extract; the page uploads
+  through `.../documents`, §20):
   - Within `EmploymentWindow` (1 h) of the identity check finishing, approved
     or in the engine's review (`checked_at`, `stepsOpen`, `employmentUntil`;
     the hosted progress says `employmentGiven`), so the subject gives it before
@@ -2272,8 +2423,9 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
       nothing is embedded. A revoked seal is `signature_invalid`.
     - An unreachable responder is no answer about the seal
       (`verify.ErrRevocationUnreachable`): the check fails as the checker's
-      own, `diploma.ErrRevocationUnavailable`, 503 `seal_check_unavailable`
-      ("try again later"). DUO's online check reads the same.
+      own, `diploma.ErrRevocationUnavailable`. DUO's online check reads the
+      same. On an upload that is no 503 but a file kept for a reviewer
+      (§20, "Seal not checkable").
     - The pinned roots hold no QuoVadis anchor (`trust.Issuer.Pinned` is false
       for UWV). On them, `DIPLOMA_TRUST_SOURCE=pinned` or the fallback after the
       EU lists failed at boot, the UWV validator cannot check: `Validate` and
@@ -2326,40 +2478,67 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   would have their June job read as current.
   - `employed` (`Statement.Employed`): a current relation that is not a
     benefit.
-- **No current job, a current benefit, or other income goes to review.** A kept statement
-  moves the approved request to `needs_review` in the same transaction
-  (`openWalletReview`), audited `identity_proofing.needs_review` and webhook
-  `session.review_opened`, with `review_reason` (`Employment.reviewReason`):
+- **No current job, a current benefit, or other income goes to review**, as
+  the step's own: an `employment` review item (§9), opened with the statement
+  in the same transaction, with `review_reason` (`Employment.reviewReason`).
+  The session keeps the identity's outcome (migration `20261106090000` moved
+  the sessions the wallet still held in `needs_review` for it back to
+  `approved`, each with a pending item).
   - `no_current_employment`: `employed: false`;
   - `current_benefit`: a job, and a current `benefit` relation beside it;
   - `current_other_income`: a job, and a current `other_income` relation
     beside it (no `benefit`).
-  - A statement kept while the engine still reviews the identity opens no
-    review then: `recordOutcome` opens it once the engine approves, in the
-    same transaction (`reviewKeptEmployment` then rejects it at once in a
-    paused org).
-  - In a paused org a review the statement opens is rejected at once, as the
-    wallet's decision (no actor), not the uploader's.
-  - The engine approved and still reports the approval, so the review is the
-    wallet's alone: `tryReconcile` skips such a request, `RecordOutcome`
-    refuses it (`review_reason IS NOT NULL`), and `DecideReview` decides it
-    in the wallet (`decideWalletReview`, `RecordWalletOutcome`) without the
-    engine. A rejection without a code is `MANUAL_REVIEW_REJECTED`.
-    `lapseReview` rejects an undecided one the same way.
-  - The org's webhook gets `session.verified`, then `session.review_opened`,
-    then the decision. `reviewReason` is in the request responses and the
-    public API result; the review panel names it.
-- **No statement in time is a rejection.** An approved request on a flow that
-  requires the step, with no statement kept within `EmploymentWindow` of the
-  check, is rejected `EMPLOYMENT_NOT_PROVIDED` (`RejectMissingEmployment`, run
-  by `ReconcileDue`, which wakes at `NextMissingEmployment`), audited
-  `identity_proofing.rejected`, webhook `session.failed`.
-  - It is due `employmentSweepGrace` after the window: the longest check (two
-    OCSP lookups, then a PDFium read) of an upload let in at the window's end,
-    so that upload is kept first.
-  - One still in the engine's review is due once the engine approves it.
-  - A refused upload does not count. Reconcile leaves the rejection: the
-    engine still reports the approval.
+  - Under `always_review` any kept statement opens the item
+    (`Employment.reviewed`), with no `review_reason` when it lists nothing of
+    the above. The review page then says the flow reviews every statement
+    (`employmentReviewWhy`).
+  - A statement kept while the engine still reviews the identity opens its
+    item at once; the engine's approval settles only the identity.
+  - Decided on the Reviews page (`routes/employment-review.tsx`) through
+    `.../review-items/employment`: audited `review_item_decided`, webhook
+    `session.step_reviewed`. Confirmed is done, rejected is
+    `EMPLOYMENT_REJECTED`, a lapse `REVIEW_LAPSED`; none changes the session.
+  - A reviewer who reaches the request only for it sees the employment, never
+    the proofed name or diplomas (`onlyStepReviews`).
+- **No statement in time is the step's, not the session's.** Once
+  `EmploymentWindow` passed without a statement kept, the step reads
+  `not_provided` (`EMPLOYMENT_NOT_PROVIDED`), read from the request, nothing
+  written. Sessions rejected `EMPLOYMENT_NOT_PROVIDED` before the step had
+  its own outcome keep it, and reconcile leaves them.
+- **Steps** (`steps.go`): `Request.Steps` reads each extra step's outcome
+  (`not_started`, `open`, `done`, `in_review`, `rejected`, `not_provided`,
+  with `until`, `code` and `reviewed` for one a reviewer accepted) from its
+  data and its review item.
+  - Registered (`extraSteps`), in page order: address (`AddressAddedAt`),
+    diplomas (`DiplomasAddedAt`, the first extract's `created_at`, read),
+    Verzekeringsbericht.
+  - None once purged: the purge erased what they read.
+  - Sent as `steps` in the request responses, the public API result and
+    every webhook's data.
+  - The public API result (and the webhook's `result`) leaves out what the
+    flow did not produce: `steps` and `diplomas` when empty, and
+    `passiveAuth`/`activeAuth` on evidence other than `emrtd`.
+    `session.verified` and `session.review_opened` carry them `open`: the
+    event's copy takes the new status and `checked_at` (`RecordOutcome`).
+  - `steps_integration_test.go` holds a test per address and diploma path.
+- **Sessions page** (`SessionParts`, `lib/session-parts.ts`): the row shows the
+  identity status and one summary line naming only the steps it is about
+  (`SessionSummaryLine`); the opened session lists every step. A session with
+  steps shows its identity and each step in the same words (To review,
+  Done, Accepted, Rejected, Review lapsed, Not provided, Waiting for the
+  person), under one summary:
+  - Needs review: the identity or any step waits;
+  - In progress / Incomplete / Complete for an approved identity.
+  - Plain text, not chips (`ui/status-text.test.ts`). An admin's detail
+    links a step to review.
+- **Overview page:** a finished session shows the same summary line under its
+  result (`SessionSummaryLine`, in `proofing-ui.tsx`).
+- **The person's end screen** (`PersonSteps`, approved or in review): a line
+  per step, read by `personStepState`:
+  - Received (done, accepted, or a review that lapsed);
+  - Being checked, Not accepted, Not received, Still to do.
+  - The hosted status carries `steps` for it.
+- **Stored** of a kept statement:
   - Per current relation the employer (`UWV` for a benefit), payroll tax
     number (none for a benefit), contract form, since when (its first month)
     and its newest month, blocks of one relation across
@@ -2383,8 +2562,7 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
     - `SaveFlowEmployment` to `required`;
     - an upload;
     - a request on a flow already set to `required` (`CreateRequest`), before
-      its subject starts: they could not upload, and the sweep would reject
-      them an hour later.
+      its subject starts: they could not upload.
   - `off` is the way to run `DIPLOMA_TRUST_SOURCE=pinned`; `uwv` with it is
     refused at startup.
 - **The page** runs the steps once the identity check finished (approved, or
@@ -2393,13 +2571,10 @@ with DigiD; the wallet checks UWV's seal and keeps the employment relations.
   - An accepted statement stays on screen (date, seal valid, each employer and
     its months) until the subject continues, as the diploma step does; the
     upload does not refetch the progress, which would skip past it.
-  - On continuing, the page re-reads the progress and settles and hands back
-    only what that read returns (`employmentOwed`): a kept statement may have
-    opened a review.
-  - Once the window closed without one, the progress keeps polling until the
-    sweep's rejection lands (`progressPollContinues`), and the step holds its
-    Continue until then, so `approved` is never handed back for a session
-    about to be rejected.
+  - On continuing, the page re-reads the progress and hands back what that
+    read returns. The step is owed only while its window is open
+    (`employmentOwed`); once it closed, Continue goes to the outcome, which the
+    statement never changes.
 
 ## 18. Document photo (ID scan)
 
@@ -2466,9 +2641,9 @@ step runs with the Idem app or the Yivi app alike.
   | `document_scan` score, by CM's ranges: below 0.40 fake, 0.90 and up authentic, between (or -1) doubtful | fake rejects (`DOC_NOT_AUTHENTIC`); doubtful goes to review | "Document check: Genuine (97%)" |
   | field `validity` | any `invalid` rejects (`DOC_FIELDS_INVALID`) | "Printed data" |
   | field `comparison` (MRZ, printed text, barcode) | any `no_match` goes to review | "MRZ matches printed text" |
-  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy | name, date of birth, document |
+  | the read fields (MRZ value first) | with no MRZ or chip read, they are the session's document: expiry, accepted document kinds and countries apply, and the name and date of birth are the identity; the BSN only under a retrieve policy, or masked before storage under a mask policy | name, date of birth, document |
   | document number | must equal the MRZ's, when the app read one (`DOCUMENT_MISMATCH`) | |
-  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes | |
+  | holder (name, date of birth) | on the Yivi path, must be the disclosed holder: the same full name (`diploma.SameName`) and, outside an age check, the same date of birth (`scannedHolderOf`); another person rejects (`DOCUMENT_MISMATCH`), no name read goes to review. The disclosure carries no document number, and another document of the same holder passes. A disclosed document takes the photo's BSN, under the BSN policy and only with `dg11` requested (`photographedDocument`) | |
   | document type | the document kind (`documentKinds`) | "Document" |
 
   - The result carries `documentCheck` (verdict, score, fields, zones, kind:
@@ -2519,6 +2694,28 @@ step runs with the Idem app or the Yivi app alike.
     asks CM too while a scan runs (`withSpentDocumentScan`, one status call
     per poll) and fails the session the same way, and the page moves to the
     outcome on its own.
+  - Liveness out of attempts is different (seen 2026-11-04).
+    - CM's page hands liveness the tries the photo left: 10 (its
+      `maximumAttemptsDocumentScan`) minus one per failed photo. A photo
+      that passes first time leaves all 10.
+    - A good front of a two-sided document is no failed photo, though CM
+      counts it as a photo attempt (code
+      `front_side_provided_back_side_required`). Seen 2026-11-05: front and
+      back at first try left liveness all 10.
+    - Once those are used it shows "Process Cannot Be Completed", posts
+      nothing, and CM's API leaves the task and the transaction `pending`,
+      even past expiry.
+    - So `TransactionStatus` reads a pending liveness check whose attempts
+      reached 10 minus the failed photos in its `documentScans` as
+      `maximum_attempts_exceeded`
+      (`spentLiveness`), and the poll fails the session as above, on any
+      device.
+    - CM's API also counts liveness tries that ended on an error, which its
+      page does not, so this can end a try early. It never leaves the person
+      on CM's error page.
+    - CM's page posts its parent only once a task is over. A reported scan
+      at a face check (`idscan.Status.Running`) fails the session too. One
+      at the photo can be tried again.
   - A hosted page framed by a customer's own page reaches the camera only
     when the customer's iframe has `allow="camera"` too.
 - **BSN**: only under the flow's BlurBSN the transaction asks CM to black
@@ -2618,6 +2815,12 @@ other choice offered.
   - The wallet hands it to the engine under the document credentials' claim
     names (`disclosedIdentity`: `firstName`, `lastName` = prefix and family
     name, `dateOfBirth`).
+  - **BSN**: asked (`ProofingRequest.BSN`, claim `bsn`) only on a flow whose
+    BSN policy keeps it (`retrieve` or `mask`, `keepsBSN`). The engine makes the
+    registered BSN the document's personal number under the flow's policy
+    (`registeredBSN`), over the photographed one, without `dg11` (which comes
+    only with the chip read), and holds the disclosure's own `bsn` to the same
+    policy (`withholdDisclosedBSN`). The result's `identity.bsn` carries it.
   - **Tied to the photographed document** (`personalDataMatch`, chosen by the
     disclosed credential, `disclosesPersonalData`), as a document number ties
     a disclosed document (§18):
@@ -2634,3 +2837,90 @@ other choice offered.
     document to check, and `document` holds the BRP name and date of birth.
   - The session stays eIDAS low: neither the BRP data nor the ID scan's face
     match against a photographed portrait reaches a higher level.
+
+## 20. One document upload step
+
+The DUO diploma (§12) and the UWV Verzekeringsbericht (§17) are one step for
+the admin and the subject. Underneath they stay two: each keeps its own flow
+setting, check, window, request step, webhook and review item.
+
+- **Flow editor**: "Upload documents", with the accepted documents to tick
+  (`DocumentsOption` in `routes/flow-editor-advanced.tsx`).
+  - Each ticked document is required: its `diplomaMode` or `employmentMode`
+    is `required`. The step is on while any is ticked, a DUO diploma when it
+    is turned on.
+  - "Always send … to review" stays per document (§9).
+  - The flow list's summary reads "Upload documents (DUO diploma, UWV
+    Verzekeringsbericht)" (`flowStepLabels`).
+- **Upload** (`POST .../requests/{id}/documents`, `POST /proof/{token}/documents`,
+  `documents.go`): up to 11 `file` parts, 5 MiB each. Per file:
+  1. **Which document**: who sealed it (`verify.SealedBy` with `trust.DUO`,
+     `trust.UWV`). It reads the one signature's signer certificate, with no
+     trust, no network and no PDFium, so an unvetted PDF never reaches PDFium.
+     A changed file still names its issuer and then fails that issuer's check.
+  2. **Refused without a check**: sealed by neither (`not_supported`), a
+     document the request does not ask for (`not_asked`), an 11th diploma
+     (`too_many`), a second statement (`duplicate`).
+  3. **Otherwise that document's own check** (`checkDiploma`,
+     `checkEmployment`), audited, kept and reviewed as on its own route.
+  - The verdict per file adds `kind` (`diploma`, `employment`).
+  - A check that breaks on the server's side (`fileCheckFailed`: the seal
+    unreachable, PDFium, storing it) fails only that file, `check_failed`,
+    logged, with nothing of it kept. The files before it are kept already, so
+    their verdicts still go back, or the page asks for them again. Only
+    `uploadErrors` (the session no longer takes documents, no checker, no
+    key) and the upload's own ctx ending fail the whole upload. A seal
+    server's timeout also matches `context.DeadlineExceeded`, so that is not
+    on the list.
+  - The hosted route checks the link first and reads only as many files as
+    the request still takes (`HostedDocumentsOpen`).
+  - The old `/diplomas` and `/employment` routes stay for API callers.
+- **Subject's page**: one stage, "Documents" (`DocumentStep`,
+  `sessionView` → `documents`).
+  - One list of what is still needed, each with where to download it.
+  - Continue once every asked document has a kept file, or the window is up
+    (`documentStepDone`).
+  - It still waits for the statement's read after Continue (`employmentOwed`).
+- **Seal not checkable** (`unchecked_documents.go`): the trust lists or a
+  revocation responder cannot be reached (`ErrTrustUnavailable`,
+  `ErrRevocationUnavailable`; `sealUnreachable`). Any other check error still
+  fails the upload.
+  - **Retry**: `sealCheckAttempts` (3) tries, `sealCheckRetryDelay` (2 s)
+    apart. Once one file stayed unreachable, the upload's next files try once
+    (`sealCheck.down`).
+  - **Kept for a reviewer**: still unreachable, the file is not refused.
+    - The whole PDF and the identity it must name (`sessionHolder`), sealed
+      with the proofing cipher, in `identity_proofing_request_unchecked_documents`
+      under the step's review kind (`diplomas`, `employment`). The only place
+      a whole PDF is kept.
+    - It opens the step's review item, whatever the flow's mode. Audited
+      `identity_proofing.document_unchecked` (the kind only).
+    - Verdict `seal_check_pending`. The step reads as given
+      (`employmentUntil`, `employmentGiven`), and an extract counts towards
+      the 10. The same file twice is kept once (`file_sha256`).
+    - Statements: up to `MaxUncheckedStatements` (3) wait together, as a
+      fake one cannot be told from the real one yet and must not lock it out
+      (`employmentOpen`). The check keeps the first that holds and refuses
+      the others (a later real one as `duplicate`).
+    - Shown on the request as `uncheckedDiplomas` / `uncheckedEmployment`,
+      on the hosted progress as `uncheckedDiplomas`.
+  - **The reviewer** (`POST .../review-items/{kind}/seal-check`,
+    `CheckSealsAgain`): runs each file's check again as at upload, against
+    the stored identity, then deletes its PDF.
+    - Kept or refused as at upload, with the same audits.
+    - Still unreachable: 503 `seal_check_unavailable`, with the files before
+      it decided and the rest still waiting.
+    - Confirm waits until no file does (409 `seal_unchecked`). Reject works
+      at once.
+  - **Deleted** when the re-check decides it, when the item is decided,
+    lapses or is rejected for a paused org (`dropUncheckedDocuments`), and
+    at the request's purge (`clearReviewItems`).
+  - The review pages list each file with its outcome and a "Check seal
+    again" button (`UncheckedSeals`). The subject's page says a reviewer
+    checks the file.
+  - **Timeline**: `document_unchecked` carries `kind`, `fileName` and
+    `sealUnchecked`. What a check again keeps or refuses is audited as at
+    upload, plus `sealCheckedAgain` and `fileName` (`withSealRecheck`), so the
+    timeline reads it as the reviewer's check. `fileName` is a personal key,
+    stripped at purge.
+

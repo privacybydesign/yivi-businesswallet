@@ -14,6 +14,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/database"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/walletunit"
 )
 
 const (
@@ -28,6 +29,9 @@ const (
 	// kvkContactName labels the KVK-derived recipient saved to the new org's
 	// address book at bootstrap.
 	kvkContactName = "KVK"
+
+	// heldSourceBootstrap is attestation.HeldSourceBootstrap: the EBWOID a wallet opens with.
+	heldSourceBootstrap = "bootstrap"
 )
 
 const orgColumns = `id, name, slug, kvk_number, euid, digital_address, status, bootstrapped_at`
@@ -44,10 +48,16 @@ var statusAudit = map[string]string{
 type Store struct {
 	db    database.DB
 	audit audit.Recorder
+	units unitProvisioner
 }
 
-func NewStore(db database.DB, recorder audit.Recorder) *Store {
-	return &Store{db: db, audit: recorder}
+// unitProvisioner creates the org's wallet unit inside the registration tx.
+type unitProvisioner interface {
+	Provision(ctx context.Context, q database.Querier, orgID uuid.UUID) (walletunit.Unit, error)
+}
+
+func NewStore(db database.DB, recorder audit.Recorder, units unitProvisioner) *Store {
+	return &Store{db: db, audit: recorder, units: units}
 }
 
 func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization) error {
@@ -58,15 +68,18 @@ func scanOrg(row interface{ Scan(...any) error }, org *organization.Organization
 // KVK attestation: the org (identity + slug-based digital address + active status),
 // its default (sending) QERDS address, KVK saved as a recipient in the address book
 // (kvkContactAddress, the address it delivers the attestation from), the requester
-// as first owner (admin membership), and the representation list (with the
-// requester's own representation claimed). One tx, following the AcceptInvitation
-// idiom.
-func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.UUID, slug, digitalAddress, kvkContactAddress string, att registryprovider.RegistrationAttestation) (organization.Organization, error) {
+// as first owner (admin membership), the representation list (with the
+// requester's own representation claimed), and the held-index row of the EBWOID
+// already in the org's holder engine. One tx, following the AcceptInvitation idiom.
+func (s *Store) RegisterOrganization(ctx context.Context, reg Registration) (organization.Organization, error) {
 	var org organization.Organization
+	att := reg.Attestation
+	requestorUserID := reg.RequestorUserID
+	kvkContactAddress := reg.KVKContactAddress
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
-		const insOrg = `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-			VALUES ($1, $2, $3, $4, $5) RETURNING ` + orgColumns
-		err := scanOrg(q.QueryRow(ctx, insOrg, att.LegalName, slug, att.KVKNumber, att.EUID, digitalAddress), &org)
+		const insOrg = `INSERT INTO organizations (id, name, slug, kvk_number, euid, digital_address)
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING ` + orgColumns
+		err := scanOrg(q.QueryRow(ctx, insOrg, reg.OrgID, att.LegalName, reg.Slug, att.KVKNumber, att.EUID, reg.DigitalAddress), &org)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			switch pgErr.ConstraintName {
@@ -88,8 +101,12 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 			return err
 		}
 
+		if err := s.recordEBWOID(ctx, q, org.ID, reg.EBWOID); err != nil {
+			return err
+		}
+
 		const insAddr = `INSERT INTO qerds_addresses (organization_id, address, is_default) VALUES ($1, $2, true)`
-		if _, err := q.Exec(ctx, insAddr, org.ID, digitalAddress); err != nil {
+		if _, err := q.Exec(ctx, insAddr, org.ID, reg.DigitalAddress); err != nil {
 			return fmt.Errorf("wallet: provision address: %w", err)
 		}
 
@@ -114,6 +131,10 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 			return err
 		}
 
+		if _, err := s.units.Provision(ctx, q, org.ID); err != nil {
+			return err
+		}
+
 		return s.audit.Record(ctx, q, audit.WalletBootstrapped,
 			audit.Target{Type: audit.TargetOrganization, ID: org.ID.String(), OrgID: &org.ID},
 			audit.Created(map[string]any{
@@ -125,6 +146,19 @@ func (s *Store) RegisterOrganization(ctx context.Context, requestorUserID uuid.U
 			}))
 	})
 	return org, err
+}
+
+// recordEBWOID indexes the org's EBWOID as a held credential and starts its trail.
+func (s *Store) recordEBWOID(ctx context.Context, q database.Querier, orgID uuid.UUID, held registryprovider.HeldEBWOID) error {
+	const insHeld = `INSERT INTO held_attestations (organization_id, credential_ref, vct, issuer, source)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	var heldID uuid.UUID
+	if err := q.QueryRow(ctx, insHeld, orgID, held.Ref, registryprovider.EBWOIDVCT, held.Issuer, heldSourceBootstrap).Scan(&heldID); err != nil {
+		return fmt.Errorf("wallet: record EBWOID: %w", err)
+	}
+	return s.audit.Record(ctx, q, audit.AttestationHeldReceived,
+		audit.Target{Type: audit.TargetHeldAttestation, ID: heldID.String(), OrgID: &orgID},
+		audit.Created(map[string]any{"vct": registryprovider.EBWOIDVCT, "source": heldSourceBootstrap, "issuer": held.Issuer}))
 }
 
 func insertRepresentations(ctx context.Context, q database.Querier, orgID, requestorUserID uuid.UUID, att registryprovider.RegistrationAttestation) error {

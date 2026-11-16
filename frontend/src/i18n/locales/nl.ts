@@ -102,6 +102,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registreren van de wallet mislukt: {{message}}",
     kind: {
       bestuurder: "Bestuurder",
@@ -414,6 +416,8 @@ export const nl: Translation<typeof en> = {
       "De KVK vermeldt je niet als vertegenwoordiger van dit bedrijf, dus je kunt de wallet niet registreren.",
     alreadyRegistered:
       "Dit bedrijf heeft al een business wallet. Vraag een eigenaar om je uit te nodigen.",
+    ebwoidMismatch:
+      "De identificatiegegevens van de eigenaar (EBWOID) horen bij een ander bedrijf dan dit KVK-nummer.",
     error: "Registratie kon niet worden voltooid. Probeer het opnieuw.",
     back: "Terug",
     haveAccount: "Heb je al een account? Inloggen",
@@ -648,6 +652,8 @@ export const nl: Translation<typeof en> = {
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
       apiKeyNotFound: "Dat API-token bestaat niet meer.",
+      apiKeyNotRevealable:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan.",
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
@@ -664,6 +670,8 @@ export const nl: Translation<typeof en> = {
       sessionOver: "Deze sessie is afgelopen. Start een nieuwe.",
       deviceActive:
         "De Idem-app heeft deze sessie nog open: ga daar verder, of sluit hem eerst.",
+      appFinished:
+        "De Idem-app heeft zijn deel al gedaan: ga verder op deze pagina.",
       hostedDisabled:
         "De gehoste pagina van deze flow staat uit. Zet hem aan onder Gehoste pagina bij de flow, of verstuur het verzoek op een andere manier.",
       redirectNotAllowed:
@@ -690,6 +698,8 @@ export const nl: Translation<typeof en> = {
         "De foto's van het document zijn niet bruikbaar. Probeer het opnieuw.",
       documentScanMismatch:
         "Deze foto's horen bij een andere controle. Fotografeer het document opnieuw.",
+      documentScanUnavailable:
+        "De scanservice kon het resultaat van deze scan niet doorgeven. Fotografeer het document opnieuw.",
       documentScanDone: "Het document is al gefotografeerd.",
       documentScanPending:
         "Fotografeer eerst het document en deel daarna je gegevens vanuit de Yivi-app.",
@@ -717,6 +727,8 @@ export const nl: Translation<typeof en> = {
       tooLarge: "Het bestand is te groot.",
       sealCheckUnavailable:
         "Het zegel op het bestand kan nu niet worden gecontroleerd. Probeer het over een paar minuten opnieuw.",
+      sealUnchecked:
+        "Een document van deze stap heeft een zegel dat nooit is gecontroleerd. Controleer het zegel opnieuw voordat je het accepteert.",
       generic: "Er ging iets mis. Probeer het opnieuw.",
     },
     address: {
@@ -753,25 +765,12 @@ export const nl: Translation<typeof en> = {
         detail:
           "Na de identiteitscontrole: de diploma-uittreksels die je bij DUO downloadt, gecontroleerd op de handtekening van DUO en op je naam en geboortedatum",
       },
-      identityDone: "Je identiteit is geverifieerd.",
-      heading: "Voeg nu je diploma toe",
-      intro:
-        "Upload het officiële uittreksel van je diploma van DUO. We controleren of DUO het heeft uitgegeven en of het op jouw naam staat.",
       how: {
         login: "Log in bij Mijn DUO met DigiD.",
         openDuo: "Open Mijn DUO",
         download:
-          "Download bij ‘Mijn diploma's’ het uittreksel van je diploma als pdf.",
-        upload:
-          "Upload die pdf hier, onveranderd. Een scan of foto van je diploma werkt niet.",
+          "Download bij ‘Mijn diploma's’ het uittreksel van elk diploma als pdf.",
       },
-      choose: "Pdf kiezen",
-      chooseAnother: "Nog een diploma toevoegen",
-      checking: "Bezig met controleren…",
-      closed: "De tijd om diploma's toe te voegen is voorbij.",
-      done: "Klaar",
-      needOne: "Voeg minstens één diploma toe om verder te gaan.",
-      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
       level: "niveau {{level}}",
       reasons: {
         notADiploma:
@@ -784,27 +783,16 @@ export const nl: Translation<typeof en> = {
     },
     employment: {
       overview: {
-        label: "Arbeidsverleden",
+        label: "Verzekeringsbericht",
         detail:
           "Na de identiteitscontrole: het Verzekeringsbericht dat je bij UWV downloadt, gecontroleerd op het zegel van UWV en op je naam en geboortedatum",
       },
-      identityDone: "Je identiteit is geverifieerd.",
-      heading: "Voeg nu je Verzekeringsbericht toe",
-      intro:
-        "Upload het Verzekeringsbericht van UWV. Daarin staat je arbeidsverleden. We controleren of UWV het heeft uitgegeven en of het op jouw naam staat.",
       how: {
         login: "Log in bij Mijn UWV met DigiD.",
         openUwv: "Open Mijn UWV",
         download:
           "Open bij ‘Persoonlijke gegevens’ je ‘Arbeidsverleden’ en download het als pdf.",
-        upload:
-          "Upload die pdf hier, precies zoals je hem downloadde. Druk hem niet af naar pdf, want dan verdwijnt het zegel van UWV.",
       },
-      choose: "Pdf kiezen",
-      chooseAgain: "Een andere pdf kiezen",
-      checking: "Bezig met controleren…",
-      closed: "De tijd om je Verzekeringsbericht toe te voegen is voorbij.",
-      continue: "Verder",
       kept: "Verzekeringsbericht van {{date}} geaccepteerd",
       keptChecks:
         "Het zegel van UWV is geldig, het bestand is niet gewijzigd en het staat op jouw naam.",
@@ -813,11 +801,11 @@ export const nl: Translation<typeof en> = {
       benefit: "(uitkering)",
       otherIncome: "(ander inkomen)",
       review:
-        "Er staat geen huidige baan in. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat geen huidige baan in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reviewBenefit:
-        "Er staat een lopende uitkering in. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat een lopende uitkering in. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reviewOtherIncome:
-        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je controle voordat er een besluit is.",
+        "Er staat ander lopend inkomen in, betaald zonder gewerkte uren. De organisatie beoordeelt je Verzekeringsbericht. Je identiteitscontrole blijft geverifieerd.",
       reasons: {
         notAStatement:
           "Dit is geen Verzekeringsbericht van UWV. Download het via Mijn UWV.",
@@ -827,6 +815,41 @@ export const nl: Translation<typeof en> = {
           "Dit Verzekeringsbericht staat op naam van iemand anders.",
         stale:
           "Dit Verzekeringsbericht is ouder dan 30 dagen. Download een nieuw exemplaar.",
+        duplicate: "Er is al een Verzekeringsbericht toegevoegd.",
+      },
+    },
+    documents: {
+      identityDone: "Je identiteit is geverifieerd.",
+      heading: "Voeg nu je documenten toe",
+      intro:
+        "Upload de documenten hieronder als pdf, als je wilt allemaal tegelijk. We controleren wie elk document heeft uitgegeven en of het op jouw naam staat.",
+      kinds: {
+        diplomas: "Diploma-uittreksel van DUO",
+        employment: "Verzekeringsbericht van UWV",
+      },
+      needed: "Nog nodig",
+      added: "Toegevoegd",
+      choose: "Pdf's kiezen",
+      chooseAnother: "Nog een pdf toevoegen",
+      checking: "Bezig met controleren…",
+      unchanged:
+        "Upload elke pdf precies zoals je hem downloadde. Een scan, een foto of een opnieuw afgedrukte pdf werkt niet.",
+      closed: "De tijd om documenten toe te voegen is voorbij.",
+      continue: "Verder",
+      needAll: "Voeg elk document hierboven toe om verder te gaan.",
+      verdictsAnnounced: "Geaccepteerd: {{accepted}}. Geweigerd: {{refused}}.",
+      sealPending_one:
+        "We hebben {{count}} document ontvangen, maar konden het zegel nu niet controleren. Een beoordelaar controleert het later. Je hoeft niets te doen.",
+      sealPending_other:
+        "We hebben {{count}} documenten ontvangen, maar konden de zegels nu niet controleren. Een beoordelaar controleert ze later. Je hoeft niets te doen.",
+      reasons: {
+        notSupported:
+          "Dit is geen document dat we kunnen controleren. Upload de originele pdf, zoals je hem downloadde.",
+        notAsked: "Dit document wordt hier niet gevraagd.",
+        tooMany:
+          "Je hebt het maximale aantal diploma's voor een controle toegevoegd.",
+        checkFailed:
+          "We konden dit bestand nu niet controleren. Upload dit bestand opnieuw.",
       },
     },
     flows: {
@@ -922,8 +945,7 @@ export const nl: Translation<typeof en> = {
         method: "Kies een app",
         session: "Scan de QR-code",
         address: "Adres",
-        diplomas: "Diploma",
-        employment: "Arbeidsverleden",
+        documents: "Documenten",
       },
       overview: {
         heading: "{{name}} wil je identiteit verifiëren",
@@ -992,6 +1014,8 @@ export const nl: Translation<typeof en> = {
         getYivi: "Nog geen Yivi-app? Download hem via de",
         appStore: "App Store",
         playStore: "Google Play",
+        yiviPrivacy: "Yivi's privacyregels",
+        yiviPrivacyUrl: "https://www.yivi.app/privacy",
         idemHeading: "Scan met de Idem-app",
         idemHint: "Open de Idem-app en scan deze code vanuit de app.",
         openIdem: "Openen in de Idem-app",
@@ -1006,6 +1030,9 @@ export const nl: Translation<typeof en> = {
         connectedHeading: "Verder in de Idem-app",
         connectedHint:
           "De sessie is geopend op de telefoon. Wordt de app gesloten, dan verschijnt hier een code om verder te gaan.",
+        finishedHeading: "De Idem-app is klaar",
+        finishedHint:
+          "De telefoon heeft zijn deel gedaan. De controle wordt op deze pagina afgerond.",
         awayHeading: "De Idem-app is gesloten",
         awayHint:
           "Scan deze code met de Idem-app om verder te gaan waar de sessie was, op dezelfde of een andere telefoon.",
@@ -1027,6 +1054,20 @@ export const nl: Translation<typeof en> = {
           "De controle is niet op tijd afgerond, dus er is niets gedeeld.",
       },
       outcome: {
+        steps: {
+          kinds: {
+            address: "Adres",
+            diplomas: "Diploma",
+            employment: "Verzekeringsbericht",
+          },
+          state: {
+            received: "Ontvangen",
+            checking: "Wordt gecontroleerd",
+            rejected: "Niet geaccepteerd",
+            missing: "Niet ontvangen",
+            open: "Nog te doen",
+          },
+        },
         approved: {
           title: "Identiteit geverifieerd",
           message: "De controle is afgerond.",
@@ -1069,6 +1110,7 @@ export const nl: Translation<typeof en> = {
       details: "Details",
     },
     sessions: {
+      sealCheckedAgain: "Nadat een beoordelaar het zegel opnieuw controleerde",
       review: {
         reasonRequired: "Geef een reden: die wordt bewaard in het auditlog.",
         reasonTooLong: "Houd de reden op maximaal {{max}} tekens.",
@@ -1157,7 +1199,6 @@ export const nl: Translation<typeof en> = {
       address: {
         title: "Adres",
         none: "Geen adres ingevuld.",
-        missing: "Geen adres",
         declared:
           "Zelf opgegeven: zoals de persoon het invulde, niet gecontroleerd tegen een document.",
         verified:
@@ -1177,27 +1218,35 @@ export const nl: Translation<typeof en> = {
           confirmed: "Een beoordelaar heeft het adres bevestigd.",
           rejected:
             "Een beoordelaar heeft het adres afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het adres op tijd beoordeeld. De identiteitscontrole verandert niet.",
         },
         openReview: "Open de beoordeling",
         tag: {
           pending: "Adres in beoordeling",
           confirmed: "Adres bevestigd",
           rejected: "Adres afgewezen",
+          lapsed: "Adresbeoordeling verlopen",
         },
         toReview: "Gaat naar een beoordelaar",
       },
       diplomas: {
         title: "Diploma's",
         none: "Geen diploma toegevoegd.",
-        tag_one: "{{count}} diploma",
-        tag_other: "{{count}} diploma's",
-        missing: "Geen diploma",
         number: "DUO-nummer {{number}}",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over de diploma's beslist. De identiteitscontrole verandert niet.",
+          confirmed: "Een beoordelaar heeft de diploma's geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft de diploma's afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft de diploma's op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
       },
       employment: {
-        title: "Huidig dienstverband",
+        title: "Verzekeringsbericht",
         none: "Geen Verzekeringsbericht geüpload.",
-        missing: "Geen arbeidsverleden",
         statementDate: "Verzekeringsbericht van {{date}}",
         noRelations: "Geen huidig dienstverband of uitkering bekend bij UWV",
         employed: "Heeft nu werk: ja",
@@ -1208,6 +1257,40 @@ export const nl: Translation<typeof en> = {
         period: "sinds {{from}}, laatst aangegeven {{to}}",
         source:
           "Uit het Verzekeringsbericht van UWV, gecontroleerd op het zegel van UWV en op de geverifieerde naam en geboortedatum. Alleen het dienstverband dat op de datum van het bericht loopt wordt bewaard.",
+        review: {
+          pending:
+            "Wacht op een beoordelaar die over het Verzekeringsbericht beslist. De identiteitscontrole verandert niet.",
+          confirmed:
+            "Een beoordelaar heeft het Verzekeringsbericht geaccepteerd.",
+          rejected:
+            "Een beoordelaar heeft het Verzekeringsbericht afgewezen. De identiteitscontrole verandert niet.",
+          lapsed:
+            "Niemand heeft het Verzekeringsbericht op tijd beoordeeld. De identiteitscontrole verandert niet.",
+        },
+      },
+      parts: {
+        identity: "Identiteit",
+        kinds: {
+          address: "Adres",
+          diplomas: "Diploma",
+          employment: "Verzekeringsbericht",
+        },
+        state: {
+          not_started: "Niet gestart",
+          open: "Wacht op de persoon",
+          to_review: "Te beoordelen",
+          done: "Klaar",
+          accepted: "Geaccepteerd",
+          rejected: "Afgewezen",
+          lapsed: "Beoordeling verlopen",
+          not_provided: "Niet aangeleverd",
+        },
+        summary: {
+          needs_review: "Beoordeling nodig",
+          in_progress: "Bezig",
+          incomplete: "Onvolledig",
+          complete: "Compleet",
+        },
       },
       purged: "Persoonsgegevens gewist",
       purgedSubject: "Gewist",
@@ -1371,9 +1454,14 @@ export const nl: Translation<typeof en> = {
       notAllowed:
         "Alleen beheerders en leden met het recht om te beoordelen kunnen beoordelen.",
       tabsLabel: "Toon",
+      alsoDecided: "Al beoordeeld in deze sessie",
+      decidedAutomatically:
+        "Automatisch beslist door de controle, zonder beoordelaar.",
+      nextPart: "Volgende: {{part}}",
       tabs: {
         all: "Alles",
         checks: "Identiteitscontroles",
+        steps: "Extra stappen",
         data: "Gegevensverzoeken",
         closed: "Afgehandeld",
       },
@@ -1394,15 +1482,69 @@ export const nl: Translation<typeof en> = {
       emptyClosed: "Er is nog niets afgehandeld.",
       identityCheck: "Identiteitscontrole",
       addressCheck: "Adres",
+      employmentCheck: "Verzekeringsbericht",
+      diplomasCheck: "Diploma's",
+      seal: {
+        why: "Het zegel kon bij het uploaden niet worden gecontroleerd, omdat de EU-vertrouwenslijsten of de intrekkingsserver van de uitgever niet bereikbaar waren. Controleer het opnieuw voordat je beslist.",
+        unchecked_one:
+          "{{count}} bestand heeft nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als het zegel is gecontroleerd.",
+        unchecked_other:
+          "{{count}} bestanden hebben nog een ongecontroleerd zegel. Je kunt deze stap pas accepteren als elk zegel is gecontroleerd.",
+        checkAgain: "Zegel opnieuw controleren",
+        checked:
+          "De zegels zijn gecontroleerd. Het resultaat staat per bestand.",
+        files_one:
+          "{{count}} bestand ging naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        files_other:
+          "{{count}} bestanden gingen naar beoordeling omdat het zegel bij het uploaden niet gecontroleerd kon worden",
+        states: {
+          waiting: "Zegel nog niet gecontroleerd",
+          kept: "Zegel gecontroleerd, bewaard",
+          refused: "Geweigerd",
+          notChecked: "Nooit gecontroleerd",
+        },
+        reasons: {
+          signatureInvalid:
+            "Het zegel klopt niet. Het bestand is na het verzegelen gewijzigd, of het komt niet van de uitgever.",
+          holderMismatch: "Het document staat op naam van een ander.",
+          notADocument: "Dit is geen leesbaar document van de uitgever.",
+          stale: "Het Verzekeringsbericht is ouder dan 30 dagen.",
+          duplicate:
+            "Hetzelfde document was al toegevoegd, dus deze kopie is niet bewaard.",
+        },
+      },
+      diplomas: {
+        title: "Diploma's beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat de diploma's door een beoordelaar goedkeuren. Het zegel van DUO op elk uittreksel klopt, en elk uittreksel staat op naam van de persoon.",
+        decisionTitle: "Besluit",
+        confirm: "Diploma's accepteren",
+        reject: "Diploma's afwijzen",
+        confirmed: "De diploma's zijn geaccepteerd.",
+        rejected: "De diploma's zijn afgewezen.",
+        lapsed: "Niemand heeft de diploma's op tijd beoordeeld.",
+      },
+      employment: {
+        title: "Verzekeringsbericht beoordelen",
+        whyTitle: "Waarom dit op jou wacht",
+        whyAlways:
+          "Deze flow laat elk Verzekeringsbericht door een beoordelaar goedkeuren. In dit bericht staat een huidige baan en geen uitkering of ander inkomen.",
+        decisionTitle: "Besluit",
+        confirm: "Verzekeringsbericht accepteren",
+        reject: "Verzekeringsbericht afwijzen",
+        confirmed: "Het Verzekeringsbericht is geaccepteerd.",
+        rejected: "Het Verzekeringsbericht is afgewezen.",
+        lapsed: "Niemand heeft het Verzekeringsbericht op tijd beoordeeld.",
+      },
       address: {
         title: "Adres beoordelen",
         whyTitle: "Waarom dit op jou wacht",
         why: "De persoon heeft dit adres zelf ingevuld. Geen register bevestigt dat diegene daar woont, dus een beoordelaar beslist.",
         whyMismatch:
           "Dit adres wijkt af van het woonadres uit de BRP dat de persoon deelde vanuit de Yivi-app. Misschien is diegene net verhuisd, dus een beoordelaar beslist.",
-        checkTitle: "Identiteitscontrole",
-        checkHint:
-          "De identiteitscontrole zelf is goedgekeurd. Je besluit gaat alleen over het adres.",
+        whyAlways:
+          "Deze flow laat elk adres door een beoordelaar goedkeuren. Het woonadres uit de BRP dat de persoon deelde, bevestigt dit adres.",
         method: "Gecontroleerd met",
         level: "Betrouwbaarheidsniveau",
         decisionTitle: "Besluit",
@@ -1410,6 +1552,7 @@ export const nl: Translation<typeof en> = {
         reject: "Adres afwijzen",
         confirmed: "Het adres is bevestigd.",
         rejected: "Het adres is afgewezen.",
+        lapsed: "Niemand heeft het adres op tijd beoordeeld.",
       },
       requestedBy: "Aangevraagd door {{name}}",
       provenWith: {
@@ -1430,6 +1573,10 @@ export const nl: Translation<typeof en> = {
           "In het Verzekeringsbericht staat geen huidige baan",
         current_benefit:
           "In het Verzekeringsbericht staat een lopende uitkering van UWV",
+        alwaysReview: "De flow laat elk identiteitsbewijs beoordelen",
+        addressAlways: "De flow laat elk adres beoordelen",
+        employmentAlways: "De flow laat elk Verzekeringsbericht beoordelen",
+        diplomasAlways: "De flow laat de diploma's beoordelen",
         current_other_income:
           "In het Verzekeringsbericht staat ander lopend inkomen zonder gewerkte uren",
       },
@@ -1439,6 +1586,13 @@ export const nl: Translation<typeof en> = {
         rejected: "Afgewezen",
         confirmed: "Adres bevestigd",
         addressRejected: "Adres afgewezen",
+        addressLapsed: "Adresbeoordeling verlopen",
+        employmentConfirmed: "Verzekeringsbericht geaccepteerd",
+        employmentRejected: "Verzekeringsbericht afgewezen",
+        employmentLapsed: "Beoordeling Verzekeringsbericht verlopen",
+        diplomasConfirmed: "Diploma's geaccepteerd",
+        diplomasRejected: "Diploma's afgewezen",
+        diplomasLapsed: "Beoordeling diploma's verlopen",
       },
       footer:
         "Beheerders en leden met het recht om te beoordelen zien deze pagina.",
@@ -1457,9 +1611,12 @@ export const nl: Translation<typeof en> = {
         other: "Dit verzoek wacht niet meer op een besluit.",
       },
       check: {
+        photosTitle: "Foto's",
         title: "Een identiteitscontrole beoordelen",
         why: {
           title: "Waarom dit op jou wacht",
+          alwaysReview:
+            "Deze flow laat elk identiteitsbewijs door een beoordelaar goedkeuren. Bekijk de automatische controles hieronder voordat je beslist.",
           body: "Geen handtekening of register staat in voor een deel van deze controle, dus een persoon moet het nakijken.",
           no_current_employment:
             "De identiteit is geverifieerd, maar in het Verzekeringsbericht staat geen huidige baan. Bekijk het dienstverband hieronder.",
@@ -1559,6 +1716,10 @@ export const nl: Translation<typeof en> = {
             "Open de gegevens van {{count}} controles om te downloaden.",
           kept_one: "De andere {{count}} blijft.",
           kept_other: "De andere {{count}} blijven.",
+          erasedAlready_one:
+            "{{count}} controle is al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
+          erasedAlready_other:
+            "{{count}} controles zijn al automatisch verwijderd. Wijs je af, dan blijft de rest bewaard.",
           reason: "Reden",
           reasonHint:
             "Verplicht. Wordt met jouw naam in het auditlogboek bewaard.",
@@ -1573,6 +1734,7 @@ export const nl: Translation<typeof en> = {
             "De persoonsgegevens in de controles die je hebt aangevinkt, en in dit verzoek, worden direct verwijderd en kunnen niet worden hersteld. De controles blijven als vastlegging zonder die gegevens.",
           approved: "Het verzoek is goedgekeurd.",
           rejected: "Het verzoek is afgewezen.",
+          restKept: "De rest blijft bewaard.",
         },
       },
     },
@@ -1586,7 +1748,7 @@ export const nl: Translation<typeof en> = {
       title: "API-tokens",
       nameRequired: "Vul een naam in.",
       intro:
-        "Met een token start je software controles op elke flow en leest ze de resultaten. Het wordt één keer getoond, bij het aanmaken.",
+        "Met een token start je software controles op elke flow en leest ze de resultaten. Je kunt het hier altijd opnieuw tonen.",
       create: "Token aanmaken",
       name: "Naam",
       nameHint:
@@ -1598,6 +1760,14 @@ export const nl: Translation<typeof en> = {
       actions: "Acties",
       revoke: "Intrekken",
       revokeNamed: "{{name}} intrekken",
+      show: "Tonen",
+      showNamed: "{{name}} tonen",
+      shownTitle: "Token “{{name}}”",
+      shownHint:
+        "Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend. Het tonen van een token komt in het auditlog.",
+      notRevealable: "Kan niet getoond worden",
+      notRevealableHint:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan en trek dit in om het te vervangen.",
       revokeConfirm: {
         title: "{{name}} intrekken?",
         message:
@@ -1605,8 +1775,9 @@ export const nl: Translation<typeof en> = {
       },
       createdTitle: "Kopieer je token nu",
       createdHint:
-        "Dit is de enige keer dat je het token “{{name}}” ziet. Bewaar het veilig, bijvoorbeeld in de geheimenopslag van je backend.",
-      createdNote: "Kwijt? Trek het in en maak een nieuw token aan.",
+        "Bewaar het token “{{name}}” veilig, bijvoorbeeld in de geheimenopslag van je backend.",
+      createdNote:
+        "Je kunt het later opnieuw tonen met Tonen, naast het token.",
     },
     webhooks: {
       endpoint: "Webhook-endpoint",
@@ -1770,8 +1941,11 @@ export const nl: Translation<typeof en> = {
       document_photo: "Document fotograferen",
       face_verification: "Gezichtscontrole",
       address: "Adres invullen",
-      diploma_upload: "Diploma's uploaden (DUO)",
-      employment_upload: "Verzekeringsbericht uploaden (UWV)",
+      documents: "Documenten uploaden ({{documents}})",
+    },
+    documents: {
+      diploma: "DUO-diploma",
+      employment: "UWV-Verzekeringsbericht",
     },
     bsnPolicies: {
       retrieve: "Het volledige BSN bewaren",
@@ -1877,8 +2051,6 @@ export const nl: Translation<typeof en> = {
           hint: "De persoon scant het paspoort of de ID-kaart, houdt het tegen de telefoon zodat de chip wordt gelezen, en maakt een selfie. Een controle die tekortschiet wordt afgewezen.",
         },
       },
-      regula:
-        "Documenten en gezichten worden gecontroleerd door Regula in de Idem-app. De Yivi-app deelt een document dat er al in staat, zonder gezichtscontrole.",
       advanced: {
         title: "Geavanceerde instellingen",
         hint: "Stappen, documenten, wat je ontvangt, privacy.",
@@ -1905,10 +2077,13 @@ export const nl: Translation<typeof en> = {
         faceInScan: "Het gezicht controleren in de ID-scan",
         faceInScanHint:
           "Direct na de foto van het document, in de browser: de ID-scan controleert of de persoon levend is en vergelijkt het gezicht met de foto op het document. Niet met de chipfoto, dus dit haalt geen betrouwbaarheidsniveau.",
-        diplomaHint:
-          "Na de identiteitscontrole, in de browser. Alleen op het scherm of via een link, nooit per e-mail.",
-        employmentHint:
-          "Na de identiteitscontrole, in de browser: de persoon uploadt het Verzekeringsbericht uit Mijn UWV, gecontroleerd op het zegel van UWV en op naam en geboortedatum. Alleen op het scherm of als link, nooit per e-mail.",
+        documents: "Documenten uploaden",
+        documentsHint:
+          "Na de identiteitscontrole, in de browser: de persoon uploadt elk document dat hieronder is aangevinkt als pdf. Elk bestand wordt gecontroleerd op het zegel van de uitgever en op naam en geboortedatum. Alleen op het scherm of via een link, nooit per e-mail.",
+        diploma: "Diploma-uittreksel (DUO)",
+        diplomaHint: "Uit Mijn DUO, tot 10 per sessie.",
+        employment: "Verzekeringsbericht (UWV)",
+        employmentHint: "Uit Mijn UWV, één per sessie.",
         faceWithoutChip:
           "Zonder het lezen van de chip is er geen chipfoto: het gezicht wordt vergeleken met je eigen foto van deze persoon, die jouw systeem bij elke sessie via de API meestuurt. Deze flow kan niet naar leden worden gestuurd, loopt alleen in de Idem-app en haalt geen betrouwbaarheidsniveau.",
         lifetime: "Geldigheid QR-code",
@@ -1986,6 +2161,22 @@ export const nl: Translation<typeof en> = {
           warning:
             "Onder {{min}} wordt afgeraden: meer mensen die niet de houder van het document zijn komen erdoor.",
         },
+      },
+      review: {
+        title: "Beoordeling",
+        hint: "Welke delen van een sessie op een beoordelaar wachten, ook als ze alle controles doorstaan.",
+        always: "Het identiteitsbewijs altijd laten beoordelen",
+        alwaysHint:
+          "Een identiteitsbewijs dat alle controles doorstaat, wacht op een beoordelaar die het goedkeurt. Een mislukte controle wijst het nog steeds af.",
+        address: "Het adres altijd laten beoordelen",
+        addressHint:
+          "Elk adres wacht op een beoordelaar, ook een adres dat het woonadres uit de BRP bevestigt.",
+        employment: "Het Verzekeringsbericht altijd laten beoordelen",
+        employmentHint:
+          "Elk bewaard Verzekeringsbericht wacht op een beoordelaar, ook een bericht met alleen een huidige baan.",
+        diplomas: "De diploma's altijd laten beoordelen",
+        diplomasHint:
+          "De bewaarde diploma-uittreksels wachten op een beoordelaar, ook als het zegel van DUO klopt.",
       },
       privacy: {
         title: "Privacy",
@@ -2069,9 +2260,9 @@ export const nl: Translation<typeof en> = {
       },
       erased: "Je gegevens zijn verwijderd.",
       erasedPartly_one:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen; dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerder verzoek konden we niet met zekerheid aan jou koppelen. Dat is bewaard en wordt verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       erasedPartly_other:
-        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen; die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
+        "We hebben de gegevens verwijderd die we met zekerheid aan jou konden koppelen. {{count}} eerdere verzoeken konden we niet met zekerheid aan jou koppelen. Die zijn bewaard en worden verwijderd zodra de bewaartermijn van {{organization}} verloopt.",
       keptByLaw_one:
         "{{count}} identiteitscontrole wordt bewaard tot {{date}}, omdat {{organization}} die volgens de wet moet bewaren. Daarna wordt ze verwijderd.",
       keptByLaw_other:
@@ -2303,6 +2494,8 @@ export const nl: Translation<typeof en> = {
     onboardingAttestationsUpdated: "Onboarding-attestaties bijgewerkt",
     wscaActivated: "Houder-wallet geactiveerd",
     wscaRotated: "Wallet-geheim geroteerd",
+    walletUnitRevoked: "Wallet-unit ingetrokken",
+    walletUnitActivated: "Nieuwe wallet-unit geactiveerd",
     themeSaved: "Wallet-thema bijgewerkt",
     avatarSaved: "Profielfoto opgeslagen",
     avatarRemoved: "Profielfoto verwijderd",
@@ -2425,6 +2618,7 @@ export const nl: Translation<typeof en> = {
       qerdsAddress: "Digitaal adres",
       qerdsContact: "Contact",
       walletInstance: "Wallet",
+      walletUnit: "Wallet-unit",
       walletRepresentation: "Vertegenwoordiging",
       kvkRegistration: "KVK-registratie",
       postguardKey: "PostGuard API-sleutel",
@@ -2524,6 +2718,8 @@ export const nl: Translation<typeof en> = {
       walletRevoked: "Wallet ingetrokken",
       representationClaimed: "Vertegenwoordiging geclaimd",
       representationRevoked: "Vertegenwoordiging ingetrokken",
+      walletUnitActivated: "Wallet-unit geactiveerd",
+      walletUnitRevoked: "Wallet-unit ingetrokken",
       kvkRegistrationValidated: "KVK-registratie gevalideerd",
       kvkRegistrationNotValidated: "KVK-registratie afgewezen",
       attestationSchemaCreated: "Attestatieschema aangemaakt",
@@ -2624,6 +2820,7 @@ export const nl: Translation<typeof en> = {
         "Instellingen voor identiteitsverificatie bijgewerkt",
       identityProofingApiKeyCreated: "API-token aangemaakt",
       identityProofingApiKeyRevoked: "API-token ingetrokken",
+      identityProofingApiKeyRevealed: "API-token getoond",
       identityProofingWebhookConfigured: "Webhook-endpoint ingesteld",
       identityProofingWebhookSecretRotated: "Webhookgeheim vernieuwd",
       identityProofingWebhookRemoved: "Webhook-endpoint verwijderd",
@@ -2640,10 +2837,13 @@ export const nl: Translation<typeof en> = {
         "Gewijzigd of een flow om het adres vraagt",
       identityProofingAddressAdded: "Adres ingevuld",
       identityProofingAddressReviewed: "Adres beoordeeld",
+      identityProofingReviewItemDecided: "Beoordeling afgerond",
       identityProofingFlowEmploymentConfigured:
         "Gewijzigd of een flow om het Verzekeringsbericht vraagt",
       identityProofingEmploymentAdded: "Verzekeringsbericht toegevoegd",
       identityProofingEmploymentRejected: "Verzekeringsbericht geweigerd",
+      identityProofingDocumentUnchecked:
+        "Document bewaard waarvan het zegel niet gecontroleerd kon worden",
       identityProofingResumed: "Identiteitsverificatie hervat",
       provisioningRunCompleted: "Gebruikers gesynchroniseerd uit de directory",
       provisioningRunFailed: "Directorysynchronisatie mislukt",
@@ -3332,6 +3532,34 @@ export const nl: Translation<typeof en> = {
     bundleDid: "conf/dids/{{instance}}-did.json",
     bundleMetadata: "conf/metadata/{{instance}}.json",
     bundleVct: "conf/vct/{{name}}.json",
+  },
+  walletUnit: {
+    title: "Attestatie van de wallet-unit",
+    intro:
+      "Als walletprovider attesteert deze omgeving de wallet-unit van de organisatie aan uitgevers en andere zakelijke wallets (WE BUILD CS-05). Elke attestatie is kort geldig en wordt één keer gebruikt. Intrekken van de unit maakt elke attestatie die eraan is uitgegeven ongeldig.",
+    states: {
+      notIssued: "Nog niet uitgegeven",
+      active: "Actief",
+      revoked: "Ingetrokken",
+    },
+    reasons: {
+      owner_request: "Verzoek van de organisatie",
+      key_compromise: "Sleutel gecompromitteerd",
+    },
+    loadError: "De wallet-unit kon niet worden geladen: {{message}}",
+    createdAt: "Unit aangemaakt",
+    issuedCount: "Uitgegeven attestaties",
+    lastIssuedAt: "Laatst uitgegeven",
+    revokedAt: "Ingetrokken",
+    reason: "Reden",
+    revoke: "Wallet-unit intrekken",
+    confirmRevoke:
+      "Elke attestatie die aan deze wallet-unit is uitgegeven wordt ongeldig, en er worden geen nieuwe uitgegeven tot je een nieuwe unit activeert. Intrekken?",
+    activateHint:
+      "Activeer een nieuwe wallet-unit om weer attestaties uit te geven. De sleutels mogen niet de gecompromitteerde zijn.",
+    activate: "Nieuwe wallet-unit activeren",
+    keysInHsm: "Sleutels in HSM · {{levels}}",
+    actionError: "De bewerking is mislukt: {{message}}",
   },
   wscaWallet: {
     title: "Houder-wallet (WSCA)",
@@ -4054,6 +4282,8 @@ export const nl: Translation<typeof en> = {
       empty: "Nog geen contacten opgeslagen.",
       loadError: "Contacten laden mislukt: {{message}}",
       taken: "Er bestaat al een contact met dat adres.",
+      invalidEuid:
+        "Dat is geen geldige EUID. Gebruik een vorm als NLNHR.12345678.",
       error: "Er is iets misgegaan: {{message}}",
     },
   },

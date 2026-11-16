@@ -27,6 +27,17 @@ func TestWebhookSignature(t *testing.T) {
 	}
 }
 
+// A session event says what kind of flow it is from, so an erasure request
+// reads apart from an identity check without reading the session.
+func TestSessionEventDataCarriesFlowKind(t *testing.T) {
+	for _, kind := range []FlowKind{FlowIdentity, FlowDataAccess, FlowDataErasure} {
+		data := sessionEventData(Request{FlowID: "f1", FlowKind: kind}, StatusNeedsReview)
+		if got := data["flowKind"]; got != string(kind) {
+			t.Errorf("flowKind = %v, want %q", got, kind)
+		}
+	}
+}
+
 // Eight attempts spread over about a day, then the delivery is failed.
 func TestWebhookRetriesSpanADay(t *testing.T) {
 	if MaxWebhookAttempts != 8 {

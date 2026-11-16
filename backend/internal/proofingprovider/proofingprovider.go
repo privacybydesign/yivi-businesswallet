@@ -69,6 +69,8 @@ type FlowSpec struct {
 	// SessionTTLSeconds is how long a session of this flow runs; 0 follows the
 	// org's session lifetime.
 	SessionTTLSeconds int `json:"sessionTtlSeconds,omitempty"`
+	// AlwaysReview sends a session that would be approved to review instead.
+	AlwaysReview bool `json:"alwaysReview,omitempty"`
 }
 
 // AssuranceTier maps a minimum score percentage to an assurance tier name.
@@ -180,18 +182,20 @@ type Result struct {
 }
 
 // App is where an Idem session's phone is: none scanned yet, holding the
-// session, or away (closed or silent), when a claim link hands it over.
+// session, or away (closed or silent), when a claim link hands it over; or
+// finished, its part done, so it no longer holds the session.
 type App string
 
 const (
 	AppWaiting   App = "waiting"
 	AppConnected App = "connected"
 	AppAway      App = "away"
+	AppFinished  App = "finished"
 )
 
 // Identity is a session's outcome with who was proofed and on what evidence,
 // for a customer's result read. Only these fields are read from the engine: never
-// the document number, personal number or place of birth.
+// the document number or place of birth.
 type Identity struct {
 	Result
 	// GivenName and FamilyName are the MRZ's: a long name is cut off there.
@@ -203,6 +207,9 @@ type Identity struct {
 	FullFamilyName string
 	BirthDate      string
 	Nationality    string
+	// PersonalNumber is the BSN as the flow's BSN policy releases it; empty
+	// when it omits it or none was read.
+	PersonalNumber string
 	// AgeOver is whether the holder is the flow's age or older, derived from
 	// the chip's date of birth; nil when the flow did not request age_over.
 	AgeOver *AgeOver
@@ -443,6 +450,10 @@ type RejectedError struct {
 // CodeDeviceActive is the engine refusing a handover while the app holding the
 // session is still active: the subject carries on there.
 const CodeDeviceActive = "device_active"
+
+// CodeAppFinished is the engine refusing a handover once the Idem app did
+// every step it runs: there is nothing left for a phone to take over.
+const CodeAppFinished = "app_finished"
 
 // CodeDocumentPhotoMissing is the engine refusing to decide a session whose
 // flow takes a document photo before the browser submitted it

@@ -15,6 +15,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,8 @@ type fakeVerifier struct {
 	queries      []openid4vpverifier.Query
 	queryClaims  map[string]string
 	queryPending bool
+	// results counts the presentations read.
+	results atomic.Int64
 }
 
 // fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
@@ -108,6 +111,7 @@ func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.Pr
 }
 
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	f.results.Add(1)
 	if f.queryPending {
 		return openid4vpverifier.Presentation{}, openid4vpverifier.ErrPending
 	}
@@ -184,6 +188,10 @@ type testEnv struct {
 	// proofing stands in for the proofing engine: a test sets its Outcome,
 	// before creating a session, to have the subject finish it.
 	proofing *proofingprovider.Stub
+	// proofingService and webhooks are what cmd/api hands the webhook
+	// deliverer, for a test that sends the outbox.
+	proofingService *proofing.Service
+	webhooks        *proofing.WebhookStore
 }
 
 // presenterMode picks which posture newTestEnv wires the inbound OpenID4VP
@@ -293,9 +301,10 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 	proofingStub := proofingprovider.NewStub()
 	proofingRecorder := audit.NewDBRecorder()
 	proofingRequests := proofing.NewRequestStore(pool, proofingRecorder, proofingCipher)
+	proofingWebhooks := proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher)
 	proofingService := proofing.NewService(proofing.NewStores(pool, proofingRecorder, proofingCipher,
 		proofingRequests,
-		proofing.NewWebhookStore(pool, proofingRecorder, proofingCipher),
+		proofingWebhooks,
 	), proofingStub, fake, nil)
 	proofingService.SetHostedBaseURL("http://wallet.test/p/")
 	proofingHandler := proofing.NewHandler(proofingService, requireUser, orgHandler.Authorize)
@@ -323,6 +332,9 @@ func newTestEnv(t *testing.T, mode presenterMode, platformAdmins ...string) *tes
 		fake:     fake,
 		verifier: verifierIdentity,
 		proofing: proofingStub,
+
+		proofingService: proofingService,
+		webhooks:        proofingWebhooks,
 	}
 }
 
@@ -397,7 +409,7 @@ func (e *testEnv) createOrg(name, slug string) uuid.UUID {
 	err := e.pool.QueryRow(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		name, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost",
+		name, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost",
 	).Scan(&id)
 	if err != nil {
 		e.t.Fatalf("create org %q: %v", slug, err)

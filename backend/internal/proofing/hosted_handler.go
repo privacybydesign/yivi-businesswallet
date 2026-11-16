@@ -98,6 +98,7 @@ func (h *Handler) registerHosted(mux *http.ServeMux) {
 	mux.Handle("POST /proof/{token}/diplomas", h.limitHosted(h.hostedAddDiplomas))
 	mux.Handle("POST /proof/{token}/address", h.limitHosted(h.hostedAddAddress))
 	mux.Handle("POST /proof/{token}/employment", h.limitHosted(h.hostedAddEmployment))
+	mux.Handle("POST /proof/{token}/documents", h.limitHosted(h.hostedAddDocuments))
 	mux.Handle("GET /proof/{token}/address/lookup", h.limitHosted(h.hostedLookUpAddress))
 	mux.Handle("GET /proof/{token}/data-export", h.limitHosted(h.hostedDataExport))
 }
@@ -145,13 +146,16 @@ type hostedProgressResponse struct {
 	// DiplomasUntil is when the subject can last add a diploma extract;
 	// absent while they cannot.
 	DiplomasUntil *time.Time `json:"diplomasUntil,omitempty"`
+	// UncheckedDiplomas is how many of the subject's extracts a reviewer
+	// checks, as their seal could not be checked at upload.
+	UncheckedDiplomas int `json:"uncheckedDiplomas,omitempty"`
 	// AddressUntil is when the subject can last enter their address; absent
 	// while they cannot, and once they did (AddressGiven).
 	AddressUntil *time.Time `json:"addressUntil,omitempty"`
 	AddressGiven bool       `json:"addressGiven"`
 	// EmploymentUntil is when the subject can last upload their
 	// Verzekeringsbericht; absent while they cannot, and once one was kept
-	// (EmploymentGiven).
+	// or waits for a reviewer to check its seal (EmploymentGiven).
 	EmploymentUntil *time.Time `json:"employmentUntil,omitempty"`
 	EmploymentGiven bool       `json:"employmentGiven"`
 	// DataExportUntil is until when an approved "see my data" request's data
@@ -174,6 +178,9 @@ type hostedProgressResponse struct {
 	// AppDone is an Idem session whose app did its part, before the
 	// document scan.
 	AppDone bool `json:"appDone,omitempty"`
+	// Steps is where each of the flow's extra steps stands, which the end
+	// screen tells the person.
+	Steps []StepOutcome `json:"steps"`
 }
 
 // hostedLegalRetention is what the person is told about the data an erasure
@@ -213,8 +220,9 @@ func newHostedProgress(req Request, now time.Time) hostedProgressResponse {
 		DiplomasUntil: diplomasUntil(req), DataExportUntil: openExport(req, now), DataMatchesKept: req.DataMatchesKept,
 		AddressUntil: addressUntil(req), AddressGiven: req.SubjectAddress != nil,
 		LegalRetention: newHostedLegalRetention(req.LegalNotice), SessionTTLSeconds: ttlSeconds,
-		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil,
-		DocumentScan: documentScanState(req), AppDone: req.appDone,
+		EmploymentUntil: employmentUntil(req), EmploymentGiven: req.SubjectEmployment != nil || req.UncheckedEmployment,
+		UncheckedDiplomas: req.UncheckedDiplomas,
+		DocumentScan:      documentScanState(req), AppDone: req.appDone, Steps: req.Steps(now),
 	}
 }
 
@@ -393,9 +401,9 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Flow.IdemAvailable = idemAppAvailable(f)
 	out.Flow.YiviPersonalData = acceptsPersonalData(f)
 	out.Flow.BrowserOnly = f.BrowserOnly
-	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request)
-	out.Flow.AddressMode = addressModeOf(hosted.Request)
-	out.Flow.EmploymentMode = employmentModeOf(hosted.Request)
+	out.Flow.DiplomaMode = diplomaModeOf(hosted.Request).forSubject()
+	out.Flow.AddressMode = addressModeOf(hosted.Request).forSubject()
+	out.Flow.EmploymentMode = employmentModeOf(hosted.Request).forSubject()
 	out.Flow.Kind = hosted.Request.FlowKind
 	out.Flow.RetentionDays = subjectRetentionDays(st, hosted.Request.FlowKind, hosted.Request.RetentionOverride, time.Now())
 

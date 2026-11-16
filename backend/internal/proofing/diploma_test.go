@@ -3,6 +3,7 @@ package proofing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -63,10 +64,22 @@ func (f *fakeDiplomas) RecordRejected(_ context.Context, _ Request, reason, _ st
 
 // fakeChecker reads a file's bytes as the holder's full name, and accepts the
 // extract when it names the holder.
-type fakeChecker struct{ holders []diploma.Person }
+type fakeChecker struct {
+	holders []diploma.Person
+	// err is the checker's own failure, for every file.
+	err error
+	// down is a revocation responder that cannot be reached.
+	down bool
+}
 
 func (f *fakeChecker) Check(_ context.Context, pdf []byte, holder diploma.Person) (diploma.Outcome, error) {
 	f.holders = append(f.holders, holder)
+	if f.err != nil {
+		return diploma.Outcome{}, f.err
+	}
+	if f.down {
+		return diploma.Outcome{}, fmt.Errorf("diploma: validate: %w", diploma.ErrRevocationUnavailable)
+	}
 	if string(pdf) == "not a pdf" {
 		return diploma.Outcome{Reason: diploma.ReasonNotADiploma}, nil
 	}
@@ -212,5 +225,29 @@ func TestAddDiplomasCapsTheCount(t *testing.T) {
 	}
 	if _, err := d.upload(req, files...); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("AddDiplomas of %d = %v, want ErrInvalidInput", len(files), err)
+	}
+}
+
+// A diplomas review item settles the step as the address's does: in review
+// while it waits, rejected with DIPLOMA_REJECTED, done once confirmed.
+func TestDiplomasStepFollowsItsReview(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		review ReviewState
+		state  StepState
+		code   string
+	}{
+		{ReviewPending, StepInReview, ""},
+		{ReviewRejected, StepRejected, ErrorDiplomaRejected},
+		{ReviewConfirmed, StepDone, ""},
+	} {
+		req := Request{Diplomas: DiplomasAlwaysReview, CheckedAt: &now, DiplomasAddedAt: &now, DiplomasReview: tc.review}
+		steps := req.Steps(now)
+		if len(steps) != 1 || steps[0].State != tc.state || steps[0].Code != tc.code {
+			t.Errorf("review %q: steps = %+v, want %s %q", tc.review, steps, tc.state, tc.code)
+		}
+	}
+	if got := DiplomasAlwaysReview.forSubject(); got != DiplomasRequired {
+		t.Errorf("always_review for the subject = %q, want required", got)
 	}
 }

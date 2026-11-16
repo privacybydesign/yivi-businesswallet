@@ -478,6 +478,8 @@ stays an abstract seam and, in the meantime, the wallet uses:
 
 - **A per-org address book (`qerds_contacts`)** — save recipients (name → digital address) and reuse
   them in Compose via a datalist picker. This is the interim stand-in for the directory.
+  A contact's optional EUID goes through `euid.Parse` and is stored in the written form; a
+  bad one is `400 invalid_euid` (see `.ai/features/wallet-bootstrap.md`).
 - **The partner QTSP's own addressing + REM/eDelivery interoperability** for actual routing.
 
 When the European Digital Directory arrives it becomes one more resolver behind `ResolveAddress`

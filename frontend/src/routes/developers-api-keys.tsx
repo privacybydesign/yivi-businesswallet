@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   useCreateApiKeyMutation,
   useProofingApiKeysQuery,
+  useRevealApiKeyMutation,
   useRevokeApiKeyMutation,
 } from "../api/identity-proofing.queries";
 import type {
@@ -24,8 +25,8 @@ const NEW_KEY_HINT = "proofing-api-key-name-hint";
 
 // The org's machine credentials: its software creates sessions and reads their
 // outcome through the public proofing API with one. A token works on every flow
-// of the org, and its secret is shown once, at creation. A revoked token is
-// not listed: it no longer does anything, and the audit log keeps the record.
+// of the org, and an admin can show it again. A revoked token is not listed:
+// it no longer does anything, and the audit log keeps the record.
 export function ApiTokensSection({
   slug,
 }: Readonly<{
@@ -39,6 +40,10 @@ export function ApiTokensSection({
   const [created, setCreated] = useState<CreatedProofingApiKey | null>(null);
   const [revoking, setRevoking] = useState<ProofingApiKey | null>(null);
   const revoke = useRevokeApiKeyMutation(slug);
+  const reveal = useRevealApiKeyMutation(slug);
+  const [shown, setShown] = useState<{ name: string; secret: string } | null>(
+    null,
+  );
   const active = keys.data?.filter((key) => !key.revokedAt);
   const keysError = blockingError(keys);
 
@@ -102,21 +107,53 @@ export function ApiTokensSection({
                     : t("identityProofing.apiKeys.neverUsed")}
                 </Table.Cell>
                 <Table.Cell className="text-right">
-                  <button
-                    type="button"
-                    className="text-error text-[12.5px] font-semibold hover:underline"
-                    aria-label={t("identityProofing.apiKeys.revokeNamed", {
-                      name: key.name,
-                    })}
-                    onClick={() => setRevoking(key)}
-                  >
-                    {t("identityProofing.apiKeys.revoke")}
-                  </button>
+                  <span className="inline-flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
+                    {key.revealable ? (
+                      <button
+                        type="button"
+                        className="text-link text-[12.5px] font-semibold hover:underline disabled:opacity-50"
+                        aria-label={t("identityProofing.apiKeys.showNamed", {
+                          name: key.name,
+                        })}
+                        disabled={reveal.isPending}
+                        onClick={() =>
+                          reveal.mutate(key.id, {
+                            onSuccess: (secret) =>
+                              setShown({ name: key.name, secret }),
+                          })
+                        }
+                      >
+                        {t("identityProofing.apiKeys.show")}
+                      </button>
+                    ) : (
+                      <span
+                        className={HINT}
+                        title={t("identityProofing.apiKeys.notRevealableHint")}
+                      >
+                        {t("identityProofing.apiKeys.notRevealable")}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="text-error text-[12.5px] font-semibold hover:underline"
+                      aria-label={t("identityProofing.apiKeys.revokeNamed", {
+                        name: key.name,
+                      })}
+                      onClick={() => setRevoking(key)}
+                    >
+                      {t("identityProofing.apiKeys.revoke")}
+                    </button>
+                  </span>
                 </Table.Cell>
               </Table.Row>
             ))}
           </Table.Body>
         </Table>
+        {reveal.isError && (
+          <p role="alert" className={`${ERROR} border-line border-t px-5 py-3`}>
+            {proofingErrorMessage(reveal.error, t)}
+          </p>
+        )}
       </Card>
       {creating && (
         <NewKeyModal
@@ -137,6 +174,15 @@ export function ApiTokensSection({
           footnote={t("identityProofing.apiKeys.createdNote")}
           secret={created.secret}
           onClose={() => setCreated(null)}
+        />
+      )}
+      {shown && (
+        <SecretReveal
+          title={t("identityProofing.apiKeys.shownTitle", { name: shown.name })}
+          hint={t("identityProofing.apiKeys.shownHint")}
+          secret={shown.secret}
+          doneLabel={t("common.close")}
+          onClose={() => setShown(null)}
         />
       )}
       {revoking && (

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/bits"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,12 +43,14 @@ const requestColumns = `r.id, r.organization_id, r.requested_by,
 	r.subject_kind, r.proofed_name_ciphertext, st.data_retention_days, st.legal_retention_months,
 	r.api_key_id, COALESCE(k.name, ''), COALESCE(r.method, ''), COALESCE(r.yivi_transaction_id, ''),
 	COALESCE(r.required_assurance_level, ''), r.link_token_hash IS NOT NULL,
-	r.cancelled_at, r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
+	r.cancelled_at, COALESCE(r.cancelled_by, ''), r.purged_at, COALESCE(r.redirect_url, ''), COALESCE(r.language, ''), r.diplomas,
+	(SELECT min(d.created_at) FROM identity_proofing_request_diplomas d WHERE d.request_id = r.id),
 	r.expects_subject, r.expected_birth_date_ciphertext, r.flow_kind, r.data_export_until, r.data_matches_kept,
 	r.data_matches_held, r.data_held_until, r.retention_override_seconds, r.address, r.address_ciphertext, r.address_added_at,
-	COALESCE(r.address_review, ''), r.address_reviewed_at,
+	` + stepReviewColumns + `,
 	r.employment, r.employment_ciphertext, r.employment_added_at, COALESCE(r.review_reason, ''),
-	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn
+	r.document_scan, COALESCE(r.document_scan_transaction_id, ''), r.document_scanned_at, ` + purgeAtColumn + `,
+	` + sealChecksColumn
 
 // purgeAtColumn is when a request is purged: purge_at, which every write to
 // its inputs stores (refreshPurgeAt), shown only once it settled. NULL while
@@ -232,6 +235,7 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 	var sessionExpiresAt, sessionEndedAt *time.Time
 	var sessionTTLSeconds int
 	var nameCT, birthDateCT, addressCT, employmentCT []byte
+	var sealChecksJSON []byte
 	var retentionDays, legalMonths, overrideSeconds, heldSessions *int
 	var heldUntil *time.Time
 	if err := row.Scan(&r.ID, &r.OrganizationID, &r.RequestedBy, &r.RequestedByName,
@@ -239,11 +243,15 @@ func (s *RequestStore) scanRequest(row pgx.Row) (Request, error) {
 		&r.AssuranceLevel, &r.EIDASLevel, &r.ErrorCode, &r.CreatedAt, &r.UpdatedAt, &r.CompletedAt, &r.CheckedAt,
 		&sessionID, &tokenCT, &sessionExpiresAt, &sessionEndedAt, &sessionTTLSeconds, &r.SubjectUserID, &r.FlowVersion,
 		&r.SubjectKind, &nameCT, &retentionDays, &legalMonths, &r.APIKeyID, &r.APIKeyName, &r.Method, &r.yiviTransactionID,
-		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.PurgedAt, &r.RedirectURL, &r.Language,
-		&r.Diplomas, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
+		&r.RequiredAssuranceLevel, &r.Hosted, &r.CancelledAt, &r.CancelledBy, &r.PurgedAt, &r.RedirectURL, &r.Language,
+		&r.Diplomas, &r.DiplomasAddedAt, &r.ExpectsSubject, &birthDateCT, &r.FlowKind, &r.DataExportUntil, &r.DataMatchesKept,
 		&heldSessions, &heldUntil, &overrideSeconds,
-		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
-		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt); err != nil {
+		&r.Address, &addressCT, &r.AddressAddedAt, &r.AddressReview, &r.AddressReviewedAt, &r.EmploymentReview, &r.EmploymentReviewedAt, &r.DiplomasReview, &r.DiplomasReviewedAt, &r.StepReviewDueAt, &r.IdentityReviewedAt, &r.Employment, &employmentCT, &r.EmploymentAddedAt, &r.ReviewReason,
+		&r.DocumentScan, &r.documentScanTransactionID, &r.DocumentScannedAt, &r.PurgeAt,
+		&sealChecksJSON); err != nil {
+		return Request{}, err
+	}
+	if err := readSealChecks(&r, sealChecksJSON); err != nil {
 		return Request{}, err
 	}
 	r.NameRetention, r.RetentionOverride = nameRetention(r.External(), retentionDays, overrideSeconds)
@@ -881,11 +889,15 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 		// When it went to review (completed_at), as waitingSince on the page.
 		order = `COALESCE(r.completed_at, r.created_at), r.created_at`
 	}
-	if filter.AddressReview != nil && *filter.AddressReview == AddressReviewPending {
-		order = `r.address_added_at, r.created_at`
-	} else if filter.AddressReview != nil {
-		// A decided one, the latest decision first, as the Closed tab shows it.
-		order = `r.address_reviewed_at DESC, r.created_at DESC`
+	var reviewKind, reviewState *string
+	if filter.ReviewKind != nil {
+		kind, state := string(*filter.ReviewKind), string(filter.reviewState())
+		reviewKind, reviewState = &kind, &state
+		order = reviewItemOrder(filter.reviewState(), "$11")
+	}
+	closed := "TRUE"
+	if filter.ClosedReviews {
+		closed, order = closedReview, closedReviewOrder
 	}
 	query := `SELECT ` + requestColumns + requestFrom + `
 		WHERE r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
@@ -894,10 +906,11 @@ func (s *RequestStore) List(ctx context.Context, orgID uuid.UUID, filter Request
 			AND ($6::text IS NULL OR r.flow_id = $6)
 			AND ($7::text IS NULL OR ` + effectiveStatusColumn + ` = $7)
 			AND (NOT $8::boolean OR r.flow_kind IN ($9, $10))
-			AND ($11::text IS NULL OR r.address_review = $11)
+			AND ($11::text IS NULL OR ` + reviewItemMatches("$11", "$12") + `)
+			AND ` + closed + `
 		ORDER BY ` + order + ` LIMIT $3`
 	rows, err := s.db.Query(ctx, query, orgID, filter.RequestedBy, maxListedRequests, filter.SubjectUserID, filter.SubjectKind,
-		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), filter.AddressReview)
+		filter.FlowID, filter.Status, filter.DataRequests, string(FlowDataAccess), string(FlowDataErasure), reviewKind, reviewState)
 	if err != nil {
 		return nil, fmt.Errorf("proofing: list requests org %s: %w", orgID, err)
 	}
@@ -1217,10 +1230,10 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 		const cancellable = `id = $1 AND cancelled_at IS NULL AND purged_at IS NULL AND ips_session_ended_at IS NULL
 			AND status IN ('pending', 'in_progress')`
 		tag, err := q.Exec(ctx, `UPDATE identity_proofing_requests
-			SET cancelled_at = now(), ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
+			SET cancelled_at = now(), cancelled_by = $3, ips_session_ended_at = COALESCE(ips_session_ended_at, now()),
 				reference_photo_ciphertext = NULL, reference_photo_mime = NULL,
 				expected_birth_date_ciphertext = NULL, updated_at = now()
-			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
+			WHERE `+cancellable+` AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID, cancelledByOf(ctx))
 		if err != nil {
 			return fmt.Errorf("proofing: cancel request %s: %w", req.ID, err)
 		}
@@ -1250,8 +1263,11 @@ func (s *RequestStore) Cancel(ctx context.Context, req Request, endSession func(
 				req.auditFields(map[string]any{"status": string(StatusCancelled)}))); err != nil {
 			return err
 		}
-		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled,
-			sessionEventData(req, StatusCancelled))
+		data := sessionEventData(req, StatusCancelled)
+		if by := cancelledByOf(ctx); by != nil {
+			data["cancelledBy"] = string(*by)
+		}
+		return enqueueRequestWebhook(ctx, q, req, EventSessionCancelled, data)
 	})
 	return done, err
 }
@@ -1292,7 +1308,7 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 				redirect_url = NULL, yivi_transaction_id = NULL, document_scan_transaction_id = NULL,
 				identity_match_key = NULL, address_ciphertext = NULL,
 				employment_ciphertext = NULL,
-				registered_address_ciphertext = NULL, address_review = NULLIF(address_review, 'pending'),
+				registered_address_ciphertext = NULL,
 				ips_session_ended_at = COALESCE(ips_session_ended_at, now()), updated_at = now()
 			WHERE id = $1 AND purged_at IS NULL AND ips_session_id IS NOT DISTINCT FROM $2`, req.ID, sessionID)
 		if err != nil {
@@ -1328,6 +1344,9 @@ func (s *RequestStore) Purge(ctx context.Context, req Request, endSession func(c
 
 // purgeRequestRecords erases what other tables hold of req's personal data.
 func purgeRequestRecords(ctx context.Context, q database.Querier, req Request) error {
+	if err := clearReviewItems(ctx, q, req.ID); err != nil {
+		return err
+	}
 	if _, err := q.Exec(ctx, `DELETE FROM identity_proofing_request_diplomas WHERE request_id = $1`, req.ID); err != nil {
 		return fmt.Errorf("proofing: purge diplomas request %s: %w", req.ID, err)
 	}
@@ -1419,29 +1438,8 @@ func scanMember(row pgx.Row) (Member, error) {
 // sealed and kept until proofedNameRetention has passed; it is never audited. A
 // decision (approved, rejected) drops the expected birth date: the match is
 // made. It is a no-op when the row already holds that outcome or moved to another
-// session, so concurrent pollers record a decision once, and for a request the
-// wallet put in review itself (Request.ReviewReason): the engine's outcome no
-// longer decides it, RecordWalletOutcome does.
+// session, so concurrent pollers record a decision once.
 func (s *RequestStore) RecordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByEngine)
-}
-
-// RecordWalletOutcome is RecordOutcome for the decision on a review the
-// wallet opened: the reviewer's, or its lapse.
-func (s *RequestStore) RecordWalletOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result) error {
-	return s.recordOutcome(ctx, req, sessionID, status, res, outcomeByWallet)
-}
-
-// outcomeOrigin is who decides an outcome: the engine, or the wallet on a
-// review it opened itself. Each records only on its own kind of request.
-type outcomeOrigin string
-
-const (
-	outcomeByEngine outcomeOrigin = "engine"
-	outcomeByWallet outcomeOrigin = "wallet"
-)
-
-func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID string, status Status, res proofingprovider.Result, origin outcomeOrigin) error {
 	action, ok := outcomeActions[status]
 	if !ok {
 		return fmt.Errorf("proofing: record outcome request %s: %q is not an outcome", req.ID, status)
@@ -1461,12 +1459,10 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 					ELSE expected_birth_date_ciphertext END
 			WHERE id = $1 AND ips_session_id = $2 AND purged_at IS NULL
 				AND status IN ('pending', 'in_progress', 'needs_review') AND status <> $3
-				AND (review_reason IS NOT NULL) = $11
-			RETURNING employment_ciphertext`
-		var employmentCT []byte
+			RETURNING checked_at`
+		var checkedAt *time.Time
 		err := q.QueryRow(ctx, update, req.ID, sessionID, string(status),
-			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method), origin == outcomeByWallet).
-			Scan(&employmentCT)
+			res.AssuranceLevel, res.EIDASLevel, res.ErrorCode, res.CompletedAt, nameCT, retainSecs, string(res.Method)).Scan(&checkedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -1488,30 +1484,11 @@ func (s *RequestStore) recordOutcome(ctx context.Context, req Request, sessionID
 		}
 		decided := req
 		decided.AssuranceLevel, decided.EIDASLevel, decided.ErrorCode = res.AssuranceLevel, res.EIDASLevel, res.ErrorCode
-		if err := enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status)); err != nil {
-			return err
-		}
-		if status != StatusApproved || origin != outcomeByEngine || employmentCT == nil {
-			return nil
-		}
-		decided.Status = StatusApproved
-		return s.reviewKeptEmployment(ctx, q, decided, employmentCT)
+		decided.Method = methodOr(res.Method, req.Method)
+		// The steps open with the check: the event says so.
+		decided.Status, decided.CheckedAt = status, checkedAt
+		return enqueueRequestWebhook(ctx, q, req, event, sessionEventData(decided, status))
 	})
-}
-
-// reviewKeptEmployment opens the wallet's review on req, just approved by the
-// engine, when the statement kept while the engine reviewed the identity calls
-// for one, as it would have on an approved request.
-func (s *RequestStore) reviewKeptEmployment(ctx context.Context, q database.Querier, req Request, employmentCT []byte) error {
-	emp, err := s.decryptEmployment(req.ID, employmentCT)
-	if err != nil {
-		return err
-	}
-	reason := emp.reviewReason()
-	if reason == "" {
-		return nil
-	}
-	return openWalletReview(audit.WithoutActor(ctx), q, s.audit, req, reason)
 }
 
 // sealProofedName seals the name a session proofed for req, with retainSecs
@@ -1701,4 +1678,23 @@ func (s *RequestStore) Stats(ctx context.Context, orgID uuid.UUID, requestedBy *
 		return nil, fmt.Errorf("proofing: stats org %s: %w", orgID, err)
 	}
 	return out, nil
+}
+
+// cancelledByOf is who ctx's actor is as a canceller; nil for none.
+func cancelledByOf(ctx context.Context) *CancelledBy {
+	actor, ok := audit.ActorFromContext(ctx)
+	var by CancelledBy
+	switch {
+	case !ok:
+		return nil
+	case actor.UserID != uuid.Nil:
+		by = CancelledByMember
+	case actor.Label == hostedSubjectActor.Label:
+		by = CancelledBySubject
+	case strings.HasPrefix(actor.Label, APIKeyActorPrefix):
+		by = CancelledByAPIKey
+	default:
+		return nil
+	}
+	return &by
 }

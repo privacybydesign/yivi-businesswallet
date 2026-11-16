@@ -51,7 +51,10 @@ const (
 	// EventSessionEmploymentAdded is sent when the subject's UWV
 	// Verzekeringsbericht was kept after their identity check.
 	EventSessionEmploymentAdded = "session.employment_added"
-	EventTest                   = "test"
+	// EventSessionStepReviewed is sent when a reviewer confirmed or rejected
+	// an extra step's review item other than the address's.
+	EventSessionStepReviewed = "session.step_reviewed"
+	EventTest                = "test"
 )
 
 // WebhookEvents are the events an endpoint may subscribe to, in display order.
@@ -60,7 +63,7 @@ var WebhookEvents = []string{
 	EventSessionVerified, EventSessionFailed, EventSessionReviewOpened, EventSessionExpired,
 	EventSessionCancelled, EventSessionPurged, EventSessionDiplomaAdded, EventSessionAddressAdded,
 	EventSessionAddressReviewed,
-	EventSessionEmploymentAdded,
+	EventSessionEmploymentAdded, EventSessionStepReviewed,
 }
 
 // webhookPersonalKeys are the payload keys that carry what the subject added
@@ -159,6 +162,7 @@ func webhookBody(id uuid.UUID, event string, createdAt time.Time, data json.RawM
 func sessionEventData(req Request, status Status) map[string]any {
 	data := map[string]any{
 		"sessionId": publicSessionID(req.ID), "status": string(status), "flowId": req.FlowID,
+		"flowKind": string(req.FlowKind),
 	}
 	for key, value := range map[string]string{
 		"assuranceLevel": req.AssuranceLevel, "eidasLevel": req.EIDASLevel, "errorCode": req.ErrorCode,
@@ -170,6 +174,12 @@ func sessionEventData(req Request, status Status) map[string]any {
 	}
 	if req.ExpectsSubject {
 		data["expectedSubject"] = true
+	}
+	if status == StatusExpired {
+		data["expiryReason"] = string(req.expiryReason())
+	}
+	if steps := req.Steps(time.Now()); len(steps) > 0 {
+		data["steps"] = steps
 	}
 	return data
 }

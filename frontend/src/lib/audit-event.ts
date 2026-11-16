@@ -144,6 +144,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "identity_proofing.customer_removed": { icon: "delete", tone: "red" },
   "identity_proofing.api_key_created": { icon: "add", tone: "green" },
   "identity_proofing.api_key_revoked": { icon: "close", tone: "red" },
+  "identity_proofing.api_key_revealed": { icon: "view", tone: "amber" },
   "identity_proofing.webhook_configured": { icon: "settings", tone: "blue" },
   "identity_proofing.webhook_secret_rotated": { icon: "lock", tone: "amber" },
   "identity_proofing.webhook_removed": { icon: "delete", tone: "red" },
@@ -168,12 +169,14 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   },
   "identity_proofing.address_added": { icon: "add", tone: "green" },
   "identity_proofing.address_reviewed": { icon: "valid", tone: "blue" },
+  "identity_proofing.review_item_decided": { icon: "valid", tone: "blue" },
   "identity_proofing.flow_employment_configured": {
     icon: "settings",
     tone: "blue",
   },
   "identity_proofing.employment_added": { icon: "add", tone: "green" },
   "identity_proofing.employment_rejected": { icon: "close", tone: "red" },
+  "identity_proofing.document_unchecked": { icon: "time", tone: "amber" },
   "identity_proofing.resumed": { icon: "valid", tone: "green" },
 };
 
@@ -343,6 +346,10 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.representationClaimed");
     case "wallet.representation_revoked":
       return t("auditLog.actions.representationRevoked");
+    case "wallet.unit_activated":
+      return t("auditLog.actions.walletUnitActivated");
+    case "wallet.unit_revoked":
+      return t("auditLog.actions.walletUnitRevoked");
     case "kvk.registration_validated":
       return t("auditLog.actions.kvkRegistrationValidated");
     case "kvk.registration_not_validated":
@@ -517,6 +524,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingApiKeyCreated");
     case "identity_proofing.api_key_revoked":
       return t("auditLog.actions.identityProofingApiKeyRevoked");
+    case "identity_proofing.api_key_revealed":
+      return t("auditLog.actions.identityProofingApiKeyRevealed");
     case "identity_proofing.webhook_configured":
       return t("auditLog.actions.identityProofingWebhookConfigured");
     case "identity_proofing.webhook_secret_rotated":
@@ -539,12 +548,16 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.identityProofingAddressAdded");
     case "identity_proofing.address_reviewed":
       return t("auditLog.actions.identityProofingAddressReviewed");
+    case "identity_proofing.review_item_decided":
+      return t("auditLog.actions.identityProofingReviewItemDecided");
     case "identity_proofing.flow_employment_configured":
       return t("auditLog.actions.identityProofingFlowEmploymentConfigured");
     case "identity_proofing.employment_added":
       return t("auditLog.actions.identityProofingEmploymentAdded");
     case "identity_proofing.employment_rejected":
       return t("auditLog.actions.identityProofingEmploymentRejected");
+    case "identity_proofing.document_unchecked":
+      return t("auditLog.actions.identityProofingDocumentUnchecked");
     case "identity_proofing.paused":
       return t("auditLog.actions.identityProofingPaused");
     case "identity_proofing.resumed":
@@ -576,6 +589,8 @@ export function auditTargetLabel(targetType: string, t: TFunction): string {
       return t("auditLog.targets.walletInstance");
     case "wallet_representation":
       return t("auditLog.targets.walletRepresentation");
+    case "wallet_unit":
+      return t("auditLog.targets.walletUnit");
     case "kvk_registration":
       return t("auditLog.targets.kvkRegistration");
     case "postguard_key":

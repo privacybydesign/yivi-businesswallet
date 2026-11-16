@@ -41,6 +41,9 @@ function errorMessage(error: unknown, t: TFunction): string {
     if (error.status === FORBIDDEN_STATUS) {
       return t("register.notRepresentative");
     }
+    if (code === "ebwoid_mismatch") {
+      return t("register.ebwoidMismatch");
+    }
     if (code === "slug_taken") {
       return t("register.slugTaken");
     }

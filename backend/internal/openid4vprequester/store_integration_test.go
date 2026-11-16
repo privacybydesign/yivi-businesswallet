@@ -20,7 +20,7 @@ func createOrg(t *testing.T, pool *pgxpool.Pool, slug string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(), `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ($1, $1, 'kvk-' || $1, 'NL.KVK.' || $1, $1 || '@qerds.localhost') RETURNING id`, slug).Scan(&id); err != nil {
+		VALUES ($1, $1, 'kvk-' || $1, 'NLNHR.' || $1, $1 || '@qerds.localhost') RETURNING id`, slug).Scan(&id); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 	return id

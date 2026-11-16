@@ -5,6 +5,7 @@ package proofing
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ func makeOrg(t *testing.T, pool *pgxpool.Pool, slug string) uuid.UUID {
 	err := pool.QueryRow(context.Background(),
 		`INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		slug, slug, "kvk-"+slug, "NL.KVK."+slug, slug+"@qerds.localhost").Scan(&id)
+		slug, slug, "kvk-"+slug, "NLNHR."+slug, slug+"@qerds.localhost").Scan(&id)
 	if err != nil {
 		t.Fatalf("create org %q: %v", slug, err)
 	}
@@ -905,14 +906,7 @@ func TestExternalReadsSkipMembers(t *testing.T) {
 	if member.External() || member.SubjectKind != SubjectMember {
 		t.Errorf("member request = kind %q; want a member's", member.SubjectKind)
 	}
-	var sent []Request
-	for _, email := range []string{"anna@example.org", "bram@example.org", "carla@example.org"} {
-		req, err := store.Create(ctx, newStoredRequest(orgID, sam, externalSubject(email)))
-		if err != nil {
-			t.Fatalf("Create external request: %v", err)
-		}
-		sent = append(sent, req)
-	}
+	sent := createExternalRequests(t, store, orgID, sam, "anna@example.org", "bram@example.org", "carla@example.org")
 	foreign, err := store.Create(ctx, newStoredRequest(otherOrg, sam, externalSubject("dora@example.org")))
 	if err != nil {
 		t.Fatalf("Create other org's request: %v", err)
@@ -930,7 +924,27 @@ func TestExternalReadsSkipMembers(t *testing.T) {
 		t.Errorf("Get of the member's request = %+v, %v; want it, which the wallet's own reads may", got, err)
 	}
 
-	// Newest first, in pages: the cursor continues after the last one read.
+	checkExternalPages(t, store, orgID, sent)
+}
+
+func createExternalRequests(t *testing.T, store *RequestStore, orgID, by uuid.UUID, emails ...string) []Request {
+	t.Helper()
+	var sent []Request
+	for _, email := range emails {
+		req, err := store.Create(context.Background(), newStoredRequest(orgID, by, externalSubject(email)))
+		if err != nil {
+			t.Fatalf("Create external request: %v", err)
+		}
+		sent = append(sent, req)
+	}
+	return sent
+}
+
+// checkExternalPages reads sent back newest first, in pages: the cursor
+// continues after the last one read.
+func checkExternalPages(t *testing.T, store *RequestStore, orgID uuid.UUID, sent []Request) {
+	t.Helper()
+	ctx := context.Background()
 	page, err := store.ListExternalPage(ctx, orgID, nil, 2)
 	if err != nil || len(page) != 2 || page[0].ID != sent[2].ID || page[1].ID != sent[1].ID {
 		t.Fatalf("first page = %+v, %v; want the two newest external requests", page, err)
@@ -1146,6 +1160,136 @@ func TestOrgSettingsNameRetention(t *testing.T) {
 	}
 }
 
+// fakeResults answers a session's result as reading it from the engine would,
+// or err.
+type fakeResults struct {
+	identity proofingprovider.Identity
+	err      error
+}
+
+func (f fakeResults) RequestResult(_ context.Context, _, id uuid.UUID) (Request, proofingprovider.Identity, error) {
+	return Request{ID: id, Status: StatusApproved}, f.identity, f.err
+}
+
+func (fakeResults) RequestDiplomas(context.Context, []uuid.UUID) (map[uuid.UUID][]Diploma, error) {
+	return map[uuid.UUID][]Diploma{}, nil
+}
+
+// sentIdentity, sentImage, sentResult, sentData and sentVerified are a
+// session.verified body as its receiver reads it.
+type sentIdentity struct {
+	FamilyName string `json:"familyName"`
+	BSN        string `json:"bsn"`
+}
+
+type sentImage struct {
+	Data string `json:"data"`
+}
+
+type sentResult struct {
+	Identity      sentIdentity `json:"identity"`
+	DocumentImage sentImage    `json:"documentImage"`
+}
+
+type sentData struct {
+	SessionID string     `json:"sessionId"`
+	Result    sentResult `json:"result"`
+}
+
+type sentVerified struct {
+	Data sentData `json:"data"`
+}
+
+// assertSentResult checks that body carries session sessionID's result, with
+// its BSN and document image, and that the outbox keeps none of it.
+func assertSentResult(t *testing.T, pool *pgxpool.Pool, body []byte, sessionID string) {
+	t.Helper()
+	var sent sentVerified
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if r := sent.Data.Result; sent.Data.SessionID != sessionID || r.Identity.FamilyName != "Jansen" ||
+		r.Identity.BSN != "111222333" || r.DocumentImage.Data != "ZnJvbnQ=" {
+		t.Errorf("sent = %+v; want the session's result with its BSN and document image", sent.Data)
+	}
+	var stored string
+	if err := pool.QueryRow(context.Background(), `SELECT payload::text FROM identity_proofing_webhook_deliveries`).Scan(&stored); err != nil {
+		t.Fatalf("stored payload: %v", err)
+	}
+	if strings.Contains(stored, "Jansen") || strings.Contains(stored, webhookResultKey) {
+		t.Errorf("the outbox keeps the result: %s", stored)
+	}
+}
+
+// session.verified carries the session's result, read as it is sent: the
+// outbox keeps none of it, a read that fails is retried, and a session erased
+// meanwhile goes out without one.
+func TestWebhookCarriesResult(t *testing.T) {
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	requests := NewRequestStore(pool, audit.NopRecorder{}, cipher)
+	webhooks := NewWebhookStore(pool, audit.NewDBRecorder(), cipher)
+	orgID := makeOrg(t, pool, "acme")
+	sam := makeUser(t, pool, "sam@example.org")
+	ctx := context.Background()
+
+	got := make(chan []byte, 10)
+	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- body
+	}))
+	t.Cleanup(receiver.Close)
+	if _, _, err := webhooks.Save(ctx, orgID, receiver.URL, []string{EventSessionVerified}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	approved := createStarted(t, requests, newStoredRequest(orgID, sam, externalSubject("a@example.org")), "s1")
+	if err := requests.RecordOutcome(ctx, approved, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Name: "Anna Jansen"}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	identity := proofingprovider.Identity{
+		Result:    proofingprovider.Result{Status: proofingprovider.StatusApproved},
+		GivenName: "Anna", FamilyName: "Jansen", PersonalNumber: "111222333",
+		DocumentImage: &proofingprovider.Image{MimeType: "image/png", Base64: "ZnJvbnQ="},
+	}
+	deliverer := NewDeliverer(webhooks, safehttp.Policy{AllowInsecureHTTP: true})
+
+	deliverer.SetResults(fakeResults{err: errors.New("engine down")})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	select {
+	case body := <-got:
+		t.Fatalf("sent %s while the result could not be read", body)
+	default:
+	}
+	if deliveries, _ := webhooks.Deliveries(ctx, orgID); len(deliveries) != 1 || deliveries[0].Status != DeliveryPending {
+		t.Fatalf("deliveries = %+v, want the one pending a retry", deliveries)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
+		t.Fatalf("make due: %v", err)
+	}
+	deliverer.SetResults(fakeResults{identity: identity})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	assertSentResult(t, pool, <-got, publicSessionID(approved.ID))
+
+	// The same event again, the session erased meanwhile.
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
+		SET status = $1, attempts = 0, next_attempt_at = now()`, DeliveryPending); err != nil {
+		t.Fatalf("send again: %v", err)
+	}
+	deliverer.SetResults(fakeResults{err: ErrRequestNotFound})
+	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
+		t.Fatalf("DeliverDue = %d, %v", n, err)
+	}
+	if body := <-got; bytes.Contains(body, []byte(`"result"`)) {
+		t.Errorf("an erased session's event carries a result: %s", body)
+	}
+}
+
 func TestWebhookOutboxBackOff(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	cipher := newTestCipher(t)
@@ -1338,6 +1482,48 @@ func TestSessionStatesSendWebhooks(t *testing.T) {
 	}
 }
 
+// webhookFixture is an org whose endpoint subscribes to some events, and a
+// user who sends its requests.
+type webhookFixture struct {
+	pool     *pgxpool.Pool
+	requests *RequestStore
+	webhooks *WebhookStore
+	orgID    uuid.UUID
+	sam      uuid.UUID
+}
+
+func newWebhookFixture(t *testing.T, events []string) webhookFixture {
+	t.Helper()
+	pool, _ := testdb.Fresh(t)
+	cipher := newTestCipher(t)
+	f := webhookFixture{
+		pool: pool, requests: NewRequestStore(pool, audit.NopRecorder{}, cipher),
+		webhooks: NewWebhookStore(pool, audit.NopRecorder{}, cipher),
+		orgID:    makeOrg(t, pool, "acme"), sam: makeUser(t, pool, "sam@example.org"),
+	}
+	if _, _, err := f.webhooks.Save(context.Background(), f.orgID, "https://hooks.example.org/x", events); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return f
+}
+
+// An outcome the engine reports before any poll saw the app join still says
+// which app decided it, as the session does.
+func TestOutcomeWebhookCarriesReportedMethod(t *testing.T) {
+	f := newWebhookFixture(t, []string{EventSessionVerified})
+	ctx := context.Background()
+	req := createStarted(t, f.requests, newStoredRequest(f.orgID, f.sam, externalSubject("a@example.org")), "s1")
+	if err := f.requests.RecordOutcome(ctx, req, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved, Method: proofingprovider.MethodIdem}); err != nil {
+		t.Fatalf("RecordOutcome: %v", err)
+	}
+	var method string
+	if err := f.pool.QueryRow(ctx, `SELECT payload->>'method' FROM identity_proofing_webhook_deliveries
+		WHERE event = $1`, EventSessionVerified).Scan(&method); err != nil || method != string(proofingprovider.MethodIdem) {
+		t.Errorf("session.verified method = %q, %v; want %q", method, err, proofingprovider.MethodIdem)
+	}
+}
+
 // An org without an endpoint of its own is sent nothing: no delivery is queued
 // for it.
 func TestWebhookNoEndpointNoDeliveries(t *testing.T) {
@@ -1425,7 +1611,7 @@ func TestWebhookLeaseFence(t *testing.T) {
 		t.Fatalf("claimDue = %d, %v", len(late), err)
 	}
 	// The lease lapses and another worker claims and delivers it.
-	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now()`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries SET next_attempt_at = now(), leased_until = now()`); err != nil {
 		t.Fatal(err)
 	}
 	current, err := webhooks.claimDue(ctx, 1, 1)
@@ -1544,9 +1730,9 @@ func TestWebhookFinalDropsDiploma(t *testing.T) {
 	got := keys()
 	slices.SortFunc(got, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
 	want := [][]string{
-		{DeliveryDelivered, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
-		{DeliveryFailed, "flowId", "sessionId", "status"},
+		{DeliveryDelivered, "flowId", "flowKind", "sessionId", "status", "steps"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status", "steps"},
+		{DeliveryFailed, "flowId", "flowKind", "sessionId", "status", "steps"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deliveries = %v, want %v", got, want)
@@ -1699,7 +1885,7 @@ func TestMemberRequestNoWebhook(t *testing.T) {
 // and only the org can revoke it.
 func TestAPIKeysBelongToOrg(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewAPIKeyStore(pool, audit.NewDBRecorder())
+	store := NewAPIKeyStore(pool, audit.NewDBRecorder(), newTestCipher(t))
 	orgID := makeOrg(t, pool, "acme")
 	otherOrg := makeOrg(t, pool, "globex")
 	sam := makeUser(t, pool, "sam@example.org")
@@ -1727,15 +1913,50 @@ func TestAPIKeysBelongToOrg(t *testing.T) {
 	}
 
 	assertAPIKeyAuthenticates(t, store, orgID, otherOrg, ci, ciSecret, otherSecret)
+	assertAPIKeyRevealed(t, pool, store, orgID, otherOrg, ci, ciSecret)
 	assertAPIKeyRevokedByOrgOnly(t, store, orgID, otherOrg, ci.ID, ciSecret, backofficeSecret)
+	if _, err := store.Secret(ctx, orgID, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Secret of a revoked key = %v, want ErrAPIKeyNotFound", err)
+	}
 
 	if keys, err := store.List(ctx, orgID); err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
 		t.Errorf("List after the revoke = %+v, %v; want the revoked key listed", keys, err)
 	}
-	for action, want := range map[string]int{audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1} {
+	for action, want := range map[string]int{
+		audit.IdentityProofingAPIKeyCreated: 3, audit.IdentityProofingAPIKeyRevoked: 1, audit.IdentityProofingAPIKeyRevealed: 1,
+	} {
 		if n := auditCount(t, pool, action); n != want {
 			t.Errorf("%s audited %d times, want %d (a repeat changes nothing)", action, n, want)
 		}
+	}
+}
+
+// assertAPIKeyRevealed checks that the org reads ci back as its secret, that
+// another org cannot, and that a key kept as its hash alone says so.
+func assertAPIKeyRevealed(t *testing.T, pool *pgxpool.Pool, store *APIKeyStore, orgID, otherOrg uuid.UUID, ci APIKey, ciSecret string) {
+	t.Helper()
+	ctx := context.Background()
+	if !ci.Revealable {
+		t.Errorf("new key = %+v, want it revealable", ci)
+	}
+	if got, err := store.Secret(ctx, orgID, ci.ID); err != nil || got != ciSecret {
+		t.Errorf("Secret = %q, %v; want the key itself", got, err)
+	}
+	if _, err := store.Secret(ctx, otherOrg, ci.ID); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Errorf("Secret from another org = %v, want ErrAPIKeyNotFound", err)
+	}
+	// A key made before keys were sealed, in an org of its own.
+	oldOrg := makeOrg(t, pool, "initech")
+	var oldID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO identity_proofing_api_keys (organization_id, name, prefix, secret_hash)
+		VALUES ($1, 'Old', 'yp_live_old0', 'hash-only') RETURNING id`, oldOrg).Scan(&oldID); err != nil {
+		t.Fatalf("insert hash-only key: %v", err)
+	}
+	if keys, err := store.List(ctx, oldOrg); err != nil || len(keys) != 1 || keys[0].Revealable {
+		t.Errorf("List of a hash-only key = %+v, %v; want it not revealable", keys, err)
+	}
+	if _, err := store.Secret(ctx, oldOrg, oldID); !errors.Is(err, ErrAPIKeyNotRevealable) {
+		t.Errorf("Secret of a hash-only key = %v, want ErrAPIKeyNotRevealable", err)
 	}
 }
 
@@ -1793,7 +2014,7 @@ func assertAPIKeyRevokedByOrgOnly(t *testing.T, store *APIKeyStore, orgID, other
 // A key shows who created it, and nothing once that user is gone.
 func TestAPIKeyShowsCreator(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
-	store := NewAPIKeyStore(pool, audit.NopRecorder{})
+	store := NewAPIKeyStore(pool, audit.NopRecorder{}, nil)
 	orgID := makeOrg(t, pool, "acme")
 	sam := makeUser(t, pool, "sam@example.org")
 	ctx := context.Background()
@@ -1867,16 +2088,8 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	if _, _, err := webhooks.Save(ctx, orgID, "https://hooks.example.org/proofing", []string{EventSessionExpired}); err != nil {
 		t.Fatalf("save webhook: %v", err)
 	}
-	_, hash, err := newLinkToken()
-	if err != nil {
-		t.Fatal(err)
-	}
 	lapse := time.Now().Add(time.Hour)
-	in := newStoredRequest(orgID, sam, Subject{Kind: SubjectExternal})
-	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
-	if _, err := store.Create(ctx, in); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	hash := createUnstartedLink(t, store, orgID, sam, lapse)
 	if next, err := store.NextDeadline(ctx, time.Now()); err != nil || !next.Equal(lapse.Truncate(time.Microsecond)) {
 		t.Errorf("NextDeadline = %v, %v; want the link's lapse %v", next, err, lapse)
 	}
@@ -1900,6 +2113,22 @@ func TestStoreLapsesUnstartedLinks(t *testing.T) {
 	if err != nil || len(deliveries) != 1 || deliveries[0].Event != EventSessionExpired {
 		t.Errorf("deliveries = %+v, %v; want one session.expired", deliveries, err)
 	}
+}
+
+// createUnstartedLink stores a hosted-link request that lapses at lapse and
+// returns its link token hash.
+func createUnstartedLink(t *testing.T, store *RequestStore, orgID, by uuid.UUID, lapse time.Time) []byte {
+	t.Helper()
+	_, hash, err := newLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newStoredRequest(orgID, by, Subject{Kind: SubjectExternal})
+	in.LinkTokenHash, in.LinkExpiresAt = hash, lapse
+	if _, err := store.Create(context.Background(), in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	return hash
 }
 
 // Delivered and failed deliveries are pruned past DeliveryRetention; a

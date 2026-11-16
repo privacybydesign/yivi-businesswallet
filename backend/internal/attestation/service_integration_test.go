@@ -59,7 +59,7 @@ func setup(t *testing.T) env {
 	ctx := context.Background()
 
 	if _, err := pool.Exec(ctx, `INSERT INTO organizations (name, slug, kvk_number, euid, digital_address)
-		VALUES ('Caesar', 'caesar', 'kvk-caesar', 'NL.KVK.caesar', 'caesar@qerds.localhost')`); err != nil {
+		VALUES ('Caesar', 'caesar', 'kvk-caesar', 'NLNHR.caesar', 'caesar@qerds.localhost')`); err != nil {
 		t.Fatalf("create org: %v", err)
 	}
 	org, err := organization.NewStore(pool, audit.NopRecorder{}).GetBySlug(ctx, "caesar")

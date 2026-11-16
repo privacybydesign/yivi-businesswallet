@@ -5,11 +5,13 @@ package proofing
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
@@ -438,5 +440,40 @@ func TestIdentityMatchKey(t *testing.T) {
 	}
 	if k := key(orgA, SubjectMember, anna); k != nil {
 		t.Errorf("a member's key = %x; want none", k)
+	}
+}
+
+// Every session event carries its flow's kind, so an endpoint tells an
+// erasure request going to review apart from an identity check.
+func TestSessionEventsCarryFlowKind(t *testing.T) {
+	f := newWebhookFixture(t, WebhookEvents)
+	requests, orgID, sam := f.requests, f.orgID, f.sam
+	ctx := context.Background()
+	check := newDataRequest(t, requests, orgID, sam, FlowIdentity, "s1")
+	if err := requests.RecordOutcome(ctx, check, "s1", StatusApproved,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome identity: %v", err)
+	}
+	erasure := newDataRequest(t, requests, orgID, sam, FlowDataErasure, "s2")
+	if err := requests.RecordOutcome(ctx, erasure, "s2", StatusNeedsReview,
+		proofingprovider.Result{Status: proofingprovider.StatusApproved}); err != nil {
+		t.Fatalf("RecordOutcome erasure: %v", err)
+	}
+
+	rows, err := f.pool.Query(ctx, `SELECT event || ' ' || COALESCE(payload->>'flowKind', '')
+		FROM identity_proofing_webhook_deliveries ORDER BY created_at, id`)
+	if err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	want := []string{
+		"session.created identity", "session.verified identity",
+		"session.created data_erasure", "session.review_opened data_erasure",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events = %v, want %v", got, want)
 	}
 }

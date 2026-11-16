@@ -14,6 +14,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingengine/bsn"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 )
 
@@ -39,6 +40,12 @@ var (
 	// ErrDocumentScanPending is a Yivi disclosure before the document photo is
 	// in.
 	ErrDocumentScanPending = errors.New("proofing: the document photo is not in yet")
+	// ErrDocumentScanUnavailable is the scan service failing to hand over a
+	// scan's result: the person scans again.
+	ErrDocumentScanUnavailable = errors.New("proofing: the scan service could not give the scan's result")
+	// ErrSessionNotStarted is a step of an org's own page on a hosted request
+	// it has not started in an app yet (StartHeadless).
+	ErrSessionNotStarted = errors.New("proofing: the session is not started yet")
 )
 
 // documentScanner is the document scan service the browser takes a document
@@ -87,6 +94,34 @@ func (s *Service) HostedStartDocumentScan(ctx context.Context, token, language s
 	return s.startDocumentScan(ctx, req, language)
 }
 
+// APIStartDocumentScan is StartDocumentScan for an org's own page, which
+// embeds the scan service's page itself: one of its external requests.
+func (s *Service) APIStartDocumentScan(ctx context.Context, orgID, id uuid.UUID, language string) (string, error) {
+	req, err := s.startedExternalRequest(ctx, orgID, id)
+	if err != nil {
+		return "", err
+	}
+	return s.startDocumentScan(ctx, req, language)
+}
+
+// startedExternalRequest is one of the org's external requests, refusing a
+// hosted one still waiting to be started: ErrSessionNotStarted says what to
+// do, where the missing session would read as one that ended. A cancelled or
+// purged one is ErrSessionOver, as on the hosted page.
+func (s *Service) startedExternalRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
+	req, err := s.requests.GetExternal(ctx, orgID, id)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.CancelledAt != nil || req.PurgedAt != nil {
+		return Request{}, ErrSessionOver
+	}
+	if req.awaitingStart(s.now()) {
+		return Request{}, ErrSessionNotStarted
+	}
+	return req, nil
+}
+
 func (s *Service) startDocumentScan(ctx context.Context, req Request, language string) (string, error) {
 	sess, err := s.documentScanSession(req)
 	if err != nil {
@@ -131,38 +166,41 @@ func (s *Service) HostedFinishDocumentScan(ctx context.Context, token, transacti
 	return s.finishDocumentScan(ctx, req, transactionID, resultID)
 }
 
-func (s *Service) finishDocumentScan(ctx context.Context, req Request, transactionID, resultID string) error {
-	sess, err := s.documentScanSession(req)
+// APIFinishDocumentScan is FinishDocumentScan for an org's own page.
+func (s *Service) APIFinishDocumentScan(ctx context.Context, orgID, id uuid.UUID, transactionID, resultID string) error {
+	req, err := s.startedExternalRequest(ctx, orgID, id)
 	if err != nil {
 		return err
 	}
-	if req.documentScanTransactionID == "" || transactionID != req.documentScanTransactionID {
-		return ErrDocumentScanMismatch
-	}
-	if req.DocumentScannedAt != nil {
-		return nil
-	}
-	if resultID == "" {
-		if err := s.documentScanUnfinished(ctx, req, sess, transactionID); err != nil {
-			return err
-		}
-		s.reconcile(ctx, requestTenant(req), req)
-		return nil
-	}
+	return s.finishDocumentScan(ctx, req, transactionID, resultID)
+}
+
+// completedScan is the scan service's result of a finished scan: a scan that
+// did not complete, or has no document image, is ErrDocumentScanFailed, and a
+// result the service refuses to hand over is ErrDocumentScanUnavailable.
+func (s *Service) completedScan(ctx context.Context, req Request, transactionID, resultID string) (idscan.Result, error) {
 	res, err := s.documentScanner.Result(ctx, transactionID, resultID)
 	if errors.Is(err, idscan.ErrNoDocumentImage) {
-		return fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)
+		return idscan.Result{}, fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)
+	}
+	var cmErr *idscan.APIError
+	if errors.As(err, &cmErr) {
+		slog.ErrorContext(ctx, "identity proofing: the scan service refused a scan's result",
+			slog.String("request_id", req.ID.String()), slog.String("transaction_id", transactionID),
+			slog.String("result_id", resultID), slog.Int("idscan_status", cmErr.Status), slog.String("idscan_message", cmErr.Message))
+		return idscan.Result{}, fmt.Errorf("%w: %w", ErrDocumentScanUnavailable, cmErr)
 	}
 	if err != nil {
-		return fmt.Errorf("proofing: document scan result request %s: %w", req.ID, err)
+		return idscan.Result{}, fmt.Errorf("proofing: document scan result request %s: %w", req.ID, err)
 	}
 	if !res.Completed {
-		return ErrDocumentScanFailed
+		return idscan.Result{}, ErrDocumentScanFailed
 	}
-	f, err := s.sessionFlow(ctx, req)
-	if err != nil {
-		return err
-	}
+	return res, nil
+}
+
+// documentPhotoOf is a completed scan res as the engine takes it for flow f.
+func documentPhotoOf(res idscan.Result, f proofingprovider.Flow) proofingprovider.DocumentPhoto {
 	photo := proofingprovider.DocumentPhoto{
 		Front: providerImage(res.Front), BSNRedacted: redactsDocumentBSN(f), Check: documentCheck(res, f),
 	}
@@ -178,7 +216,36 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 			photo.Face.Selfie = &selfie
 		}
 	}
-	if err := s.ips.SubmitDocumentPhoto(ctx, requestTenant(req), sess.ID, sess.Token, photo); err != nil {
+	return photo
+}
+
+func (s *Service) finishDocumentScan(ctx context.Context, req Request, transactionID, resultID string) error {
+	sess, err := s.documentScanSession(req)
+	if err != nil {
+		return err
+	}
+	if req.documentScanTransactionID == "" || transactionID != req.documentScanTransactionID {
+		return ErrDocumentScanMismatch
+	}
+	if req.DocumentScannedAt != nil {
+		return nil
+	}
+	if resultID == "" {
+		if err := s.documentScanUnfinished(ctx, req, sess, transactionID, true); err != nil {
+			return err
+		}
+		s.reconcile(ctx, requestTenant(req), req)
+		return nil
+	}
+	res, err := s.completedScan(ctx, req, transactionID, resultID)
+	if err != nil {
+		return err
+	}
+	f, err := s.sessionFlow(ctx, req)
+	if err != nil {
+		return err
+	}
+	if err := s.ips.SubmitDocumentPhoto(ctx, requestTenant(req), sess.ID, sess.Token, documentPhotoOf(res, f)); err != nil {
 		return documentScanStepError(err)
 	}
 	if err := s.requests.MarkDocumentScanned(ctx, req, sess.ID, transactionID); err != nil {
@@ -196,20 +263,26 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	return nil
 }
 
-// documentScanUnfinished is a scan the page reports ended without a result.
-// One that used up the scan service's own attempts fails the session, as a new
-// transaction would give the person new ones; any other the person may try
-// again (ErrDocumentScanFailed).
-func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess *ipsSession, transactionID string) error {
+// documentScanUnfinished is a scan that ended without a result. One that used
+// up the scan service's own attempts fails the session, as a new transaction
+// would give the person new ones. So does one the scan service's page reports
+// (reported) ended at a face check: its page posts only once a task is over,
+// but its API leaves a face check out of attempts pending. Any other the
+// person may try again (ErrDocumentScanFailed).
+func (s *Service) documentScanUnfinished(ctx context.Context, req Request, sess *ipsSession, transactionID string, reported bool) error {
 	status, err := s.documentScanner.TransactionStatus(ctx, transactionID)
 	if err != nil {
 		return fmt.Errorf("proofing: document scan status request %s: %w", req.ID, err)
 	}
-	f := status.Failure
-	if f == nil || f.State != idscan.StateMaximumAttemptsExceeded {
+	var failure proofingprovider.DocumentScanFailure
+	switch f, running := status.Failure, status.Running; {
+	case f != nil && f.State == idscan.StateMaximumAttemptsExceeded:
+		failure = proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
+	case reported && running != nil && slices.Contains(faceScanTasks, running.Task):
+		failure = proofingprovider.DocumentScanFailure{Task: running.Task, Attempts: running.Attempts}
+	default:
 		return ErrDocumentScanFailed
 	}
-	failure := proofingprovider.DocumentScanFailure{Task: f.Task, Code: f.Code, Attempts: f.Attempts}
 	if err := s.ips.FailDocumentScan(ctx, requestTenant(req), sess.ID, sess.Token, failure); err != nil {
 		return documentScanStepError(err)
 	}
@@ -235,7 +308,7 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 		// No scan to watch: not asked, no scanner, or the session is over.
 		return req
 	}
-	switch err := s.documentScanUnfinished(ctx, req, sess, req.documentScanTransactionID); {
+	switch err := s.documentScanUnfinished(ctx, req, sess, req.documentScanTransactionID, false); {
 	case err == nil:
 		return s.reconcile(ctx, requestTenant(req), req)
 	case errors.Is(err, ErrDocumentScanFailed), errors.Is(err, ErrSessionOver):
@@ -248,6 +321,9 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 	return req
 }
 
+// faceScanTasks are the scan service's face checks.
+var faceScanTasks = []string{idscan.TaskFaceLiveness, idscan.TaskFaceMatch}
+
 // documentScanOptions are the rules of flow f the scan service enforces: the
 // BSN blacked out when f says so, and f's age check.
 func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
@@ -259,15 +335,21 @@ func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
 }
 
 // documentCheck is the scan service's result res in the engine's terms. The
-// personal number goes along only for a flow that keeps the BSN.
+// personal number goes along only for a flow that keeps the BSN, masked
+// before it is stored when the flow masks it.
 func documentCheck(res idscan.Result, f proofingprovider.Flow) proofingprovider.DocumentCheck {
 	doc := res.Document
 	scanned := proofingprovider.ScannedDocument{
 		Kind: documentKinds[doc.Type], IssuingState: doc.IssuingState, Nationality: doc.Nationality, Number: doc.Number,
 		Surname: doc.Surname, GivenNames: doc.GivenNames, DateOfBirth: doc.DateOfBirth, DateOfExpiry: doc.DateOfExpiry, Sex: doc.Sex,
 	}
-	if f.BSNPolicy == bsnPolicyRetrieve {
+	switch f.BSNPolicy {
+	case bsnPolicyRetrieve:
 		scanned.PersonalNumber = doc.PersonalNumber
+	case bsnPolicyMask:
+		if bsn.Valid(doc.PersonalNumber) {
+			scanned.PersonalNumber = bsn.Mask(doc.PersonalNumber)
+		}
 	}
 	return proofingprovider.DocumentCheck{
 		Verdict: documentVerdicts[res.Authenticity], Score: res.Score,

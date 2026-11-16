@@ -13,22 +13,25 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 )
 
-// DecisionKind is what a reviewer decided on: the session's review or its
-// address's.
+// DecisionKind is what a reviewer decided on: the session's review, or a
+// step's (its ReviewKind).
 type DecisionKind string
 
 const (
-	DecisionReview  DecisionKind = "review"
-	DecisionAddress DecisionKind = "address"
+	DecisionReview     DecisionKind = "review"
+	DecisionAddress    DecisionKind = "address"
+	DecisionEmployment DecisionKind = "employment"
+	DecisionDiplomas   DecisionKind = "diplomas"
 )
 
 // Decision is a reviewer's decision on a request, as its audit event keeps
-// it: what (review_decided or address_reviewed), the outcome, why, by whom and
-// when. A purge erases the reason from the event, so Reason is empty then.
+// it: what (review_decided, review_item_decided, or address_reviewed from
+// before review items), the outcome, why, by whom and when. A purge erases
+// the reason from the event, so Reason is empty then.
 type Decision struct {
 	Kind DecisionKind
-	// Outcome is approved or rejected for a review, confirmed or rejected for
-	// an address.
+	// Outcome is approved or rejected for a review, confirmed, rejected or
+	// lapsed for an address.
 	Outcome   string
 	Reason    string
 	ErrorCode string
@@ -43,8 +46,11 @@ type Decision struct {
 type decisionFields struct {
 	Decision      string `json:"decision"`
 	AddressReview string `json:"addressReview"`
-	Reason        string `json:"reason"`
-	ErrorCode     string `json:"errorCode"`
+	// Kind and State are a review_item_decided's.
+	Kind      string `json:"kind"`
+	State     string `json:"state"`
+	Reason    string `json:"reason"`
+	ErrorCode string `json:"errorCode"`
 }
 
 // RequestDecisions is every reviewer decision on request id, oldest first.
@@ -61,7 +67,7 @@ func (s *Service) RequestDecisions(ctx context.Context, orgID, id uuid.UUID) ([]
 		switch e.Action {
 		case audit.IdentityProofingReviewDecided:
 			kind = DecisionReview
-		case audit.IdentityProofingAddressReviewed:
+		case audit.IdentityProofingAddressReviewed, audit.IdentityProofingReviewItemDecided:
 			kind = DecisionAddress
 		default:
 			continue
@@ -73,7 +79,12 @@ func (s *Service) RequestDecisions(ctx context.Context, orgID, id uuid.UUID) ([]
 			return nil, fmt.Errorf("proofing: read decision %s: %w", e.ID, err)
 		}
 		outcome := meta.After.Decision
-		if kind == DecisionAddress {
+		switch {
+		case e.Action == audit.IdentityProofingReviewItemDecided && !ReviewKind(meta.After.Kind).stepReview():
+			continue
+		case e.Action == audit.IdentityProofingReviewItemDecided:
+			kind, outcome = DecisionKind(meta.After.Kind), meta.After.State
+		case kind == DecisionAddress:
 			outcome = meta.After.AddressReview
 		}
 		out = append(out, Decision{

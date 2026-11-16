@@ -16,6 +16,7 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/idscan"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/respond"
 )
 
 // photoFlow photographs the document next to the chip read.
@@ -88,6 +89,25 @@ func (f fixture) sendOnScreen(t *testing.T, flowID string, method proofingprovid
 	return sent
 }
 
+// assertScanUnavailable checks that the scan service failing to hand over a
+// result is answered as 502 document_scan_unavailable naming what it said,
+// and that nothing reaches the engine.
+func assertScanUnavailable(t *testing.T, f fixture, scanner *fakeScanner, id uuid.UUID) {
+	t.Helper()
+	scanner.resultErr = &idscan.APIError{Status: http.StatusInternalServerError, Message: "Internal Server Error"}
+	err := f.svc.FinishDocumentScan(context.Background(), testOrg.ID, id, nil, "trx-1", "res-1")
+	var answer *respond.APIError
+	if !errors.Is(err, ErrDocumentScanUnavailable) || !errors.As(mapError(err), &answer) ||
+		answer.Status != http.StatusBadGateway || answer.Code != "document_scan_unavailable" ||
+		!strings.Contains(answer.Message, "500: Internal Server Error") {
+		t.Errorf("the scan service's 500: %v, answered %+v; want 502 document_scan_unavailable naming it", err, answer)
+	}
+	if len(f.ips.documentPhotos) != 0 {
+		t.Fatal("a scan without its result reached the engine")
+	}
+	scanner.resultErr = nil
+}
+
 // The on-screen page photographs the document through the scan service: the
 // photos of the scan it started go to the engine as document_photo, with the
 // BSN covered by the service, once.
@@ -118,6 +138,8 @@ func TestDocumentScanOnScreen(t *testing.T) {
 	if len(f.ips.documentPhotos) != 0 {
 		t.Fatal("an unfinished scan reached the engine")
 	}
+
+	assertScanUnavailable(t, f, scanner, id)
 
 	scanner.result = scannedResult
 	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1"); err != nil {
@@ -165,10 +187,15 @@ func checkScannedPhoto(t *testing.T, photo proofingprovider.DocumentPhoto) {
 // service.
 // A scan the page reports ended without a result fails the session once the
 // scan service's own attempts ran out, so a new transaction gives none back;
-// one the person left can be tried again.
+// one the person left can be tried again. ID Scan's page posts only once a
+// task is over, but its API leaves a face check out of attempts pending: the
+// page's report at a face check fails the session.
 func TestUnfinishedDocumentScan(t *testing.T) {
 	failed := func(task, state string) idscan.Status {
 		return idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{Task: task, State: state, Attempts: 3}}
+	}
+	running := func(task string) idscan.Status {
+		return idscan.Status{State: idscan.StatePending, Running: &idscan.Running{Task: task, Attempts: 2}}
 	}
 	for name, tc := range map[string]unfinishedScanCase{
 		"face liveness out of attempts": {failed(idscan.TaskFaceLiveness, idscan.StateMaximumAttemptsExceeded), true},
@@ -177,6 +204,9 @@ func TestUnfinishedDocumentScan(t *testing.T) {
 		"stopped by the person":         {failed(idscan.TaskFaceLiveness, idscan.StateAborted), false},
 		"failed without a reason":       {idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{}}, false},
 		"still running":                 {idscan.Status{State: idscan.StatePending}, false},
+		"ended at the photo":            {running(idscan.TaskDocumentScan), false},
+		"ended at the liveness check":   {running(idscan.TaskFaceLiveness), true},
+		"ended at the face match":       {running(idscan.TaskFaceMatch), true},
 	} {
 		t.Run(name, func(t *testing.T) { checkUnfinishedScan(t, tc) })
 	}
@@ -185,6 +215,14 @@ func TestUnfinishedDocumentScan(t *testing.T) {
 type unfinishedScanCase struct {
 	status idscan.Status
 	failed bool
+}
+
+// failedTask is the task tc's session fails at.
+func (tc unfinishedScanCase) failedTask() string {
+	if tc.status.Failure != nil {
+		return tc.status.Failure.Task
+	}
+	return tc.status.Running.Task
 }
 
 // checkUnfinishedScan reports a scan ended without a result whose transaction
@@ -208,10 +246,31 @@ func checkUnfinishedScan(t *testing.T, tc unfinishedScanCase) {
 			t.Errorf("FinishDocumentScan = %v, failures %+v, audited %+v; want ErrDocumentScanFailed and no failure",
 				err, f.ips.scanFailures, f.requests.scanFailures)
 		}
-	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.status.Failure.Task:
-		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.status.Failure.Task)
+	case err != nil || len(f.ips.scanFailures) != 1 || f.ips.scanFailures[0].Task != tc.failedTask():
+		t.Errorf("FinishDocumentScan = %v, failures %+v; want the session failed at %s", err, f.ips.scanFailures, tc.failedTask())
 	case len(f.requests.scanFailures) != 1 || f.requests.scanFailures[0] != f.ips.scanFailures[0]:
 		t.Errorf("audited %+v, want the failure %+v", f.requests.scanFailures, f.ips.scanFailures[0])
+	}
+}
+
+// The scanned BSN reaches the engine only for a flow that keeps it, and
+// already masked for one that masks it.
+func TestDocumentCheckBSN(t *testing.T) {
+	res := idscan.Result{Document: idscan.Document{IssuingState: "NLD", PersonalNumber: "111222333"}}
+	for policy, want := range map[string]string{"": "", "omit": "", bsnPolicyMask: "****.**.333", bsnPolicyRetrieve: "111222333"} {
+		flow := photoFlow
+		flow.BSNPolicy = policy
+		if got := documentCheck(res, flow).Document.PersonalNumber; got != want {
+			t.Errorf("policy %q: personal number %q, want %q", policy, got, want)
+		}
+	}
+
+	// A misread number masked would pass for a BSN: it is not masked at all.
+	misread := idscan.Result{Document: idscan.Document{IssuingState: "NLD", PersonalNumber: "123456783"}}
+	flow := photoFlow
+	flow.BSNPolicy = bsnPolicyMask
+	if got := documentCheck(misread, flow).Document.PersonalNumber; got != "" {
+		t.Errorf("a number failing the 11-proef under mask: %q, want none", got)
 	}
 }
 
@@ -461,9 +520,11 @@ func TestPollFailsSpentDocumentScan(t *testing.T) {
 	if _, err := f.svc.StartDocumentScan(ctx, testOrg.ID, id, nil, "nl"); err != nil {
 		t.Fatalf("StartDocumentScan: %v", err)
 	}
-	scanner.status = idscan.Status{State: idscan.StatePending}
-	if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
-		t.Fatalf("poll while scanning: %v, failures %+v", err, f.ips.scanFailures)
+	for _, task := range []string{idscan.TaskDocumentScan, idscan.TaskFaceLiveness} {
+		scanner.status = idscan.Status{State: idscan.StatePending, Running: &idscan.Running{Task: task, Attempts: 4}}
+		if _, err := f.svc.RequestIf(ctx, testOrg.ID, id, allow); err != nil || len(f.ips.scanFailures) != 0 {
+			t.Fatalf("poll while scanning at %s: %v, failures %+v", task, err, f.ips.scanFailures)
+		}
 	}
 	scanner.status = idscan.Status{State: idscan.StateFailed, Failure: &idscan.Failure{
 		Task: idscan.TaskFaceMatch, State: idscan.StateMaximumAttemptsExceeded, Attempts: 3,

@@ -113,6 +113,11 @@ type Holder interface {
 	// query cannot be satisfied. The stub returns a canned token.
 	Present(ctx context.Context, orgID uuid.UUID, dcqlQuery []byte, nonce, audience string) (Presentation, error)
 
+	// DropOrganization removes everything the holder keeps for an organization,
+	// for one whose wallet was never opened: its credentials and, for the irmago
+	// engine, its schema, files and cached engine. An unknown org is a no-op.
+	DropOrganization(ctx context.Context, orgID uuid.UUID) error
+
 	// Close releases all per-organization engines.
 	Close() error
 }
