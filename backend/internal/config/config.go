@@ -716,8 +716,8 @@ func Load() (Config, error) {
 		loadPostGuard,
 		loadAttestationHolder,
 		loadURLs,
-		loadDevMode,
 		loadSigningRedirectURI,
+		loadDevMode,
 		loadTrustedProxies,
 	} {
 		if err := load(&cfg); err != nil {
@@ -1001,20 +1001,34 @@ func loadDevMode(c *Config) error {
 }
 
 // requireProductionSettings refuses, outside a local stack, plain http to
-// another machine for what the phone or a VOG check sends, and a stub in place
-// of a real check.
+// another machine for what the phone, a browser or a VOG check sends, a switch
+// that allows it, and a stub in place of a real check.
 func requireProductionSettings(c *Config) error {
 	// The Idem app sends chip data, selfies and liveness frames to the first
 	// two, the backend a member's VOG PDF to the third and the ID Scan key to
-	// the last: over the network only with https. Plain http to this machine never leaves it.
+	// the fourth; the rest are the wallet's own pages and callbacks and the
+	// address register: over the network only with https. Plain http to this
+	// machine never leaves it.
 	for key, raw := range map[string]string{
-		envIdentityProofingPublicURL: c.IdentityProofingPublicURL,
-		envRegulaFaceAPIPublicURL:    c.RegulaFaceAPIPublicURL,
-		envVogValidatorURL:           c.VogValidatorURL,
-		envIDScanAPIURL:              c.IDScanAPIURL,
+		envIdentityProofingPublicURL:   c.IdentityProofingPublicURL,
+		envRegulaFaceAPIPublicURL:      c.RegulaFaceAPIPublicURL,
+		envVogValidatorURL:             c.VogValidatorURL,
+		envIDScanAPIURL:                c.IDScanAPIURL,
+		envAppBaseURL:                  c.AppBaseURL,
+		envOpenID4VPRequesterPublicURL: c.OpenID4VPRequesterPublicURL,
+		envAddressLookupURL:            c.AddressLookupURL,
+		envSigningRedirectURI:          c.SigningRedirectURI,
 	} {
 		if raw != "" && !strings.HasPrefix(strings.ToLower(raw), "https://") && !localhostURL(raw) {
 			return fmt.Errorf("config: %s %q must be https outside %s=true (a local stack)", key, raw, envDevMode)
+		}
+	}
+	for key, insecure := range map[string]bool{
+		envOpenID4VPPresenterAllowInsecureHTTP: c.OpenID4VPPresenterAllowInsecureHTTP,
+		envAttestationHolderAllowInsecureHTTP:  c.AttestationHolderAllowInsecureHTTP,
+	} {
+		if insecure {
+			return fmt.Errorf("config: %s allows plain http and private addresses and needs %s=true (a local stack)", key, envDevMode)
 		}
 	}
 	for key, stubbed := range map[string]bool{

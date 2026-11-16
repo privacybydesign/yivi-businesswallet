@@ -59,8 +59,12 @@ The dev stack runs with `DEV_MODE=true` (`compose.override.yaml`):
   leaves the claim open. Every later unknown address is refused as usual. No
   `PLATFORM_ADMIN_EMAILS` entry is needed.
 - The backend refuses to start with it unless `APP_BASE_URL` is set to a localhost URL.
-- Outside it, the URLs the phone talks to (`IDENTITY_PROOFING_PUBLIC_URL`,
-  `REGULA_FACE_API_PUBLIC_URL`) must be https, or plain http to localhost.
+- Outside it, these URLs must be https, or plain http to localhost:
+  `IDENTITY_PROOFING_PUBLIC_URL`, `REGULA_FACE_API_PUBLIC_URL`, `VOG_VALIDATOR_URL`,
+  `ID_SCAN_API_URL`, `APP_BASE_URL`, `OPENID4VP_REQUESTER_PUBLIC_URL`,
+  `ADDRESS_LOOKUP_URL` and `SIGNING_REDIRECT_URI`.
+- Outside it, `OPENID4VP_PRESENTER_ALLOW_INSECURE_HTTP` and
+  `ATTESTATION_HOLDER_ALLOW_INSECURE_HTTP` must stay off.
 
 On first run `npm run dev` creates a root `.env` from `.env.example` if one does
 not exist. Compose **requires** `POSTGRES_PASSWORD` (there is no weak default), so
