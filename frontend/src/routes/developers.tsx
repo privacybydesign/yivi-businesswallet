@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { useOrganizationQuery } from "../api/organization.queries";
 import { absoluteApiUrl } from "../api/http";
-import { TopBar } from "../ui";
+import { buttonClassName, TopBar } from "../ui";
 import { ApiTokensSection } from "./developers-api-keys";
 import { WebhookSection } from "./developers-webhook";
 
@@ -36,7 +36,7 @@ export default function Developers(): React.JSX.Element {
             href={absoluteApiUrl(API_DOCS_PATH)}
             target="_blank"
             rel="noreferrer"
-            className="text-link inline-flex h-9 items-center px-1 text-[13.5px] font-semibold underline"
+            className={buttonClassName("secondary")}
           >
             {t("identityProofing.overview.apiDocs")}
           </a>

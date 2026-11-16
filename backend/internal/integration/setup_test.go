@@ -15,6 +15,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,8 @@ type fakeVerifier struct {
 	identityIssuedAt time.Time
 	// vog, when set, adds a pbdf.vog credential to every presentation.
 	vog *fakeVog
+	// results counts the presentations read.
+	results atomic.Int64
 }
 
 // fakeVog is a disclosed pbdf.vog credential: the identity printed on it and
@@ -94,6 +97,7 @@ func (f *fakeVerifier) StartProofing(ctx context.Context, _ openid4vpverifier.Pr
 }
 
 func (f *fakeVerifier) Result(_ context.Context, _ string) (openid4vpverifier.Presentation, error) {
+	f.results.Add(1)
 	byCredential := map[string]map[string]string{
 		"email": {openid4vpverifier.ClaimEmail: f.email},
 	}

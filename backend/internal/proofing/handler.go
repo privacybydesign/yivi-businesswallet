@@ -1143,6 +1143,7 @@ var errorResponses = []struct {
 	{ErrFlowNotAllowed, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "flow_not_allowed", Message: "your organization's admin has not made this flow available"}},
 	{ErrWrongMethod, respond.APIError{Status: http.StatusConflict, Code: "wrong_method", Message: "this session does not run in that app"}},
 	{ErrNotHosted, respond.APIError{Status: http.StatusConflict, Code: "not_hosted", Message: "create the session with hosted: true to pick its app from your own UI"}},
+	{ErrSessionNotStarted, respond.APIError{Status: http.StatusConflict, Code: "session_not_started", Message: "start the session first: POST /proofing/sessions/{id}/methods/{method}"}},
 	{ErrResultNotReady, respond.APIError{Status: http.StatusConflict, Code: "result_not_ready", Message: "this session has no outcome yet"}},
 	{ErrDeviceActive, respond.APIError{Status: http.StatusConflict, Code: "device_active", Message: "the Idem app still has this session open; carry on there"}},
 	{ErrAppFinished, respond.APIError{Status: http.StatusConflict, Code: "app_finished", Message: "the Idem app already did its part; carry on on this page"}},

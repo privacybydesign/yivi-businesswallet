@@ -351,7 +351,10 @@ type Request struct {
 	LegalNotice *LegalNotice
 	// CancelledAt is when an API caller cancelled it; PurgedAt when its data was
 	// erased in the engine and here (the row stays for the audit trail).
-	CancelledAt     *time.Time
+	CancelledAt *time.Time
+	// CancelledBy is who cancelled it (CancelledByAPIKey, …); empty for one
+	// cancelled before the wallet kept it.
+	CancelledBy     CancelledBy
 	PurgedAt        *time.Time
 	RequestedBy     *uuid.UUID
 	RequestedByName string
@@ -509,6 +512,37 @@ func (r Request) liveSession(now time.Time) *ipsSession {
 		return nil
 	}
 	return r.session
+}
+
+// ExpiryReason is why a request expired.
+type ExpiryReason string
+
+const (
+	// ExpiryNotStarted is a hosted link nobody started before it lapsed.
+	ExpiryNotStarted ExpiryReason = "not_started"
+	// ExpiryNotFinished is a session the person did not finish in time.
+	ExpiryNotFinished ExpiryReason = "not_finished"
+	// ExpiryReviewEnded is a review the engine ended before anyone decided it.
+	ExpiryReviewEnded ExpiryReason = "review_ended"
+)
+
+// ExpiryReason is why r reads as expired at now; empty when it does not.
+func (r Request) ExpiryReason(now time.Time) ExpiryReason {
+	if r.EffectiveStatus(now) != StatusExpired {
+		return ""
+	}
+	return r.expiryReason()
+}
+
+// expiryReason is why r expired, given that it did.
+func (r Request) expiryReason() ExpiryReason {
+	switch {
+	case r.Status == StatusNeedsReview:
+		return ExpiryReviewEnded
+	case r.session == nil:
+		return ExpiryNotStarted
+	}
+	return ExpiryNotFinished
 }
 
 // EffectiveStatus is Status with an unfinished request whose session is over
@@ -1122,3 +1156,13 @@ var referencePhotoTypes = []string{"image/jpeg", "image/png", "image/webp"}
 func hasFaceStep(steps []string) bool {
 	return slices.ContainsFunc(steps, func(step string) bool { return slices.Contains(faceSteps, step) })
 }
+
+// CancelledBy is who cancelled a request.
+type CancelledBy string
+
+const (
+	CancelledByAPIKey CancelledBy = "api_key"
+	CancelledByMember CancelledBy = "member"
+	// CancelledBySubject is the person declining on the hosted page.
+	CancelledBySubject CancelledBy = "subject"
+)

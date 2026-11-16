@@ -60,74 +60,269 @@ tags:
       its slots; there is no wallet login. Only the app calls them: integrators
       use the proofing API.
   - name: identity-proofing
-    description: >-
-      Identity document and face verification, run by the wallet's own proofing engine:
-      the wallet's own routes (flows, settings, API keys, webhook, requests) and the hosted page.
-
-      The Idem app's own session routes (`/api/v1/app/...`, the `api=` of its deep link) are
-      under the `idem-app` tag: only that app calls them, and an integrator never does; the
-      API below is what an integrator uses.
-  - name: identity-proofing-api
-    x-displayName: 'Identity proofing: API'
+    x-displayName: 'Identity proofing'
     description: |
-      The API an organisation's own backend calls, with one of the organisation's API keys
-      as a Bearer token (`Authorization: Bearer yp_live_…`). It sends requests to external
-      people (no login) and reads their outcome.
+      The API an organisation's own software uses to have a person prove their identity and
+      to read the outcome. You create a session for a flow, the person does the check, and
+      the outcome comes back as a webhook and by reading the session.
 
-      An organisation admin first creates a flow (what is checked) in the wallet and an API
-      key for the organisation. The API works on any flow of the organisation that a
-      recipient can finish: `GET /proofing/flows` lists them and marks the organisation's
-      default flow. Outcomes arrive as webhooks (see `ProofingWebhookEvent`) and can be
-      read with `GET /proofing/sessions/{id}`.
+      ### Before you start
 
-      ### Use cases
+      An organisation admin creates an **API key** (`yp_live_…`) once in the wallet, under
+      **Identity proofing › Developers**, where it is shown once. It opens every route of this
+      API. Everything else can be set up in the wallet or with that key:
+      - the **flows** (`POST /proofing/flows`, and the routes under
+        `/proofing/flows/{flowID}`). A flow fixes what is checked: which documents and
+        countries are accepted, whether the chip is read, whether the document is
+        photographed, whether there is a face check, and what the result carries. You choose
+        a flow per session and never send those settings with it;
+      - the **default flow** (`PUT /proofing/flow-selection`);
+      - the **allowed redirect origins** (`PATCH /proofing/settings`): the origins you
+        redirect back to, or embed the hosted page on;
+      - a **webhook endpoint** (`PUT /proofing/webhook`, an https URL of yours) and the
+        events it receives. Its signing secret (`whsec_…`) is shown once.
 
-      **Verify a new person** (onboarding, optionally with DUO diplomas): create a
-      session with the person's `email` (mailed QR code) or `hosted: true` (a link you
-      hand them). A flow with the diploma step must be hosted: the extracts are uploaded
-      on the page, and arrive as `session.diploma_added`.
+      Every call goes to `https://<the wallet's host>/api/v1/proofing/...` with the API key as
+      a Bearer token. A call acts for the organisation the key belongs to, and only ever sees
+      or changes that organisation's flows, sessions, settings and webhook, as in the wallet.
+      Another organisation's flow or session is answered as unknown (422 `flow_not_found`,
+      404 `session_not_found`).
 
-      **Password reset / account recovery**: on "forgot password", create a session with
-      `hosted: true`, a `redirectUrl` back to your reset page, and the account holder's
-      `name` and `birthDate`. Send the user to `hostedUrl`. Allow the reset only when the
-      session is `approved`; someone else's document gives `rejected` with `errorCode`
-      `IDENTITY_MISMATCH`. Use a flow at assurance level `substantial` (chip, face match,
-      liveness).
+      ```
+      Authorization: Bearer YOUR_API_KEY
+      ```
 
-      **One known person must identify** (e.g. Anna de Vries): any channel, with `name`
-      and `birthDate`. Only that person's document is `approved`; the session reads
-      `expectedSubject: true`.
+      ### A session, step by step
 
-      **Confirm a change, such as a bank account, with a liveness check**:
-      - with the document (recommended): a `substantial` flow plus `name` and
-        `birthDate`, as for a password reset;
-      - against your own photo of the person, without a document: a flow whose only step
-        is the face check (`needsReferencePhoto: true` in the flow list), and
-        `referencePhoto` with your photo. It runs in the Idem app only and reaches no
-        assurance level: it shows the live person matches your photo, not who they are.
+      1. **Pick the flow.** `GET /proofing/flows` lists the organisation's flows with their
+         `id`.
+      2. **Create the session.** `POST /proofing/sessions` with the `flowId` and
+         `hosted: true`. Add the expected person (`name` with `birthDate`) to let only that
+         person pass. The answer carries the session's `id` and a `hostedUrl`.
+      3. **Let the person do the check**, in one of the three ways below.
+      4. **Receive the outcome.** Your webhook endpoint gets `session.verified` with the
+         result in `data.result`, or `session.failed` with an `errorCode`.
+      5. **Or read it yourself.** `GET /proofing/sessions/{id}` for the status,
+         `GET /proofing/sessions/{id}/result` for the result.
 
-      ### Embedding the hosted page
+      ```
+      POST /api/v1/proofing/sessions
+      {
+        "flowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10",
+        "hosted": true,
+        "name": "Anna de Vries",
+        "birthDate": "1990-04-12",
+        "redirectUrl": "https://portal.example.nl/onboarding/return"
+      }
+      ```
 
-      The hosted page may be shown in an iframe on one of the organisation's
-      `allowedRedirectOrigins`; it posts `{type: "proofing.completed", session, status}` to
-      the parent once settled.
+      ### Three ways to run the check
 
-      ### Outcomes
+      **1. Our page, by link.** Send the person to `hostedUrl`. The page runs the whole flow
+      and then sends them to your `redirectUrl` with `?session=<id>&status=<status>` added.
 
-      `status` ends as `approved`, `rejected` (`errorCode` says why; the wallet itself
-      sets `IDENTITY_MISMATCH`, `ASSURANCE_NOT_MET`, `REVIEW_LAPSED`,
-      `ORG_PAUSED` and `LEGAL_RETENTION`, and `EMPLOYMENT_NOT_PROVIDED` on sessions from before
-      the Verzekeringsbericht had its own outcome; a reviewer `REVIEW_NOT_HOLDER` (it is someone else's), `REVIEW_ALTERED`
-      (it looks altered), `EVIDENCE_NOT_AS_REQUESTED` (it is not what was asked for) or
-      `MANUAL_REVIEW_REJECTED` (something else); the session itself is rejected for `FACE_NO_MATCH`,
-      `LIVENESS_FAILED`, `DOC_EXPIRED`, `DOC_TAMPERED`,
-      `CHIP_CLONE_DETECTED`, `DOCUMENT_TYPE_NOT_ACCEPTED`, `DOCUMENT_COUNTRY_NOT_ACCEPTED`,
-      `FACE_STEP_NOT_COMPLETED`, `AGE_NOT_DISCLOSED` and `ASSURANCE_NOT_MET`), `needs_review` (an admin decides),
-      `expired` or `cancelled`.
+      **2. Our page, embedded.** Show `hostedUrl` in an iframe on one of your allowed redirect
+      origins. Once the session settles, the page posts this to the parent window:
+
+      ```
+      { "type": "proofing.completed", "session": "ps_…", "status": "approved" }
+      ```
+
+      **3. Your own page.** Create the session with `hosted: true`, then start it in the app
+      the person uses with `POST /proofing/sessions/{id}/methods/{method}` (`yivi_app` or
+      `idem_app`). The answer carries the link to show as a button or QR code: `walletLink`
+      for the Yivi app, `appLink` for the Idem app. Poll
+      `GET /proofing/sessions/{id}/methods/{method}/status` until `done` is true; for the
+      Yivi app that poll also collects what the person shared, so keep polling.
+
+      For a flow that photographs the document, also show the scan in your page:
+      `POST /proofing/sessions/{id}/document-scan` answers the `url` of the scan service's
+      page. Show it in an iframe with camera access. The scan itself runs in that page
+      and cannot be restyled. When it posts its `transactionId` and `resultId` to your
+      page, hand them to `POST /proofing/sessions/{id}/document-scan/finish`.
+
+      ```
+      1. POST /proofing/sessions                       { "flowId": "…", "hosted": true }
+      2. POST /proofing/sessions/{id}/methods/yivi_app  -> walletLink
+      3. POST /proofing/sessions/{id}/document-scan     -> url (iframe)
+      4. POST /proofing/sessions/{id}/document-scan/finish { "transactionId": "…", "resultId": "…" }
+      5. GET  /proofing/sessions/{id}/methods/yivi_app/status   until done
+      ```
+
+      A flow that asks for the address, diplomas or the Verzekeringsbericht takes those on
+      our page: use way 1 or 2 for such a flow.
+
+      ### The result
+
+      `GET /proofing/sessions/{id}/result` answers a settled session's result, and the
+      `session.verified` webhook carries the same result in `data.result`. What it holds
+      follows the session's flow, and only what the flow produced is in it:
+      - `identity`: name, date of birth, nationality, and `bsn` when the flow keeps the BSN
+        (in full, or only its last 3 digits as `****.**.123`). It comes from the BRP when the
+        person shared their personal data through DigiD in the Yivi app, else from the
+        document's chip or photo;
+      - `documentImage` and `documentImageBack`: the photos of the document's front and back,
+        for a flow that keeps them, each `{mimeType, data}` with `data` in base64. With
+        "Black out the BSN" on, the BSN is covered in the photos, and only `bsn` carries it;
+      - `photo`: the document's portrait from the chip, for a flow that keeps it;
+      - `evidence`: what the identity rests on (`emrtd` the chip, `yivi_disclosure` the Yivi
+        app, `document_photo` the photographed document) and the checks that ran on it.
+
+      ### Webhooks
+
+      Each event is a POST to your endpoint with a JSON body and three headers:
+
+      | Header | Holds |
+      |---|---|
+      | `Yivi-Event` | the event's type, as `type` in the body |
+      | `Yivi-Delivery` | the delivery's id, as `id` in the body; the same on every retry |
+      | `Yivi-Signature` | `t=<unix time>,v1=<signature>` |
+
+      ```
+      {
+        "id": "bf60aacd-e049-4363-92b4-cdcd97299949",
+        "type": "session.verified",
+        "createdAt": "2026-11-13T12:44:35Z",
+        "data": {
+          "sessionId": "ps_tmncasdiyffevjl6egt65h2lya",
+          "status": "approved",
+          "flowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10",
+          "flowKind": "identity",
+          "method": "yivi_app",
+          "eidasLevel": "low",
+          "result": { "…": "as GET /proofing/sessions/{id}/result" }
+        }
+      }
+      ```
+
+      | Event | Sent when |
+      |---|---|
+      | `session.created` | the session exists and the person can open it |
+      | `session.started` | the person's app joined the session |
+      | `session.handover` | a running Idem session moved to another phone |
+      | `session.verified` | the session is approved; carries `data.result` |
+      | `session.failed` | the session is rejected; `data.errorCode` says why |
+      | `session.review_opened` | the session waits for a reviewer; `session.verified` or `session.failed` follows |
+      | `session.expired` | the session ran out before it was finished |
+      | `session.cancelled` | the session was cancelled |
+      | `session.purged` | the session's personal data was erased |
+      | `session.address_added`, `session.diploma_added`, `session.employment_added` | the person added that extra step's data |
+      | `session.address_reviewed`, `session.step_reviewed` | a reviewer decided an extra step |
+      | `test` | you sent a test event (`POST /proofing/webhook/test`, or the Developers page) |
+
+      **Check the signature** on every event, on the raw body as received:
+      1. Read `t` and every `v1` from `Yivi-Signature`.
+      2. Compute the HMAC-SHA256 of `<t>.<raw body>` with your `whsec_…` secret as the key,
+         in hex.
+      3. Accept the event when it equals one of the `v1` values, compared in constant time.
+         For 24 hours after you rotate the secret there are two `v1` values, one per secret.
+      4. Refuse an event whose `t` is more than a few minutes old.
+
+      ```python
+      import hashlib, hmac
+
+      def valid(signature_header: str, raw_body: bytes, secret: str) -> bool:
+          parts = [p.split("=", 1) for p in signature_header.split(",") if "=" in p]
+          t = next((v for k, v in parts if k == "t"), "")
+          want = hmac.new(secret.encode(), t.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+          return any(k == "v1" and hmac.compare_digest(v, want) for k, v in parts)
+      ```
+
+      The same in Go:
+
+      ```go
+      func valid(signatureHeader string, rawBody []byte, secret string) bool {
+      	var t string
+      	var v1s []string
+      	for part := range strings.SplitSeq(signatureHeader, ",") {
+      		k, v, ok := strings.Cut(part, "=")
+      		switch {
+      		case !ok:
+      		case k == "t":
+      			t = v
+      		case k == "v1":
+      			v1s = append(v1s, v)
+      		}
+      	}
+      	mac := hmac.New(sha256.New, []byte(secret))
+      	mac.Write([]byte(t + "."))
+      	mac.Write(rawBody)
+      	want := hex.EncodeToString(mac.Sum(nil))
+      	for _, v := range v1s {
+      		if hmac.Equal([]byte(v), []byte(want)) {
+      			return true
+      		}
+      	}
+      	return false
+      }
+      ```
+
+      **Answer 2xx** within 10 seconds. Anything else is tried again, up to 8 times in all
+      over about 24 hours. An event can arrive more than once (deduplicate on `id`) and out of
+      order: read the session when you need its current state.
+
+      ### Assurance levels
+
+      A flow's `requiredAssuranceLevel` is reached only by the checks that prove it: `low` by
+      the chip read with its data proven genuine (`nfc.passive_auth`), `substantial` also by a
+      live face check matched by Regula against the chip's photo. A photo without the chip
+      read, and a face matched against your own `referencePhoto`, reach no level.
+
+      Every session reports the level it reached in `eidasLevel`, also on a flow without one.
+      A session on a flow with a level that falls short of it is `rejected` with
+      `ASSURANCE_NOT_MET`.
+
+      ### Outcomes and error codes
+
+      A session's `status` ends as `approved`, `rejected`, `needs_review` (a reviewer of the
+      organisation decides, then it is approved or rejected), `expired` or `cancelled`.
+
+      An `expired` session carries `expiryReason`: `not_started` (a hosted link nobody
+      started in time), `not_finished` (the person did not finish in time) or
+      `review_ended` (a review nobody decided before it ended). A `cancelled` session carries
+      `cancelledBy`: `api_key` (your software), `member` (someone in the wallet) or `subject`
+      (the person declined on the hosted page). The `session.expired` and
+      `session.cancelled` webhooks carry the same.
+
+      A `rejected` session carries an `errorCode`:
+
+      | `errorCode` | Meaning |
+      |---|---|
+      | `IDENTITY_MISMATCH` | the document is not the expected person's (`name` with `birthDate`) |
+      | `DOCUMENT_MISMATCH` | the photographed document and the shared data are not the same person's |
+      | `DOCUMENT_TYPE_NOT_ACCEPTED` | the flow does not accept this kind of document |
+      | `DOCUMENT_COUNTRY_NOT_ACCEPTED` | the flow does not accept documents of this country |
+      | `DOC_EXPIRED` | the document is past its expiry date |
+      | `DOC_NOT_AUTHENTIC` | the document scan judged the document fake |
+      | `DOC_FIELDS_INVALID` | a field on the photographed document failed its check |
+      | `DOCUMENT_SCAN_FAILED` | the document could not be photographed within the allowed attempts |
+      | `DOC_TAMPERED` | the chip's data does not match its signature |
+      | `CHIP_CLONE_DETECTED` | the chip is a copy |
+      | `FACE_NO_MATCH` | the live face is not the document's |
+      | `LIVENESS_FAILED` | no live person was shown |
+      | `FACE_STEP_NOT_COMPLETED` | the face check was not finished |
+      | `AGE_NOT_DISCLOSED` | the age the flow asks for was not shared |
+      | `ASSURANCE_NOT_MET` | the checks fell short of the level the flow requires |
+      | `REVIEW_NOT_HOLDER`, `REVIEW_ALTERED`, `EVIDENCE_NOT_AS_REQUESTED`, `MANUAL_REVIEW_REJECTED` | a reviewer rejected it: someone else's, altered, not what was asked for, or another reason |
+      | `REVIEW_LAPSED` | a review nobody decided in time |
+      | `ORG_PAUSED` | the organisation's identity proofing was paused |
+      | `LEGAL_RETENTION` | an erasure request refused because the data must be kept by law |
+
+      A call the API refuses answers `{ "error": "<message>", "code": "<code>" }`: 400 for a
+      body or field that is not valid, 401 for a missing or wrong API key, 403 for a key
+      without the scope or while proofing is paused, 404 for a session that is not the
+      organisation's, 422 `flow_not_found` for a flow that is not, 409 and 422 for a call the
+      session or flow does not allow (each route lists its codes), and 429 when you call too
+      often. Act on `code`; `error` is for people and may change.
+  - name: identity-proofing-internal
+    description: >-
+      The wallet's own identity proofing routes (flows, settings, API keys, webhook,
+      requests) and the hosted page's, called only by the wallet's frontend. Left out of
+      the served docs (apidocs.served): an integrator uses the `identity-proofing` API.
 paths:
   /api/v1/admin/identity-proofing/pauses:
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List orgs whose identity proofing is paused (platform admin)
       description: >-
         Requires the platform administrator role. `pauses` holds one entry per paused org
@@ -162,7 +357,7 @@ paths:
           format: uuid
         description: Organisation id.
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Pause or resume an org's identity proofing (platform admin)
       description: >-
         Requires the platform administrator role. Body `{paused}`. While paused, nothing new
@@ -5277,7 +5472,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List the org's identity proofing flows
       description: >-
         Requires organisation membership. The active version of each of the organisation's flows
@@ -5332,7 +5527,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Create an identity proofing flow
       description: >-
         Requires an administrator role in the organisation. The flow configuration: `name`,
@@ -5417,7 +5612,7 @@ paths:
           type: string
         description: Flow id (stable across versions).
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List every version of an identity proofing flow
       description: >-
         Requires an administrator role in the organisation. Oldest first; exactly one
@@ -5476,7 +5671,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Edit an identity proofing flow as a new version
       description: >-
         Requires an administrator role in the organisation. Same body as creating a flow; it is
@@ -5567,7 +5762,7 @@ paths:
           minimum: 1
         description: Flow version to make active.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Activate a version of an identity proofing flow
       description: >-
         Requires an administrator role in the organisation. Makes the version the only
@@ -5628,7 +5823,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List the org's See my data and Delete my data flows
       description: >-
         Requires an administrator role in the organisation. The two data requests every
@@ -5670,7 +5865,7 @@ paths:
           type: string
         description: Organisation slug.
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Choose which flows members may use and the default flow
       description: >-
         Requires an administrator role in the organisation. Replaces the selection: `flowIds`
@@ -5719,7 +5914,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: The identity proofing overview
       description: >-
         Requires organisation membership. The external requests the overview and the dashboard
@@ -5774,7 +5969,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List identity proofing requests
       description: >-
         Requires organisation membership. An administrator sees every request of the
@@ -5904,7 +6099,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Send an identity proofing request
       description: >-
         Requires organisation membership. Either `userId` (a member of the organisation) with
@@ -6057,7 +6252,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get one identity proofing request
       description: >-
         Requires organisation membership. The request, re-checked with the engine
@@ -6122,7 +6317,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get a fresh Idem app link for a running request
       description: >-
         Requires organisation membership, and a live request for the Idem app whose
@@ -6173,7 +6368,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Where a running Idem request's phone is
       description: >-
         Requires organisation membership, and a live request for the Idem app whose
@@ -6222,7 +6417,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Start an on-screen request's Yivi disclosure
       description: >-
         Requires organisation membership, and a request sent on-screen for the Yivi
@@ -6274,7 +6469,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Redeem an on-screen request's Yivi disclosure
       description: >-
         Requires organisation membership. `done` is false while the subject has not finished the
@@ -6352,7 +6547,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Choose the app of an on-screen request's session
       description: >-
         Requires organisation membership, and a request created on screen with method `pending`:
@@ -6401,7 +6596,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Start an on-screen request's document photo
       description: >-
         Requires organisation membership, and a request whose flow photographs the document
@@ -6454,7 +6649,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Finish an on-screen request's document photo
       description: >-
         Requires organisation membership. Hands the photos of the scan the page started last
@@ -6517,7 +6712,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read a flow's hosted page settings
       description: >-
         Requires an administrator role in the organisation. `enabled` (hosted links may be made
@@ -6553,7 +6748,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Save a flow's hosted page settings
       description: >-
         Requires an administrator role in the organisation. Body `{enabled, locales,
@@ -6637,7 +6832,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read a flow's own branding
       description: >-
         Requires an administrator role in the organisation. `custom` false is "same as the
@@ -6674,7 +6869,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Save a flow's own branding
       description: >-
         Requires an administrator role in the organisation. A multipart form: `custom` (`true`
@@ -6740,7 +6935,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get a flow's own logo
       description: >-
         Requires an administrator role in the organisation. The logo image the flow's own
@@ -6785,7 +6980,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read whether a flow asks for the postal address
       description: >-
         Requires an administrator role in the organisation. `{addressMode}`: `off`,
@@ -6816,7 +7011,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Set whether a flow asks for the postal address
       description: >-
         Requires an administrator role in the organisation. Body `{addressMode}`. Sessions
@@ -6880,7 +7075,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read whether a flow asks for diploma extracts
       description: >-
         Requires an administrator role in the organisation. `{diplomaMode}`: `off` or
@@ -6910,7 +7105,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Set whether a flow asks for diploma extracts
       description: >-
         Requires an administrator role in the organisation. Body `{diplomaMode}`. Sessions
@@ -6976,7 +7171,7 @@ paths:
           type: string
         description: The flow's id.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read whether a flow asks for the UWV Verzekeringsbericht
       description: >-
         Requires an administrator role in the organisation. `{employmentMode}`: `off`,
@@ -7008,7 +7203,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Set whether a flow asks for the UWV Verzekeringsbericht
       description: >-
         Requires an administrator role in the organisation. Body `{employmentMode}`. Sessions
@@ -7070,7 +7265,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read whether the org's identity proofing is paused
       description: >-
         Any member. `paused` is whether identity proofing is stopped for the org. Only a
@@ -7114,7 +7309,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read an external person's request's verified identity
       description: >-
         Requires an administrator role in the organisation, or the reviewer right, which reaches
@@ -7198,7 +7393,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Decide a request under review
       description: >-
         Requires an administrator role in the organisation, or the reviewer right (a request
@@ -7277,7 +7472,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Enter the postal address on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). Once, within an
@@ -7366,7 +7561,7 @@ paths:
           maxLength: 200
         description: The house number the subject typed; only the number it starts with is looked up.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Look up a Dutch address on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). While the
@@ -7423,7 +7618,7 @@ paths:
           enum: [identity, address, employment, diplomas, data_request]
         description: The review item decided; any other is 404 `not_found`.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Confirm or reject a review item
       description: >-
         Requires an administrator role in the organisation, or the reviewer right. `decision` is
@@ -7527,7 +7722,7 @@ paths:
           enum: [diplomas, employment]
         description: The step whose files are checked; another review kind is 400 `invalid_input`, an unknown one 404 `not_found`.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Check the seals that could not be checked at upload again
       description: >-
         Requires an administrator role in the organisation, or the reviewer right, on a step
@@ -7582,7 +7777,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Count what waits for review
       description: >-
         Requires an administrator role in the organisation, or the reviewer right. How many
@@ -7646,7 +7841,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List the closed reviews
       description: >-
         Requires an administrator role in the organisation, or the reviewer right. What the
@@ -7682,7 +7877,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Upload diploma extracts on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). Multipart `file`
@@ -7764,7 +7959,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Upload the UWV Verzekeringsbericht on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). One multipart
@@ -7861,7 +8056,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Upload documents on an on-screen request
       description: >-
         Requires organisation membership (an admin, or the member who sent it). Multipart `file`
@@ -7954,7 +8149,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Read a data request's matched sessions
       description: >-
         Requires an administrator role in the organisation, or the reviewer right, which reaches
@@ -7995,7 +8190,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Download an approved data request's data
       description: >-
         Requires an administrator role in the organisation, or the reviewer right, which reaches
@@ -8030,7 +8225,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Follow the organisation's reviews
       description: >-
         Requires the reviewer right (an administrator has it). A Server-Sent Events stream that
@@ -8068,7 +8263,7 @@ paths:
           type: string
         description: Request id, the UUID or the `ps_…` id the API and webhooks show.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get a proofing request's timeline
       description: >-
         Requires organisation membership. Every audit event about the request, oldest
@@ -8128,7 +8323,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Count external proofing requests of the last 30 days
       description: >-
         Requires organisation membership. Counts the requests sent to external people since
@@ -8169,7 +8364,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get the organisation's identity proofing settings
       description: >-
         Requires organisation membership. What the organisation set once for all its flows:
@@ -8212,7 +8407,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
     patch:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Change the organisation's identity proofing settings
       description: >-
         Requires an administrator role in the organisation. The session lifetime and the data
@@ -8284,7 +8479,7 @@ paths:
           type: string
         description: Organisation slug.
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Set the organisation's branding
       description: >-
         Requires an administrator role in the organisation. A multipart form:
@@ -8336,7 +8531,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get the organisation's proofing logo
       description: >-
         Requires organisation membership. The logo image, served with a locked-down
@@ -8368,7 +8563,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List the organisation's API keys
       description: >-
         Requires an administrator role in the organisation. Every key of the organisation,
@@ -8398,7 +8593,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Create an API key
       description: >-
         Requires an administrator role in the organisation. `name` labels the key. The answer
@@ -8462,7 +8657,7 @@ paths:
           format: uuid
         description: API key id.
     delete:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Revoke an API key
       description: >-
         Requires an administrator role in the organisation. The key stops
@@ -8555,7 +8750,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get the organisation's webhook endpoint
       description: >-
         Requires an administrator role in the organisation. The organisation has one endpoint,
@@ -8600,7 +8795,7 @@ paths:
         '403':
           $ref: '#/components/responses/ProofingForbidden'
     put:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Set the organisation's webhook endpoint
       description: >-
         Requires an administrator role in the organisation. `url` (absolute https; it
@@ -8672,7 +8867,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     delete:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Remove the organisation's webhook endpoint
       description: >-
         Requires an administrator role in the organisation. Deliveries still waiting for it are
@@ -8695,7 +8890,7 @@ paths:
           type: string
         description: Organisation slug.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Rotate the webhook signing secret
       description: >-
         Requires an administrator role in the organisation. The answer carries the new `secret`,
@@ -8730,7 +8925,7 @@ paths:
           type: string
         description: Organisation slug.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Send a test webhook event
       description: >-
         Requires an administrator role in the organisation. Queues a `test` event for the
@@ -8757,7 +8952,7 @@ paths:
           type: string
         description: Organisation slug.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: List the organisation's recent webhook deliveries
       description: >-
         Requires an administrator role in the organisation. The 20 most recent, newest
@@ -8800,7 +8995,7 @@ paths:
           $ref: '#/components/responses/ProofingForbidden'
   /api/v1/proofing/flows:
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: List your organisation's flows (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, not a session. Only the
@@ -8891,7 +9086,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Create a flow (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Creates a flow as an admin does in the wallet,
@@ -9046,7 +9241,7 @@ paths:
           type: string
         description: The flow's id, as `GET /proofing/flows` lists it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: List the versions of a flow (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:read`. Every version of the flow, oldest first, the
@@ -9111,7 +9306,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Edit a flow (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Saves the body as the flow's next version,
@@ -9264,7 +9459,7 @@ paths:
           minimum: 1
         description: The version to make active.
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Activate a version of a flow (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Makes an earlier (or later) version of the flow
@@ -9337,7 +9532,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/flow-selection:
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Choose the flows members may use and the default flow (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. `flowIds` are the flows the organisation's
@@ -9439,7 +9634,7 @@ paths:
           type: string
         description: The flow's id, as `GET /proofing/flows` lists it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read a flow's hosted page settings (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:read`. Whether the flow is sent as a hosted link
@@ -9506,7 +9701,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Save a flow's hosted page settings (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Saves the flow's hosted page. `returnUrl` is
@@ -9607,7 +9802,7 @@ paths:
           type: string
         description: The flow's id, as `GET /proofing/flows` lists it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read whether a flow asks for the postal address (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:read`. `addressMode`: `off`, `required`, or
@@ -9672,7 +9867,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Set whether a flow asks for the postal address (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `addressMode`, for the
@@ -9766,7 +9961,7 @@ paths:
           type: string
         description: The flow's id, as `GET /proofing/flows` lists it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read whether a flow asks for diploma extracts (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:read`. The flow's `diplomaMode`.
@@ -9830,7 +10025,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Set whether a flow asks for diploma extracts (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `diplomaMode`, for the
@@ -9924,7 +10119,7 @@ paths:
           type: string
         description: The flow's id, as `GET /proofing/flows` lists it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read whether a flow asks for the UWV Verzekeringsbericht (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:read`. The flow's `employmentMode`.
@@ -9988,7 +10183,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Set whether a flow asks for the UWV Verzekeringsbericht (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `employmentMode`, for the
@@ -10075,7 +10270,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/settings:
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read the organisation's settings (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `settings:read`. How long a mailed session runs
@@ -10136,7 +10331,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
     patch:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Change the organisation's settings (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `settings:write`. Changes the fields sent and leaves the rest,
@@ -10229,7 +10424,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/webhook:
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Read the organisation's webhook endpoint (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The endpoint (`configured` false for none),
@@ -10288,7 +10483,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
     put:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Set the organisation's webhook endpoint (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Sets where events are sent and which.
@@ -10380,7 +10575,7 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
     delete:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Remove the organisation's webhook endpoint (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. No further events are sent.
@@ -10441,7 +10636,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/webhook/rotate-secret:
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Rotate the webhook signing secret (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Makes a new signing secret, answered once;
@@ -10507,7 +10702,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/webhook/test:
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Send a test webhook event (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Queues a `test` event for the endpoint, at most 10 a minute.
@@ -10568,7 +10763,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/proofing/webhook/deliveries:
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: List the organisation's recent webhook deliveries (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The latest deliveries, newest first: the
@@ -10634,7 +10829,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Open a hosted proofing link
       security: []
       description: >-
@@ -10724,7 +10919,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Poll a hosted proofing link
       security: []
       description: >-
@@ -10769,7 +10964,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Start a hosted proofing link
       security: []
       description: >-
@@ -10833,7 +11028,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Decline a hosted proofing link
       security: []
       description: >-
@@ -10875,7 +11070,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: A hosted link's organisation logo
       security: []
       description: >-
@@ -10903,7 +11098,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Get a fresh Idem app link for a hosted link
       security: []
       description: >-
@@ -10942,7 +11137,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Start the Yivi disclosure of a hosted link
       security: []
       description: >-
@@ -10981,7 +11176,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Poll the Yivi disclosure of a hosted link
       security: []
       description: >-
@@ -11026,7 +11221,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Choose the app of a hosted link's session
       security: []
       description: >-
@@ -11067,7 +11262,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Start the document photo of a hosted link
       security: []
       description: >-
@@ -11108,7 +11303,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Finish the document photo of a hosted link
       security: []
       description: >-
@@ -11159,7 +11354,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Download an approved data request's data on its hosted link
       security: []
       description: >-
@@ -11195,7 +11390,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Enter the postal address on a hosted link
       security: []
       description: >-
@@ -11253,7 +11448,7 @@ paths:
           maxLength: 200
         description: The house number the subject typed; only the number it starts with is looked up.
     get:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Look up a Dutch address on a hosted link
       security: []
       description: >-
@@ -11294,7 +11489,7 @@ paths:
           type: string
         description: Opaque hosted-link token from the `hostedUrl` of a hosted proofing session.
     post:
-      tags: [identity-proofing]
+      tags: [identity-proofing-internal]
       summary: Upload diploma extracts on a hosted link
       security: []
       description: >-
@@ -11362,7 +11557,7 @@ paths:
           type: string
         description: The hosted link's token.
     post:
-      tags: [identity-proofing-hosted]
+      tags: [identity-proofing-internal]
       summary: Upload the UWV Verzekeringsbericht on a hosted page
       description: >-
         Anonymous: the link's token is the credential. As the on-screen upload, for the subject
@@ -11449,7 +11644,7 @@ paths:
           type: string
         description: The hosted link's token.
     post:
-      tags: [identity-proofing-hosted]
+      tags: [identity-proofing-internal]
       summary: Upload documents on a hosted page
       description: >-
         Anonymous: the link's token is the credential. As the on-screen upload, for the subject
@@ -11524,26 +11719,67 @@ paths:
           description: A file or the upload is too large (`too_large`).
   /api/v1/proofing/sessions:
     get:
-      tags: [identity-proofing-api]
-      summary: List proofing sessions (public API)
+      tags: [identity-proofing]
+      summary: List your organisation's sessions (public API)
       description: >-
-        Authenticated with the organisation's API key with `sessions:read`. The organisation's
+        Authenticated with the organisation's API key with `sessions:read`. Only the sessions
+        of the organisation the API key belongs to, never another organisation's: your
         sessions for external people, newest first, as stored (no re-check with the engine),
         `limit` per page (default 50, at most 100): `{sessions, nextCursor}`. Pass
         `nextCursor` back as `cursor` for the next page; it is null on the last.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/sessions?limit=50' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/sessions?limit=50", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       parameters:
         - name: limit
           in: query
           required: false
+          description: Optional. Sessions per page.
           schema:
             type: integer
             minimum: 1
             maximum: 100
+            default: 50
         - name: cursor
           in: query
           required: false
+          description: Optional. The `nextCursor` of the previous page; leave it out for the first page.
           schema:
             type: string
       responses:
@@ -11587,61 +11823,81 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Create a proofing session (public API)
       description: >-
-        Send an `Idempotency-Key` header to make a retry safe: the same key and body
-        within 24 hours (until the next hourly prune after) get the first answer again (`Idempotent-Replayed: true`), the
-        key with another body is 422 `idempotency_key_reused`, and while the first call
-        still runs 409 `idempotency_in_flight`. A call whose outcome is unknown (the
-        server lost it mid-call) keeps answering 409 until the key expires after 24
-        hours, so that a retry can never create a second session; look the session up
-        with `GET /proofing/sessions` or use a new key. Purging a session drops the
-        answers stored for it. An answer is kept per API key: another API key of the
-        organisation that sends the same `Idempotency-Key` runs its own call and is
-        never answered with this one. `cancel` takes the header too.
-        Authenticated with the organisation's API key as a Bearer token. `email` and an optional
-        `name` of the subject, an external person, `flowId` (any flow of the organisation a
-        subject can finish; absent is the organisation's default flow, else 422
-        `no_default_flow`), `flowKind` (`data_access` "See my data" or `data_erasure` "Delete
-        my data" starts a person's data request on the organisation's own flow of that kind
-        instead, which goes to the organisation's review once the person is proven; a
-        `flowId` naming a data request flow does the same; a `flowKind` that is not the kind
-        of the `flowId` given is 400 `invalid_input`) and
-        `sendMail` (absent or true mails the subject as a request sent from the wallet would), and
-        `language` (`en` or `nl`: the mail's and the Idem app's; absent is the deployment
-        default for the mail and the phone's language in the app). The answer carries the session's Idem `deepLink`, for a caller that shows the QR code
-        itself, and `mailSent`. Refused while the organisation's proofing is paused.
-        With `hosted: true` no session is created yet: the answer carries `hostedUrl`,
-        a link to the public page the subject opens on their own device (valid 72 hours)
-        and starts once from; nothing is mailed. `redirectUrl`, only with
-        `hosted: true`, is where the page sends the subject once the session settles, with
-        `?session=<id>&status=<status>` added; its origin must be one of the organisation's
-        `allowedRedirectOrigins` (else 400 `redirect_not_allowed`). Without one, the link
-        takes the flow's return page (`returnUrl` in its hosted page settings), if it has one;
-        `redirect: false` leaves that out too, so the page ends on its own thank-you screen.
-        The page redirects only while the origin is still allowed and the flow still ends on
-        a redirect. `birthDate`
-        (YYYY-MM-DD, with `name`) makes the session one for that person only, as for an
-        account recovery: the name and birth date read off the document must match, else
-        the session is `rejected` with `errorCode` `IDENTITY_MISMATCH`. The session and its
-        webhooks then carry `expectedSubject: true`. The flow must read the document data
-        (400 otherwise). On a flow whose face check runs without the chip read
-        (`needsReferencePhoto` in the flow list), `referencePhoto` is required (422
-        `reference_photo_required` otherwise): the organisation's own photo of the person,
-        standard base64 of a PNG, JPEG or WebP of at most 512 KiB, which the live face
-        and its liveness are checked against in the Idem app. It is refused on any other
-        flow, such a session runs in the Idem app only and reaches no assurance level,
-        and the photo is deleted once the face check can no longer run. A body over
-        1 MiB is 400 `invalid_body`, or 413 `body_too_large` when an `Idempotency-Key`
-        is sent. Unknown fields are refused (400 `invalid_body`).
+        Authenticated with the organisation's API key with `sessions:write`. Starts a check of
+        an external person on one of the organisation's flows. Each field and whether it is
+        required is listed under the request body.
+
+        - Mailed (the default): the person gets a mail with the QR code, and the session runs
+          10 minutes, or the flow's own length. The answer has the `deepLink` too, to show the
+          QR code yourself (with `sendMail: false` nothing is mailed).
+        - `hosted: true`: the answer has a `hostedUrl` valid 72 hours. The session starts when
+          the person opens it, and nothing is mailed.
+
+        Answers 201 with the session. Refused while the organisation's proofing is paused.
+        Send an `Idempotency-Key` to make a retry safe: the same key and body within 24 hours
+        get the first answer again (`Idempotent-Replayed: true`). Each API key keeps its own
+        keys.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/sessions' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "flowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10",
+                "hosted": true,
+                "name": "Anna de Vries",
+                "redirectUrl": "https://portal.example.org/onboarding/return"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/sessions", strings.NewReader(`{
+            	  "flowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10",
+            	  "hosted": true,
+            	  "name": "Anna de Vries",
+            	  "redirectUrl": "https://portal.example.org/onboarding/return"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       parameters:
         - name: Idempotency-Key
           in: header
           required: false
-          description: Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          description: Optional. Makes a retry safe; the same key and body within 24 hours get the first answer again.
           schema:
             type: string
             maxLength: 255
@@ -11782,7 +12038,7 @@ paths:
           pattern: '^ps_[a-z2-7]{26}$'
         description: Session id (`ps_…`), as the create answer and webhooks give it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Get a proofing session (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token. One of the organisation's
@@ -11811,6 +12067,43 @@ paths:
         only on sessions decided under an earlier rule.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '200':
           description: Successful response.
@@ -11862,7 +12155,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Erase a proofing session (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token. Erases the session in
@@ -11874,6 +12167,43 @@ paths:
         still holds is not erased: 409 `legal_retention`, until the period has passed.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X DELETE 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodDelete, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '204':
           description: Erased.
@@ -11904,7 +12234,7 @@ paths:
           pattern: '^ps_[a-z2-7]{26}$'
         description: Session id (`ps_…`), as the create answer and webhooks give it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Download an approved data request's data (public API)
       description: >-
         Authenticated with the organisation's API key with the `results:read` scope. An approved
@@ -11917,6 +12247,43 @@ paths:
         `imagesHeld`, never included. Audited `identity_proofing.data_exported`.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/data-export' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/data-export", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '200':
           description: The data.
@@ -11948,7 +12315,7 @@ paths:
           pattern: '^ps_[a-z2-7]{26}$'
         description: Session id (`ps_…`), as the create answer and webhooks give it.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Get a proofing session's verified identity (public API)
       description: >-
         Authenticated with the organisation's API key with the `results:read` scope. A settled
@@ -11964,6 +12331,43 @@ paths:
         `identity_proofing.result_read`.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/result' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/result", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '200':
           description: Successful response.
@@ -12007,6 +12411,34 @@ paths:
                         documentNumber: "1234567890"
                         signedAt: "2026-10-02T09:36:40Z"
                         addedAt: "2026-10-02T09:37:02Z"
+                digid:
+                  summary: Approved through DigiD in the Yivi app, with the document photographed
+                  value:
+                    id: ps_tmncasdiyffevjl6egt65h2lya
+                    status: approved
+                    method: yivi_app
+                    eidasLevel: low
+                    verifiedAt: "2026-11-13T12:44:35Z"
+                    identity:
+                      givenName: Anna
+                      familyName: Jansen
+                      birthDate: "1991-03-14"
+                      nationality: NLD
+                      bsn: "111222333"
+                    evidence:
+                      - type: yivi_disclosure
+                        documentKind: identity_card
+                        documentCheck:
+                          verdict: authentic
+                          score: 0.93
+                          fields: valid
+                          zones: valid
+                    documentImage:
+                      mimeType: image/jpeg
+                      data: /9j/4AAQSkZJRgABAQAAAQABAAD
+                    documentImageBack:
+                      mimeType: image/jpeg
+                      data: /9j/4AAQSkZJRgABAQAAAQABAAD
                 rejected:
                   summary: Rejected, no identity
                   value:
@@ -12054,24 +12486,60 @@ paths:
           enum: [idem_app, yivi_app, browser]
         description: The app the subject proofs with.
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Start a hosted session in an app, headless (public API)
       description: >-
         Authenticated with the organisation's API key with `sessions:write`, for an
         organisation building its own UI: starts a session created with `hosted: true` in the app, as
         the subject picking it on the hosted page would, and answers the link to show:
         `appLink` (the Idem app's `vcmrtd://` link) or `walletLink` (the Yivi app's
-        `openid4vp://` request, its disclosure started already), with `expiresAt`. The
-        Yivi disclosure is then polled through `/api/v1/proof/{token}/yivi/disclosure` with the token
-        of the `hostedUrl`, which also serves `claim-link` for a new Idem code. Takes an
-        `Idempotency-Key`.
+        `openid4vp://` request, its disclosure started already), with `expiresAt`. Then
+        poll `GET .../methods/{method}/status` until `done`: for the Yivi app that poll also
+        collects what the person shared. Takes an `Idempotency-Key`.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/methods/yivi_app' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/methods/yivi_app", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       parameters:
         - name: Idempotency-Key
           in: header
           required: false
-          description: Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          description: Optional. Makes a retry safe; the same key and body within 24 hours get the first answer again.
           schema:
             type: string
             maxLength: 255
@@ -12148,14 +12616,53 @@ paths:
           enum: [idem_app, yivi_app, browser]
         description: The app the subject proofs with.
     get:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Poll a headless session (public API)
       description: >-
         Authenticated with the organisation's API key with `sessions:read`. The session's
-        `status` as stored (no re-check with the engine), and `done`
-        once it has an outcome or ended.
+        `status`, and `done` once it has an outcome or ended. For `yivi_app` the poll also
+        collects what the person shared in the Yivi app, which settles the session: keep
+        polling until `done`. A flow that photographs the document settles only once the
+        photo is in too.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/methods/yivi_app/status' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/methods/yivi_app/status", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '200':
           description: Successful response.
@@ -12192,6 +12699,261 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/proofing/sessions/{sessionID}/document-scan:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    post:
+      tags: [identity-proofing]
+      summary: Start the document photo in your own page (public API)
+      description: >-
+        Authenticated with the organisation's API key with `sessions:write`, for an
+        organisation building its own UI on a flow that photographs the document. Answers
+        the `url` of the scan service's page: show it in an iframe on your page, with camera
+        access (`allow="camera"`). The person photographs the document there, and for a flow
+        with a face check does that there too. When the page is done it posts a message to
+        your page (`window.postMessage`, from the origin of `url`):
+        `{ "transactionId": "…", "state": "completed", "resultId": "…" }`. Hand both ids to
+        `POST .../document-scan/finish`. A message without `state` `completed` means the
+        person stopped: hand over its `transactionId` alone, then start again for another
+        go. The session must be started first (`POST .../methods/{method}`). Each call
+        starts a new scan, and only the last one can be finished.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/document-scan' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "language": "nl"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/document-scan", strings.NewReader(`{
+            	  "language": "nl"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                language:
+                  type: string
+                  enum: [en, nl]
+                  default: en
+                  description: Optional. The language of the scan page.
+            example:
+              language: nl
+      responses:
+        '200':
+          description: The scan page to embed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: The scan service's page for this session's document photo.
+              example:
+                url: https://id-scan.example.com/nl-nl/identifications/47zEQkzlk9ttIYvWymNsA0ctfFoK6fAc
+        '400':
+          description: The body is not valid JSON or has an unknown field (`invalid_body`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The session is not started yet (`session_not_started`), has ended
+            (`session_over`), takes no document photo (`document_scan_not_asked`), or its
+            photo is in already (`document_scan_done`); or the deployment has no scan service
+            (`no_document_scanner`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/proofing/sessions/{sessionID}/document-scan/finish:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^ps_[a-z2-7]{26}$'
+        description: Session id (`ps_…`), as the create answer and webhooks give it.
+    post:
+      tags: [identity-proofing]
+      summary: Finish the document photo in your own page (public API)
+      description: >-
+        Authenticated with the organisation's API key with `sessions:write`. Hands the
+        session the scan the person finished: the `transactionId` and `resultId` the scan
+        page posted to your page. The photos and the document check then belong to the
+        session, and a flow of the document photo alone is settled by it. Without a
+        `resultId` (the person stopped), the session is told the scan did not finish: 422
+        `document_scan_failed` while the person may try again, and the session is rejected
+        (`DOCUMENT_SCAN_FAILED`) once the scan service's attempts are used up. Finishing the
+        same scan again changes nothing.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/document-scan/finish' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "transactionId": "821bb247-8c77-463b-b1d1-8d8a76ed27fe",
+                "resultId": "450f3433-7167-4da0-8857-ea0d8d664779"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/document-scan/finish", strings.NewReader(`{
+            	  "transactionId": "821bb247-8c77-463b-b1d1-8d8a76ed27fe",
+            	  "resultId": "450f3433-7167-4da0-8857-ea0d8d664779"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [transactionId]
+              properties:
+                transactionId:
+                  type: string
+                  description: Required. The scan's id, as the scan page posted it.
+                resultId:
+                  type: string
+                  description: >-
+                    Optional. The result's id, as the scan page posted it. Leave it out when the
+                    person stopped (no `state: completed`).
+            example:
+              transactionId: 821bb247-8c77-463b-b1d1-8d8a76ed27fe
+              resultId: 450f3433-7167-4da0-8857-ea0d8d664779
+      responses:
+        '204':
+          description: The photos are in.
+        '400':
+          description: The body is not valid JSON or has an unknown field (`invalid_body`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The session is not started yet (`session_not_started`), has ended
+            (`session_over`), takes no document photo (`document_scan_not_asked`), or this is
+            not the scan started last (`document_scan_mismatch`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The scan did not finish (`document_scan_failed`); start another.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          description: >-
+            The scan service could not give this scan's result
+            (`document_scan_unavailable`); start another scan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/proofing/sessions/{sessionID}/cancel:
     parameters:
       - name: sessionID
@@ -12202,7 +12964,7 @@ paths:
           pattern: '^ps_[a-z2-7]{26}$'
         description: Session id (`ps_…`), as the create answer and webhooks give it.
     post:
-      tags: [identity-proofing-api]
+      tags: [identity-proofing]
       summary: Cancel a proofing session (public API)
       description: >-
         Authenticated with the organisation's API key as a Bearer token. Ends a session that is
@@ -12211,11 +12973,48 @@ paths:
         `identity_proofing.session_cancelled`. Takes an `Idempotency-Key`.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/cancel' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/sessions/ps_q4r7tz2mxk3vbn6hw5jc2dfa7e/cancel", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       parameters:
         - name: Idempotency-Key
           in: header
           required: false
-          description: Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          description: Optional. Makes a retry safe; the same key and body within 24 hours get the first answer again.
           schema:
             type: string
             maxLength: 255
@@ -13866,6 +14665,87 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+x-webhooks:
+  proofing-session-event:
+    post:
+      tags: [identity-proofing]
+      summary: A proofing session's event, sent to the organisation's webhook endpoint
+      description: >-
+        Sent for the events the endpoint subscribes to, signed with the endpoint's secret.
+        `session.verified` carries the session's result in `data.result`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingWebhookEvent'
+            examples:
+              verified:
+                summary: session.verified, with the result
+                value:
+                  id: bf60aacd-e049-4363-92b4-cdcd97299949
+                  type: session.verified
+                  createdAt: "2026-11-13T12:44:35Z"
+                  data:
+                    sessionId: ps_tmncasdiyffevjl6egt65h2lya
+                    status: approved
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowKind: identity
+                    method: yivi_app
+                    eidasLevel: low
+                    result:
+                      id: ps_tmncasdiyffevjl6egt65h2lya
+                      status: approved
+                      method: yivi_app
+                      eidasLevel: low
+                      verifiedAt: "2026-11-13T12:44:35Z"
+                      identity:
+                        givenName: Anna
+                        familyName: Jansen
+                        birthDate: "1991-03-14"
+                        nationality: NLD
+                        bsn: "111222333"
+                      evidence:
+                        - type: yivi_disclosure
+                          documentKind: identity_card
+                          documentCheck:
+                            verdict: authentic
+                            score: 0.93
+                            fields: valid
+                            zones: valid
+                      documentImage:
+                        mimeType: image/jpeg
+                        data: /9j/4AAQSkZJRgABAQAAAQABAAD
+                      documentImageBack:
+                        mimeType: image/jpeg
+                        data: /9j/4AAQSkZJRgABAQAAAQABAAD
+              failed:
+                summary: session.failed, with the reason
+                value:
+                  id: 4d0f6d1a-7c0e-4c58-9a3b-0c2a6f1e8b77
+                  type: session.failed
+                  createdAt: "2026-11-13T12:50:02Z"
+                  data:
+                    sessionId: ps_b7k2mq4xz6rt3vnw5hc2jd7fae
+                    status: rejected
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowKind: identity
+                    method: yivi_app
+                    errorCode: DOCUMENT_MISMATCH
+              created:
+                summary: session.created
+                value:
+                  id: 9b2e4c1f-3a5d-4e6f-8a7b-1c2d3e4f5a6b
+                  type: session.created
+                  createdAt: "2026-11-13T12:43:41Z"
+                  data:
+                    sessionId: ps_tmncasdiyffevjl6egt65h2lya
+                    status: pending
+                    flowId: 6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10
+                    flowKind: identity
+      responses:
+        '200':
+          description: Received; any 2xx answer counts.
 components:
   securitySchemes:
     apiKey:
@@ -14013,70 +14893,74 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        Who to verify and how. Without `hosted`, the session starts now and runs 10 minutes
-        (or the organisation's session length); with `hosted: true` you get a link valid 72 hours,
-        and the session starts when the person opens it.
+        No field is required on its own. A session is mailed by default, so send `email`, or
+        `hosted: true` or `sendMail: false` when nothing should be mailed.
       properties:
         email:
           type: string
           format: email
-          description: The person's address; required unless `hosted` or `sendMail` is false.
+          description: >-
+            Optional. The person's e-mail address, which the session is mailed to. Leave it out
+            only with `hosted: true` or `sendMail: false`, where nothing is mailed.
         name:
           type: string
           maxLength: 200
-          description: The person's name. Only a label, unless `birthDate` is given too.
+          description: Optional. The person's name, shown in the wallet and the mail.
         birthDate:
           type: string
           format: date
           example: "1990-04-12"
           description: >-
-            With `name`, makes the session one for that person only: the name and birth date
-            on the document must match, or the session is `rejected` with `IDENTITY_MISMATCH`.
-            The flow must read the document data.
+            Optional. Needs `name` too. Makes the session one for that person only: the name and
+            birth date on the document must match, or the session is `rejected` with
+            `IDENTITY_MISMATCH`. The flow must read the document data.
         referencePhoto:
           type: string
           format: byte
           description: >-
-            Your own photo of the person's face, standard base64 of a PNG, JPEG or WebP of
-            at most 512 KiB. Required on a flow with `needsReferencePhoto`, refused on any
-            other. One that does not decode is refused (400) when its session is made: here,
-            or for a hosted request when its subject starts. Deleted once the face check can
-            no longer run.
+            Optional. Send it on a flow with `needsReferencePhoto: true`, and only there. Your
+            own photo of the person's face, base64 of a PNG, JPEG or WebP of at most 512 KiB.
         flowId:
           type: string
-          description: Any flow of the organisation a subject can finish; absent runs the organisation's default flow.
+          description: Optional. The flow to run. Default the organisation's default flow.
         flowKind:
           type: string
           enum: [identity, data_access, data_erasure]
+          default: identity
           description: >-
-            `data_access` ("See my data") or `data_erasure` ("Delete my data") starts a data
-            request on the organisation's own flow of that kind; absent or `identity` is an
-            identity check on `flowId`.
+            Optional. `data_access` ("See my data") or `data_erasure` ("Delete my data") starts
+            a data request instead of an identity check.
         sendMail:
           type: boolean
           default: true
-          description: False skips the mail; show the answer's `deepLink` as a QR code yourself.
+          description: >-
+            Optional. `false` sends no mail: show the answer's `deepLink` as a QR code
+            yourself.
         language:
           type: string
           enum: [en, nl]
-          description: The mail's, the page's and the Idem app's language.
+          description: >-
+            Optional. The language of the mail, the hosted page and the Idem app. Default the
+            deployment's for the mail, and the phone's in the app.
         hosted:
           type: boolean
           default: false
-          description: Answer a `hostedUrl` to hand the person instead of starting the session now. Live keys only.
+          description: >-
+            Optional. `true` answers a `hostedUrl` (valid 72 hours) to hand the person, instead
+            of starting the session now. Nothing is mailed.
         redirectUrl:
           type: string
           format: uri
           description: >-
-            With `hosted`, where the page sends the person once the session settles, with
-            `?session=<id>&status=<status>` added. Its origin must be one of the organisation's
-            allowed redirect origins. Absent takes the flow's return page, if it has one.
+            Optional, only with `hosted: true`. Where the page sends the person once the
+            session ends, with `?session=<id>&status=<status>` added. Must be on one of the
+            organisation's `allowedRedirectOrigins`. Default the flow's return page.
         redirect:
           type: boolean
           default: true
           description: >-
-            With `hosted`, false ends the page on its own thank-you screen even when the flow
-            has a return page. Not with a `redirectUrl` (400 `invalid_input`).
+            Optional, only with `hosted: true`. `false` ends the page on its own thank-you
+            screen, even when the flow has a return page. Not together with `redirectUrl`.
     ProofingApiSession:
       type: object
       description: A session as stored, with its outcome. Never document data beyond the proofed name.
@@ -14141,6 +15025,20 @@ components:
         cancelledAt:
           type: string
           format: date-time
+        cancelledBy:
+          type: string
+          enum: [api_key, member, subject]
+          description: >-
+            Who cancelled the session: the organisation's software with its API key, a member in
+            the wallet, or the person declining on the hosted page. Absent for a session cancelled
+            before the wallet kept this.
+        expiryReason:
+          type: string
+          enum: [not_started, not_finished, review_ended]
+          description: >-
+            Why an `expired` session expired: a hosted link nobody started in time
+            (`not_started`), a session the person did not finish in time (`not_finished`), or a
+            review nobody decided before it ended (`review_ended`). Absent otherwise.
         purgedAt:
           type: string
           format: date-time
@@ -14205,7 +15103,7 @@ components:
           properties:
             deepLink:
               type: string
-              description: The Idem app's `vcmrtd://` link, to show as a QR code; empty for a hosted or test session.
+              description: The Idem app's `vcmrtd://` link, to show as a QR code; empty for a hosted session.
             mailSent:
               type: boolean
             hostedUrl:
@@ -14481,6 +15379,14 @@ components:
             expectedSubject:
               type: boolean
               description: Only present, as true, on a session created for one person.
+            cancelledBy:
+              type: string
+              enum: [api_key, member, subject]
+              description: On `session.cancelled`, who cancelled it, as on the session.
+            expiryReason:
+              type: string
+              enum: [not_started, not_finished, review_ended]
+              description: On `session.expired`, why it expired, as on the session.
             result:
               description: >-
                 Only on `session.verified`: the session's result as `GET
