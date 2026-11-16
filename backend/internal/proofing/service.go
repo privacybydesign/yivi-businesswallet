@@ -784,25 +784,57 @@ func checkEditorChoices(in proofingprovider.FlowSpec, current *proofingprovider.
 	if current != nil {
 		was = *current
 	}
-	if slices.Contains(in.RequestedAttributes, attributeAgeOver) && in.AgeOver != was.AgeOver {
-		if _, ok := openid4vpverifier.AgeClaim(in.AgeOver); !ok {
-			return in, fmt.Errorf("%w: the age check asks one of the ages %v", ErrInvalidInput, openid4vpverifier.AgeClaimAges())
-		}
+	if err := checkAgeChoice(in, was); err != nil {
+		return in, err
 	}
-	if in.RetentionOverrideSeconds != 0 && in.RetentionOverrideSeconds != was.RetentionOverrideSeconds &&
-		!slices.ContainsFunc(flowRetentionDays, func(days int) bool { return in.RetentionOverrideSeconds == days*secondsPerDay }) {
-		return in, fmt.Errorf("%w: a flow keeps its data for %v days, or follows the organisation", ErrInvalidInput, flowRetentionDays)
+	if err := checkRetentionChoice(in, was); err != nil {
+		return in, err
 	}
-	for _, t := range in.AcceptedDocumentTypes {
-		if !slices.Contains(editorDocumentTypes, t) && !slices.Contains(was.AcceptedDocumentTypes, t) {
-			return in, fmt.Errorf("%w: unknown accepted document type %q: a flow takes %s", ErrInvalidInput, t, strings.Join(editorDocumentTypes, ", "))
+	types, err := editorDocumentTypesChoice(in.AcceptedDocumentTypes, was.AcceptedDocumentTypes)
+	if err != nil {
+		return in, err
+	}
+	in.AcceptedDocumentTypes = types
+	return carryUnshownSettings(in, was)
+}
+
+func checkAgeChoice(in, was proofingprovider.FlowSpec) error {
+	if !slices.Contains(in.RequestedAttributes, attributeAgeOver) || in.AgeOver == was.AgeOver {
+		return nil
+	}
+	if _, ok := openid4vpverifier.AgeClaim(in.AgeOver); !ok {
+		return fmt.Errorf("%w: the age check asks one of the ages %v", ErrInvalidInput, openid4vpverifier.AgeClaimAges())
+	}
+	return nil
+}
+
+func checkRetentionChoice(in, was proofingprovider.FlowSpec) error {
+	if in.RetentionOverrideSeconds == 0 || in.RetentionOverrideSeconds == was.RetentionOverrideSeconds ||
+		slices.ContainsFunc(flowRetentionDays, func(days int) bool { return in.RetentionOverrideSeconds == days*secondsPerDay }) {
+		return nil
+	}
+	return fmt.Errorf("%w: a flow keeps its data for %v days, or follows the organisation", ErrInvalidInput, flowRetentionDays)
+}
+
+// editorDocumentTypesChoice is types as the editor stores them, refusing a
+// type it does not offer unless was already has it.
+func editorDocumentTypesChoice(types, was []string) ([]string, error) {
+	for _, t := range types {
+		if !slices.Contains(editorDocumentTypes, t) && !slices.Contains(was, t) {
+			return types, fmt.Errorf("%w: unknown accepted document type %q: a flow takes %s", ErrInvalidInput, t, strings.Join(editorDocumentTypes, ", "))
 		}
 	}
 	// Every kind and nothing else is any document, which an empty list says.
-	if !slices.Equal(in.AcceptedDocumentTypes, was.AcceptedDocumentTypes) && len(in.AcceptedDocumentTypes) == len(documentKindNames) &&
-		!slices.ContainsFunc(documentKindNames, func(kind string) bool { return !slices.Contains(in.AcceptedDocumentTypes, kind) }) {
-		in.AcceptedDocumentTypes = nil
+	if !slices.Equal(types, was) && len(types) == len(documentKindNames) &&
+		!slices.ContainsFunc(documentKindNames, func(kind string) bool { return !slices.Contains(types, kind) }) {
+		return nil, nil
 	}
+	return types, nil
+}
+
+// carryUnshownSettings carries the settings the editor does not show over from
+// was when in leaves them all out, and refuses a change to them.
+func carryUnshownSettings(in, was proofingprovider.FlowSpec) (proofingprovider.FlowSpec, error) {
 	if in.LegalBasis == "" && in.ProcessingPurpose == "" && in.AssuranceTiers == nil {
 		in.LegalBasis, in.ProcessingPurpose, in.AssuranceTiers = was.LegalBasis, was.ProcessingPurpose, was.AssuranceTiers
 	}
