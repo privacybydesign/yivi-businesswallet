@@ -133,7 +133,7 @@ func TestProofingAdminHTTPFlow(t *testing.T) {
 	}
 
 	resp := env.postJSON("/api/v1/orgs/acme/identity-proofing/flows", map[string]any{
-		"name": "Passport + face", "steps": []string{"nfc_read", "face_match"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
+		"name": "Passport + face", "steps": []string{"document_capture", "nfc_read", "face_verification"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create flow = %d, want 201", resp.StatusCode)
@@ -184,7 +184,7 @@ func TestProofingAdminHTTPFlow(t *testing.T) {
 	// Editing a flow adds a version that is active at once; activating the first
 	// rolls it back.
 	resp = env.postJSON("/api/v1/orgs/acme/identity-proofing/flows/"+flow.ID+"/versions", map[string]any{
-		"name": "Passport + face v2", "steps": []string{"nfc_read", "face_match"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
+		"name": "Passport + face v2", "steps": []string{"document_capture", "nfc_read", "face_verification"}, "requiredChecks": []string{"nfc.passive_auth", "face.match"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("new flow version = %d, want 201", resp.StatusCode)

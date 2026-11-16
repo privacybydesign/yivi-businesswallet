@@ -907,9 +907,26 @@ post-review outcome stay the system's.
   it into the row's detail list with those photos: one audited read per open
   (`staleTime: Infinity`), and the timeline then shows it.
   Keys carry `scopes` (`sessions:write`, `sessions:read`, `results:read`,
-  `flows:read`); every key gets all four, and only a signed-in org admin
+  `flows:read`, `flows:write`, `settings:read`, `settings:write`,
+  `webhooks:write`); every key gets all of them (migration `20261116090100`
+  gave the keys made before the last four), and only a signed-in org admin
   creates one. A missing scope is 403
   `insufficient_scope`.
+- **Setup over the API** (`api_setup_handler.go`): a key sets up what an admin
+  sets up in the wallet, on the admin's own handlers. `orgFromRequest` answers
+  the key's org on them.
+
+  | Route under `/proofing` | Scope |
+  |---|---|
+  | `POST flows`, `POST flows/{id}/versions`, `.../versions/{v}/activate`, `PUT flow-selection` | `flows:write` |
+  | `GET flows/{id}/versions` | `flows:read` |
+  | `GET`/`PUT flows/{id}/{hosted,address,diplomas,employment}` | `flows:read` / `flows:write` |
+  | `GET`/`PATCH settings` (no branding: wallet only) | `settings:read` / `settings:write` |
+  | `GET`/`PUT`/`DELETE webhook`, `POST webhook/{rotate-secret,test}`, `GET webhook/deliveries` | `webhooks:write` |
+
+  - `GET /proofing/flows` also lists each flow's `allowed`, `hostedEnabled`,
+    `hostedReturnUrl` and step modes.
+  - Audited as the key (`api_key:<prefix>`), as every API write.
   `GET /proofing/sessions?limit=&cursor=` pages the org's external sessions
   newest first from stored state (cursor: created_at + id), `{sessions, nextCursor}`.
   `Idempotency-Key` on create, cancel and the headless start (`idempotency.go`,

@@ -165,7 +165,7 @@ func TestEditFlowReasonLocales(t *testing.T) {
 // item no reason in, unless the version predates reasons and gives none.
 func TestSaveFlowHostedNeedsReasons(t *testing.T) {
 	onlyEnglish := map[string]map[string]string{"dg1": {"en": reasonDocumentEN}}
-	both := FlowHosted{Enabled: true, Completion: CompletionRedirect}
+	both := FlowHosted{Enabled: true, Completion: CompletionRedirect, Locales: email.Locales()}
 	english := FlowHosted{Enabled: true, Completion: CompletionRedirect, Locales: []email.Locale{email.LocaleEN}}
 	dutch := FlowHosted{Enabled: true, Completion: CompletionRedirect, Locales: []email.Locale{email.LocaleNL}}
 	tests := []struct {

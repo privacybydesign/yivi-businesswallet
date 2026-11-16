@@ -5341,10 +5341,9 @@ paths:
         `document_photo` step; anything else is refused),
         `requestedAttributes`, `attributeReasons`, `acceptedDocumentTypes`, `acceptedIssuingCountries`,
         `requiredChecks`, `checkThresholds`, `requiredAssuranceLevel`, `bsnPolicy`, `keepFacePhotos`,
-        `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds`, `assuranceTiers`,
-        `legalBasis`, `processingPurpose` and `alwaysReview` (a session the checks would approve
+        `blurBsn`, `retentionOverrideSeconds`, `sessionTtlSeconds` and `alwaysReview` (a session the checks would approve
         goes to `needs_review` instead; a rejection stays one). Face capture is always set to the app (`selfieLocation` is
-        overwritten). An empty `name` or `steps`, an unknown `faceProvider`, or a missing `attributeReasons` entry, is 400
+        overwritten). An empty `name` or `steps`, an unknown `faceProvider`, any choice the wallet's flow editor does not offer (see `POST /proofing/flows`), or a missing `attributeReasons` entry, is 400
         `invalid_input`. The proofing engine validates the combination (including `regula` on a
         deployment without Regula) and its refusal is returned as 422 `rejected_by_provider`.
         Creates version 1; the answer is the flow with `completable` and `needsReferencePhoto`.
@@ -5483,7 +5482,7 @@ paths:
         Requires an administrator role in the organisation. Same body as creating a flow; it is
         stored as the next version and made the active one. Requests already sent keep the
         version their session pinned. An empty `name` or `steps`, an unknown `faceProvider`,
-        or a missing `attributeReasons` entry is 400 `invalid_input`. A data request flow, or
+        any choice the wallet's flow editor does not offer (see `POST /proofing/flows`), or a missing `attributeReasons` entry is 400 `invalid_input`. A data request flow, or
         one requiring diplomas, keeps `dg1` in `requestedAttributes` (422 `flow_no_identity`).
       requestBody:
         required: true
@@ -8382,7 +8381,7 @@ paths:
                     - id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                       name: Production backend
                       prefix: yp_live_3kq7
-                      scopes: [sessions:write, sessions:read, results:read, flows:read]
+                      scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
                       createdByName: Sam de Vries
                       createdAt: "2026-09-01T10:05:00Z"
                       lastUsedAt: "2026-10-02T09:30:00Z"
@@ -8398,7 +8397,10 @@ paths:
         carries the key's `secret` (`yp_live_…`), the one time it is readable: only its SHA-256
         is kept. The organisation's backend sends it as a Bearer token to the public
         `/api/v1/proofing` routes. A key gets every scope: `sessions:write` (create, cancel,
-        erase), `sessions:read`, `results:read` (the verified identity) and `flows:read`. A
+        erase), `sessions:read`, `results:read` (the verified identity), `flows:read`,
+        `flows:write` (create and edit flows, their hosted page and steps, the default flow),
+        `settings:read`, `settings:write` (the session settings and the allowed redirect
+        origins) and `webhooks:write` (the webhook endpoint). A
         route the key lacks the scope for answers 403 `insufficient_scope`. An empty `name` or
         one over 100 characters is 400 `invalid_input`.
       requestBody:
@@ -8426,7 +8428,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     secret: yp_live_3kq7Vb9xR2mT8nW4cZ6hJ1pL5sD0fG7a
         '400':
@@ -8471,7 +8473,7 @@ paths:
                     id: 5e4d3c2b-1a09-4f8e-8d7c-6b5a49382716
                     name: Production backend
                     prefix: yp_live_3kq7
-                    scopes: [sessions:write, sessions:read, results:read, flows:read]
+                    scopes: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read, settings:write, webhooks:write]
                     createdAt: "2026-09-01T10:05:00Z"
                     lastUsedAt: "2026-10-02T09:30:00Z"
                     revokedAt: "2026-10-02T10:00:00Z"
@@ -8738,16 +8740,54 @@ paths:
   /api/v1/proofing/flows:
     get:
       tags: [identity-proofing-api]
-      summary: List the organisation's flows (public API)
+      summary: List your organisation's flows (public API)
       description: >-
-        Authenticated with the organisation's API key as a Bearer token, not a session. Every
-        flow of the organisation that a subject can finish, with the organisation's default
+        Authenticated with the organisation's API key as a Bearer token, not a session. Only the
+        flows of the organisation the API key belongs to, never another organisation's: every
+        flow of yours that a person can finish, with the organisation's default
         flow marked (`default`). A session may use any of them. `needsReferencePhoto: true`
         marks a flow whose face check runs without the chip read: every session on it must
         carry a `referencePhoto`. See my data and Delete my data are not listed: start one
         with `flowKind` on `POST /proofing/sessions`.
       security:
         - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
       responses:
         '200':
           description: Successful response.
@@ -8766,12 +8806,1759 @@ paths:
                       requestedAttributes: [dg1, dg2, selfie]
                       default: true
                       needsReferencePhoto: false
+                      allowed: true
+                      hostedEnabled: true
+                      hostedReturnUrl: https://portal.example.org/done
+                      diplomaMode: "off"
+                      addressMode: required
+                      employmentMode: "off"
                     - id: 9a2b4c6d-1e3f-4a5b-8c7d-0e1f2a3b4c5d
                       name: Bank account change
                       version: 1
                       requestedAttributes: [selfie]
                       default: false
                       needsReferencePhoto: true
+                      allowed: false
+                      hostedEnabled: false
+                      diplomaMode: "off"
+                      addressMode: "off"
+                      employmentMode: "off"
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      tags: [identity-proofing-api]
+      summary: Create a flow (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Creates a flow as an admin does in the wallet,
+        version 1, active at once, audited `identity_proofing.flow_created`. The body is the flow:
+        its `name`, `steps`, `requiredChecks`, `requestedAttributes` and the rest of the spec.
+        Make it the default with `PUT /proofing/flow-selection`, and set its hosted page and steps
+        with the routes under `/proofing/flows/{flowID}`. Takes an `Idempotency-Key`. The flow
+        takes only what the wallet's flow editor offers, and the choices that depend on each other
+        the same way; anything else is 400 `invalid_input`:
+        `steps` are `document_capture`, `nfc_read`, `document_photo` and `face_verification`, each
+        once, stored in the order the app runs them; each item in `requestedAttributes` (`dg1`,
+        `age_over`, `chip_checks`, `dg11`, `dg2`, `biometrics`, `selfie`, `document_image`, or
+        `outcome_only` alone) needs a step that produces it; `ageOver` is 12, 16, 18, 21 or 65;
+        `acceptedDocumentTypes` are `passport`, `identity_card`, `residence_permit`,
+        `drivers_license` and `personal_data` (all four kinds alone is stored as any document);
+        a `face.match` threshold is a whole hundredth; `retentionOverrideSeconds` is 0, or 1, 30 or
+        90 days; `legalBasis`, `processingPurpose` and `assuranceTiers` are not set; a flow locked
+        to `apps: [yivi]` must be one the Yivi app runs (no face check without `nfc_read`, no level
+        above `low`); `faceProvider: idscan` always requires `face.liveness`. An edit may keep a
+        value the version already has, as the editor does, and leaving out `legalBasis`,
+        `processingPurpose` and `assuranceTiers` keeps the version's. A flow's hosted page offers
+        at least one language.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/flows' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "Passport with face check",
+                "steps": [
+                  "document_capture",
+                  "nfc_read",
+                  "face_verification"
+                ],
+                "requiredChecks": [
+                  "nfc.passive_auth",
+                  "face.match"
+                ],
+                "requestedAttributes": [
+                  "dg1"
+                ],
+                "attributeReasons": {
+                  "dg1": {
+                    "en": "To confirm who you are.",
+                    "nl": "Om te bevestigen wie je bent."
+                  }
+                }
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/flows", strings.NewReader(`{
+            	  "name": "Passport with face check",
+            	  "steps": [
+            	    "document_capture",
+            	    "nfc_read",
+            	    "face_verification"
+            	  ],
+            	  "requiredChecks": [
+            	    "nfc.passive_auth",
+            	    "face.match"
+            	  ],
+            	  "requestedAttributes": [
+            	    "dg1"
+            	  ],
+            	  "attributeReasons": {
+            	    "dg1": {
+            	      "en": "To confirm who you are.",
+            	      "nl": "Om te bevestigen wie je bent."
+            	    }
+            	  }
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional. Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSpec'
+      responses:
+        '201':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlow'
+        '400':
+          description: >-
+            The body is not JSON or has an unknown field (`invalid_body`), or a field is invalid (`invalid_input`; the message says which).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The engine refused the flow, for example an unknown country code or a face threshold under 0.75 on `substantial` (`rejected_by_provider`; the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/versions:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+    get:
+      tags: [identity-proofing-api]
+      summary: List the versions of a flow (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. Every version of the flow, oldest first, the
+        active one marked `active`. Each carries the whole spec, to edit from.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowList'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [identity-proofing-api]
+      summary: Edit a flow (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Saves the body as the flow's next version,
+        active at once, as the wallet's flow editor does; sessions already sent keep the version
+        they were sent on. A See my data or Delete my data flow cannot be changed
+        (`data_request_flow`, 409). Takes an `Idempotency-Key`.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "Passport with face check",
+                "steps": [
+                  "document_capture",
+                  "nfc_read",
+                  "face_verification"
+                ],
+                "requiredChecks": [
+                  "nfc.passive_auth",
+                  "face.match"
+                ],
+                "requestedAttributes": [
+                  "dg1"
+                ],
+                "attributeReasons": {
+                  "dg1": {
+                    "en": "To confirm who you are.",
+                    "nl": "Om te bevestigen wie je bent."
+                  }
+                }
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions", strings.NewReader(`{
+            	  "name": "Passport with face check",
+            	  "steps": [
+            	    "document_capture",
+            	    "nfc_read",
+            	    "face_verification"
+            	  ],
+            	  "requiredChecks": [
+            	    "nfc.passive_auth",
+            	    "face.match"
+            	  ],
+            	  "requestedAttributes": [
+            	    "dg1"
+            	  ],
+            	  "attributeReasons": {
+            	    "dg1": {
+            	      "en": "To confirm who you are.",
+            	      "nl": "Om te bevestigen wie je bent."
+            	    }
+            	  }
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional. Makes a retry safe; the same key and body within 24 hours get the first answer again.
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSpec'
+      responses:
+        '201':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlow'
+        '400':
+          description: >-
+            The body is not JSON or has an unknown field (`invalid_body`), or a field is invalid (`invalid_input`; the message says which).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A data request flow, which cannot be changed (`data_request_flow`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/versions/{version}/activate:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+        description: The version to make active.
+    post:
+      tags: [identity-proofing-api]
+      summary: Activate a version of a flow (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Makes an earlier (or later) version of the flow
+        the active one, to roll back an edit.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions/2/activate' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/versions/2/activate", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlow'
+        '400':
+          description: >-
+            `version` is not a positive number (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow, or that version of it, does not exist (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flow-selection:
+    put:
+      tags: [identity-proofing-api]
+      summary: Choose the flows members may use and the default flow (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. `flowIds` are the flows the organisation's
+        members may send in the wallet; `defaultFlowId` is the default, the flow a session
+        created without a `flowId` runs, and the one the wallet preselects. Answers the flows as
+        `GET /proofing/flows` lists them.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/flow-selection' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "flowIds": [
+                  "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10"
+                ],
+                "defaultFlowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/flow-selection", strings.NewReader(`{
+            	  "flowIds": [
+            	    "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10"
+            	  ],
+            	  "defaultFlowId": "6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowSelection'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiFlowList'
+        '400':
+          description: >-
+            The body is not JSON or has an unknown field (`invalid_body`), or a flow cannot be offered to members (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            A flow in `flowIds` or the `defaultFlowId` is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/hosted:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+    get:
+      tags: [identity-proofing-api]
+      summary: Read a flow's hosted page settings (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. Whether the flow is sent as a hosted link
+        (`enabled`), the languages its page offers (`locales`, empty for every one), how it ends
+        (`completion`: `redirect` sends the person to a return page, `done` always ends on the
+        page's own thank-you screen) and its return page (`returnUrl`, empty for none).
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/hosted' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/hosted", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowHosted'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing-api]
+      summary: Save a flow's hosted page settings (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Saves the flow's hosted page. `returnUrl` is
+        the page its hosted links send the person back to once the check ends. A session
+        created with its own `redirectUrl` goes there instead. `returnUrl` must be on one of the
+        organisation's `allowedRedirectOrigins` (`PATCH /proofing/settings`), or the answer is
+        `redirect_not_allowed` (400). The same origins may frame the hosted page in an iframe.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/hosted' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "enabled": true,
+                "completion": "redirect",
+                "returnUrl": "https://portal.example.org/onboarding/done"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/hosted", strings.NewReader(`{
+            	  "enabled": true,
+            	  "completion": "redirect",
+            	  "returnUrl": "https://portal.example.org/onboarding/done"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowHostedUpdate'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowHosted'
+        '400':
+          description: >-
+            `enabled` is missing (`invalid_body`); `completion` or a locale is unknown, or a `returnUrl` is sent with `completion: done` (`invalid_input`); or `returnUrl` is not on an allowed origin (`redirect_not_allowed`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/address:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+    get:
+      tags: [identity-proofing-api]
+      summary: Read whether a flow asks for the postal address (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. `addressMode`: `off`, `required`, or
+        `always_review` (every address goes to a reviewer).
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/address' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/address", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowAddress'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing-api]
+      summary: Set whether a flow asks for the postal address (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `addressMode`, for the
+        sessions sent after.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/address' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "addressMode": "required"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/address", strings.NewReader(`{
+            	  "addressMode": "required"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowAddress'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowAddress'
+        '400':
+          description: >-
+            `addressMode` is not `off`, `required` or `always_review` (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/diplomas:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+    get:
+      tags: [identity-proofing-api]
+      summary: Read whether a flow asks for diploma extracts (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. The flow's `diplomaMode`.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/diplomas' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/diplomas", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowDiplomas'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing-api]
+      summary: Set whether a flow asks for diploma extracts (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `diplomaMode`, for the
+        sessions sent after.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/diplomas' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "diplomaMode": "required"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/diplomas", strings.NewReader(`{
+            	  "diplomaMode": "required"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowDiplomas'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowDiplomas'
+        '400':
+          description: >-
+            `diplomaMode` is not `off`, `required` or `always_review` (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/flows/{flowID}/employment:
+    parameters:
+      - name: flowID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The flow's id, as `GET /proofing/flows` lists it.
+    get:
+      tags: [identity-proofing-api]
+      summary: Read whether a flow asks for the UWV Verzekeringsbericht (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:read`. The flow's `employmentMode`.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/employment' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/employment", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowEmployment'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [identity-proofing-api]
+      summary: Set whether a flow asks for the UWV Verzekeringsbericht (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `flows:write`. Sets the flow's `employmentMode`, for the
+        sessions sent after.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/employment' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "employmentMode": "required"
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/flows/6f1c0d2e-5b0a-4c7e-9f61-2a8d7c3e4b10/employment", strings.NewReader(`{
+            	  "employmentMode": "required"
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingFlowEmployment'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingFlowEmployment'
+        '400':
+          description: >-
+            `employmentMode` is not `off`, `required` or `always_review` (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '422':
+          description: >-
+            The flow is not one of the organisation's (`flow_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/settings:
+    get:
+      tags: [identity-proofing-api]
+      summary: Read the organisation's settings (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `settings:read`. How long a mailed session runs
+        (`sessionTtlSeconds`), how long an approved person's data is kept (`dataRetentionDays`),
+        how its erasure requests are decided (`erasureHandling`), its `legalRetention` (null for
+        none) and its `allowedRedirectOrigins`: the origins a hosted page may send its person
+        back to and be framed on. The branding is set in the wallet only.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/settings' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/settings", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiSettings'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    patch:
+      tags: [identity-proofing-api]
+      summary: Change the organisation's settings (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `settings:write`. Changes the fields sent and leaves the rest,
+        audited `identity_proofing.settings_updated`. `allowedRedirectOrigins` replaces the list:
+        each an origin (`https://host[:port]`, or `http` on `localhost`), at most 10. Removing the
+        origin of a flow's return page is refused (`redirect_origin_in_use`, 409): change that
+        flow's `returnUrl` first.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PATCH 'https://wallet.example.org/api/v1/proofing/settings' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "allowedRedirectOrigins": [
+                  "https://portal.example.org"
+                ]
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPatch, "https://wallet.example.org/api/v1/proofing/settings", strings.NewReader(`{
+            	  "allowedRedirectOrigins": [
+            	    "https://portal.example.org"
+            	  ]
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingUpdateSettings'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingApiSettings'
+        '400':
+          description: >-
+            Nothing to change (`invalid_body`), or a field is invalid, such as an origin that is not `https://host[:port]` or more than 10 of them (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: An origin a flow's return page is on (`redirect_origin_in_use`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/webhook:
+    get:
+      tags: [identity-proofing-api]
+      summary: Read the organisation's webhook endpoint (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The endpoint (`configured` false for none),
+        its `events`, the last four characters of its secret, its delivery `health`, and the
+        `availableEvents`. The secret itself is shown only when it is made.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/webhook' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/webhook", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      tags: [identity-proofing-api]
+      summary: Set the organisation's webhook endpoint (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Sets where events are sent and which.
+        The `url` must be `https`, and must resolve to a public address when an event is sent:
+        an address on a private, loopback or link-local network is never called. The first
+        save answers the signing `secret` (`whsec_…`) once; saving again keeps it. Verify every
+        event with it, as the webhook section describes.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X PUT 'https://wallet.example.org/api/v1/proofing/webhook' \
+              -H "Authorization: Bearer YOUR_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "url": "https://portal.example.org/hooks/yivi",
+                "events": [
+                  "session.verified",
+                  "session.failed",
+                  "session.expired"
+                ]
+              }'
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            	"strings"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPut, "https://wallet.example.org/api/v1/proofing/webhook", strings.NewReader(`{
+            	  "url": "https://portal.example.org/hooks/yivi",
+            	  "events": [
+            	    "session.verified",
+            	    "session.failed",
+            	    "session.expired"
+            	  ]
+            	}`))
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	req.Header.Set("Content-Type", "application/json")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProofingSaveWebhook'
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
+        '400':
+          description: >-
+            `url` is not an `https` URL, or `events` is empty or names an unknown event (`invalid_input`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      tags: [identity-proofing-api]
+      summary: Remove the organisation's webhook endpoint (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. No further events are sent.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X DELETE 'https://wallet.example.org/api/v1/proofing/webhook' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodDelete, "https://wallet.example.org/api/v1/proofing/webhook", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          description: >-
+            The organisation has no webhook endpoint (`webhook_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/webhook/rotate-secret:
+    post:
+      tags: [identity-proofing-api]
+      summary: Rotate the webhook signing secret (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Makes a new signing secret, answered once;
+        events are signed with it from then on.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/webhook/rotate-secret' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/webhook/rotate-secret", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingWebhookEndpoint'
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          description: >-
+            The organisation has no webhook endpoint (`webhook_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/webhook/test:
+    post:
+      tags: [identity-proofing-api]
+      summary: Send a test webhook event (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. Queues a `test` event for the endpoint, at most 10 a minute.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X POST 'https://wallet.example.org/api/v1/proofing/webhook/test' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodPost, "https://wallet.example.org/api/v1/proofing/webhook/test", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '204':
+          description: Queued.
+        '401':
+          $ref: '#/components/responses/ApiUnauthorized'
+        '403':
+          $ref: '#/components/responses/ApiForbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '404':
+          description: >-
+            The organisation has no webhook endpoint (`webhook_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/proofing/webhook/deliveries:
+    get:
+      tags: [identity-proofing-api]
+      summary: List the organisation's recent webhook deliveries (public API)
+      description: >-
+        Authenticated with the organisation's API key as a Bearer token, with `webhooks:write`. The latest deliveries, newest first: the
+        event, its session, the status, attempts and the endpoint's last answer.
+      security:
+        - apiKey: []
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -X GET 'https://wallet.example.org/api/v1/proofing/webhook/deliveries' \
+              -H "Authorization: Bearer YOUR_API_KEY"
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+            	"fmt"
+            	"io"
+            	"log"
+            	"net/http"
+            )
+
+            func main() {
+            	req, err := http.NewRequest(http.MethodGet, "https://wallet.example.org/api/v1/proofing/webhook/deliveries", nil)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// YOUR_API_KEY: your organisation's API key, from Identity proofing › Developers.
+            	req.Header.Set("Authorization", "Bearer YOUR_API_KEY")
+            	resp, err := http.DefaultClient.Do(req)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	defer resp.Body.Close()
+            	body, err := io.ReadAll(resp.Body)
+            	if err != nil {
+            		log.Fatal(err)
+            	}
+            	// Any status of 400 or higher carries {"error", "code"}: act on code.
+            	fmt.Println(resp.Status, string(body))
+            }
+      responses:
+        '200':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProofingWebhookDeliveryList'
         '401':
           $ref: '#/components/responses/ApiUnauthorized'
         '403':
@@ -12127,7 +13914,27 @@ components:
         needsReferencePhoto:
           type: boolean
           description: The face is checked without reading the chip, against the `referencePhoto` every session on this flow must carry.
-      required: [id, name, version, requestedAttributes, default, needsReferencePhoto]
+        allowed:
+          type: boolean
+          description: Offered to the organisation's members in the wallet (`PUT /proofing/flow-selection`).
+        hostedEnabled:
+          type: boolean
+          description: The flow may be sent as a hosted link (`PUT /proofing/flows/{flowID}/hosted`).
+        hostedReturnUrl:
+          type: string
+          description: The page the flow's hosted links send the person back to; absent for none.
+        diplomaMode:
+          type: string
+          description: Whether the flow asks for DUO diploma extracts after the identity check.
+        addressMode:
+          type: string
+          enum: [off, required, always_review]
+          description: Whether the flow asks for the postal address after the identity check.
+        employmentMode:
+          type: string
+          description: Whether the flow asks for the UWV Verzekeringsbericht after the identity check.
+      required: [id, name, version, requestedAttributes, default, needsReferencePhoto, allowed, hostedEnabled,
+        diplomaMode, addressMode, employmentMode]
     ProofingApiFlowList:
       type: array
       items:
@@ -12768,6 +14575,9 @@ components:
         employmentMode:
           type: string
           enum: ['off', required, always_review]
+          description: >-
+            Required. Whether the flow asks for the UWV Verzekeringsbericht after the identity check: `off`,
+            `required`, or `always_review` (asked, and always checked by a reviewer).
       required: [employmentMode]
     ProofingEmployment:
       type: object
@@ -12838,30 +14648,36 @@ components:
       required: [file]
     ProofingFlowSpec:
       type: object
-      description: A flow's configuration, as sent to create a flow or save a new version. Unknown fields are refused (400 `invalid_body`).
+      description: >-
+        A flow's configuration, sent to create a flow or save its next version. Only `name` and
+        `steps` are required. Unknown fields are refused (400 `invalid_body`).
       properties:
         name:
           type: string
+          description: Required. The flow's name, shown in the wallet.
         steps:
           type: array
           minItems: 1
           items:
             type: string
             enum: [document_capture, nfc_read, document_photo, face_verification, selfie, liveness, face_match]
+          description: >-
+            Required. What the person does, in order. `document_capture` and `nfc_read` go
+            together: scan the document and read its chip.
         requestedAttributes:
           type: array
           items:
             type: string
             enum: [dg1, dg11, dg2, selfie, chip_checks, biometrics, document_image, age_over]
           description: >-
-            What a session's result may carry; absent or empty releases the outcome only (the
-            assurance summary, no data). `age_over` releases only whether the person is `ageOver`
-            or older, derived from the chip's date of birth; it needs `nfc_read`.
+            Optional. What a session's result may carry. Default none: only the outcome.
+            `age_over` releases only whether the person is `ageOver` or older, and needs
+            `nfc_read`.
         ageOver:
           type: integer
           minimum: 1
           maximum: 120
-          description: The age, in years, `age_over` answers for; set exactly when `requestedAttributes` has `age_over`.
+          description: Optional, only with `age_over` in `requestedAttributes`. The age in years it answers for.
         attributeReasons:
           type: object
           additionalProperties:
@@ -12870,107 +14686,88 @@ components:
               type: string
               maxLength: 300
           description: >-
-            Why each requested attribute is collected, by attribute and then language (`en`,
-            `nl`): what the person reads before they start. Every attribute in `requestedAttributes`
-            other than `outcome_only` needs a reason in each language the flow's hosted page
-            offers (every supported one until its admin sets them), or the flow is refused (400
-            `invalid_input`). A flow saved before reasons existed has none.
+            Optional. Why each requested attribute is collected, by attribute and language
+            (`en`, `nl`), shown to the person before they start. Give one for every attribute
+            in `requestedAttributes`, in every language the flow's page offers, or the flow is
+            refused (400 `invalid_input`).
         selfieLocation:
           type: string
-          description: >-
-            Ignored; the wallet sets the face capture to the app, or to the browser for
-            `faceProvider` `idscan`.
+          description: Optional. Ignored.
         faceProvider:
           type: string
           enum: [regula, idscan]
+          default: regula
           description: >-
-            What verifies the face step; absent is `regula` (in the Idem app). `idscan` checks
-            liveness and matches the face against the photographed document's portrait in the
-            browser, right after the document photo, and needs the `document_photo` step.
+            Optional. What checks the face. `regula` runs in the Idem app; `idscan` runs in the
+            browser right after the document photo, and needs the `document_photo` step.
         apps:
           type: array
           items:
             type: string
             enum: [idem, yivi]
           description: >-
-            The apps a session may run in; absent allows both. A flow locked to `yivi` runs its
-            browser steps (the document photo, the face in the ID scan) and then the Yivi
-            disclosure, cannot be e-mailed, and refuses the Idem app; one locked to `idem` needs
-            a step the app runs. Asking a session in an app the flow locks out is 400
-            `invalid_input`.
+            Optional. The apps a session may run in. Default both. Only `yivi`: the flow cannot
+            be mailed. Only `idem`: the flow needs a step the Idem app runs.
         acceptedDocumentTypes:
           type: array
           items:
             type: string
           description: >-
-            Document codes accepted (the MRZ document code, such as `P`, or `drivers_license` for a Dutch
-            driving licence) or kinds (`passport`, `identity_card`, `residence_permit`); empty accepts any.
-            `eu_driving_licence`, the chip evidence's type, is refused (422 `rejected_by_provider`). Only Dutch
-            driving licences are verified: the engine holds the RDW's licence CSCAs and no other state's.
-            `personal_data` accepts the registered personal data (`pbdf.gemeente.personalData`, from
-            the BRP after a DigiD login), which only the Yivi app shares: only on a flow whose `apps`
-            is `yivi` alone. The Yivi app offers the
-            person any one of the accepted kinds and the personal data, and asks nothing else; a
-            document code other than a kind makes it offer every document. A photographed document
-            is tied to disclosed personal data by its date of birth (another is rejected,
-            `DOCUMENT_MISMATCH`) and surname (another sends the session to review), so such a flow
-            with `document_photo` checks no age. Personal data alone accepts any photographed
-            document.
+            Optional. The documents accepted: kinds (`passport`, `identity_card`,
+            `residence_permit`), MRZ document codes (such as `P`), `drivers_license` (Dutch
+            only), or `personal_data` (the BRP data the Yivi app shares, only on a flow with
+            `apps: [yivi]`). Default any document.
         acceptedIssuingCountries:
           type: array
           items:
             type: string
             pattern: '^[A-Z]{3}$'
           description: >-
-            3-letter ICAO 9303 codes (ISO 3166-1 alpha-3, or an ICAO-only code such as `EUE`
-            or `UNO`); an unknown code is refused (422 `rejected_by_provider`). A German
-            document's `D` counts as `DEU`. Empty accepts any country.
+            Optional. 3-letter ICAO codes (ISO 3166-1 alpha-3, or an ICAO code such as `EUE`).
+            Default any country. An unknown code is refused (422 `rejected_by_provider`).
         requiredChecks:
           type: array
           items:
             type: string
+          description: >-
+            Optional. The checks an approval needs, such as `nfc.passive_auth`,
+            `nfc.chip_auth`, `face.match` and `face.liveness`. Default none.
         checkThresholds:
           type: object
           additionalProperties:
             type: number
           description: >-
-            Only `face.match` takes one: the similarity from 0 to 1 the face match must reach,
-            in place of the deployment's, at the Idem app's face step (the Yivi app runs no face
-            check). Absent, the
-            deployment's applies. A flow requiring `substantial` may not set it under 0.75 (422
-            `rejected_by_provider` otherwise), and matches at 0.75 at least when it sets none,
-            whatever the deployment's.
+            Optional. Only `face.match` takes one: the similarity from 0 to 1 the face must
+            reach. Default the deployment's. At least 0.75 on a flow requiring `substantial`.
         requiredAssuranceLevel:
           type: string
           enum: [low, substantial]
+          description: Optional. The eIDAS level an approval must reach. Default none.
         bsnPolicy:
           type: string
           enum: [retrieve, mask, omit]
-          description: Absent is omit, the BSN dropped before storage.
+          default: omit
+          description: Optional. What happens to the BSN. `omit` drops it before it is stored.
         keepFacePhotos:
           type: boolean
+          default: false
           description: >-
-            Keep the face photos (the document portrait, the selfie and the sender's
-            reference photo) in the result and the stored evidence, for an organisation that must
-            keep them. Absent is false: they are dropped once the face match is done, and its
-            verdicts stay.
+            Optional. `true` keeps the face photos in the result. By default they are dropped
+            once the face match is done.
         blurBsn:
           type: boolean
-          description: Cover the BSN region of a document photo. Absent is false.
+          default: false
+          description: Optional. `true` covers the BSN on a document photo.
         retentionOverrideSeconds:
           type: integer
           minimum: 1
           maximum: 31536000
-          description: >-
-            How long the flow's finished sessions keep their data, at most a year. Set, it
-            applies in place of the organisation's data retention; absent, the organisation's
-            fixed 7 days apply.
+          description: Optional. How long finished sessions keep their data, at most a year. Default 7 days.
         sessionTtlSeconds:
           type: integer
           enum: [120, 300, 600]
-          description: >-
-            How long a session of this flow runs. Absent, the organisation's fixed 10 minutes
-            apply. Any other value is 400 `invalid_input`.
+          default: 600
+          description: Optional. How long a session of this flow runs.
         assuranceTiers:
           type: array
           items:
@@ -12978,16 +14775,24 @@ components:
             properties:
               level:
                 type: string
+                description: Required. The level this tier gives.
               minPercent:
                 type: number
+                description: Required. The score from which it applies.
             required: [level, minPercent]
+          description: Optional. Score tiers for the assurance level.
         legalBasis:
           type: string
+          description: Optional. The legal basis recorded with the flow.
         processingPurpose:
           type: string
+          description: Optional. The processing purpose recorded with the flow.
         alwaysReview:
           type: boolean
-          description: A session the checks would approve goes to `needs_review` instead; a rejection stays one.
+          default: false
+          description: >-
+            Optional. `true` sends a session the checks would approve to `needs_review`
+            instead. A rejection stays a rejection.
       required: [name, steps]
     ProofingFlow:
       description: >-
@@ -13078,12 +14883,13 @@ components:
           type: array
           items:
             type: string
-          description: The flows members may use.
+          description: Required. The flows members may send in the wallet; `[]` for none.
         defaultFlowId:
           type: string
           description: >-
-            The organisation's default flow: any active identity flow an external person can
-            be sent, whether or not it is in `flowIds`; empty for none.
+            Optional. The default flow: the one a session without `flowId` runs. Any active
+            identity flow, whether or not it is in `flowIds`. Leave it out or send `""` for
+            none.
       required: [flowIds]
     ProofingFlowHosted:
       type: object
@@ -13112,20 +14918,24 @@ components:
       properties:
         enabled:
           type: boolean
-        locales:
-          type: array
-          description: Empty or absent is every language.
-          items:
-            type: string
-            enum: [en, nl]
+          description: Required. Whether the flow may be sent as a hosted link.
         completion:
           type: string
           enum: [redirect, done]
+          description: >-
+            Required. How the page ends: `redirect` sends the person to the return page,
+            `done` always shows the page's own thank-you screen.
+        locales:
+          type: array
+          items:
+            type: string
+            enum: [en, nl]
+          description: Optional. The languages the page offers. Default every language.
         returnUrl:
           type: string
           description: >-
-            On one of the organisation's allowed redirect origins, and only with `completion:
-            redirect`. Absent or empty removes the return page.
+            Optional, only with `completion: redirect`. The return page, on one of the
+            organisation's `allowedRedirectOrigins`. Leave it out for no return page.
       required: [enabled, completion]
     ProofingDataMatches:
       type: object
@@ -13267,6 +15077,9 @@ components:
         addressMode:
           type: string
           enum: ['off', required, always_review]
+          description: >-
+            Required. Whether the flow asks for the postal address after the identity check: `off`,
+            `required`, or `always_review` (asked, and always checked by a reviewer).
       required: [addressMode]
     ProofingAddress:
       type: object
@@ -13337,6 +15150,9 @@ components:
         diplomaMode:
           type: string
           enum: ['off', required, always_review]
+          description: >-
+            Required. Whether the flow asks for DUO diploma extracts after the identity check: `off`,
+            `required`, or `always_review` (asked, and always checked by a reviewer).
       required: [diplomaMode]
     ProofingRequest:
       type: object
@@ -13980,6 +15796,30 @@ components:
           items:
             type: string
       required: [sessionTtlSeconds, dataRetentionDays, erasureHandling, legalRetention, branding, allowedRedirectOrigins]
+    ProofingApiSettings:
+      type: object
+      description: >-
+        What the organisation set once for all its flows, as its software reads it: the wallet's
+        settings without the branding.
+      properties:
+        sessionTtlSeconds:
+          type: integer
+        dataRetentionDays:
+          type: integer
+        erasureHandling:
+          type: string
+          enum: [review, automatic]
+        legalRetention:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ProofingLegalRetention'
+          description: What the law makes the organisation keep; null for none.
+        allowedRedirectOrigins:
+          type: array
+          description: Where a hosted page may send its person back to and be framed on.
+          items:
+            type: string
+      required: [sessionTtlSeconds, dataRetentionDays, erasureHandling, legalRetention, allowedRedirectOrigins]
     ProofingLegalRetention:
       type: object
       additionalProperties: false
@@ -13991,43 +15831,42 @@ components:
           type: integer
           minimum: 1
           maximum: 600
+          description: Required. How many months the data must be kept.
         reasonEn:
           type: string
           maxLength: 500
           description: >-
-            Shown to a person whose "delete my data" request it declines, or leaves sessions of, in
-            English.
+            Required. Why, in English: shown to a person whose "delete my data" request this
+            declines, or leaves sessions of.
         reasonNl:
           type: string
           maxLength: 500
-          description: The same, in Dutch.
+          description: Required. The same, in Dutch.
       required: [months, reasonEn, reasonNl]
     ProofingUpdateSettings:
       type: object
       additionalProperties: false
-      description: At least one field; an absent one is left as it is.
+      description: Send at least one field. A field you leave out stays as it is.
       minProperties: 1
       properties:
-        sessionTtlSeconds:
-          type: integer
-          deprecated: true
-          description: Refused with 400 `invalid_input`; a flow sets its own (`sessionTtlSeconds`).
-        dataRetentionDays:
-          type: integer
-          deprecated: true
-          description: Refused with 400 `invalid_input`; a flow sets its own (`retentionOverrideSeconds`).
         erasureHandling:
           type: string
           enum: [review, automatic]
+          description: Optional. How "delete my data" requests are decided once the person is proven.
         legalRetention:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/ProofingLegalRetention'
+          description: Optional. What the law makes the organisation keep. `null` removes it.
         allowedRedirectOrigins:
           type: array
           maxItems: 10
           items:
             type: string
+          description: >-
+            Optional. Replaces the list of origins a hosted page may send its person back to
+            and be framed on: each `https://host[:port]` (or `http://localhost`). An origin a
+            flow's return page is on cannot be removed (409 `redirect_origin_in_use`).
     ProofingBrandingForm:
       type: object
       properties:
@@ -14138,7 +15977,8 @@ components:
           type: array
           items:
             type: string
-            enum: [sessions:write, sessions:read, results:read, flows:read]
+            enum: [sessions:write, sessions:read, results:read, flows:read, flows:write, settings:read,
+              settings:write, webhooks:write]
         createdByName:
           type: string
           description: Who created the key; absent once that user is gone.
@@ -14206,12 +16046,16 @@ components:
         url:
           type: string
           format: uri
+          description: >-
+            Required. Where events are sent: an `https` URL that resolves to a public address.
+            A private, loopback or link-local address is never called.
         events:
           type: array
           minItems: 1
           items:
             type: string
             enum: [session.created, session.started, session.handover, session.verified, session.failed, session.review_opened, session.expired, session.cancelled, session.purged, session.diploma_added, session.address_added, session.address_reviewed, session.employment_added, session.step_reviewed]
+          description: Required. The events to send, at least one.
       required: [url, events]
     ProofingWebhookDeliveryList:
       type: array

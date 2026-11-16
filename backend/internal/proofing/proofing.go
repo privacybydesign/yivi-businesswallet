@@ -1029,6 +1029,24 @@ const (
 	attributeFaceImage = "face_image"
 )
 
+// The face checks a flow requires: the match against the document's photo,
+// and the liveness check.
+const (
+	checkFaceMatch    = "face.match"
+	checkFaceLiveness = "face.liveness"
+)
+
+// secondsPerDay converts a flow's retention in days to its seconds.
+const secondsPerDay = 24 * 60 * 60
+
+// The chip's extra data, the live selfie and the document photos, as a flow
+// requests them.
+const (
+	attributeDG11          = "dg11"
+	attributeSelfie        = "selfie"
+	attributeDocumentImage = "document_image"
+)
+
 // attributeAgeOver is the age check, which withholds the date of birth from
 // the document data next to it.
 const attributeAgeOver = "age_over"

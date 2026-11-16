@@ -233,6 +233,9 @@ func (s *Service) SaveFlowHosted(ctx context.Context, org Org, flowID string, f 
 	if err := s.refuseDataRequestFlow(ctx, org, flowID); err != nil {
 		return FlowHosted{}, err
 	}
+	if len(f.Locales) == 0 {
+		return FlowHosted{}, fmt.Errorf("%w: the page offers at least one language", ErrInvalidInput)
+	}
 	if err := hostedOffersReasons(flow, f); err != nil {
 		return FlowHosted{}, err
 	}
