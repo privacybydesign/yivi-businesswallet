@@ -1,7 +1,7 @@
 # Multi-stage build for the PostGuard sidecar.
 # Stage 1 compiles TypeScript to dist/; stage 2 ships only prod deps + dist.
 
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -9,7 +9,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-FROM node:22-slim AS runtime
+FROM node:25-slim AS runtime
 ENV NODE_ENV=production
 # Pull in the security fixes Debian has published since the base image was
 # built. The Grype scan in delivery.yml gates the image on fixable critical
