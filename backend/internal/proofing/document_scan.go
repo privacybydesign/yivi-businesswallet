@@ -135,6 +135,50 @@ func (s *Service) HostedFinishDocumentScan(ctx context.Context, token, transacti
 	return s.finishDocumentScan(ctx, req, transactionID, resultID)
 }
 
+// completedScan is the scan service's result of a finished scan: a scan that
+// did not complete, or has no document image, is ErrDocumentScanFailed, and a
+// result the service refuses to hand over is ErrDocumentScanUnavailable.
+func (s *Service) completedScan(ctx context.Context, req Request, transactionID, resultID string) (idscan.Result, error) {
+	res, err := s.documentScanner.Result(ctx, transactionID, resultID)
+	if errors.Is(err, idscan.ErrNoDocumentImage) {
+		return idscan.Result{}, fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)
+	}
+	var cmErr *idscan.APIError
+	if errors.As(err, &cmErr) {
+		slog.ErrorContext(ctx, "identity proofing: the scan service refused a scan's result",
+			slog.String("request_id", req.ID.String()), slog.String("transaction_id", transactionID),
+			slog.String("result_id", resultID), slog.Int("idscan_status", cmErr.Status), slog.String("idscan_message", cmErr.Message))
+		return idscan.Result{}, fmt.Errorf("%w: %w", ErrDocumentScanUnavailable, cmErr)
+	}
+	if err != nil {
+		return idscan.Result{}, fmt.Errorf("proofing: document scan result request %s: %w", req.ID, err)
+	}
+	if !res.Completed {
+		return idscan.Result{}, ErrDocumentScanFailed
+	}
+	return res, nil
+}
+
+// documentPhotoOf is a completed scan res as the engine takes it for flow f.
+func documentPhotoOf(res idscan.Result, f proofingprovider.Flow) proofingprovider.DocumentPhoto {
+	photo := proofingprovider.DocumentPhoto{
+		Front: providerImage(res.Front), BSNRedacted: redactsDocumentBSN(f), Check: documentCheck(res, f),
+	}
+	if res.Back != nil {
+		back := providerImage(*res.Back)
+		photo.Back = &back
+	}
+	if res.Face != nil {
+		// A completed scan's liveness check passed: a failed one fails the scan.
+		photo.Face = &proofingprovider.FaceCheck{LivenessPassed: true, MatchScore: res.Face.MatchScore}
+		if res.Face.Selfie != nil {
+			selfie := providerImage(*res.Face.Selfie)
+			photo.Face.Selfie = &selfie
+		}
+	}
+	return photo
+}
+
 func (s *Service) finishDocumentScan(ctx context.Context, req Request, transactionID, resultID string) error {
 	sess, err := s.documentScanSession(req)
 	if err != nil {
@@ -153,43 +197,15 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 		s.reconcile(ctx, requestTenant(req), req)
 		return nil
 	}
-	res, err := s.documentScanner.Result(ctx, transactionID, resultID)
-	if errors.Is(err, idscan.ErrNoDocumentImage) {
-		return fmt.Errorf("%w: %w", ErrDocumentScanFailed, err)
-	}
-	var cmErr *idscan.APIError
-	if errors.As(err, &cmErr) {
-		slog.ErrorContext(ctx, "identity proofing: the scan service refused a scan's result",
-			slog.String("request_id", req.ID.String()), slog.String("transaction_id", transactionID),
-			slog.String("result_id", resultID), slog.Int("idscan_status", cmErr.Status), slog.String("idscan_message", cmErr.Message))
-		return fmt.Errorf("%w: %w", ErrDocumentScanUnavailable, cmErr)
-	}
+	res, err := s.completedScan(ctx, req, transactionID, resultID)
 	if err != nil {
-		return fmt.Errorf("proofing: document scan result request %s: %w", req.ID, err)
-	}
-	if !res.Completed {
-		return ErrDocumentScanFailed
+		return err
 	}
 	f, err := s.sessionFlow(ctx, req)
 	if err != nil {
 		return err
 	}
-	photo := proofingprovider.DocumentPhoto{
-		Front: providerImage(res.Front), BSNRedacted: redactsDocumentBSN(f), Check: documentCheck(res, f),
-	}
-	if res.Back != nil {
-		back := providerImage(*res.Back)
-		photo.Back = &back
-	}
-	if res.Face != nil {
-		// A completed scan's liveness check passed: a failed one fails the scan.
-		photo.Face = &proofingprovider.FaceCheck{LivenessPassed: true, MatchScore: res.Face.MatchScore}
-		if res.Face.Selfie != nil {
-			selfie := providerImage(*res.Face.Selfie)
-			photo.Face.Selfie = &selfie
-		}
-	}
-	if err := s.ips.SubmitDocumentPhoto(ctx, requestTenant(req), sess.ID, sess.Token, photo); err != nil {
+	if err := s.ips.SubmitDocumentPhoto(ctx, requestTenant(req), sess.ID, sess.Token, documentPhotoOf(res, f)); err != nil {
 		return documentScanStepError(err)
 	}
 	if err := s.requests.MarkDocumentScanned(ctx, req, sess.ID, transactionID); err != nil {

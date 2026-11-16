@@ -93,24 +93,37 @@ func TestProofingAPIRoundTripWithWebhook(t *testing.T) {
 	if n, err := deliverer.DeliverDue(context.Background()); err != nil || n != 2 {
 		t.Fatalf("DeliverDue = %d, %v; want session.created and session.verified", n, err)
 	}
+	got := receiveSignedHooks(t, hooks, 2, secret)
+	if created := got["session.created"]; strings.Contains(string(created.body), `"result"`) {
+		t.Errorf("session.created carries a result: %s", created.body)
+	}
+	assertVerifiedHookMatchesAPI(t, got["session.verified"], session.ID, apiResult)
+}
+
+// receiveSignedHooks takes n deliveries off hooks by event, each signed with
+// secret.
+func receiveSignedHooks(t *testing.T, hooks <-chan receivedHook, n int, secret string) map[string]receivedHook {
+	t.Helper()
 	got := map[string]receivedHook{}
-	for range 2 {
+	for range n {
 		hook := <-hooks
 		got[hook.event] = hook
 		if !validHookSignature(hook.signature, hook.body, secret) {
 			t.Errorf("%s: signature %q does not verify under the endpoint's secret", hook.event, hook.signature)
 		}
 	}
-	if created := got["session.created"]; strings.Contains(string(created.body), `"result"`) {
-		t.Errorf("session.created carries a result: %s", created.body)
-	}
+	return got
+}
 
-	verified := got["session.verified"]
+// assertVerifiedHookMatchesAPI checks that session.verified carries the
+// approved session under its delivery id, with the result GET /result gave.
+func assertVerifiedHookMatchesAPI(t *testing.T, verified receivedHook, sessionID string, apiResult []byte) {
+	t.Helper()
 	var body verifiedHookBody
 	if err := json.Unmarshal(verified.body, &body); err != nil {
 		t.Fatalf("session.verified body: %v", err)
 	}
-	if body.ID != verified.delivery || body.Data.SessionID != session.ID || body.Data.Status != "approved" {
+	if body.ID != verified.delivery || body.Data.SessionID != sessionID || body.Data.Status != "approved" {
 		t.Errorf("session.verified = %+v; want the approved session under its delivery id", body)
 	}
 	var fromHook, fromAPI map[string]any

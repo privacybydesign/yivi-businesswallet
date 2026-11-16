@@ -89,6 +89,25 @@ func (f fixture) sendOnScreen(t *testing.T, flowID string, method proofingprovid
 	return sent
 }
 
+// assertScanUnavailable checks that the scan service failing to hand over a
+// result is answered as 502 document_scan_unavailable naming what it said,
+// and that nothing reaches the engine.
+func assertScanUnavailable(t *testing.T, f fixture, scanner *fakeScanner, id uuid.UUID) {
+	t.Helper()
+	scanner.resultErr = &idscan.APIError{Status: http.StatusInternalServerError, Message: "Internal Server Error"}
+	err := f.svc.FinishDocumentScan(context.Background(), testOrg.ID, id, nil, "trx-1", "res-1")
+	var answer *respond.APIError
+	if !errors.Is(err, ErrDocumentScanUnavailable) || !errors.As(mapError(err), &answer) ||
+		answer.Status != http.StatusBadGateway || answer.Code != "document_scan_unavailable" ||
+		!strings.Contains(answer.Message, "500: Internal Server Error") {
+		t.Errorf("the scan service's 500: %v, answered %+v; want 502 document_scan_unavailable naming it", err, answer)
+	}
+	if len(f.ips.documentPhotos) != 0 {
+		t.Fatal("a scan without its result reached the engine")
+	}
+	scanner.resultErr = nil
+}
+
 // The on-screen page photographs the document through the scan service: the
 // photos of the scan it started go to the engine as document_photo, with the
 // BSN covered by the service, once.
@@ -120,20 +139,7 @@ func TestDocumentScanOnScreen(t *testing.T) {
 		t.Fatal("an unfinished scan reached the engine")
 	}
 
-	// The scan service failing to hand over the result says what it
-	// answered, and nothing reaches the engine.
-	scanner.resultErr = &idscan.APIError{Status: http.StatusInternalServerError, Message: "Internal Server Error"}
-	err = f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1")
-	var answer *respond.APIError
-	if !errors.Is(err, ErrDocumentScanUnavailable) || !errors.As(mapError(err), &answer) ||
-		answer.Status != http.StatusBadGateway || answer.Code != "document_scan_unavailable" ||
-		!strings.Contains(answer.Message, "500: Internal Server Error") {
-		t.Errorf("the scan service's 500: %v, answered %+v; want 502 document_scan_unavailable naming it", err, answer)
-	}
-	if len(f.ips.documentPhotos) != 0 {
-		t.Fatal("a scan without its result reached the engine")
-	}
-	scanner.resultErr = nil
+	assertScanUnavailable(t, f, scanner, id)
 
 	scanner.result = scannedResult
 	if err := f.svc.FinishDocumentScan(ctx, testOrg.ID, id, nil, "trx-1", "res-1"); err != nil {

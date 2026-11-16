@@ -1175,6 +1175,52 @@ func (fakeResults) RequestDiplomas(context.Context, []uuid.UUID) (map[uuid.UUID]
 	return map[uuid.UUID][]Diploma{}, nil
 }
 
+// sentIdentity, sentImage, sentResult, sentData and sentVerified are a
+// session.verified body as its receiver reads it.
+type sentIdentity struct {
+	FamilyName string `json:"familyName"`
+	BSN        string `json:"bsn"`
+}
+
+type sentImage struct {
+	Data string `json:"data"`
+}
+
+type sentResult struct {
+	Identity      sentIdentity `json:"identity"`
+	DocumentImage sentImage    `json:"documentImage"`
+}
+
+type sentData struct {
+	SessionID string     `json:"sessionId"`
+	Result    sentResult `json:"result"`
+}
+
+type sentVerified struct {
+	Data sentData `json:"data"`
+}
+
+// assertSentResult checks that body carries session sessionID's result, with
+// its BSN and document image, and that the outbox keeps none of it.
+func assertSentResult(t *testing.T, pool *pgxpool.Pool, body []byte, sessionID string) {
+	t.Helper()
+	var sent sentVerified
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if r := sent.Data.Result; sent.Data.SessionID != sessionID || r.Identity.FamilyName != "Jansen" ||
+		r.Identity.BSN != "111222333" || r.DocumentImage.Data != "ZnJvbnQ=" {
+		t.Errorf("sent = %+v; want the session's result with its BSN and document image", sent.Data)
+	}
+	var stored string
+	if err := pool.QueryRow(context.Background(), `SELECT payload::text FROM identity_proofing_webhook_deliveries`).Scan(&stored); err != nil {
+		t.Fatalf("stored payload: %v", err)
+	}
+	if strings.Contains(stored, "Jansen") || strings.Contains(stored, webhookResultKey) {
+		t.Errorf("the outbox keeps the result: %s", stored)
+	}
+}
+
 // session.verified carries the session's result, read as it is sent: the
 // outbox keeps none of it, a read that fails is retried, and a session erased
 // meanwhile goes out without one.
@@ -1228,32 +1274,7 @@ func TestWebhookCarriesResult(t *testing.T) {
 	if n, err := deliverer.DeliverDue(ctx); err != nil || n != 1 {
 		t.Fatalf("DeliverDue = %d, %v", n, err)
 	}
-	var sent struct {
-		Data struct {
-			SessionID string `json:"sessionId"`
-			Result    struct {
-				Identity struct {
-					FamilyName string `json:"familyName"`
-					BSN        string `json:"bsn"`
-				} `json:"identity"`
-				DocumentImage struct{ Data string } `json:"documentImage"`
-			} `json:"result"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(<-got, &sent); err != nil {
-		t.Fatalf("body: %v", err)
-	}
-	if r := sent.Data.Result; sent.Data.SessionID != publicSessionID(approved.ID) || r.Identity.FamilyName != "Jansen" ||
-		r.Identity.BSN != "111222333" || r.DocumentImage.Data != "ZnJvbnQ=" {
-		t.Errorf("sent = %+v; want the session's result with its BSN and document image", sent.Data)
-	}
-	var stored string
-	if err := pool.QueryRow(ctx, `SELECT payload::text FROM identity_proofing_webhook_deliveries`).Scan(&stored); err != nil {
-		t.Fatalf("stored payload: %v", err)
-	}
-	if strings.Contains(stored, "Jansen") || strings.Contains(stored, webhookResultKey) {
-		t.Errorf("the outbox keeps the result: %s", stored)
-	}
+	assertSentResult(t, pool, <-got, publicSessionID(approved.ID))
 
 	// The same event again, the session erased meanwhile.
 	if _, err := pool.Exec(ctx, `UPDATE identity_proofing_webhook_deliveries
