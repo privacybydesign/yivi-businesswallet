@@ -14659,7 +14659,7 @@ components:
           minItems: 1
           items:
             type: string
-            enum: [document_capture, nfc_read, document_photo, face_verification, selfie, liveness, face_match]
+            enum: [document_capture, nfc_read, document_photo, face_verification]
           description: >-
             Required. What the person does, in order. `document_capture` and `nfc_read` go
             together: scan the document and read its chip.
@@ -14676,7 +14676,7 @@ components:
           type: integer
           minimum: 1
           maximum: 120
-          description: Optional, only with `age_over` in `requestedAttributes`. The age in years it answers for.
+          description: Optional, only with `age_over` in `requestedAttributes`. The age in years it answers for, one of 12, 16, 18, 21 or 65 (a flow keeps an age it already has).
         attributeReasons:
           type: object
           additionalProperties:
@@ -14713,9 +14713,9 @@ components:
             type: string
           description: >-
             Optional. The documents accepted: kinds (`passport`, `identity_card`,
-            `residence_permit`), MRZ document codes (such as `P`), `drivers_license` (Dutch
-            only), or `personal_data` (the BRP data the Yivi app shares, only on a flow with
-            `apps: [yivi]`). Default any document.
+            `residence_permit`), `drivers_license` (Dutch only), or `personal_data` (the BRP data
+            the Yivi app shares, only on a flow with `apps: [yivi]`). Default any document; all
+            four kinds alone is stored as any document.
         acceptedIssuingCountries:
           type: array
           items:
@@ -14759,9 +14759,10 @@ components:
           description: Optional. `true` covers the BSN on a document photo.
         retentionOverrideSeconds:
           type: integer
-          minimum: 1
-          maximum: 31536000
-          description: Optional. How long finished sessions keep their data, at most a year. Default 7 days.
+          minimum: 0
+          description: >-
+            Optional. How long finished sessions keep their data, in seconds: 86400, 2592000 or
+            7776000 (1, 30 or 90 days), or 0 to follow the organisation's retention. Default 0.
         sessionTtlSeconds:
           type: integer
           enum: [120, 300, 600]
@@ -14779,13 +14780,13 @@ components:
                 type: number
                 description: Required. The score from which it applies.
             required: [level, minPercent]
-          description: Optional. Score tiers for the assurance level.
+          description: Optional. Refused (400 `invalid_input`) unless it equals the version's; leave it out to keep the version's.
         legalBasis:
           type: string
-          description: Optional. The legal basis recorded with the flow.
+          description: Optional. Refused (400 `invalid_input`) unless it equals the version's; leave it out to keep the version's.
         processingPurpose:
           type: string
-          description: Optional. The processing purpose recorded with the flow.
+          description: Optional. Refused (400 `invalid_input`) unless it equals the version's; leave it out to keep the version's.
         alwaysReview:
           type: boolean
           default: false
