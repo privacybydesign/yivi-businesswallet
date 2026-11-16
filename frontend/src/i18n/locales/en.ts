@@ -550,6 +550,8 @@ export const en = {
         "Your organisation has no default flow. Pick a flow, or set a default on the Flows page.",
       proofingPaused: "Identity proofing is paused for this organisation.",
       apiKeyNotFound: "That API token no longer exists.",
+      apiKeyNotRevealable:
+        "This token was made before tokens could be shown again. Create a new one.",
       sessionNotFound: "That session no longer exists.",
       notUnderReview:
         "This session is no longer waiting for review: someone may have decided it already.",

@@ -149,6 +149,11 @@ export function ApiTokensSection({
             ))}
           </Table.Body>
         </Table>
+        {reveal.isError && (
+          <p role="alert" className={`${ERROR} border-line border-t px-5 py-3`}>
+            {proofingErrorMessage(reveal.error, t)}
+          </p>
+        )}
       </Card>
       {creating && (
         <NewKeyModal

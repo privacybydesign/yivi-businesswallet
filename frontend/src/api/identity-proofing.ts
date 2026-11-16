@@ -1178,10 +1178,10 @@ export function getProofingApiKeySecret(
   keyId: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  return request(
-    `${base(slug)}/api-keys/${encodeURIComponent(keyId)}/secret`,
-    { schema: z.object({ secret: z.string() }), signal },
-  ).then((body) => body.secret);
+  return request(`${base(slug)}/api-keys/${encodeURIComponent(keyId)}/secret`, {
+    schema: z.object({ secret: z.string() }),
+    signal,
+  }).then((body) => body.secret);
 }
 
 export function revokeProofingApiKey(

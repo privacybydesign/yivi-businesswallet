@@ -1886,6 +1886,7 @@ const PROOFING_ERROR_KEYS = {
   no_default_flow: "identityProofing.errors.noDefaultFlow",
   proofing_paused: "identityProofing.errors.proofingPaused",
   api_key_not_found: "identityProofing.errors.apiKeyNotFound",
+  api_key_not_revealable: "identityProofing.errors.apiKeyNotRevealable",
   session_not_found: "identityProofing.errors.sessionNotFound",
   not_under_review: "identityProofing.errors.notUnderReview",
   address_not_under_review: "identityProofing.errors.addressNotUnderReview",

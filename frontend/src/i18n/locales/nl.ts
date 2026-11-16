@@ -572,6 +572,8 @@ export const nl: Translation<typeof en> = {
       proofingPaused:
         "Identiteitsverificatie is gepauzeerd voor deze organisatie.",
       apiKeyNotFound: "Dat API-token bestaat niet meer.",
+      apiKeyNotRevealable:
+        "Dit token is gemaakt voordat tokens opnieuw getoond konden worden. Maak een nieuw token aan.",
       sessionNotFound: "Die sessie bestaat niet meer.",
       notUnderReview:
         "Deze sessie wacht niet meer op beoordeling: misschien heeft iemand haar al beoordeeld.",
@@ -1694,7 +1696,8 @@ export const nl: Translation<typeof en> = {
       createdTitle: "Kopieer je token nu",
       createdHint:
         "Bewaar het token “{{name}}” veilig, bijvoorbeeld in de geheimenopslag van je backend.",
-      createdNote: "Je kunt het later opnieuw tonen met Tonen, naast het token.",
+      createdNote:
+        "Je kunt het later opnieuw tonen met Tonen, naast het token.",
     },
     webhooks: {
       endpoint: "Webhook-endpoint",
