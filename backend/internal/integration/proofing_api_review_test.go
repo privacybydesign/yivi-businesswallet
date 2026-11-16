@@ -21,13 +21,17 @@ type apiReviewResp struct {
 		DecidedBy string `json:"decidedBy"`
 	} `json:"decisions"`
 	Result *struct {
-		Identity *struct {
-			FamilyName string `json:"familyName"`
-		} `json:"identity"`
-		Photo *struct {
-			Data string `json:"data"`
-		} `json:"photo"`
+		Identity *apiReviewIdentity `json:"identity"`
+		Photo    *apiReviewPhoto    `json:"photo"`
 	} `json:"result"`
+}
+
+type apiReviewIdentity struct {
+	FamilyName string `json:"familyName"`
+}
+
+type apiReviewPhoto struct {
+	Data string `json:"data"`
 }
 
 // apiErrorCode is the code of an error answer.
@@ -161,9 +165,7 @@ func TestProofingReviewLinkFlow(t *testing.T) {
 			} `json:"decisions"`
 		} `json:"request"`
 		Result *struct {
-			Identity *struct {
-				FamilyName string `json:"familyName"`
-			} `json:"identity"`
+			Identity *apiReviewIdentity `json:"identity"`
 		} `json:"result"`
 	}
 	opened := decodeJSON[page](t, env.do(http.MethodGet, "/api/v1/review/"+token, nil))

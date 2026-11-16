@@ -76,7 +76,7 @@ func TestAPIKeyScopesUpgradeExistingKeys(t *testing.T) {
 	}
 	want := []string{
 		"sessions:write", "sessions:read", "results:read", "flows:read", "flows:write",
-		"settings:read", "settings:write", "webhooks:write",
+		"settings:read", "settings:write", "webhooks:write", "reviews:read", "reviews:write",
 	}
 	if !slices.Equal(scopes, want) {
 		t.Errorf("scopes = %v, want %v", scopes, want)
