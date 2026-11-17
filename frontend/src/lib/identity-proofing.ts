@@ -1920,6 +1920,7 @@ const PROOFING_ERROR_KEYS = {
   employment_closed: "identityProofing.errors.employmentClosed",
   employment_not_asked: "identityProofing.errors.employmentNotAsked",
   no_employment_checker: "identityProofing.errors.noEmploymentChecker",
+  no_diploma_checker: "identityProofing.errors.noDiplomaChecker",
   seal_check_unavailable: "identityProofing.errors.sealCheckUnavailable",
   seal_unchecked: "identityProofing.errors.sealUnchecked",
   flow_no_identity: "identityProofing.errors.flowNoIdentity",

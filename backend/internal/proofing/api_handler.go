@@ -440,12 +440,21 @@ type apiMethodResponse struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
+// apiStartMethods are the methods an integrator starts a session in. Pending
+// is the hosted page's alone: the API has no call to choose the app after it.
+var apiStartMethods = []proofingprovider.Method{
+	proofingprovider.MethodIdem, proofingprovider.MethodYivi, proofingprovider.MethodBrowser,
+}
+
 func (h *Handler) apiStartMethod(w http.ResponseWriter, r *http.Request) error {
 	id, err := apiSessionID(r)
 	if err != nil {
 		return err
 	}
 	method := proofingprovider.Method(r.PathValue("method"))
+	if !slices.Contains(apiStartMethods, method) {
+		return &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "method must be idem_app, yivi_app or browser"}
+	}
 	caller := callerFromContext(r.Context())
 	started, err := h.service.StartHeadless(r.Context(), caller.Org.ID, id, method)
 	if err != nil {

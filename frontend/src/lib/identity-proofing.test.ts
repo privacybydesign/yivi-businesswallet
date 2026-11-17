@@ -1555,6 +1555,7 @@ describe("proofingErrorMessage", () => {
     [409, "employment_closed", "employmentClosed"],
     [409, "employment_not_asked", "employmentNotAsked"],
     [409, "no_employment_checker", "noEmploymentChecker"],
+    [409, "no_diploma_checker", "noDiplomaChecker"],
     [503, "seal_check_unavailable", "sealCheckUnavailable"],
   ] as const)("maps %i %s to its own copy", (status, code, key) => {
     const copy = t(`identityProofing.errors.${key}`);

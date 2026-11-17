@@ -610,6 +610,8 @@ export const en = {
       employmentNotAsked: "This check does not ask for a Verzekeringsbericht.",
       noEmploymentChecker:
         "This server checks no Verzekeringsbericht. Ask your administrator to set EMPLOYMENT_VALIDATOR_PROVIDER.",
+      noDiplomaChecker:
+        "This server checks no diplomas. Ask your administrator to set DIPLOMA_VALIDATOR_PROVIDER.",
       flowNoIdentity:
         "A data request flow must read the name and date of birth: the person's sessions are found by them.",
       dataFlowForMember:

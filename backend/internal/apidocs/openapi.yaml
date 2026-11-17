@@ -7793,7 +7793,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The step's item waits for no decision (`not_under_review`).
+          description: The step's item waits for no decision (`not_under_review`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -7971,7 +7971,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the request was cancelled or erased (`session_over`).
+          description: The request asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), the request was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`).
         '413':
           description: An extract or the upload is too large (`too_large`).
         '503':
@@ -8163,7 +8163,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -9437,7 +9437,8 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >-
-            The step does not wait for a decision (`not_under_review`).
+            The step does not wait for a decision (`not_under_review`), or the deployment
+            checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -11826,7 +11827,7 @@ paths:
         '429':
           $ref: '#/components/responses/HostedTooManyRequests'
         '409':
-          description: The session asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), or the link was cancelled or erased (`session_over`).
+          description: The session asks for no diplomas (`diplomas_not_asked`), the upload window is closed (`diplomas_closed`), the link was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`).
           content:
             application/json:
               schema:
@@ -12001,7 +12002,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no Verzekeringsbericht (`no_employment_checker`).
+          description: The session asks for no document (`documents_not_asked`), the upload window is closed (`diplomas_closed`, `employment_closed`), the session was cancelled or erased (`session_over`), or the deployment checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
@@ -13204,7 +13205,7 @@ paths:
         '409':
           description: >-
             The step does not wait for a decision (`not_under_review`), or the deployment
-            checks no Verzekeringsbericht (`no_employment_checker`).
+            checks no diplomas (`no_diploma_checker`) or no Verzekeringsbericht (`no_employment_checker`).
           content:
             application/json:
               schema:
