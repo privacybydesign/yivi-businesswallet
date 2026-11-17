@@ -12,6 +12,7 @@ import type {
 } from "../api/attestations";
 import { resolveSubjectSource } from "../api/attestations";
 import {
+  useAttestationRulebooksQuery,
   useIssueAttestationMutation,
   useIssuedAttestationQuery,
 } from "../api/attestations.queries";
@@ -20,6 +21,7 @@ import { useOrganizationMembersQuery } from "../api/organization.queries";
 import { fullName } from "../lib/name";
 import { Button, Icon, Modal, Outcome, Select } from "../ui";
 import { apiErrorCode, control } from "../lib/attestation-form";
+import { claimSummary, formatClaims, parseClaims } from "../lib/rulebook-claims";
 import { Field } from "./attestations-fields";
 
 const QR_SIZE = 220;
@@ -102,6 +104,9 @@ function inlineError(error: Error, t: TFunction): string {
   if (code === "missing_attribute") {
     return t("attestations.wizard.missingAttribute");
   }
+  if (code === "invalid_claims") {
+    return t("attestations.wizard.invalidClaims", { message: error.message });
+  }
   return error.message;
 }
 
@@ -148,11 +153,21 @@ export function AttestationIssueWizard({
   const [result, setResult] = useState<IssueResult | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [attempted, setAttempted] = useState(false);
+  // JSON claims for a rulebook template; null until prefilled from its sample.
+  const [claimsText, setClaimsText] = useState<string | null>(null);
 
   const template = useMemo(
     () => templates.find((tpl) => tpl.id === templateId),
     [templates, templateId],
   );
+  const rulebookId = template?.rulebook;
+  const rulebooks = useAttestationRulebooksQuery(slug, rulebookId !== undefined);
+  const rulebookSample = rulebooks.data?.find(
+    (rulebook) => rulebook.id === rulebookId,
+  )?.sample;
+  const claimsDraft =
+    claimsText ?? (rulebookSample ? formatClaims(rulebookSample) : "");
+  const parsedClaims = parseClaims(claimsDraft);
 
   const memberEntries = (members.data?.entries ?? []).filter(
     (entry) => entry.userId !== null,
@@ -203,6 +218,7 @@ export function AttestationIssueWizard({
     setTemplateId(id);
     const picked = templates.find((tpl) => tpl.id === id);
     setValues(picked ? defaultsFor(picked) : {});
+    setClaimsText(null);
   }
 
   function selectMember(userId: string): void {
@@ -264,9 +280,16 @@ export function AttestationIssueWizard({
     if (!template || issue.isPending) {
       return;
     }
-    const attributes: Record<string, string> = {};
-    for (const attribute of template.attributes) {
-      attributes[attribute.key] = values[attribute.key] ?? "";
+    let attributes: Record<string, unknown> = {};
+    if (rulebookId !== undefined) {
+      if (!parsedClaims.ok) {
+        return;
+      }
+      attributes = parsedClaims.claims;
+    } else {
+      for (const attribute of template.attributes) {
+        attributes[attribute.key] = values[attribute.key] ?? "";
+      }
     }
     const recipient: IssueAttestationInput["recipient"] = isOrganization
       ? { kind: RECIPIENT_ORGANIZATION, ref: recipientRef }
@@ -514,7 +537,44 @@ export function AttestationIssueWizard({
         </div>
       )}
 
-      {phase === "attributes" && template && (
+      {phase === "attributes" && template && rulebookId !== undefined && (
+        <div className="flex flex-col gap-2">
+          <p className="text-ink-soft text-[13.5px]">
+            {t("attestations.wizard.rulebookClaimsIntro")}
+          </p>
+          <Field
+            id="wizard-rulebook-claims"
+            label={t("attestations.wizard.rulebookClaimsLabel")}
+            required
+            error={
+              attempted && !parsedClaims.ok
+                ? t(`attestations.wizard.claims.${parsedClaims.reason}`)
+                : undefined
+            }
+          >
+            <textarea
+              id="wizard-rulebook-claims"
+              className={`${control(attempted && !parsedClaims.ok)} min-h-[320px] py-2 font-mono text-[12.5px]`}
+              spellCheck={false}
+              value={claimsDraft}
+              onChange={(event) => setClaimsText(event.target.value)}
+            />
+          </Field>
+          {rulebookSample && (
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setClaimsText(formatClaims(rulebookSample))}
+              >
+                {t("attestations.wizard.rulebookClaimsReset")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {phase === "attributes" && template && rulebookId === undefined && (
         <div className="flex flex-col gap-3">
           {template.attributes.length === 0 ? (
             <p className="text-ink-soft text-[13.5px]">
@@ -578,11 +638,17 @@ export function AttestationIssueWizard({
                 key={attribute.key}
                 className="flex justify-between gap-4 text-[13px]"
               >
-                <span className="text-ink-soft">
+                <span className="text-ink-soft shrink-0">
                   {attribute.label || attribute.key}
                 </span>
-                <span className="text-ink font-mono">
-                  {values[attribute.key] || "—"}
+                <span className="text-ink min-w-0 truncate font-mono">
+                  {rulebookId !== undefined
+                    ? claimSummary(
+                        parsedClaims.ok
+                          ? parsedClaims.claims[attribute.key]
+                          : undefined,
+                      )
+                    : values[attribute.key] || "—"}
                 </span>
               </div>
             ))}
@@ -725,6 +791,14 @@ export function AttestationIssueWizard({
       if (recipientValid) {
         setAttempted(false);
         setPhase("attributes");
+      }
+      return;
+    }
+    if (phase === "attributes" && template && rulebookId !== undefined) {
+      setAttempted(true);
+      if (parsedClaims.ok) {
+        setAttempted(false);
+        setPhase("review");
       }
       return;
     }

@@ -235,6 +235,10 @@ func (e *Engine) Claims(ctx context.Context, orgID uuid.UUID, ref, vct, lang str
 	if err != nil {
 		return HeldCredential{}, err
 	}
+	nested := nestedClaimLabels(batch.CredentialMetadata, lang)
+	for i := range attributes {
+		attributes[i].NestedLabels = nested[attributes[i].Key]
+	}
 	name, logoURI := credentialDisplay(batch.CredentialMetadata, lang)
 	// The logo is the credential type's own image, not the issuer's. An issuer may
 	// have added it to newer batches only, so when this credential's own batch
@@ -473,7 +477,7 @@ func (e *Engine) batchByUniqueVCT(ctx context.Context, orgID uuid.UUID, vct stri
 // claimLabels extracts, from a credential's stored issuer metadata, a map of
 // top-level payload key → display label and the metadata's claim order. It handles
 // single-segment claim paths (the flat top-level attributes the detail view shows);
-// nested-path claims are skipped (their values render as JSON under the parent).
+// nestedClaimLabels handles the longer ones.
 // Returns empty results when meta is nil (the credential carried no metadata).
 // Labels are resolved in the requested language (see pickLocaleName).
 func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]string, []string) {
@@ -502,6 +506,47 @@ func claimLabels(meta *models.CredentialMetadata, lang string) (map[string]strin
 		labels[key] = pickLocaleName(names, lang)
 	}
 	return labels, order
+}
+
+// nestedClaimLabels maps each top-level key to the labels of the claims below it,
+// keyed by the rest of the path joined with "." and "[]" for an array element.
+func nestedClaimLabels(meta *models.CredentialMetadata, lang string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	if meta == nil {
+		return out
+	}
+	for _, claim := range meta.Claims {
+		var path []any
+		if err := json.Unmarshal(claim.Path, &path); err != nil || len(path) < 2 {
+			continue
+		}
+		key, ok := path[0].(string)
+		if !ok || key == "" {
+			continue
+		}
+		segments := make([]string, 0, len(path)-1)
+		for _, seg := range path[1:] {
+			switch v := seg.(type) {
+			case nil, float64:
+				segments = append(segments, "[]")
+			case string:
+				segments = append(segments, v)
+			}
+		}
+		names := make([]localeName, len(claim.Display))
+		for i, d := range claim.Display {
+			names[i] = localeName{name: d.Name, locale: d.Locale}
+		}
+		label := pickLocaleName(names, lang)
+		if label == "" {
+			continue
+		}
+		if out[key] == nil {
+			out[key] = map[string]string{}
+		}
+		out[key][strings.Join(segments, ".")] = label
+	}
+	return out
 }
 
 // issuerDisplayName resolves a credential's issuer metadata display name in the

@@ -29,7 +29,7 @@ func scanIssued(row rowScanner) (Issued, error) {
 	); err != nil {
 		return Issued{}, err
 	}
-	attrs, err := unmarshalStringMap(attrsRaw)
+	attrs, err := unmarshalValueMap(attrsRaw)
 	if err != nil {
 		return Issued{}, err
 	}

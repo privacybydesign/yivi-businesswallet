@@ -172,15 +172,13 @@ function OnboardingAttestationsCard({
   const configured = onboarding.data ?? [];
   const configuredIds = configured.map((a) => a.templateId);
   const configuredSet = new Set(configuredIds);
-  const available = (templates.data ?? []).filter(
+  // A rulebook template needs a full rulebook payload, which onboarding cannot fill.
+  const onboardable = (templates.data ?? []).filter(
     (tmpl) =>
-      tmpl.subjectType === "natural_person" && !configuredSet.has(tmpl.id),
+      tmpl.subjectType === "natural_person" && tmpl.rulebook === undefined,
   );
-  const hasPersonTemplates =
-    configured.length > 0 ||
-    (templates.data ?? []).some(
-      (tmpl) => tmpl.subjectType === "natural_person",
-    );
+  const available = onboardable.filter((tmpl) => !configuredSet.has(tmpl.id));
+  const hasPersonTemplates = configured.length > 0 || onboardable.length > 0;
 
   const add = (templateId: string): void => {
     if (templateId === "") {

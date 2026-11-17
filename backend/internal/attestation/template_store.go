@@ -16,7 +16,7 @@ import (
 // attestations, so the Templates tab renders from a single query.
 const templateSelect = `SELECT t.id, t.organization_id, t.schema_id, t.name,
 		t.default_attributes, t.attribute_sources, t.validity_seconds, t.key_material_id, t.status, t.created_at, t.updated_at,
-		s.vct, s.display_name, s.subject_type, s.attributes, s.qualified,
+		s.vct, s.display_name, s.subject_type, s.attributes, s.qualified, COALESCE(s.rulebook, ''),
 		COUNT(ia.id) AS issued_count
 	FROM attestation_templates t
 	JOIN attestation_schemas s ON s.id = t.schema_id
@@ -38,7 +38,7 @@ func scanTemplate(row rowScanner) (Template, error) {
 	if err := row.Scan(
 		&t.ID, &t.OrganizationID, &t.SchemaID, &t.Name,
 		&defaultAttrsRaw, &sourcesRaw, &validitySeconds, &keyMaterialID, &t.Status, &t.CreatedAt, &t.UpdatedAt,
-		&t.VCT, &schemaDisplay, &t.SubjectType, &schemaAttrsRaw, &t.Qualified,
+		&t.VCT, &schemaDisplay, &t.SubjectType, &schemaAttrsRaw, &t.Qualified, &t.Rulebook,
 		&t.IssuedCount,
 	); err != nil {
 		return Template{}, err
@@ -106,7 +106,7 @@ func (s *Store) GetTemplate(ctx context.Context, orgID, id uuid.UUID) (Template,
 // GetTemplateDetail resolves the template + schema fields the issue flow needs.
 func (s *Store) GetTemplateDetail(ctx context.Context, orgID, id uuid.UUID) (TemplateDetail, error) {
 	const query = `SELECT t.id, t.organization_id, t.name, t.default_attributes, t.validity_seconds,
-			s.vct, s.credential_config_id, s.subject_type, s.attributes, s.qualified
+			s.vct, s.credential_config_id, s.subject_type, s.attributes, s.qualified, COALESCE(s.rulebook, '')
 		FROM attestation_templates t
 		JOIN attestation_schemas s ON s.id = t.schema_id
 		WHERE t.organization_id = $1 AND t.id = $2`
@@ -118,7 +118,7 @@ func (s *Store) GetTemplateDetail(ctx context.Context, orgID, id uuid.UUID) (Tem
 	)
 	err := s.db.QueryRow(ctx, query, orgID, id).Scan(
 		&d.ID, &d.OrganizationID, &d.Name, &defaultAttrsRaw, &validitySeconds,
-		&d.SchemaVCT, &d.CredentialConfigID, &d.SubjectType, &schemaAttrsRaw, &d.Qualified,
+		&d.SchemaVCT, &d.CredentialConfigID, &d.SubjectType, &schemaAttrsRaw, &d.Qualified, &d.SchemaRulebook,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TemplateDetail{}, ErrTemplateNotFound

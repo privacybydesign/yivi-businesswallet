@@ -3,6 +3,9 @@ package eudiholder
 import (
 	"reflect"
 	"testing"
+
+	"github.com/privacybydesign/irmago/eudi/storage/db/models"
+	"gorm.io/datatypes"
 )
 
 func TestDecodeClaims(t *testing.T) {
@@ -73,8 +76,33 @@ func TestAssembleAttributes(t *testing.T) {
 		t.Fatalf("got %d attributes, want %d: %#v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("attribute %d = %#v, want %#v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestNestedClaimLabels(t *testing.T) {
+	t.Parallel()
+
+	claim := func(path, name string) models.CredentialClaim {
+		return models.CredentialClaim{
+			Path:    datatypes.JSON(path),
+			Display: []models.ClaimDisplay{{Name: name, Locale: loc("en")}},
+		}
+	}
+	meta := &models.CredentialMetadata{Claims: []models.CredentialClaim{
+		claim(`["registered_address"]`, "Registered address"),
+		claim(`["registered_address","post_code"]`, "Post code"),
+		claim(`["legal_representative",null,"full_name"]`, "Full name"),
+	}}
+
+	got := nestedClaimLabels(meta, "en")
+	want := map[string]map[string]string{
+		"registered_address":   {"post_code": "Post code"},
+		"legal_representative": {"[].full_name": "Full name"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("nestedClaimLabels = %v, want %v", got, want)
 	}
 }

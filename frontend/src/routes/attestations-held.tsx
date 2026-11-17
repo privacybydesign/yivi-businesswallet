@@ -57,6 +57,56 @@ function formatClaimValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function nestedPath(path: string, segment: string): string {
+  return path === "" ? segment : `${path}.${segment}`;
+}
+
+// ClaimValue renders a claim value, nesting objects and arrays as lists. labels
+// are the issuer's labels for the claims below the attribute, keyed by path.
+function ClaimValue({
+  value,
+  labels,
+  path = "",
+}: Readonly<{
+  value: unknown;
+  labels?: Record<string, string>;
+  path?: string;
+}>): React.JSX.Element {
+  if (Array.isArray(value)) {
+    const itemPath = nestedPath(path, "[]");
+    const items: unknown[] = value;
+    return (
+      <ol className="flex list-decimal flex-col gap-2 pl-5">
+        {items.map((item, index) => (
+          <li key={index}>
+            <ClaimValue value={item} labels={labels} path={itemPath} />
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    return (
+      <dl className="border-line flex flex-col gap-1 border-l-2 pl-3">
+        {Object.entries(value as Record<string, unknown>).map(([key, child]) => {
+          const childPath = nestedPath(path, key);
+          return (
+            <div key={key}>
+              <dt className="text-ink-soft text-[12px]">
+                {labels?.[childPath] ?? key}
+              </dt>
+              <dd>
+                <ClaimValue value={child} labels={labels} path={childPath} />
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    );
+  }
+  return <>{formatClaimValue(value)}</>;
+}
+
 // The detail page for one credential the organization holds: its state and
 // what to do about it, the attributes it discloses, its history, where it came
 // from, and what the wallet checked about it.
@@ -392,6 +442,37 @@ function CardHeader({
   );
 }
 
+// Whether a held credential of a WE BUILD rulebook type matches that rulebook's
+// schema, and where it does not.
+function RulebookCheck({
+  rulebook,
+  violations,
+}: Readonly<{ rulebook: string; violations: string[] }>): React.JSX.Element {
+  const { t } = useTranslation();
+  if (violations.length === 0) {
+    return (
+      <p className="border-line text-ink-soft border-b px-5 py-3 text-[12.5px]">
+        {t("attestations.held.detail.rulebookMatch", { rulebook })}
+      </p>
+    );
+  }
+  return (
+    <div
+      role="alert"
+      className="border-line bg-warning-bg text-warning-fg border-b px-5 py-3 text-[12.5px]"
+    >
+      <p className="font-semibold">
+        {t("attestations.held.detail.rulebookMismatch", { rulebook })}
+      </p>
+      <ul className="mt-1 list-disc pl-5 font-mono text-[11.5px]">
+        {violations.map((violation) => (
+          <li key={violation}>{violation}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function AttributesCard({
   credential,
 }: Readonly<{
@@ -406,6 +487,12 @@ function AttributesCard({
           count: credential.attributes.length,
         })}
       />
+      {credential.rulebook && (
+        <RulebookCheck
+          rulebook={credential.rulebook}
+          violations={credential.rulebookViolations ?? []}
+        />
+      )}
       {credential.attributes.length === 0 ? (
         <p className="text-ink-soft px-5 py-4 text-[13px]">
           {t("attestations.held.detail.noAttributes")}
@@ -428,7 +515,10 @@ function AttributesCard({
                 )}
               </dt>
               <dd className="text-ink text-[13.5px] break-words">
-                {formatClaimValue(attribute.value)}
+                <ClaimValue
+                  value={attribute.value}
+                  labels={attribute.nestedLabels}
+                />
               </dd>
             </div>
           ))}

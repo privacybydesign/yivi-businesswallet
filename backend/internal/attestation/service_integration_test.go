@@ -132,7 +132,7 @@ func TestIssuePersonEmailsAndClaims(t *testing.T) {
 	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "anna@example.com"},
-		Attributes: map[string]string{"email": "anna@example.com", "department": "Platform"},
+		Attributes: map[string]any{"email": "anna@example.com", "department": "Platform"},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -171,7 +171,7 @@ func TestIssuePersonQrMethodSkipsEmail(t *testing.T) {
 	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID:     templateID,
 		Recipient:      attestation.Recipient{Kind: attestation.RecipientMember, Ref: "anna@example.com"},
-		Attributes:     map[string]string{"email": "anna@example.com"},
+		Attributes:     map[string]any{"email": "anna@example.com"},
 		DeliveryMethod: attestation.DeliveryMethodQR,
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestIssueOrganizationDeliversOverQerds(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
-		Attributes: map[string]string{"name": "Supplier B.V."},
+		Attributes: map[string]any{"name": "Supplier B.V."},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -219,7 +219,7 @@ func TestRecipientKindMustMatchSubjectType(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "a@b.com"},
-		Attributes: map[string]string{"name": "X"},
+		Attributes: map[string]any{"name": "X"},
 	})
 	if !errors.Is(err, attestation.ErrRecipientKindMismatch) {
 		t.Fatalf("expected ErrRecipientKindMismatch, got %v", err)
@@ -366,7 +366,7 @@ func TestDataMinimisationRejectsUndeclaredAttribute(t *testing.T) {
 	_, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "x@example.com"},
-		Attributes: map[string]string{"email": "x@example.com", "salary": "secret"},
+		Attributes: map[string]any{"email": "x@example.com", "salary": "secret"},
 	})
 	if !errors.Is(err, attestation.ErrUnknownAttribute) {
 		t.Fatalf("expected ErrUnknownAttribute, got %v", err)
@@ -391,7 +391,7 @@ func TestRevoke(t *testing.T) {
 	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "z@example.com"},
-		Attributes: map[string]string{"email": "z@example.com"},
+		Attributes: map[string]any{"email": "z@example.com"},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -434,7 +434,7 @@ func TestCancelOffer(t *testing.T) {
 	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "c@example.com"},
-		Attributes: map[string]string{"email": "c@example.com"},
+		Attributes: map[string]any{"email": "c@example.com"},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -457,7 +457,7 @@ func TestCancelOffer(t *testing.T) {
 	claimable, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
 		TemplateID: templateID,
 		Recipient:  attestation.Recipient{Kind: attestation.RecipientExternal, Ref: "d@example.com"},
-		Attributes: map[string]string{"email": "d@example.com"},
+		Attributes: map[string]any{"email": "d@example.com"},
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)

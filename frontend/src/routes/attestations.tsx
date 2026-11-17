@@ -60,6 +60,7 @@ import {
 } from "../ui";
 import type { IconName } from "../ui";
 import { AttestationIssueWizard } from "./attestations-issue";
+import { AttestationRulebookImport } from "./attestations-rulebook-import";
 import { AttestationSchemaForm } from "./attestations-schema-form";
 import { AttestationTemplateForm } from "./attestations-template-form";
 import { WscaActivationNotice } from "./wsca-activation-notice";
@@ -1209,6 +1210,7 @@ function SchemasTab({
   const [pendingDelete, setPendingDelete] = useState<AttestationSchema | null>(
     null,
   );
+  const [importing, setImporting] = useState(false);
 
   if (error) {
     return (
@@ -1220,9 +1222,12 @@ function SchemasTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
+      <div className="flex flex-wrap gap-2">
         <Button icon="add" onClick={onCreate}>
           {t("attestations.schemas.newAction")}
+        </Button>
+        <Button variant="secondary" onClick={() => setImporting(true)}>
+          {t("attestations.rulebooks.openAction")}
         </Button>
       </div>
       {pending ? (
@@ -1258,6 +1263,9 @@ function SchemasTab({
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
+                  {schema.rulebook && (
+                    <Tag tone="green">{t("attestations.rulebooks.tag")}</Tag>
+                  )}
                   {schema.qualified && (
                     <Tag tone="blue">{t("attestations.qualified")}</Tag>
                   )}
@@ -1292,6 +1300,13 @@ function SchemasTab({
             </Card>
           ))}
         </div>
+      )}
+      {importing && (
+        <AttestationRulebookImport
+          slug={slug}
+          schemas={schemas}
+          onClose={() => setImporting(false)}
+        />
       )}
       {pendingDelete && (
         <ConfirmDialog

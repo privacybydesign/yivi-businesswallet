@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/auth"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
@@ -142,6 +143,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /orgs/{slug}/attestations/schemas/{id}/logo", admin(respond.HandlerFunc(h.putSchemaLogo)))
 	mux.Handle("PATCH /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.updateSchema)))
 	mux.Handle("DELETE /orgs/{slug}/attestations/schemas/{id}", admin(respond.HandlerFunc(h.deleteSchema)))
+
+	// WE BUILD rulebook catalogue and import (admin).
+	mux.Handle("GET /orgs/{slug}/attestations/rulebooks", admin(respond.HandlerFunc(h.listRulebooks)))
+	mux.Handle("POST /orgs/{slug}/attestations/rulebooks/{id}/import", admin(respond.HandlerFunc(h.importRulebook)))
 
 	// Per-org issuer GitOps bundle generator (admin).
 	mux.Handle("GET /orgs/{slug}/attestations/issuer-bundle", admin(respond.HandlerFunc(h.issuerBundle)))
@@ -514,15 +519,22 @@ func (h *Handler) updateSchema(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	req, err := decodeSchema(r)
+	org := organization.OrgFromContext(r.Context())
+	existing, err := h.schemas.GetSchema(r.Context(), org.ID, id)
+	if errors.Is(err, ErrSchemaNotFound) {
+		return notFound("schema_not_found", "schema not found")
+	}
+	if err != nil {
+		return fmt.Errorf("getting attestation schema: %w", err)
+	}
+	req, err := decodeSchemaFor(r, existing)
 	if err != nil {
 		return err
 	}
-	org := organization.OrgFromContext(r.Context())
-	sc, err := h.schemas.UpdateSchema(r.Context(), org.ID, id, Schema{
+	sc, err := h.schemas.UpdateSchema(r.Context(), org.ID, id, keepRulebookFields(existing, Schema{
 		DisplayName: req.DisplayName, CredentialConfigID: req.CredentialConfigID,
 		SubjectType: req.SubjectType, Attributes: req.Attributes, Display: req.Display, Qualified: req.Qualified, Status: req.Status,
-	})
+	}))
 	if errors.Is(err, ErrSchemaNotFound) {
 		return notFound("schema_not_found", "schema not found")
 	}
@@ -550,6 +562,12 @@ func (h *Handler) deleteSchema(w http.ResponseWriter, r *http.Request) error {
 }
 
 func decodeSchema(r *http.Request) (schemaRequest, error) {
+	return decodeSchemaFor(r, Schema{})
+}
+
+// decodeSchemaFor decodes a schema write over existing (zero for a create). A
+// rulebook schema's attributes are not checked: the update keeps the stored ones.
+func decodeSchemaFor(r *http.Request, existing Schema) (schemaRequest, error) {
 	var req schemaRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return schemaRequest{}, badRequest("invalid_body", "invalid request body")
@@ -569,11 +587,13 @@ func decodeSchema(r *http.Request) (schemaRequest, error) {
 	if req.SubjectType != "" && req.SubjectType != SubjectNaturalPerson && req.SubjectType != SubjectOrganization {
 		return schemaRequest{}, badRequest("invalid_input", "invalid subjectType")
 	}
-	attrs, err := normalizeAttributes(req.Attributes)
-	if err != nil {
-		return schemaRequest{}, err
+	if existing.Rulebook == "" {
+		attrs, err := normalizeAttributes(req.Attributes)
+		if err != nil {
+			return schemaRequest{}, err
+		}
+		req.Attributes = attrs
 	}
-	req.Attributes = attrs
 	display, err := normalizeNames(req.Display)
 	if err != nil {
 		return schemaRequest{}, err
@@ -721,6 +741,8 @@ func (h *Handler) putOnboarding(w http.ResponseWriter, r *http.Request) error {
 		return notFound("template_not_found", "template not found")
 	case errors.Is(err, ErrOnboardingSubject):
 		return badRequest("onboarding_subject_mismatch", "onboarding auto-issue is only supported for natural-person templates")
+	case errors.Is(err, ErrOnboardingRulebook):
+		return badRequest("onboarding_rulebook", "onboarding auto-issue does not support WE BUILD rulebook templates")
 	case err != nil:
 		return fmt.Errorf("updating onboarding attestations: %w", err)
 	}
@@ -934,10 +956,10 @@ type recipientRequest struct {
 }
 
 type issueRequest struct {
-	TemplateID     string            `json:"templateId"`
-	Recipient      recipientRequest  `json:"recipient"`
-	Attributes     map[string]string `json:"attributes"`
-	DeliveryMethod string            `json:"deliveryMethod"`
+	TemplateID     string           `json:"templateId"`
+	Recipient      recipientRequest `json:"recipient"`
+	Attributes     map[string]any   `json:"attributes"`
+	DeliveryMethod string           `json:"deliveryMethod"`
 }
 
 func (h *Handler) listIssued(w http.ResponseWriter, r *http.Request) error {
@@ -988,7 +1010,7 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("invalid_input", "invalid recipient userId")
 	}
 	if req.Attributes == nil {
-		req.Attributes = map[string]string{}
+		req.Attributes = map[string]any{}
 	}
 	deliveryMethod := strings.TrimSpace(req.DeliveryMethod)
 	if deliveryMethod != "" && deliveryMethod != DeliveryMethodEmail && deliveryMethod != DeliveryMethodQR {
@@ -1026,6 +1048,10 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("unknown_attribute", err.Error())
 	case errors.Is(err, ErrMissingAttribute):
 		return badRequest("missing_attribute", err.Error())
+	case errors.Is(err, ErrInvalidAttribute):
+		return badRequest("invalid_attribute", err.Error())
+	case errors.Is(err, rulebook.ErrInvalidClaims):
+		return badRequest("invalid_claims", err.Error())
 	case err != nil:
 		return fmt.Errorf("issuing attestation: %w", err)
 	}

@@ -169,6 +169,9 @@ export const attestationSchemaSchema = z.object({
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
   status: z.string(),
+  // The WE BUILD rulebook the schema was imported from; absent for a schema the
+  // organization defined. A rulebook schema's vct and attributes are fixed.
+  rulebook: z.string().optional(),
   logoUri: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -209,6 +212,8 @@ export const attestationTemplateSchema = z.object({
   attributes: z.array(attestationAttributeSchema),
   subjectType: attestationSubjectTypeSchema,
   qualified: z.boolean(),
+  // Set when the template's schema was imported from a WE BUILD rulebook.
+  rulebook: z.string().optional(),
   issuedCount: z.number(),
 });
 
@@ -257,7 +262,8 @@ export const issuedAttestationSchema = z.object({
   recipientKind: z.string(),
   recipientUserId: z.string().optional(),
   recipientRef: z.string(),
-  attributes: z.record(z.string(), z.string()),
+  // Strings for an organization-defined schema; any JSON value for a rulebook one.
+  attributes: z.record(z.string(), z.unknown()),
   qualified: z.boolean(),
   status: z.string(),
   // The delivery channel the offer was routed over: "email", "qerds", or "none"
@@ -351,6 +357,9 @@ export const heldAttributeSchema = z.object({
   key: z.string(),
   label: z.string(),
   value: z.unknown(),
+  // Labels of the claims inside an object or array value, keyed by their path
+  // below key ("post_code", "[].full_name").
+  nestedLabels: z.record(z.string(), z.string()).optional(),
 });
 
 export type HeldAttribute = z.infer<typeof heldAttributeSchema>;
@@ -376,6 +385,10 @@ export const heldAttestationClaimsSchema = z.object({
   hasStatusList: z.boolean().default(false),
   statusCheckedAt: z.string().optional(),
   attributes: z.array(heldAttributeSchema),
+  // The WE BUILD rulebook the credential type belongs to, and where its claims
+  // do not match that rulebook's schema.
+  rulebook: z.string().optional(),
+  rulebookViolations: z.array(z.string()).optional(),
 });
 
 export type HeldAttestationClaims = z.infer<typeof heldAttestationClaimsSchema>;
@@ -449,7 +462,7 @@ export interface AttestationKeyInput {
 export interface IssueAttestationInput {
   templateId: string;
   recipient: { kind: string; userId?: string; ref: string };
-  attributes: Record<string, string>;
+  attributes: Record<string, unknown>;
   // "email" (send a claim link) or "qr" (show the QR directly, no e-mail) for a
   // natural person; omitted for organizations (always delivered over QERDS).
   deliveryMethod?: "email" | "qr";
@@ -531,6 +544,48 @@ export function declineCredentialOffer(
       signal,
     },
   );
+}
+
+// A WE BUILD attestation rulebook a schema can be imported from, with a sample
+// of valid claims the issue form starts from.
+export const attestationRulebookSchema = z.object({
+  id: z.string(),
+  vct: z.string(),
+  name: z.string(),
+  subjectType: attestationSubjectTypeSchema,
+  upstream: z.string(),
+  attributes: z.array(attestationAttributeSchema),
+  sample: z.record(z.string(), z.unknown()),
+});
+
+export type AttestationRulebook = z.infer<typeof attestationRulebookSchema>;
+
+const attestationRulebookListSchema = z.array(attestationRulebookSchema);
+
+export function getAttestationRulebooks(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<AttestationRulebook[]> {
+  return request(`${base(slug)}/rulebooks`, {
+    schema: attestationRulebookListSchema,
+    signal,
+  });
+}
+
+export async function importAttestationRulebook(
+  slug: string,
+  rulebookId: string,
+  signal?: AbortSignal,
+): Promise<AttestationSchema> {
+  const schema = await request(
+    `${base(slug)}/rulebooks/${encodeURIComponent(rulebookId)}/import`,
+    {
+      schema: attestationSchemaSchema,
+      method: "POST",
+      signal,
+    },
+  );
+  return withAbsoluteLogo(schema);
 }
 
 function base(slug: string): string {

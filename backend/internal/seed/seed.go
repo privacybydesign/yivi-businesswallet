@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/organization"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/registryprovider"
@@ -423,6 +424,9 @@ func Run(ctx context.Context, dsn, addressDomain string, adminEmails []string) e
 
 	demoOrg := orgsBySlug[demoOrgSlug]
 	if err := seedAttestations(ctx, pool, demoOrg.ID); err != nil {
+		return err
+	}
+	if err := seedRulebookSchemas(ctx, pool, demoOrg.ID); err != nil {
 		return err
 	}
 	if err := seedEmailSettings(ctx, pool, demoOrg.ID, yiviOrg.name, "noreply@yivi.app"); err != nil {
@@ -980,6 +984,42 @@ func seedAttestations(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) 
 	}
 
 	slog.Info("seeded attestation schemas + templates", slog.Int("count", len(demoSchemas)))
+	return nil
+}
+
+// seedRulebookSchemas imports every WE BUILD rulebook into an org, with a template
+// each, skipping the ones it already holds.
+func seedRulebookSchemas(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID) error {
+	store := attestation.NewStore(pool, audit.NewDBRecorder())
+	existing, err := store.ListSchemas(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("seed: list attestation schemas: %w", err)
+	}
+	held := make(map[string]bool, len(existing))
+	for _, s := range existing {
+		held[s.VCT] = true
+	}
+	created := 0
+	for _, rb := range rulebook.All() {
+		if held[rb.VCT] {
+			continue
+		}
+		in, err := attestation.SchemaFromRulebook(rb.ID, "")
+		if err != nil {
+			return fmt.Errorf("seed: rulebook schema %q: %w", rb.ID, err)
+		}
+		schema, err := store.CreateSchema(ctx, orgID, in)
+		if err != nil {
+			return fmt.Errorf("seed: create rulebook schema %q: %w", rb.ID, err)
+		}
+		if _, err := store.CreateTemplate(ctx, orgID, attestation.Template{SchemaID: schema.ID, Name: in.DisplayName}); err != nil {
+			return fmt.Errorf("seed: create rulebook template %q: %w", rb.ID, err)
+		}
+		created++
+	}
+	if created > 0 {
+		slog.Info("seeded WE BUILD rulebook schemas + templates", slog.Int("count", created))
+	}
 	return nil
 }
 

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/audit"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vciissuer"
@@ -166,7 +168,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	if err := checkRecipientKind(detail.SubjectType, in.Recipient.Kind); err != nil {
 		return IssueResult{}, err
 	}
-	if err := validateAttributes(detail.SchemaAttributes, in.Attributes); err != nil {
+	if err := validateAttributes(detail, in.Attributes); err != nil {
 		return IssueResult{}, err
 	}
 
@@ -197,7 +199,7 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		VCT:                detail.SchemaVCT,
 		DisplayName:        detail.Name,
 		IssuerName:         orgName,
-		Claims:             toClaims(in.Attributes),
+		Claims:             maps.Clone(in.Attributes),
 		ExpirationSeconds:  expirationSeconds,
 		// tx_code is a second factor only for the external-email path (a person
 		// keys the PIN in). Members redeem while authenticated; an organization
@@ -466,6 +468,10 @@ type HeldClaimsView struct {
 	Revoked     bool       `json:"revoked"`
 	HeldChecks
 	Attributes []eudiholder.HeldAttribute `json:"attributes"`
+	// Rulebook is the WE BUILD rulebook the credential's vct belongs to, and
+	// RulebookViolations where its claims do not match that rulebook's schema.
+	Rulebook           string   `json:"rulebook,omitempty"`
+	RulebookViolations []string `json:"rulebookViolations,omitempty"`
 }
 
 // HeldChecks are what the wallet knows about a held credential's integrity:
@@ -533,20 +539,45 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
 	}
 	validity := validities[held.CredentialRef]
+	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s rulebook check: %w", id, err)
+	}
 	return HeldClaimsView{
-		ID:          held.ID,
-		VCT:         held.VCT,
-		Issuer:      held.Issuer,
-		IssuerName:  issuerName,
-		DisplayName: cred.DisplayName,
-		LogoURI:     cred.LogoURI,
-		Source:      held.Source,
-		ReceivedAt:  held.ReceivedAt,
-		ExpiresAt:   validity.ExpiresAt,
-		Revoked:     validity.Revoked,
-		HeldChecks:  heldChecks(validity),
-		Attributes:  cred.Attributes,
+		Rulebook:           rulebookID,
+		RulebookViolations: violations,
+		ID:                 held.ID,
+		VCT:                held.VCT,
+		Issuer:             held.Issuer,
+		IssuerName:         issuerName,
+		DisplayName:        cred.DisplayName,
+		LogoURI:            cred.LogoURI,
+		Source:             held.Source,
+		ReceivedAt:         held.ReceivedAt,
+		ExpiresAt:          validity.ExpiresAt,
+		Revoked:            validity.Revoked,
+		HeldChecks:         heldChecks(validity),
+		Attributes:         cred.Attributes,
 	}, nil
+}
+
+// checkRulebook validates a held credential's claims against the WE BUILD rulebook
+// its vct belongs to. It returns no rulebook for any other vct.
+func checkRulebook(vct string, attrs []eudiholder.HeldAttribute) (string, []string, error) {
+	rb, ok := rulebook.ForVCT(vct)
+	if !ok {
+		return "", nil, nil
+	}
+	claims := make(map[string]any, len(attrs))
+	for _, a := range attrs {
+		claims[a.Key] = a.Value
+	}
+	err := rb.ValidateClaims(claims)
+	var ve *rulebook.ValidationError
+	if errors.As(err, &ve) {
+		return rb.ID, ve.Violations, nil
+	}
+	return rb.ID, nil, err
 }
 
 // ListHeld returns an organization's active held credentials enriched with each
@@ -634,32 +665,36 @@ func resolveDelivery(subjectType, method string) string {
 	return DeliveryEmail
 }
 
-// validateAttributes enforces the schema allow-list: every provided key must be
-// declared, and every required attribute must be present and non-empty.
-func validateAttributes(allowed []AttributeDef, provided map[string]string) error {
-	byKey := make(map[string]AttributeDef, len(allowed))
-	for _, a := range allowed {
+// validateAttributes checks the values a template issues: a rulebook schema's
+// against the rulebook's JSON schema (rulebook.ErrInvalidClaims), an
+// organization-defined schema's against its allow-list, where every declared key
+// may be given as a string and every required one must be non-empty.
+func validateAttributes(detail TemplateDetail, provided map[string]any) error {
+	if detail.SchemaRulebook != "" {
+		rb, ok := rulebook.Get(detail.SchemaRulebook)
+		if !ok {
+			return fmt.Errorf("%w: %q", ErrUnknownRulebook, detail.SchemaRulebook)
+		}
+		return rb.ValidateClaims(provided)
+	}
+	byKey := make(map[string]AttributeDef, len(detail.SchemaAttributes))
+	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
 	}
-	for key := range provided {
+	for key, value := range provided {
 		if _, ok := byKey[key]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownAttribute, key)
 		}
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%w: %q", ErrInvalidAttribute, key)
+		}
 	}
-	for _, a := range allowed {
-		if a.Required && provided[a.Key] == "" {
+	for _, a := range detail.SchemaAttributes {
+		if v, _ := provided[a.Key].(string); a.Required && v == "" {
 			return fmt.Errorf("%w: %q", ErrMissingAttribute, a.Key)
 		}
 	}
 	return nil
-}
-
-func toClaims(attrs map[string]string) map[string]any {
-	out := make(map[string]any, len(attrs))
-	for k, v := range attrs {
-		out[k] = v
-	}
-	return out
 }
 
 func newClaimToken() (string, error) {

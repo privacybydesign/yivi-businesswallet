@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Legal Entity Identifier (LEI) Attestation",
+  "description": "Written from rb-lei section 3 and 5.1; WE BUILD publishes no JSON schema for this rulebook.",
+  "type": "object",
+  "properties": {
+    "vct": { "type": "string", "const": "eu.we-build.lei.1" },
+    "iss": { "type": "string" },
+    "iat": { "type": "integer" },
+    "exp": { "type": "integer" },
+    "attestation_legal_category": { "type": "string", "enum": ["EAA", "PuB-EAA", "QEAA"] },
+    "issuing_country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+    "lei": { "type": "string", "pattern": "^[A-Z0-9]{18}[0-9]{2}$" },
+    "lei_status": {
+      "type": "string",
+      "enum": [
+        "PENDING_VALIDATION",
+        "ISSUED",
+        "DUPLICATE",
+        "LAPSED",
+        "RETIRED",
+        "ANNULLED",
+        "CANCELLED",
+        "TRANSFERRED",
+        "PENDING_TRANSFER",
+        "PENDING_ARCHIVAL"
+      ]
+    },
+    "lei_renewal_date": { "type": "string", "format": "date-time" },
+    "trust_anchor": { "type": "string", "format": "uri" },
+    "status": { "type": "object" },
+    "cnf": { "type": "object" }
+  },
+  "required": ["vct", "iss", "exp", "attestation_legal_category", "issuing_country", "lei", "lei_status", "lei_renewal_date"]
+}
