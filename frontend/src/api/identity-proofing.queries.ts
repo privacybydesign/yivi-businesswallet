@@ -448,24 +448,6 @@ export function useProofingOverviewQuery(
   });
 }
 
-// The requests sent to one member, newest first. Under the requests key, so
-// everything that refreshes the org's requests refreshes these too.
-export function useMemberRequestsQuery(
-  slug: string,
-  userId: string,
-): UseQueryResult<ProofingRequest[], Error> {
-  return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), "member", userId],
-    queryFn: ({ signal }) =>
-      getProofingRequests(slug, { subjectUserId: userId }, signal),
-    enabled: slug !== "" && userId !== "",
-    refetchInterval: (query) =>
-      query.state.data?.some((r) => isProofingLive(r.status))
-        ? REQUESTS_POLL_INTERVAL_MS
-        : false,
-  });
-}
-
 // Re-reads the org's requests each time the backend says its reviews changed,
 // and each time the stream (re)connects, for what changed while it was down:
 // the sidebar's count and the Reviews lists follow at once, with no timer.

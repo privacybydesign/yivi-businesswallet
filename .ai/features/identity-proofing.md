@@ -33,8 +33,7 @@ this screen) and has two switches, off by default: "Add the person's name" and "
 person pass". The Flows page lists neither GDPR request: one line under the table says See my
 data and Delete my data are always available and links to Settings › Data and privacy. Only a
 platform admin pauses an org's proofing, after which no request can be sent
-(`proofing_paused`, 403) while sent ones run out (§8). A member is sent a
-request from their member detail page (admin-only, like that page). The people
+(`proofing_paused`, 403) while sent ones run out (§8). The people
 an org verifies are its members, or external people with no login: an e-mail
 address and an optional name, a request without a `userId`. The org's own
 backend can send to them through the public API with one of its keys. Sending
@@ -73,7 +72,6 @@ routes, chip verification, results, Regula), `internal/proofingprovider` (the
 seam's value types + a test stub, leaf level),
 `internal/proofing` (org settings, flow selection, members, requests, service,
 handler), `internal/email` (kind `identity_proofing_requested`, the `qr` block),
-`frontend/src/routes/member-proofing.tsx` (the member detail panel),
 `frontend/src/routes/identity-proofing-overview.tsx` (the overview),
 `frontend/src/routes/developers.tsx` + `developers-api-keys.tsx` +
 `developers-webhook.tsx` (the Developers page), `proofing-branding.tsx`

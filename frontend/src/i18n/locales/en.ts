@@ -2788,14 +2788,6 @@ export const en = {
     requestIdentificationHint:
       "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
     identityRequested: "Identification requested",
-    proofing: {
-      flow: "Identity proofing flow",
-      send: "Send identity proofing",
-      hint: "Mails this member a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
-      noFlows:
-        "No flow is available to members yet. Create one and tick it under",
-      lastRequest: "Last proofing:",
-    },
     vogValidUntil: "VOG valid until",
     vogNone: "No VOG on file",
     requestVog: "Request VOG",

@@ -2856,14 +2856,6 @@ export const nl: Translation<typeof en> = {
     requestIdentificationHint:
       "Vraagt dit lid om nu zijn identiteit opnieuw te bevestigen. Het lid krijgt een e-mail met een link.",
     identityRequested: "Identificatie aangevraagd",
-    proofing: {
-      flow: "Flow voor identiteitsverificatie",
-      send: "Identiteitsverificatie versturen",
-      hint: "Mailt dit lid een QR-code en een link voor de Idem-app. De sessie start bij het versturen van de mail en loopt 10 minuten; stuur daarna een nieuw verzoek.",
-      noFlows:
-        "Er is nog geen flow beschikbaar voor leden. Maak er een aan en vink die aan onder",
-      lastRequest: "Laatste verificatie:",
-    },
     vogValidUntil: "VOG geldig tot",
     vogNone: "Geen VOG bekend",
     requestVog: "VOG aanvragen",
