@@ -27,8 +27,8 @@ func TestServedDocsShowOneProofingAPI(t *testing.T) {
 		t.Fatalf("the served docs are not a valid OpenAPI 3 document: %v", err)
 	}
 
-	if len(doc.Tags) != len(full.Tags)-1 || doc.Tags.Get(internalProofingTag) != nil {
-		t.Errorf("served %d of %d tags; want all but %s", len(doc.Tags), len(full.Tags), internalProofingTag)
+	if len(doc.Tags) != len(full.Tags)-len(hiddenTags) || doc.Tags.Get(internalProofingTag) != nil || doc.Tags.Get(platformAdminTag) != nil {
+		t.Errorf("served %d of %d tags; want all but %v", len(doc.Tags), len(full.Tags), hiddenTags)
 	}
 	if publicProofingRoutes(t, doc) == 0 {
 		t.Error("the identity proofing tab holds no route")
@@ -57,6 +57,25 @@ func publicProofingRoutes(t *testing.T, doc *openapi3.T) int {
 		}
 	}
 	return public
+}
+
+// The served docs hold no route of the wallet's operator, and do not name its
+// role: a user is an admin or a member of their organisation.
+func TestServedDocsLeaveOutPlatformAdmin(t *testing.T) {
+	doc, err := openapi3.NewLoader().LoadFromData(served)
+	if err != nil {
+		t.Fatalf("load the served docs: %v", err)
+	}
+	for path, item := range doc.Paths.Map() {
+		for method, op := range item.Operations() {
+			if slices.Contains(op.Tags, platformAdminTag) || strings.HasPrefix(path, "/api/v1/admin/") {
+				t.Errorf("%s %s is a route of the wallet's operator", method, path)
+			}
+		}
+	}
+	if text := strings.ToLower(string(served)); strings.Contains(text, "platform admin") {
+		t.Error("the served docs name a platform admin")
+	}
 }
 
 // Every text the served docs keep reads as in openapi.yaml.
