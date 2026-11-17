@@ -4,7 +4,8 @@ The backend serves its own OpenAPI spec and a browsable [ReDoc](https://github.c
 
 - `GET /api/docs` — ReDoc UI (`redoc.html`)
 - `GET /api/docs/openapi.yaml` — the OpenAPI 3 spec (`openapi.yaml`), without
-  the wallet's own identity proofing routes (`served.go`)
+  the wallet's own identity proofing routes and the platform admin's
+  (`served.go`)
 
 Both are read-only, unauthenticated, and mounted on the root mux outside the
 `/api/v1` prefix so they are never mistaken for API resources. The spec and the
@@ -33,3 +34,9 @@ shared error responses under `components/responses`).
 - `identity-proofing-internal` holds the wallet's own proofing routes and the
   hosted page's. They stay in `openapi.yaml`, so the route test covers them, and
   are left out of what is served.
+
+## Platform admin
+
+- `platform-admin` holds the wallet operator's routes over every organisation
+  (`/organizations`, `/admin/...`). A user is only ever an admin or a member of
+  their own organisation, so these are left out of what is served too.

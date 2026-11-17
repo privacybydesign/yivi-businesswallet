@@ -1175,6 +1175,7 @@ var errorResponses = []struct {
 	{ErrReferencePhotoRequired, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "reference_photo_required", Message: "this flow matches the face against your own photo of the person: send it as referencePhoto through the API"}},
 	{ErrDiplomasNeedPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "diplomas_need_page", Message: "this flow asks for diplomas, which are uploaded on a page: show the session on screen or send a hosted link"}},
 	{ErrAddressNeedsPage, respond.APIError{Status: http.StatusUnprocessableEntity, Code: "address_needs_page", Message: "this flow asks for the address, which is entered on a page: show the session on screen or send a hosted link"}},
+	{ErrNoDiplomaChecker, respond.APIError{Status: http.StatusConflict, Code: "no_diploma_checker", Message: "this deployment checks no diplomas; set DIPLOMA_VALIDATOR_PROVIDER on the server"}},
 	{ErrNoEmploymentChecker, respond.APIError{Status: http.StatusConflict, Code: "no_employment_checker", Message: "this deployment checks no Verzekeringsbericht; set EMPLOYMENT_VALIDATOR_PROVIDER on the server"}},
 	{diploma.ErrTrustUnavailable, sealCheckUnavailable},
 	{diploma.ErrRevocationUnavailable, sealCheckUnavailable},

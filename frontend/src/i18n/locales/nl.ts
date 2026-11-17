@@ -633,6 +633,8 @@ export const nl: Translation<typeof en> = {
         "Deze controle vraagt niet om een Verzekeringsbericht.",
       noEmploymentChecker:
         "Deze server controleert geen Verzekeringsbericht. Vraag je beheerder EMPLOYMENT_VALIDATOR_PROVIDER in te stellen.",
+      noDiplomaChecker:
+        "Deze server controleert geen diploma's. Vraag je beheerder DIPLOMA_VALIDATOR_PROVIDER in te stellen.",
       flowNoIdentity:
         "Een flow voor gegevensverzoeken moet naam en geboortedatum uitlezen: daarmee worden de sessies van de persoon gevonden.",
       dataFlowForMember:
