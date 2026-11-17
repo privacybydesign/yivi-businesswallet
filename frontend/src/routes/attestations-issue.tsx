@@ -21,7 +21,11 @@ import { useOrganizationMembersQuery } from "../api/organization.queries";
 import { fullName } from "../lib/name";
 import { Button, Icon, Modal, Outcome, Select } from "../ui";
 import { apiErrorCode, control } from "../lib/attestation-form";
-import { claimSummary, formatClaims, parseClaims } from "../lib/rulebook-claims";
+import {
+  claimSummary,
+  formatClaims,
+  parseClaims,
+} from "../lib/rulebook-claims";
 import { Field } from "./attestations-fields";
 
 const QR_SIZE = 220;
@@ -161,7 +165,10 @@ export function AttestationIssueWizard({
     [templates, templateId],
   );
   const rulebookId = template?.rulebook;
-  const rulebooks = useAttestationRulebooksQuery(slug, rulebookId !== undefined);
+  const rulebooks = useAttestationRulebooksQuery(
+    slug,
+    rulebookId !== undefined,
+  );
   const rulebookSample = rulebooks.data?.find(
     (rulebook) => rulebook.id === rulebookId,
   )?.sample;

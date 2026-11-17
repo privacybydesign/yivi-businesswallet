@@ -3,7 +3,10 @@ import { claimSummary, formatClaims, parseClaims } from "./rulebook-claims";
 
 describe("parseClaims", () => {
   it("returns the object for valid JSON", () => {
-    const text = formatClaims({ lei: "724500VKKSH9QOLTFR81", nested: { a: 1 } });
+    const text = formatClaims({
+      lei: "724500VKKSH9QOLTFR81",
+      nested: { a: 1 },
+    });
     expect(parseClaims(text)).toEqual({
       ok: true,
       claims: { lei: "724500VKKSH9QOLTFR81", nested: { a: 1 } },

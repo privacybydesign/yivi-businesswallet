@@ -88,19 +88,21 @@ function ClaimValue({
   if (typeof value === "object" && value !== null) {
     return (
       <dl className="border-line flex flex-col gap-1 border-l-2 pl-3">
-        {Object.entries(value as Record<string, unknown>).map(([key, child]) => {
-          const childPath = nestedPath(path, key);
-          return (
-            <div key={key}>
-              <dt className="text-ink-soft text-[12px]">
-                {labels?.[childPath] ?? key}
-              </dt>
-              <dd>
-                <ClaimValue value={child} labels={labels} path={childPath} />
-              </dd>
-            </div>
-          );
-        })}
+        {Object.entries(value as Record<string, unknown>).map(
+          ([key, child]) => {
+            const childPath = nestedPath(path, key);
+            return (
+              <div key={key}>
+                <dt className="text-ink-soft text-[12px]">
+                  {labels?.[childPath] ?? key}
+                </dt>
+                <dd>
+                  <ClaimValue value={child} labels={labels} path={childPath} />
+                </dd>
+              </div>
+            );
+          },
+        )}
       </dl>
     );
   }
