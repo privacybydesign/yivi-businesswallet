@@ -21,7 +21,7 @@ import {
   proofingErrorMessage,
   shortRequestId,
 } from "../lib/identity-proofing";
-import { Button, Card, ConfirmDialog, Input, StatusText } from "../ui";
+import { Button, Card, ConfirmDialog, Input, StatusText, Table } from "../ui";
 import { SecretReveal, WebhookStateText } from "./proofing-ui";
 
 const ERROR = "text-error text-[12.5px]";
@@ -385,27 +385,40 @@ function DeliveriesCard({
         </p>
       )}
       {error === null && rows.length > 0 && (
-        <ul className="divide-line divide-y">
-          {rows.map((d) => (
-            <li
-              key={d.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 text-[12.5px]"
-            >
-              <span className="text-ink w-36 shrink-0 font-mono">
-                {d.event}
-              </span>
-              <span className="text-ink-soft min-w-0 flex-1 basis-20 truncate font-mono">
-                {d.sessionId ? shortRequestId(d.sessionId) : "—"}
-              </span>
-              <span className="shrink-0 whitespace-nowrap">
-                <DeliveryStatus delivery={d} />
-              </span>
-              <span className="text-muted ml-auto min-w-20 shrink-0 text-right whitespace-nowrap">
-                {formatWhen(d.lastAttemptAt ?? d.createdAt)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <Table>
+          <Table.Head>
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.webhooks.columns.event")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.webhooks.columns.session")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col">
+              {t("identityProofing.webhooks.columns.response")}
+            </Table.HeaderCell>
+            <Table.HeaderCell scope="col" className="text-right">
+              {t("identityProofing.webhooks.columns.sent")}
+            </Table.HeaderCell>
+          </Table.Head>
+          <Table.Body>
+            {rows.map((d) => (
+              <Table.Row key={d.id} className="text-[12.5px]">
+                <Table.Cell className="text-ink font-mono break-all">
+                  {d.event}
+                </Table.Cell>
+                <Table.Cell className="text-ink-soft font-mono whitespace-nowrap">
+                  {d.sessionId ? shortRequestId(d.sessionId) : "—"}
+                </Table.Cell>
+                <Table.Cell className="whitespace-nowrap">
+                  <DeliveryStatus delivery={d} />
+                </Table.Cell>
+                <Table.Cell className="text-muted text-right whitespace-nowrap">
+                  {formatWhen(d.lastAttemptAt ?? d.createdAt)}
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
       )}
     </Card>
   );
