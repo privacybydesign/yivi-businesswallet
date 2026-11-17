@@ -1735,6 +1735,12 @@ export const nl: Translation<typeof en> = {
       secretHint:
         "Kopieer het nu en bewaar het bij je ontvanger: het wordt niet opnieuw getoond. Controleer er de Yivi-Signature-header mee.",
       recent: "Recente afleveringen",
+      columns: {
+        event: "Gebeurtenis",
+        session: "Sessie",
+        response: "Antwoord",
+        sent: "Verstuurd",
+      },
       defaultBody:
         "Er worden geen berichten verstuurd. Resultaten staan op het tabblad Personen van elke flow, zijn op te vragen via de API en staan in de auditlog.",
       defaultHint:

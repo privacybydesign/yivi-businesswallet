@@ -1689,6 +1689,12 @@ export const en = {
       secretHint:
         "Copy it now and store it with your receiver: it is not shown again. Check the Yivi-Signature header with it.",
       recent: "Recent deliveries",
+      columns: {
+        event: "Event",
+        session: "Session",
+        response: "Response",
+        sent: "Sent",
+      },
       defaultBody:
         "No events are sent. Results show on each flow's People tab, through the API and in the audit log.",
       defaultHint:
