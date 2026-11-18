@@ -2651,6 +2651,7 @@ step runs with the Idem app or the Yivi app alike.
   | Both sides, camera only | `requireBothSides`, `captureSources` |
   | The page with the BSN (a Dutch passport's back) | `desiredFields: ["personal_number"]` |
   | BSN blacked out, only under BlurBSN | `redactFields: ["personal_number", "mrz_strings", "signature"]` |
+  | Printed portrait blacked out, unless the flow keeps face photos | `redactFields: ["portrait", "ghost_portrait"]` |
   | Image quality (screen, copy, glare, focus, bounds) | the CM account's `PUT /config` |
 
   - `allowedExpiration` and `validateFields` are left out: with them CM stopped
@@ -2753,6 +2754,11 @@ step runs with the Idem app or the Yivi app alike.
   - `mrz_strings`: the whole MRZ, as an older Dutch document carries the BSN
     in its optional data (`mrz` is refused).
   - `signature`: the holder's signature, under the same setting.
+- **Portrait**: unless the flow keeps face photos (`keepFacePhotos`), the
+  transaction asks CM to black out the printed portrait as well.
+  - `portrait`: the main printed face.
+  - `ghost_portrait`: its smaller, lighter copy. Not in CM's public docs;
+    CM accepts it and blurs the ghost image.
 - **Face in the scan** (`faceProvider: idscan`): CM's page runs its
   `face_liveness` and `face_match` tasks right after the document scan, in the
   same transaction (`ScanOptions.Face`).

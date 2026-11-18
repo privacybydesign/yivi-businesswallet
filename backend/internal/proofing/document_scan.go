@@ -325,9 +325,10 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 var faceScanTasks = []string{idscan.TaskFaceLiveness, idscan.TaskFaceMatch}
 
 // documentScanOptions are the rules of flow f the scan service enforces: the
-// BSN blacked out when f says so, and f's age check.
+// BSN blacked out when f says so, the portrait unless f keeps face photos, and
+// f's age check.
 func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
-	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), Face: scansFace(f)}
+	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), RedactPortrait: !keepsFacePhotos(f), Face: scansFace(f)}
 	if slices.Contains(f.RequestedAttributes, attributeAgeOver) {
 		opts.MinimumAge = f.AgeOver
 	}
