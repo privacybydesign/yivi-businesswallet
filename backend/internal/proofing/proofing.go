@@ -1113,6 +1113,12 @@ func scansFace(f proofingprovider.Flow) bool {
 	return f.FaceProvider == faceProviderIDScan && takesDocumentPhoto(f)
 }
 
+// keepsFacePhotos reports whether f keeps the face photos, so the printed
+// portrait stays visible on its document photos.
+func keepsFacePhotos(f proofingprovider.Flow) bool {
+	return f.KeepFacePhotos != nil && *f.KeepFacePhotos
+}
+
 // redactsDocumentBSN reports whether f's document photo has its BSN covered:
 // only when the flow's "Black out the BSN" is on (BlurBSN), as the engine's
 // coversDocumentBSN. The scan service covers it on any document, Dutch or

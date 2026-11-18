@@ -279,13 +279,15 @@ func TestDocumentScanFollowsTheFlow(t *testing.T) {
 		flow func(*proofingprovider.Flow)
 		want idscan.ScanOptions
 	}{
-		"as created":    {func(*proofingprovider.Flow) {}, idscan.ScanOptions{}},
-		"BSN blacked":   {func(f *proofingprovider.Flow) { f.BlurBSN = new(true) }, idscan.ScanOptions{RedactBSN: true}},
-		"BSN kept":      {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyRetrieve }, idscan.ScanOptions{}},
-		"age check, 18": {func(f *proofingprovider.Flow) { f.RequestedAttributes, f.AgeOver = []string{attributeAgeOver}, 18 }, idscan.ScanOptions{MinimumAge: 18}},
+		"as created":          {func(*proofingprovider.Flow) {}, idscan.ScanOptions{RedactPortrait: true}},
+		"BSN blacked":         {func(f *proofingprovider.Flow) { f.BlurBSN = new(true) }, idscan.ScanOptions{RedactBSN: true, RedactPortrait: true}},
+		"BSN kept":            {func(f *proofingprovider.Flow) { f.BSNPolicy = bsnPolicyRetrieve }, idscan.ScanOptions{RedactPortrait: true}},
+		"face photos kept":    {func(f *proofingprovider.Flow) { f.KeepFacePhotos = new(true) }, idscan.ScanOptions{}},
+		"face photos dropped": {func(f *proofingprovider.Flow) { f.KeepFacePhotos = new(false) }, idscan.ScanOptions{RedactPortrait: true}},
+		"age check, 18":       {func(f *proofingprovider.Flow) { f.RequestedAttributes, f.AgeOver = []string{attributeAgeOver}, 18 }, idscan.ScanOptions{RedactPortrait: true, MinimumAge: 18}},
 		"face in the scan": {func(f *proofingprovider.Flow) {
 			f.Steps, f.FaceProvider = append(slices.Clone(f.Steps), "face_verification"), faceProviderIDScan
-		}, idscan.ScanOptions{Face: true}},
+		}, idscan.ScanOptions{RedactPortrait: true, Face: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, scanner := newScanFixture(t)

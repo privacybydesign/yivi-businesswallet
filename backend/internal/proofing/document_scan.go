@@ -251,9 +251,13 @@ func (s *Service) finishDocumentScan(ctx context.Context, req Request, transacti
 	if err := s.requests.MarkDocumentScanned(ctx, req, sess.ID, transactionID); err != nil {
 		return err
 	}
-	// The scan comes after the app's part. A Yivi disclosure that waited for
-	// it decides the session now; the engine decides any other itself, once
-	// the scan is in.
+	return s.decideAfterDocumentScan(ctx, req, sess)
+}
+
+// decideAfterDocumentScan settles req once its scan is in. The scan comes
+// after the app's part: a Yivi disclosure that waited for it decides the
+// session now; the engine decides any other itself.
+func (s *Service) decideAfterDocumentScan(ctx context.Context, req Request, sess *ipsSession) error {
 	if req.Method == proofingprovider.MethodYivi && req.yiviTransactionID != "" {
 		if _, err := s.yiviDisclosure(ctx, req, sess); err != nil && !errors.Is(err, ErrDisclosurePending) {
 			return err
@@ -325,9 +329,10 @@ func (s *Service) withSpentDocumentScan(ctx context.Context, req Request) Reques
 var faceScanTasks = []string{idscan.TaskFaceLiveness, idscan.TaskFaceMatch}
 
 // documentScanOptions are the rules of flow f the scan service enforces: the
-// BSN blacked out when f says so, and f's age check.
+// BSN blacked out when f says so, the portrait unless f keeps face photos, and
+// f's age check.
 func documentScanOptions(f proofingprovider.Flow) idscan.ScanOptions {
-	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), Face: scansFace(f)}
+	opts := idscan.ScanOptions{RedactBSN: redactsDocumentBSN(f), RedactPortrait: !keepsFacePhotos(f), Face: scansFace(f)}
 	if slices.Contains(f.RequestedAttributes, attributeAgeOver) {
 		opts.MinimumAge = f.AgeOver
 	}
