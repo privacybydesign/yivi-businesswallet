@@ -1104,6 +1104,53 @@ export function saveProofingBranding(
   });
 }
 
+// An unsaved branding form: the org's, or a flow's with flowId (custom false
+// shows the org's saved branding).
+export interface BrandingMailPreviewInput {
+  flowId?: string;
+  custom?: boolean;
+  displayName: string;
+  primaryColor: string;
+  supportContact: string;
+  privacyUrl: string;
+  logo?: File;
+  removeLogo?: boolean;
+  locale: string;
+}
+
+const brandingMailPreviewSchema = z.object({
+  subject: z.string(),
+  html: z.string(),
+});
+
+export type BrandingMailPreview = z.infer<typeof brandingMailPreviewSchema>;
+
+// The backend renders the proofing mail as it is sent, so the preview cannot
+// drift from it.
+export function previewBrandingMail(
+  slug: string,
+  input: BrandingMailPreviewInput,
+  signal?: AbortSignal,
+): Promise<BrandingMailPreview> {
+  const form = new FormData();
+  if (input.flowId) {
+    form.set("flowId", input.flowId);
+    form.set("custom", String(input.custom === true));
+  }
+  form.set("displayName", input.displayName);
+  form.set("primaryColor", input.primaryColor);
+  form.set("supportContact", input.supportContact);
+  form.set("privacyUrl", input.privacyUrl);
+  form.set("locale", input.locale);
+  setLogoFields(form, input);
+  return request(`${base(slug)}/settings/branding/mail-preview`, {
+    schema: brandingMailPreviewSchema,
+    method: "POST",
+    body: form,
+    signal,
+  });
+}
+
 function setLogoFields(
   form: FormData,
   input: { logo?: File; removeLogo?: boolean },

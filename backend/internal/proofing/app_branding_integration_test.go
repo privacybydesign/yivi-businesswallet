@@ -4,6 +4,7 @@ package proofing
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,9 +24,8 @@ var orgThemeInput = themesettings.SettingsInput{
 }
 
 // A session gets the branding of whoever it was sent to: a member the org's
-// theme; an external person the org's proofing colours and logo when it has
-// white-labeling, else the org's whole theme and logo, under the name its
-// proofing mail signs with. One org's request never resolves under another org.
+// theme; an external person the org's theme with the proofing colours, font
+// and logo over it, under the name its proofing mail signs with. One org's request never resolves under another org.
 func TestAppBrandingResolver(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
@@ -86,7 +86,9 @@ func TestAppBrandingResolver(t *testing.T) {
 			Branding{DisplayName: "CM Tickets Concerten", SecondaryColor: "#112233"},
 			whiteLabelLogo, external,
 			func(string) AppBranding {
-				return AppBranding{Name: "CM Tickets Concerten", SecondaryColor: "#112233", HasLogo: true}
+				want := orgTheme("CM Tickets Concerten")
+				want.SecondaryColor = "#112233"
+				return want
 			},
 			whiteLabelLogo,
 		},
@@ -103,18 +105,20 @@ func TestAppBrandingResolver(t *testing.T) {
 					Name: "CM Theater", PrimaryColor: "#0A7C59", SecondaryColor: "#112233", TextColor: "#222222",
 					SurfaceColor: "#F7F7F7", BorderColor: "#DDDDDD", LinkColor: "#0055AA", SuccessColor: "#2E7D32",
 					WarningColor: "#ED6C02", ErrorColor: "#C62828", HeaderColor: "#0A3D2E",
-					FontFamily: `"Open Sans", system-ui, sans-serif`,
+					FontFamily: `"Open Sans", system-ui, sans-serif`, HasLogo: true,
 				}
 			},
-			nil,
+			orgLogo,
 		},
 		"external person, only a font of its own": {
 			Branding{DisplayName: "CM Musea", FontFamily: `"Nunito", system-ui, sans-serif`},
 			nil, external,
 			func(string) AppBranding {
-				return AppBranding{Name: "CM Musea", FontFamily: `"Nunito", system-ui, sans-serif`}
+				want := orgTheme("CM Musea")
+				want.FontFamily = `"Nunito", system-ui, sans-serif`
+				return want
 			},
-			nil,
+			orgLogo,
 		},
 		"external person, no white-labeling": {
 			Branding{DisplayName: "CM Festivals"},
@@ -210,8 +214,8 @@ func TestAppBrandingResolverNone(t *testing.T) {
 	}
 }
 
-// An org whose proofing has only colours of its own has no logo: the org
-// theme's is not mixed into its white-labeling.
+// An org whose proofing has only a colour of its own keeps the org theme's
+// other colours and its logo.
 func TestAppBrandingColoursOnly(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
 	ctx := context.Background()
@@ -234,18 +238,18 @@ func TestAppBrandingColoursOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
-	want := AppBranding{Name: "cm", PrimaryColor: "#0A7C59"}
+	want := AppBranding{Name: "cm", PrimaryColor: "#0A7C59", HeaderColor: "#101E1E", HasLogo: true}
 	if got, err := resolver.Branding(ctx, orgID, req.ID); err != nil || got == nil || *got != want {
 		t.Errorf("Branding = %+v, %v; want %+v", got, err, want)
 	}
-	if _, err := resolver.Logo(ctx, orgID, req.ID); !errors.Is(err, ErrNoAppLogo) {
-		t.Errorf("Logo = %v; want ErrNoAppLogo", err)
+	if logo, err := resolver.Logo(ctx, orgID, req.ID); err != nil || string(logo.Bytes) != "org-logo" {
+		t.Errorf("Logo = %q, %v; want the org theme's", logo.Bytes, err)
 	}
 }
 
 // A request to an external person on a flow with its own branding gets that
 // branding in the app, over the org's: its name, colour and logo, the org's
-// white-label for the rest. A flow with the org's branding, and a request to a
+// proofing branding and then its theme for the rest. A flow with the org's branding, and a request to a
 // member on any flow, look as they did without one.
 func TestAppBrandingFlow(t *testing.T) {
 	pool, _ := testdb.Fresh(t)
@@ -324,30 +328,34 @@ func TestAppBrandingFlow(t *testing.T) {
 		}
 	}
 
-	// An org with white-labeling of its own: the flow's colour and logo go over
-	// it, its second colour and font stay.
+	// An org with proofing colours of its own: the flow's colour and logo go
+	// over them, its second colour and font stay, the theme fills the rest.
 	whiteLabel := Branding{DisplayName: "CM Tickets", SecondaryColor: "#112233", FontFamily: `"Nunito", system-ui, sans-serif`}
 	orgID := newOrg(whiteLabel, orgLogo, Branding{DisplayName: "CM Concerten", PrimaryColor: "#0A7C59"}, ownLogo)
-	check("custom flow over white-labeling", orgID, request(orgID, "custom", external), AppBranding{
-		Name: "CM Concerten", PrimaryColor: "#0A7C59", SecondaryColor: "#112233",
-		FontFamily: `"Nunito", system-ui, sans-serif`, HasLogo: true,
-	}, ownLogo)
-	check("org-branded flow with white-labeling", orgID, request(orgID, "org", external), AppBranding{
-		Name: "CM Tickets", SecondaryColor: "#112233", FontFamily: `"Nunito", system-ui, sans-serif`, HasLogo: true,
-	}, orgLogo)
+	withLook := func(name, primary string) AppBranding {
+		want := orgTheme(name)
+		want.PrimaryColor = cmp.Or(primary, want.PrimaryColor)
+		want.SecondaryColor, want.FontFamily = "#112233", `"Nunito", system-ui, sans-serif`
+		return want
+	}
+	check("custom flow over white-labeling", orgID, request(orgID, "custom", external),
+		withLook("CM Concerten", "#0A7C59"), ownLogo)
+	check("org-branded flow with white-labeling", orgID, request(orgID, "org", external),
+		withLook("CM Tickets", ""), orgLogo)
 	var orgName string
 	if err := pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&orgName); err != nil {
 		t.Fatalf("read org name: %v", err)
 	}
 	check("member on a custom flow", orgID, request(orgID, "custom", member), orgTheme(orgName), themeLogo)
 
-	// An org without white-labeling: a flow with only a name and a logo keeps
-	// the org's theme under its own name and logo; a colour of its own is a look
-	// of its own, and the org's proofing logo is its logo.
+	// An org without proofing colours: a flow with only a name and a logo keeps
+	// the org's theme under its own name and logo; a colour of its own goes over
+	// the theme, and the org's proofing logo is its logo.
 	orgID = newOrg(Branding{DisplayName: "CM Festivals"}, orgLogo, Branding{DisplayName: "CM Zomer"}, ownLogo)
 	check("custom flow name and logo over the org theme", orgID, request(orgID, "custom", external), orgTheme("CM Zomer"), ownLogo)
 	check("org-branded flow over the org theme", orgID, request(orgID, "org", external), orgTheme("CM Festivals"), orgLogo)
 	orgID = newOrg(Branding{DisplayName: "CM Musea"}, orgLogo, Branding{PrimaryColor: "#8E2440"}, nil)
-	check("custom flow colour", orgID, request(orgID, "custom", external),
-		AppBranding{Name: "CM Musea", PrimaryColor: "#8E2440", HasLogo: true}, orgLogo)
+	musea := orgTheme("CM Musea")
+	musea.PrimaryColor = "#8E2440"
+	check("custom flow colour", orgID, request(orgID, "custom", external), musea, orgLogo)
 }

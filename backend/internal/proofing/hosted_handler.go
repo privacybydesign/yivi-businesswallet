@@ -382,8 +382,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 		HidePoweredBy: st.Branding.HidePoweredBy,
 	}
 	// The logo is the one the theme comes with: the flow's own, else the org's
-	// proofing logo, or the org's theme's for an org without white-labeling of
-	// its own.
+	// proofing logo, else the org's theme's.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
 	if err != nil {
 		return fmt.Errorf("proofing: hosted page theme: %w", err)

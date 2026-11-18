@@ -8524,10 +8524,9 @@ paths:
         `secondaryColor` (`#rrggbb`, the Idem app's second colour), the rest of the
         white-label as the organisation theme has it (`textColor`, `surfaceColor`,
         `borderColor`, `linkColor`, `successColor`, `warningColor`, `errorColor`,
-        `topbarColor` and `fontFamily`; setting any colour or the font gives the organisation's
-        proofing a look of its own in the Idem app and hosted page, where what it leaves empty
-        keeps the design's, not the organisation's; without one they show the organisation's
-        theme), `supportContact` and `privacyUrl` (an https URL), each added to the mail and
+        `topbarColor` and `fontFamily`; each one set is the Idem app's and hosted page's, each
+        one left empty is the organisation theme's), `supportContact` and `privacyUrl` (an
+        https URL), each added to the mail and
         left out when empty,
         and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
         render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
@@ -8552,6 +8551,58 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ProofingForbidden'
+        '413':
+          description: The logo is too large (`payload_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/orgs/{slug}/identity-proofing/settings/branding/mail-preview:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    post:
+      tags: [identity-proofing-internal]
+      summary: Preview the proofing mail of an unsaved branding
+      description: >-
+        Requires an administrator role in the organisation. The branding form as the
+        organisation's or a flow's branding save takes it (`displayName`, `primaryColor`,
+        `supportContact`, `privacyUrl`, a `logo` file or `removeLogo=true`), plus `flowId`
+        for a flow's own branding with `custom` (`true` for its own fields, else the
+        organisation's) and `locale` (`en` or `nl`; another is the default). Returns the
+        proofing mail an external person would get, rendered as it is sent, with a sample
+        link and its images inline. Nothing is saved.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProofingBrandingForm'
+      responses:
+        '200':
+          description: The rendered mail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject, html]
+                properties:
+                  subject:
+                    type: string
+                  html:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/ProofingForbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '413':
           description: The logo is too large (`payload_too_large`).
           content:

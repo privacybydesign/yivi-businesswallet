@@ -154,6 +154,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /orgs/{slug}/identity-proofing/settings", member(respond.HandlerFunc(h.getSettings)))
 	mux.Handle("PATCH /orgs/{slug}/identity-proofing/settings", admin(respond.HandlerFunc(h.updateSettings)))
 	mux.Handle("PUT /orgs/{slug}/identity-proofing/settings/branding", admin(respond.HandlerFunc(h.saveBranding)))
+	mux.Handle("POST /orgs/{slug}/identity-proofing/settings/branding/mail-preview", admin(respond.HandlerFunc(h.previewBrandingMail)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/settings/logo", member(respond.HandlerFunc(h.serveLogo)))
 	mux.Handle("GET /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.listAPIKeys)))
 	mux.Handle("POST /orgs/{slug}/identity-proofing/api-keys", admin(respond.HandlerFunc(h.createAPIKey)))

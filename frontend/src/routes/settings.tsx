@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -168,7 +169,7 @@ function SettingsPanel({
     case "org":
       return <OrgProfileSettings org={org} />;
     case "branding":
-      return <BrandingPanel slug={slug} orgName={org.name} />;
+      return <BrandingSettings slug={slug} orgName={org.name} />;
     case "privacy":
       return <PrivacySettingsPanel slug={slug} />;
     case "mandates":
@@ -177,8 +178,6 @@ function SettingsPanel({
       return <IdentitySettingsPanel slug={slug} />;
     case "screening":
       return <ScreeningSettingsPanel slug={slug} />;
-    case "theme":
-      return <ThemeSettingsPanel slug={slug} />;
     case "issuer":
       return <IssuerSettingsPanel slug={slug} />;
     case "provisioning":
@@ -193,4 +192,55 @@ function SettingsPanel({
         </div>
       );
   }
+}
+
+// The Branding tab: the wallet's own look, then what external people see,
+// which falls back to it.
+function BrandingSettings({
+  slug,
+  orgName,
+}: Readonly<{
+  slug: string;
+  orgName: string;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-10">
+      <BrandingSection
+        title={t("settings.brandingWallet")}
+        hint={t("settings.brandingWalletHint")}
+      >
+        <ThemeSettingsPanel slug={slug} />
+      </BrandingSection>
+      <BrandingSection
+        title={t("settings.brandingExternal")}
+        hint={t("settings.brandingExternalHint")}
+      >
+        <BrandingPanel slug={slug} orgName={orgName} />
+      </BrandingSection>
+    </div>
+  );
+}
+
+function BrandingSection({
+  title,
+  hint,
+  children,
+}: Readonly<{
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}>): React.JSX.Element {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+      <div>
+        <h2 id={headingId} className="font-display text-[19px] font-bold">
+          {title}
+        </h2>
+        <p className="text-ink-soft mt-1 text-[13px]">{hint}</p>
+      </div>
+      {children}
+    </section>
+  );
 }

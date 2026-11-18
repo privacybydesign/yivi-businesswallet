@@ -1380,7 +1380,7 @@ type mailSend struct {
 // proofingMail is the mail a request sends. A member's is the org's; an
 // external person's is signed with and styled as the flow's branding over the
 // org's, with its support contact and privacy statement. A logo that cannot be
-// read is left out (the wordmark shows): a cosmetic loss must not block the
+// read is left out (the org's shows): a cosmetic loss must not block the
 // send. A flow's branding that cannot be read blocks it, since the mail would
 // otherwise go out in another look than the admin set.
 func (s *Service) proofingMail(ctx context.Context, org Org, settings *Settings, send mailSend) (email.ProofingMail, error) {

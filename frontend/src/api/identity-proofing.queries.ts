@@ -1,10 +1,18 @@
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { followReviewEvents } from "./review-events";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
+  previewBrandingMail,
+  type BrandingMailPreview,
+  type BrandingMailPreviewInput,
   activateProofingFlowVersion,
   checkReviewLinkSeals,
   decideReviewLinkItem,
@@ -610,6 +618,28 @@ export function useCreateRequestMutation(
         toast.error(t("toasts.identityProofingMailNotSent"));
       }
     },
+  });
+}
+
+// The proofing mail an unsaved branding form gives, rendered by the backend.
+// A File hashes as {}, so a picked logo is in the key by its name, size and
+// date as well.
+export function useBrandingMailPreviewQuery(
+  slug: string,
+  input: BrandingMailPreviewInput,
+): UseQueryResult<BrandingMailPreview, Error> {
+  const { logo } = input;
+  const logoKey = logo ? `${logo.name}:${logo.size}:${logo.lastModified}` : "";
+  return useQuery({
+    queryKey: [
+      ...proofingSettingsQueryKey(slug),
+      "mailPreview",
+      input,
+      logoKey,
+    ],
+    queryFn: ({ signal }) => previewBrandingMail(slug, input, signal),
+    enabled: slug !== "",
+    placeholderData: keepPreviousData,
   });
 }
 

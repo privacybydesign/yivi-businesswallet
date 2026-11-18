@@ -71,37 +71,62 @@ export default function Proof(): React.JSX.Element {
   const page = useHostedProofingQuery(token);
 
   return (
-    // The card sits at the top, 80 px down, on every step, as VF1 to VF5
-    // draw it; "Powered by Yivi" follows it.
+    <HostedLayout>
+      {/* Data first: a background refetch that fails (the tab regaining
+            focus on return from the Idem app) keeps the page it already has
+            rather than replacing the session with an error card. */}
+      {page.data !== undefined ? (
+        <HostedPage token={token} page={page.data} />
+      ) : page.isError ? (
+        <Card className="p-6">
+          <p role="alert" className="text-error text-[13.5px]">
+            {errorCode(page.error) === NOT_FOUND
+              ? t("proofLink.notFound")
+              : hostedErrorMessage(page.error, t)}
+          </p>
+        </Card>
+      ) : (
+        <p className={HINT}>{t("common.loading")}</p>
+      )}
+    </HostedLayout>
+  );
+}
+
+// The page around the card: it sits at the top, 80 px down, on every step,
+// as VF1 to VF5 draw it; "Powered by Yivi" follows it.
+export function HostedLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  return (
     <div className="bg-surface-2 flex min-h-screen flex-col items-center px-4 pt-20 pb-10">
       <div
         className={`flex w-full max-w-[560px] flex-col gap-5 ${DOCUMENT_SCAN_WIDE_PAGE}`}
       >
-        {/* Data first: a background refetch that fails (the tab regaining
-            focus on return from the Idem app) keeps the page it already has
-            rather than replacing the session with an error card. */}
-        {page.data !== undefined ? (
-          <>
-            <HostedFlow token={token} page={page.data} />
-            {!page.data.organization.branding.hidePoweredBy && (
-              <p className="text-muted text-center text-[12.5px]">
-                {t("proofLink.poweredBy")}
-              </p>
-            )}
-          </>
-        ) : page.isError ? (
-          <Card className="p-6">
-            <p role="alert" className="text-error text-[13.5px]">
-              {errorCode(page.error) === NOT_FOUND
-                ? t("proofLink.notFound")
-                : hostedErrorMessage(page.error, t)}
-            </p>
-          </Card>
-        ) : (
-          <p className={HINT}>{t("common.loading")}</p>
-        )}
+        {children}
       </div>
     </div>
+  );
+}
+
+// The hosted page itself, under the "powered by" line; the settings preview
+// shows it too.
+export function HostedPage({
+  token,
+  page,
+}: Readonly<{
+  token: string;
+  page: HostedProofing;
+}>): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <HostedFlow token={token} page={page} />
+      {!page.organization.branding.hidePoweredBy && (
+        <p className="text-muted text-center text-[12.5px]">
+          {t("proofLink.poweredBy")}
+        </p>
+      )}
+    </>
   );
 }
 

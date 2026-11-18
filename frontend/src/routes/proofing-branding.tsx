@@ -2,14 +2,18 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as React from "react";
 import {
+  useProofingFlowsQuery,
   useProofingSettingsQuery,
   useSaveBrandingMutation,
 } from "../api/identity-proofing.queries";
 import {
   PROOFING_THEME_COLOR_FIELDS,
+  type ProofingBranding,
   type ProofingThemeColorField,
   type ProofingSettings,
 } from "../api/identity-proofing";
+import { useOrgThemeQuery } from "../api/theme.queries";
+import type { OrgTheme } from "../api/theme";
 import { COLOR_FIELD_DEFAULTS, FONT_OPTIONS } from "../lib/theme";
 import {
   isHexColor,
@@ -27,10 +31,10 @@ import {
   ERROR,
   HINT,
   LABEL,
-  MailPreview,
 } from "./proofing-branding-fields";
 import type { BrandingDraft } from "./proofing-branding-fields";
 import { ColorField as ThemeColorField } from "./theme-settings";
+import { BrandingPreviews } from "./branding-preview";
 
 // Each further colour's label, the org theme settings' own.
 const THEME_COLOR_LABELS = {
@@ -48,6 +52,27 @@ interface Draft extends BrandingDraft, Record<ProofingThemeColorField, string> {
   secondaryColor: string;
   fontFamily: string;
   hidePoweredBy: boolean;
+}
+
+// The fields that give external people another look than the wallet's; each
+// left empty is the wallet's.
+const LOOK_FIELDS = [
+  "primaryColor",
+  "secondaryColor",
+  ...PROOFING_THEME_COLOR_FIELDS,
+  "fontFamily",
+] as const satisfies readonly (keyof Draft)[];
+
+function hasOwnLook(draft: Draft): boolean {
+  return LOOK_FIELDS.some((field) => draft[field] !== "");
+}
+
+function withoutOwnLook(draft: Draft): Draft {
+  const out = { ...draft };
+  for (const field of LOOK_FIELDS) {
+    out[field] = "";
+  }
+  return out;
 }
 
 function draftFrom(settings: ProofingSettings): Draft {
@@ -83,8 +108,9 @@ export function BrandingPanel({
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const settings = useProofingSettingsQuery(slug);
+  const theme = useOrgThemeQuery(slug);
 
-  const error = blockingError(settings);
+  const error = blockingError(settings, theme);
   if (error !== null) {
     return (
       <p role="alert" className={ERROR}>
@@ -92,27 +118,38 @@ export function BrandingPanel({
       </p>
     );
   }
-  if (settings.data === undefined) {
+  if (settings.data === undefined || theme.data === undefined) {
     return <p className="text-ink-soft text-[14px]">{t("common.loading")}</p>;
   }
-  return <BrandingTab slug={slug} orgName={orgName} settings={settings.data} />;
+  return (
+    <BrandingTab
+      slug={slug}
+      orgName={orgName}
+      settings={settings.data}
+      theme={theme.data}
+    />
+  );
 }
 
 // The look of the proofing mail external people get, and of the hosted page:
 // the name it signs with, its logo and colour, and its support contact and
-// privacy statement, with a live preview beside the form.
+// privacy statement, with a live preview beside the form. Its colours and font
+// are the wallet's unless it sets its own.
 function BrandingTab({
   slug,
   orgName,
   settings,
+  theme,
 }: Readonly<{
   slug: string;
   orgName: string;
   settings: ProofingSettings;
+  theme: OrgTheme;
 }>): React.JSX.Element {
   const { t } = useTranslation();
   const save = useSaveBrandingMutation(slug);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(settings));
+  const [ownLook, setOwnLook] = useState(() => hasOwnLook(draftFrom(settings)));
   const logoPreview = useLogoPreview(draft.logo);
 
   const saved = draftFrom(settings);
@@ -141,6 +178,37 @@ function BrandingTab({
       : absoluteApiUrl(settings.branding.logoUri));
   const change = (patch: Partial<Draft>): void =>
     setDraft((d) => ({ ...d, ...patch }));
+  const flows = useProofingFlowsQuery(slug);
+  const shown: ProofingBranding = {
+    ...settings.branding,
+    displayName: draft.displayName.trim(),
+    primaryColor: hexOrEmpty(draft.primaryColor),
+    secondaryColor: hexOrEmpty(draft.secondaryColor),
+    ...Object.fromEntries(
+      PROOFING_THEME_COLOR_FIELDS.map((field) => [
+        field,
+        hexOrEmpty(draft[field]),
+      ]),
+    ),
+    fontFamily: draft.fontFamily,
+    supportContact: draft.supportContact.trim(),
+    privacyUrl: draft.privacyUrl.trim(),
+    hidePoweredBy: draft.hidePoweredBy,
+    logoUri: logoUri || theme.logoUri,
+  };
+  const name = shown.displayName || orgName;
+
+  function setWalletLook(on: boolean): void {
+    setOwnLook(!on);
+    if (on) {
+      setDraft(withoutOwnLook);
+    }
+  }
+
+  function reset(next: Draft): void {
+    setDraft(next);
+    setOwnLook(hasOwnLook(next));
+  }
 
   function submit(event: React.FormEvent): void {
     event.preventDefault();
@@ -168,7 +236,7 @@ function BrandingTab({
         removeLogo: draft.removeLogo,
       },
       {
-        onSuccess: (next) => setDraft(draftFrom(next)),
+        onSuccess: (next) => reset(draftFrom(next)),
       },
     );
   }
@@ -189,11 +257,19 @@ function BrandingTab({
             idPrefix="branding"
             draft={draft}
             onChange={change}
-            logo={{ uri: logoUri, source: logoUri ? "own" : "none" }}
+            logo={{
+              uri: logoUri || theme.logoUri,
+              source: logoSource(logoUri, theme.logoUri),
+            }}
             fallbackName={orgName}
+            fallbackColor={
+              isHexColor(theme.primaryColor) ? theme.primaryColor : undefined
+            }
+            hideColor={!ownLook}
             placeholders={{
               displayName: orgName,
-              color: t("identityProofing.branding.orgColor"),
+              color:
+                theme.primaryColor || t("identityProofing.branding.orgColor"),
               support: t("identityProofing.branding.supportPlaceholder"),
               privacy: t("identityProofing.branding.privacyPlaceholder"),
             }}
@@ -208,7 +284,23 @@ function BrandingTab({
               {t("identityProofing.branding.hidePoweredBy")}
             </label>
           </BrandingFields>
-          <WhiteLabelFields draft={draft} onChange={change} />
+          <div className="flex flex-col gap-1 px-6 pb-5">
+            <label className="flex items-center gap-2 text-[13px] font-semibold">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={!ownLook}
+                onChange={(e) => setWalletLook(e.target.checked)}
+              />
+              {t("identityProofing.branding.useWalletLook")}
+            </label>
+            <p className={`${HINT} pl-6`}>
+              {t("identityProofing.branding.useWalletLookHint")}
+            </p>
+          </div>
+          {ownLook && (
+            <WhiteLabelFields draft={draft} onChange={change} theme={theme} />
+          )}
           {save.isError && (
             <p className={`${ERROR} px-6 pb-5`}>
               {proofingErrorMessage(save.error, t)}
@@ -219,7 +311,7 @@ function BrandingTab({
               type="button"
               variant="secondary"
               disabled={!dirty || save.isPending}
-              onClick={() => setDraft(draftFrom(settings))}
+              onClick={() => reset(draftFrom(settings))}
             >
               {t("identityProofing.branding.discard")}
             </Button>
@@ -233,27 +325,44 @@ function BrandingTab({
           </div>
         </form>
       </Card>
-      <MailPreview
-        name={draft.displayName.trim() || orgName}
-        color={isHexColor(draft.primaryColor) ? draft.primaryColor : ""}
-        logoUri={logoUri}
-        supportContact={draft.supportContact.trim()}
-        privacyUrl={draft.privacyUrl.trim()}
+      <BrandingPreviews
+        slug={slug}
+        orgName={orgName}
+        name={name}
+        branding={shown}
+        theme={theme}
+        flow={flows.data?.find((flow) => flow.default)}
+        dataRetentionDays={settings.dataRetentionDays}
+        sessionTtlSeconds={settings.sessionTtlSeconds}
+        mail={{
+          displayName: draft.displayName,
+          primaryColor: shown.primaryColor,
+          supportContact: shown.supportContact,
+          privacyUrl: shown.privacyUrl,
+          logo: draft.logo ?? undefined,
+          removeLogo: draft.removeLogo,
+        }}
       />
     </div>
   );
 }
 
 // The white-label look beyond the mail's colour: a second colour, the org
-// theme's palette and a font, for the Idem app and the hosted page.
+// theme's palette and a font, for the Idem app and the hosted page. Each
+// shows the wallet's value while empty.
 function WhiteLabelFields({
   draft,
   onChange,
+  theme,
 }: Readonly<{
   draft: Draft;
   onChange: (patch: Partial<Draft>) => void;
+  theme: OrgTheme;
 }>): React.JSX.Element {
   const { t } = useTranslation();
+  const walletFont = FONT_OPTIONS.find(
+    (option) => option.value !== "" && option.value === theme.fontFamily,
+  );
   return (
     <div className="flex flex-col gap-5 px-6 pb-5">
       <ColorField
@@ -261,7 +370,9 @@ function WhiteLabelFields({
         label={t("identityProofing.branding.secondaryColor")}
         hint={t("identityProofing.branding.secondaryColorHint")}
         hexLabel={t("identityProofing.branding.secondaryColor")}
-        placeholder={t("identityProofing.branding.orgColor")}
+        placeholder={
+          theme.accentColor || t("identityProofing.branding.orgColor")
+        }
         value={draft.secondaryColor}
         onChange={(value) => onChange({ secondaryColor: value })}
       />
@@ -277,7 +388,7 @@ function WhiteLabelFields({
               key={field}
               label={t(THEME_COLOR_LABELS[field])}
               value={draft[field]}
-              fallback={COLOR_FIELD_DEFAULTS[field]}
+              fallback={theme[field] || COLOR_FIELD_DEFAULTS[field]}
               onChange={(value) => onChange({ [field]: value })}
               onClear={() => onChange({ [field]: "" })}
               clearLabel={t("themeSettings.reset")}
@@ -297,7 +408,11 @@ function WhiteLabelFields({
                 value={option.value}
                 style={{ fontFamily: option.value || undefined }}
               >
-                {option.name}
+                {option.value === "" && walletFont
+                  ? t("identityProofing.branding.walletFont", {
+                      name: walletFont.name,
+                    })
+                  : option.name}
               </option>
             ))}
           </Select>
@@ -305,4 +420,20 @@ function WhiteLabelFields({
       </div>
     </div>
   );
+}
+
+// Where the logo row's image comes from: the branding's own, else the
+// wallet's it falls back to, else none.
+function logoSource(
+  ownUri: string,
+  walletUri: string,
+): "own" | "inherited" | "none" {
+  if (ownUri) {
+    return "own";
+  }
+  return walletUri ? "inherited" : "none";
+}
+
+function hexOrEmpty(value: string): string {
+  return isHexColor(value) ? value : "";
 }

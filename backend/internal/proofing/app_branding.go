@@ -1,6 +1,7 @@
 package proofing
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -69,11 +70,9 @@ type appBrandingThemes interface {
 // AppBrandingResolver picks a request's branding from who it was sent to and
 // the flow it runs, never from anything the app sends. A request to a member
 // gets the org's theme under the org's name. A request to an external person
-// gets the proofing branding its mail and hosted page wear: the flow's own over
-// the org's (Settings.brandedFor). When that has white-labeling (see
-// whiteLabeled), its colours, font and logo, the design's own for the rest;
-// else the org's theme, with the proofing logo when it has one and the org's
-// otherwise. Either way under the name the proofing mail signs with.
+// gets the org's theme with the proofing branding its mail and hosted page
+// wear over it, field by field: the flow's own over the org's
+// (Settings.brandedFor), under the name the proofing mail signs with.
 type AppBrandingResolver struct {
 	requests *RequestStore
 	settings appBrandingSettings
@@ -102,17 +101,7 @@ func (r *AppBrandingResolver) Branding(ctx context.Context, orgID, requestID uui
 		if err != nil {
 			return nil, err
 		}
-		if b := settings.Branding; whiteLabeled(b) {
-			out = AppBranding{
-				Name: settings.SignedAs(), PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor,
-				TextColor: b.TextColor, SurfaceColor: b.SurfaceColor, BorderColor: b.BorderColor,
-				LinkColor: b.LinkColor, SuccessColor: b.SuccessColor, WarningColor: b.WarningColor,
-				ErrorColor: b.ErrorColor, HeaderColor: b.TopbarColor, FontFamily: b.FontFamily, HasLogo: b.HasLogo,
-			}
-		} else {
-			out = fromTheme(settings.SignedAs(), theme)
-			out.HasLogo = out.HasLogo || b.HasLogo
-		}
+		out = fromTheme(settings.SignedAs(), theme).under(settings.Branding)
 	} else {
 		settings, err := r.settings.Get(ctx, orgID)
 		if err != nil {
@@ -137,7 +126,7 @@ func (r *AppBrandingResolver) Logo(ctx context.Context, orgID, requestID uuid.UU
 		if err != nil {
 			return Logo{}, err
 		}
-		if whiteLabeled(settings.Branding) || settings.Branding.HasLogo {
+		if settings.Branding.HasLogo {
 			logo, err := flowOrOrgLogo(ctx, r.flows, r.settings, orgID, flowID, own)
 			if errors.Is(err, ErrNoLogo) {
 				return Logo{}, ErrNoAppLogo
@@ -169,16 +158,19 @@ func (r *AppBrandingResolver) externalBranding(ctx context.Context, orgID uuid.U
 	return settings.brandedFor(own), own, nil
 }
 
-// whiteLabeled reports whether the org's proofing has white-labeling of its
-// own: a colour or a font. A logo alone is a mark under the org's look, not a
-// look of its own; its name, support contact and privacy link are not looks
-// either.
-func whiteLabeled(b Branding) bool {
-	look := Branding{
-		PrimaryColor: b.PrimaryColor, SecondaryColor: b.SecondaryColor, TextColor: b.TextColor,
-		SurfaceColor: b.SurfaceColor, BorderColor: b.BorderColor, LinkColor: b.LinkColor,
-		SuccessColor: b.SuccessColor, WarningColor: b.WarningColor, ErrorColor: b.ErrorColor,
-		TopbarColor: b.TopbarColor, FontFamily: b.FontFamily,
-	}
-	return look != Branding{}
+// under is a with b's colours, font and logo over its own.
+func (a AppBranding) under(b Branding) AppBranding {
+	a.PrimaryColor = cmp.Or(b.PrimaryColor, a.PrimaryColor)
+	a.SecondaryColor = cmp.Or(b.SecondaryColor, a.SecondaryColor)
+	a.TextColor = cmp.Or(b.TextColor, a.TextColor)
+	a.SurfaceColor = cmp.Or(b.SurfaceColor, a.SurfaceColor)
+	a.BorderColor = cmp.Or(b.BorderColor, a.BorderColor)
+	a.LinkColor = cmp.Or(b.LinkColor, a.LinkColor)
+	a.SuccessColor = cmp.Or(b.SuccessColor, a.SuccessColor)
+	a.WarningColor = cmp.Or(b.WarningColor, a.WarningColor)
+	a.ErrorColor = cmp.Or(b.ErrorColor, a.ErrorColor)
+	a.HeaderColor = cmp.Or(b.TopbarColor, a.HeaderColor)
+	a.FontFamily = cmp.Or(b.FontFamily, a.FontFamily)
+	a.HasLogo = a.HasLogo || b.HasLogo
+	return a
 }

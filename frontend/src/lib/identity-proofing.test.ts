@@ -40,7 +40,6 @@ import {
   identityRequired,
   proofingRejectionReason,
   effectiveBranding,
-  appLook,
   dropsOwnBranding,
   hostedDraft,
   hostedDraftDirty,
@@ -3255,78 +3254,6 @@ describe("effective branding", () => {
       ...org,
       primaryColor: "#abcdef",
     });
-  });
-});
-
-describe("app look", () => {
-  const bare: ProofingBranding = {
-    displayName: "",
-    primaryColor: "",
-    secondaryColor: "",
-    textColor: "",
-    surfaceColor: "",
-    borderColor: "",
-    linkColor: "",
-    successColor: "",
-    warningColor: "",
-    errorColor: "",
-    topbarColor: "",
-    fontFamily: "",
-    supportContact: "help@acme.example",
-    privacyUrl: "https://acme.example/privacy",
-    logoUri: "",
-    hidePoweredBy: false,
-  };
-  const theme = {
-    primaryColor: "#036bd2",
-    topbarColor: "#101e1e",
-    logoUri: "/theme-logo",
-  };
-
-  it("is the org's theme under the branding's name without a look of its own", () => {
-    expect(
-      appLook({ ...bare, displayName: "Acme Trips" }, theme, "Acme"),
-    ).toEqual({
-      name: "Acme Trips",
-      primaryColor: "#036bd2",
-      headerColor: "#101e1e",
-      logoUri: "/theme-logo",
-    });
-  });
-
-  it("takes the branding's logo over the theme's", () => {
-    expect(appLook({ ...bare, logoUri: "/flow-logo" }, theme, "Acme")).toEqual({
-      name: "Acme",
-      primaryColor: "#036bd2",
-      headerColor: "#101e1e",
-      logoUri: "/flow-logo",
-    });
-  });
-
-  it("is the branding alone once it has a colour or a font, the app's own for the rest", () => {
-    expect(
-      appLook({ ...bare, primaryColor: "#22337a" }, theme, "Acme"),
-    ).toEqual({
-      name: "Acme",
-      primaryColor: "#22337a",
-      headerColor: "",
-      logoUri: "",
-    });
-    expect(
-      appLook({ ...bare, fontFamily: "Inter, sans-serif" }, theme, "Acme")
-        .primaryColor,
-    ).toBe("");
-    expect(
-      appLook(
-        { ...bare, secondaryColor: "#112233", topbarColor: "#0a3d2e" },
-        theme,
-        "Acme",
-      ).headerColor,
-    ).toBe("#0a3d2e");
-  });
-
-  it("does not count the support contact or privacy link as a look", () => {
-    expect(appLook(bare, theme, "Acme").primaryColor).toBe("#036bd2");
   });
 });
 

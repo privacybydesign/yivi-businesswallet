@@ -1,8 +1,10 @@
 package email
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +163,56 @@ func TestProofingMailSenderLocale(t *testing.T) {
 		if !strings.Contains(sender.sent[0].HTMLBody, tc.want) {
 			t.Errorf("locale %q: mail not marked %s", tc.locale, tc.want)
 		}
+	}
+}
+
+// The proofing mail shows its branding's own logo, else the org's.
+func TestProofingMailLogo(t *testing.T) {
+	orgLogo := Logo{Bytes: []byte("org-logo"), ContentType: "image/png"}
+	ownLogo := Logo{Bytes: []byte("own-logo"), ContentType: "image/png"}
+	for name, tc := range map[string]struct {
+		brand ProofingBrand
+		want  []byte
+	}{
+		"own logo":    {ProofingBrand{PrimaryColor: "#0a7c59", Logo: ownLogo}, ownLogo.Bytes},
+		"no own logo": {ProofingBrand{PrimaryColor: "#0a7c59"}, orgLogo.Bytes},
+	} {
+		sender := &recordingSender{}
+		svc := newTestService(sender, stubBrand{logo: orgLogo}, LocaleEN)
+		brand := tc.brand
+		if err := svc.SendIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+			To: "person@example.org", OrgName: "Acme BV", RequesterName: "Sam",
+			DeepLink: "vcmrtd://verify?handover=abc", ValidFor: time.Minute, Brand: &brand,
+		}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.ContainsFunc(sender.sent[0].Inline, func(img mailer.InlineImage) bool {
+			return bytes.Equal(img.Bytes, tc.want)
+		}) {
+			t.Errorf("%s: mail does not carry logo %q", name, tc.want)
+		}
+	}
+}
+
+// The proofing mail preview is the mail as sent, with the draft's name,
+// colour and support line, its images inline, and no SMTP settings needed.
+func TestPreviewIdentityProofingRequested(t *testing.T) {
+	svc := newTestService(&recordingSender{}, stubBrand{logo: Logo{Bytes: []byte("org-logo"), ContentType: "image/png"}}, LocaleEN)
+	svc.settings = stubSettings{}
+	body, err := svc.PreviewIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
+		OrgName: "Acme Trips", RequesterName: "Acme Trips", SupportContact: "help@acme.example",
+		Brand: &ProofingBrand{PrimaryColor: "#0a7c59"},
+	})
+	if err != nil {
+		t.Fatalf("PreviewIdentityProofingRequested: %v", err)
+	}
+	for _, want := range []string{"Acme Trips", "help@acme.example", "#0a7c59", "data:image/png;base64,"} {
+		if !strings.Contains(body.HTMLBody, want) {
+			t.Errorf("preview lacks %q", want)
+		}
+	}
+	if strings.Contains(body.HTMLBody, "cid:") {
+		t.Error("preview still references cid: images")
 	}
 }
 

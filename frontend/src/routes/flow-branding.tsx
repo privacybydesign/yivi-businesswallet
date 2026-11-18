@@ -6,44 +6,38 @@ import { useOrganizationQuery } from "../api/organization.queries";
 import { useOrgThemeQuery } from "../api/theme.queries";
 import {
   useProofingFlowBrandingQuery,
+  useProofingFlowsQuery,
   useProofingSettingsQuery,
   useSaveFlowBrandingMutation,
 } from "../api/identity-proofing.queries";
 import type {
   ProofingBranding,
+  ProofingFlow,
   ProofingFlowBranding,
+  ProofingSettings,
 } from "../api/identity-proofing";
 import { absoluteApiUrl } from "../api/http";
 import type { OrgTheme } from "../api/theme";
 import {
-  appLook,
   dropsOwnBranding,
   effectiveBranding,
   isHexColor,
   isInvalidColor,
   proofingErrorMessage,
-  readableTextOn,
 } from "../lib/identity-proofing";
-import type { AppLook } from "../lib/identity-proofing";
 import { blockingError } from "../lib/query-state";
 import { useLogoPreview } from "../lib/use-logo-preview";
 import { Button, Card, ConfirmDialog } from "../ui";
 import {
   BrandingFields,
-  CAPTION,
   ERROR,
   FALLBACK_PREVIEW_COLOR,
   HINT,
-  MailPreviewCard,
 } from "./proofing-branding-fields";
 import type { BrandingDraft } from "./proofing-branding-fields";
-import { InitialMark } from "./proofing-ui";
+import { BrandingPreviews } from "./branding-preview";
 
 const SWATCH = "h-3.5 w-3.5 shrink-0 rounded-sm";
-
-type PreviewKind = "mail" | "app";
-
-const PREVIEW_KINDS: readonly PreviewKind[] = ["mail", "app"];
 
 type Mode = "org" | "custom";
 
@@ -88,6 +82,7 @@ export function FlowBrandingSettings({
   const settings = useProofingSettingsQuery(slug);
   const org = useOrganizationQuery(slug);
   const theme = useOrgThemeQuery(slug);
+  const flows = useProofingFlowsQuery(slug);
 
   const error = blockingError(own, settings, org, theme);
   if (error !== null) {
@@ -116,6 +111,8 @@ export function FlowBrandingSettings({
       }}
       orgTheme={theme.data}
       saved={own.data}
+      settings={settings.data}
+      flow={flows.data?.find((flow) => flow.id === flowId)}
     />
   );
 }
@@ -131,10 +128,14 @@ function BrandingForm({
   orgBranding,
   orgTheme,
   saved,
+  settings,
+  flow,
 }: Readonly<{
   slug: string;
   flowId: string;
   orgName: string;
+  settings: ProofingSettings;
+  flow: ProofingFlow | undefined;
   // The org's branding, its logo address already absolute.
   orgBranding: ProofingBranding;
   // The org's theme, the Idem app's look without a proofing look of its own.
@@ -172,6 +173,7 @@ function BrandingForm({
     privacyUrl: draft.privacyUrl.trim(),
     logoUri: ownLogoUri,
   });
+  const name = shown.displayName || orgName;
   const change = (patch: Partial<BrandingDraft>): void =>
     setDraft((d) => ({ ...d, ...patch }));
 
@@ -332,17 +334,27 @@ function BrandingForm({
           </div>
         </form>
       </Card>
-      <BrandingPreview
-        mail={
-          <MailPreviewCard
-            name={shown.displayName || orgName}
-            color={isHexColor(shown.primaryColor) ? shown.primaryColor : ""}
-            logoUri={shown.logoUri}
-            supportContact={shown.supportContact}
-            privacyUrl={shown.privacyUrl}
-          />
-        }
-        app={<AppPreviewCard look={appLook(shown, orgTheme, orgName)} />}
+      <BrandingPreviews
+        slug={slug}
+        orgName={orgName}
+        name={name}
+        branding={{ ...shown, logoUri: shown.logoUri || orgTheme.logoUri }}
+        theme={orgTheme}
+        flow={flow}
+        dataRetentionDays={settings.dataRetentionDays}
+        sessionTtlSeconds={settings.sessionTtlSeconds}
+        mail={{
+          flowId,
+          custom,
+          displayName: draft.displayName,
+          primaryColor: isHexColor(draft.primaryColor)
+            ? draft.primaryColor
+            : "",
+          supportContact: draft.supportContact,
+          privacyUrl: draft.privacyUrl,
+          logo: draft.logo ?? undefined,
+          removeLogo: draft.removeLogo,
+        }}
       />
       {confirmDrop && (
         <ConfirmDialog
@@ -355,109 +367,6 @@ function BrandingForm({
           onConfirm={persist}
         />
       )}
-    </div>
-  );
-}
-
-// The preview beside the form: the flow's proofing mail, or how the Idem app
-// shows the flow's name, logo and colour.
-function BrandingPreview({
-  mail,
-  app,
-}: Readonly<{
-  mail: React.ReactNode;
-  app: React.ReactNode;
-}>): React.JSX.Element {
-  const { t } = useTranslation();
-  const [kind, setKind] = useState<PreviewKind>("mail");
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id={headingId} className={CAPTION}>
-          {t("identityProofingFlows.branding.preview.caption")}
-        </h3>
-        <fieldset
-          aria-labelledby={headingId}
-          className="bg-surface-3 rounded-yivi inline-flex gap-1 p-[3px]"
-        >
-          {PREVIEW_KINDS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={kind === option}
-              onClick={() => setKind(option)}
-              className={[
-                "text-ink flex h-8 cursor-pointer items-center rounded-md px-3 text-[13px] font-semibold transition-opacity",
-                kind === option
-                  ? "bg-surface shadow-sm"
-                  : "opacity-55 hover:opacity-100",
-              ].join(" ")}
-            >
-              {t(`identityProofingFlows.branding.preview.${option}`)}
-            </button>
-          ))}
-        </fieldset>
-      </div>
-      {kind === "mail" ? mail : app}
-    </section>
-  );
-}
-
-// A sketch of the Idem app's first screen for this flow: its header with the
-// logo and name, and its colour on the button. A colour the branding leaves
-// empty is the app's own, drawn as the preview's fallback.
-function AppPreviewCard({
-  look,
-}: Readonly<{ look: AppLook }>): React.JSX.Element {
-  const { t } = useTranslation();
-  const fill = isHexColor(look.primaryColor)
-    ? look.primaryColor
-    : FALLBACK_PREVIEW_COLOR;
-  const header = isHexColor(look.headerColor)
-    ? look.headerColor
-    : FALLBACK_PREVIEW_COLOR;
-  return (
-    <div className="border-line bg-surface-2 flex flex-col items-center gap-3 rounded-xl border px-4 py-5">
-      <div className="border-ink bg-surface w-full max-w-[280px] overflow-hidden rounded-[34px] border-8">
-        <div
-          className="flex items-center gap-2.5 px-4 pt-5 pb-3.5"
-          style={{ backgroundColor: header, color: readableTextOn(header) }}
-        >
-          {look.logoUri ? (
-            <img
-              src={look.logoUri}
-              alt=""
-              className="bg-surface-3 h-7 w-7 shrink-0 rounded-md object-contain"
-            />
-          ) : (
-            <InitialMark
-              name={look.name}
-              color={fill}
-              className="h-7 w-7 rounded-md text-[13px]"
-            />
-          )}
-          <span className="min-w-0 text-[14px] font-semibold wrap-anywhere">
-            {look.name}
-          </span>
-        </div>
-        <div className="flex flex-col gap-4 px-4 pt-4 pb-5">
-          <h4 className="text-ink text-[17px] leading-snug font-bold">
-            {t("identityProofing.branding.preview.heading", {
-              name: look.name,
-            })}
-          </h4>
-          <div
-            className="rounded-lg py-2.5 text-center text-[13px] font-semibold"
-            style={{ backgroundColor: fill, color: readableTextOn(fill) }}
-          >
-            {t("identityProofingFlows.branding.preview.start")}
-          </div>
-        </div>
-      </div>
-      <p className={`${HINT} max-w-xs text-center`}>
-        {t("identityProofingFlows.branding.preview.appNote")}
-      </p>
     </div>
   );
 }

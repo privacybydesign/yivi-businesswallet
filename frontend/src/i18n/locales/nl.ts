@@ -1271,17 +1271,12 @@ export const nl: Translation<typeof en> = {
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy:
         "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
+      useWalletLook: "Gebruik de kleuren en het lettertype van de wallet",
+      useWalletLookHint:
+        "Zet dit uit om externe personen andere kleuren of een ander lettertype te tonen dan je leden zien.",
+      walletFont: "Wallet: {{name}}",
       discard: "Verwerpen",
       save: "Huisstijl opslaan",
-      preview: {
-        caption: "Voorbeeld · verificatiemail",
-        heading: "{{name}} vraagt je je identiteit te verifiëren",
-        body: "{{name}} vraagt je je identiteit te verifiëren met je paspoort of identiteitskaart en je gezicht, in de Idem-app op je telefoon.",
-        button: "Openen in de Idem-app",
-        support: "Vragen over dit verzoek? Neem contact op met {{contact}}.",
-        privacy: "Hoe er met je gegevens wordt omgegaan: {{url}}",
-        footer: "Identiteitscontrole door Yivi",
-      },
     },
     legalRetention: {
       title: "Wettelijke bewaartermijn",
@@ -1813,9 +1808,33 @@ export const nl: Translation<typeof en> = {
         caption: "Voorbeeld",
         mail: "Verificatiemail",
         app: "Idem-app",
-        start: "Starten",
+        hosted: "Gehoste pagina",
         appNote:
-          "Zo toont de Idem-app de naam, het logo en de kleur van deze flow als de persoon het verzoek opent.",
+          "Het eerste scherm van de Idem-app als de persoon het verzoek opent.",
+        idem: {
+          title: "Verzoek",
+          heading: "{{party}} wil je identiteit verifiëren",
+          requestedBy: "Aangevraagd door {{org}}",
+          expiresIn_one: "Dit verzoek verloopt over {{count}} minuut.",
+          expiresIn_other: "Dit verzoek verloopt over {{count}} minuten.",
+          theyWillReceive: "Zij ontvangen",
+          stepByStep:
+            "Je gegevens gaan stap voor stap naar de verificatiedienst, zodat je op een ander apparaat verder kunt. {{party}} ontvangt ze pas als je afrondt. Stop je, dan worden ze verwijderd zodra dit verzoek verloopt.",
+          continue: "Doorgaan",
+          decline: "Weigeren",
+          items: {
+            documentIdentity:
+              "Documentidentiteit (naam, geboortedatum, documentnummer, vervaldatum)",
+            additionalDetails:
+              "Aanvullende persoonsgegevens (persoonsnummer, geboorteplaats)",
+            facePhoto: "Je pasfoto uit de chip van het document",
+            chipChecks: "Controles op de echtheid van het document",
+            biometrics: "Resultaat van de gezichtsverificatie",
+            ageOver: "Of je {{age}} jaar of ouder bent",
+            ageCheck: "Of je oud genoeg bent",
+            everything: "Alles wat de app uit je document leest",
+          },
+        },
       },
       dropConfirm: {
         title: "De huisstijl van de organisatie gebruiken?",
@@ -3159,7 +3178,6 @@ export const nl: Translation<typeof en> = {
     tabScreening: "Screening (VOG)",
     tabBranding: "Huisstijl",
     tabPrivacy: "Gegevens en privacy",
-    tabTheme: "Wallet-thema",
     tabCommunication: "Communicatie",
     tabEmail: "E-mail",
     tabMailTemplates: "E-mailteksten",
@@ -3171,6 +3189,12 @@ export const nl: Translation<typeof en> = {
     tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    brandingWallet: "Je wallet",
+    brandingWalletHint:
+      "Hoe de business wallet eruitziet voor je leden, en de Idem-app als een verzoek naar een lid gaat.",
+    brandingExternal: "Wat externe personen zien",
+    brandingExternalHint:
+      "De verificatiemail, de gehoste pagina en de Idem-app voor een persoon buiten de organisatie. Velden die je leeg laat gebruiken die van de wallet.",
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
     discard: "Verwerpen",
     organisation: {

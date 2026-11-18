@@ -1164,17 +1164,15 @@ post-review outcome stay the system's.
     proofing mail of external people (a member's mail is the org's own):
     subject, heading and requester are the display name, the colour replaces
     the org's theme primary seed, the logo replaces the org's theme logo (none
-    shows the name as wordmark, never the theme logo), and the `supportContact`
+    shows the theme logo, else the name as wordmark), and the `supportContact`
     / `privacyUrl` paragraphs appear only when set (an all-empty paragraph
     collapses). The hosted page and the on-screen page show the same display
     name, colour, logo, support contact and privacy URL.
   - **White-label** (the same branding save): a second colour
     (`secondary_color`, the Idem app's), the palette the org theme has (text,
     surface, border, link, success, warning, error and top bar colours) and a
-    font family, all `#rrggbb` or a CSS font-family list; NULL keeps the
-    design's own. Any colour or the font is a look of its own
-    (`whiteLabeled`); a logo, name, support contact and privacy link alone are
-    not. It applies to the Idem app and the hosted page (below).
+    font family, all `#rrggbb` or a CSS font-family list; NULL is the org
+    theme's. It applies to the Idem app and the hosted page (below).
   - **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`):
     the app session view carries `branding`, so the app looks like the
     requester's own: colours (accent as secondary, top bar as header), font and
@@ -1185,15 +1183,16 @@ post-review outcome stay the system's.
     and the request's flow), the org's settings and the flow's own branding: a
     request to an external person gets the proofing branding its mail and
     hosted page wear, the flow's own over the org's (`Settings.brandedFor`).
-    With white-label (a colour or the font, a flow's own colour included) that
-    is its colours, font and logo (the flow's, else the org's proofing logo);
-    what it leaves out keeps the design's own, not the org's theme's. Without,
-    the org theme under the name the proofing mail signs with, with the
-    proofing logo (the flow's, else the org's) or else the theme's. A request
-    to a member gets the org theme under the org's name, whatever its flow.
-    Nothing set at either level is no `branding`. `relyingParty` stays the
-    org's own name next to it. The hosted page applies the same look (`theme`
-    in the hosted view).
+    - That branding goes over the org theme field by field
+      (`AppBranding.under`): each colour, the font and the logo it sets win,
+      each one it leaves empty is the theme's.
+    - The logo is the flow's, else the org's proofing logo, else the theme's.
+    - The name is the one the proofing mail signs with.
+    - A request to a member gets the org theme under the org's name, whatever
+      its flow.
+    - Nothing set at either level is no `branding`. `relyingParty` stays the
+      org's own name next to it.
+    - The hosted page applies the same look (`theme` in the hosted view).
   - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
     org and flow, `flow_branding.go`; a row is "custom for this flow", none is
     "same as the organisation"): `GET` and `PUT
@@ -1205,7 +1204,7 @@ post-review outcome stay the system's.
     the org's white-label colours and font stay under it (`Branding.over`,
     mirrored by `effectiveBranding` in `lib/identity-proofing.ts`). It styles
     the flow's proofing mail (`proofingMail`: a branding that cannot be read
-    blocks the mail, a logo that cannot be read leaves the wordmark), its
+    blocks the mail, a logo that cannot be read leaves the theme's), its
     hosted page (`HostedRequest`, `HostedLogo`; where `SetAppBranding` is
     wired, as in `cmd/api` and the integration harness, the page's `theme` and
     logo come from `AppBrandingResolver`, which applies it as well) and the
@@ -1215,12 +1214,30 @@ post-review outcome stay the system's.
     confirm, and checks none of the form's fields or its logo upload (the
     handler does not read it): the tab sends its hidden draft text fields in
     that mode too. Audited `identity_proofing.flow_branding_configured` with
-    before and after. The form is the Branding tab of Edit flow, with a preview
-    that switches between the proofing mail and the Idem app (`appLook` in
-    `lib/identity-proofing.ts` mirrors the resolver for an external person).
+    before and after. The form is the Branding tab of Edit flow, with the
+    branding preview (below).
   - **Allowed redirect origins** (§7).
-  - Branding is under Settings › Branding (the org's, for every flow; the
-    wallet's own look is the separate Settings › Wallet theme).
+  - Settings › Branding holds both looks (the old `?tab=theme` opens it):
+    - "Your wallet": the org theme (`theme-settings.tsx`).
+    - "What external people see": the org's proofing branding, for every
+      flow (`proofing-branding.tsx`). A "use the wallet's colours and font"
+      switch hides the colour and font fields, and turning it on clears
+      them. Empty fields show the wallet's values as placeholders.
+  - **Branding preview** (`routes/branding-preview.tsx`), beside both branding
+    forms, of the unsaved draft:
+    - Mail: the real mail, rendered by `POST
+      .../settings/branding/mail-preview` (`mail_preview.go`, the form plus
+      `flowId`/`custom`, nothing saved) in a sandboxed frame.
+    - Hosted page: the real page (`HostedPage` in `proof.tsx`) in a
+      same-origin frame on `/preview/hosted`, so its theme applies to the
+      frame alone. The settings post it a hosted view built by
+      `lib/hosted-preview.ts` (the resolver's per-field fallback, the org's
+      default flow or the flow being edited).
+    - Idem app: its consent screen drawn in HTML. `lib/idem-look.ts` copies
+      the app's colour rules (vcmrtd `idem/lib/theme/app_theme.dart`: a colour
+      that does not read on white is the app's own) and the strings are the
+      app's `.arb` ones. A change in the app's consent screen needs a change
+      here.
 
 ## 5. No test mode
 
