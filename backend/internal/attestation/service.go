@@ -27,6 +27,10 @@ const claimTokenBytes = 24
 // just failed (see Service.releaseClaim).
 const releaseClaimTimeout = 5 * time.Second
 
+// listReconcileBudget bounds the issuer calls one Issued-tab load may spend, so a
+// slow issuer cannot keep the whole ledger from loading.
+const listReconcileBudget = 5 * time.Second
+
 // issuer is the hosted-issuer seam the service orchestrates (see
 // internal/openid4vciissuer). Accept the interface; the concrete client/stub is
 // injected at boot.
@@ -270,23 +274,28 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	return issued, nil
 }
 
-// ListIssued returns the issuance ledger, first reconciling every open offer with
-// the issuer. An organization accepts an offer in its own wallet, so only the
-// issuer can tell this side that it was claimed.
+// ListIssued returns the issuance ledger, first reconciling every open offer to an
+// organization with the issuer. An organization accepts an offer in its own
+// wallet, so only the issuer can tell this side that it was claimed.
 func (s *Service) ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error) {
 	issued, err := s.store.ListIssued(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	reconcileCtx, cancel := context.WithTimeout(ctx, listReconcileBudget)
+	defer cancel()
 	instance, resolved := "", false
 	for i, row := range issued {
-		if row.Status != StatusOffered || row.IssuanceID == "" {
+		if row.Status != StatusOffered || row.IssuanceID == "" || row.RecipientKind != RecipientOrganization {
 			continue
+		}
+		if reconcileCtx.Err() != nil {
+			break
 		}
 		if !resolved {
 			instance, resolved = s.instanceFor(ctx, orgID), true
 		}
-		credentialUUID, ok := s.reconcile(ctx, instance, row.IssuanceID)
+		credentialUUID, ok := s.reconcile(reconcileCtx, instance, row.IssuanceID)
 		if !ok {
 			continue
 		}
