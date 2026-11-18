@@ -105,9 +105,11 @@ export function FlowBrandingSettings({
       slug={slug}
       flowId={flowId}
       orgName={org.data.name}
+      // The org's colour and logo are its theme's, the one look.
       orgBranding={{
         ...settings.data.branding,
-        logoUri: absoluteLogo(settings.data.branding.logoUri),
+        primaryColor: theme.data.primaryColor,
+        logoUri: theme.data.logoUri,
       }}
       orgTheme={theme.data}
       saved={own.data}
@@ -136,9 +138,9 @@ function BrandingForm({
   orgName: string;
   settings: ProofingSettings;
   flow: ProofingFlow | undefined;
-  // The org's branding, its logo address already absolute.
+  // The org's branding, with its theme's colour and logo.
   orgBranding: ProofingBranding;
-  // The org's theme, the Idem app's look without a proofing look of its own.
+  // The org's theme, the one look.
   orgTheme: OrgTheme;
   saved: ProofingFlowBranding;
 }>): React.JSX.Element {
@@ -338,7 +340,7 @@ function BrandingForm({
         slug={slug}
         orgName={orgName}
         name={name}
-        branding={{ ...shown, logoUri: shown.logoUri || orgTheme.logoUri }}
+        branding={shown}
         theme={orgTheme}
         flow={flow}
         dataRetentionDays={settings.dataRetentionDays}

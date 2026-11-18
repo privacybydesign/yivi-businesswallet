@@ -250,13 +250,11 @@ func TestProofingMemberCannotManage(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	// Reading the settings and the logo is for every member.
+	// Reading the settings is for every member.
 	settings := decodeJSON[proofingSettingsResp](t, env.do(http.MethodGet, base+"/settings", nil))
 	if settings.SessionTTLSeconds != int(proofing.SessionTTL.Seconds()) {
 		t.Errorf("member settings = %+v, want the default session lifetime", settings)
 	}
-	wantProofingError(t, "member reads the logo of an org without one", env.do(http.MethodGet, base+"/settings/logo", nil),
-		http.StatusNotFound, "not_found")
 
 	// The request routes are member routes: with no flow made available the
 	// request is refused on the flow, not on the role.
@@ -493,6 +491,7 @@ type proofingSettingsResp struct {
 		PrivacyURL     string `json:"privacyUrl"`
 		LogoURI        string `json:"logoUri"`
 		HidePoweredBy  bool   `json:"hidePoweredBy"`
+		ShowTheme      bool   `json:"showTheme"`
 	} `json:"branding"`
 	LegalRetention *struct {
 		Months   int    `json:"months"`
@@ -646,53 +645,41 @@ func TestOrgSettingsHTTPFlow(t *testing.T) {
 	assertOrgBranding(t, env, orgID, base)
 }
 
-// assertOrgBranding saves the org's branding with a logo, checks it round trips
-// beside the other settings saved before, refuses bad fields, and keeps or
-// removes the logo as asked.
+// assertOrgBranding saves the org's branding, checks it round trips beside
+// the other settings saved before with no colour or logo of its own, refuses a
+// bad field, and keeps the theme switch when a form leaves it out.
 func assertOrgBranding(t *testing.T, env *testEnv, orgID uuid.UUID, base string) {
 	t.Helper()
-	logo := testLogoPNG(t)
 	form := map[string]string{
-		"displayName": "Acme Identity", "primaryColor": "#1f5b4a", "supportContact": "help@acme.test",
-		"privacyUrl": "https://acme.test/privacy", "hidePoweredBy": "true",
+		"displayName": "Acme Identity", "supportContact": "help@acme.test",
+		"privacyUrl": "https://acme.test/privacy", "hidePoweredBy": "true", "showTheme": "false",
 	}
-	resp := env.putBranding("acme", form, logo)
+	resp := env.putBranding("acme", form, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save branding = %d, want 200", resp.StatusCode)
 	}
 	settings := decodeJSON[proofingSettingsResp](t, resp)
 	b := settings.Branding
-	if b.DisplayName != "Acme Identity" || b.PrimaryColor != "#1f5b4a" || b.SupportContact != "help@acme.test" ||
-		b.PrivacyURL != "https://acme.test/privacy" || !b.HidePoweredBy || !strings.HasPrefix(b.LogoURI, base+"/settings/logo?v=") {
-		t.Errorf("branding = %+v; want the saved fields and a logo link", b)
+	if b.DisplayName != "Acme Identity" || b.SupportContact != "help@acme.test" || b.PrivacyURL != "https://acme.test/privacy" ||
+		!b.HidePoweredBy || b.ShowTheme || b.PrimaryColor != "" || b.LogoURI != "" {
+		t.Errorf("branding = %+v; want the saved fields, the theme off, no colour or logo", b)
 	}
 	if len(settings.AllowedRedirectOrigins) != 1 || settings.DataRetentionDays != fixedRetentionDays {
 		t.Errorf("settings after branding = %+v, want the other settings kept", settings)
-	}
-	resp = env.do(http.MethodGet, base+"/settings/logo", nil)
-	served, err := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get(headerContentType) != contentTypePNG || !bytes.Equal(served, logo) {
-		t.Errorf("logo = %d %q (%d bytes, err %v), want the uploaded PNG", resp.StatusCode, resp.Header.Get(headerContentType), len(served), err)
 	}
 	if n := env.auditCount(orgID, audit.IdentityProofingSettingsUpdated); n != 2 {
 		t.Errorf("settings_updated audits = %d, want 2 after the branding", n)
 	}
 
-	bad := map[string]string{"displayName": "Acme", "primaryColor": "green"}
-	wantProofingError(t, "branding with a colour that is no hex", env.putBranding("acme", bad, nil), http.StatusBadRequest, "invalid_input")
-	bad = map[string]string{"displayName": "Acme", "privacyUrl": "http://acme.test/privacy"}
+	bad := map[string]string{"displayName": "Acme", "privacyUrl": "http://acme.test/privacy"}
 	wantProofingError(t, "branding with a privacy URL that is no https", env.putBranding("acme", bad, nil), http.StatusBadRequest, "invalid_input")
 
-	// A form without a logo keeps it; removeLogo clears it.
-	if kept := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); kept.Branding.LogoURI == "" {
-		t.Errorf("branding saved without a logo field = %+v, want the logo kept", kept.Branding)
+	delete(form, "showTheme")
+	form["displayName"] = "Acme"
+	if kept := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); kept.Branding.ShowTheme ||
+		kept.Branding.DisplayName != "Acme" {
+		t.Errorf("branding saved without showTheme = %+v, want the theme kept off", kept.Branding)
 	}
-	form["removeLogo"] = "true"
-	if removed := decodeJSON[proofingSettingsResp](t, env.putBranding("acme", form, nil)); removed.Branding.LogoURI != "" {
-		t.Errorf("branding saved with removeLogo = %+v, want no logo", removed.Branding)
-	}
-	wantProofingError(t, "removed logo", env.do(http.MethodGet, base+"/settings/logo", nil), http.StatusNotFound, "not_found")
 }
 
 // The org's legal retention is a floor for every flow's retention: it is told

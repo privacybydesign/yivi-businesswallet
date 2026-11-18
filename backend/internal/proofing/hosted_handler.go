@@ -377,12 +377,11 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.Organization.Name = st.SignedAs()
 	out.Organization.Branding = brandingResponse{
 		DisplayName: st.Branding.DisplayName, PrimaryColor: st.Branding.PrimaryColor,
-		SecondaryColor: st.Branding.SecondaryColor,
 		SupportContact: st.Branding.SupportContact, PrivacyURL: st.Branding.PrivacyURL,
-		HidePoweredBy: st.Branding.HidePoweredBy,
+		HidePoweredBy: st.Branding.HidePoweredBy, ShowTheme: st.Branding.ShowTheme,
 	}
 	// The logo is the one the theme comes with: the flow's own, else the org's
-	// proofing logo, else the org's theme's.
+	// theme's.
 	theme, hasLogo, err := h.hostedTheme(r, hosted.Request)
 	if err != nil {
 		return fmt.Errorf("proofing: hosted page theme: %w", err)

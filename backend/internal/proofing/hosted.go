@@ -385,8 +385,8 @@ func (s *Service) HostedEmbedOrigins(ctx context.Context, token string) ([]strin
 	return settings.RedirectOrigins, nil
 }
 
-// HostedLogo is the logo of a hosted request's page: its flow's own, else its
-// org's.
+// HostedLogo is the logo of a hosted request's page without an app branding
+// resolver: its flow's own, or ErrNoLogo.
 func (s *Service) HostedLogo(ctx context.Context, token string) (Logo, error) {
 	req, err := s.hostedRequest(ctx, token)
 	if err != nil {

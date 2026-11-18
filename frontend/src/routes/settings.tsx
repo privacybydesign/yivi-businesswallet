@@ -1,4 +1,3 @@
-import { useId } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useOrganizationQuery } from "../api/organization.queries";
@@ -25,12 +24,11 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
-import { BrandingPanel } from "./proofing-branding";
+import { BrandingSettings } from "./branding-settings";
 import { PrivacySettingsPanel } from "./settings-privacy";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
-import { ThemeSettingsPanel } from "./theme-settings";
 import { WalletUnitPanel } from "./wallet-unit-panel";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
@@ -192,55 +190,4 @@ function SettingsPanel({
         </div>
       );
   }
-}
-
-// The Branding tab: the wallet's own look, then what external people see,
-// which falls back to it.
-function BrandingSettings({
-  slug,
-  orgName,
-}: Readonly<{
-  slug: string;
-  orgName: string;
-}>): React.JSX.Element {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col gap-10">
-      <BrandingSection
-        title={t("settings.brandingWallet")}
-        hint={t("settings.brandingWalletHint")}
-      >
-        <ThemeSettingsPanel slug={slug} />
-      </BrandingSection>
-      <BrandingSection
-        title={t("settings.brandingExternal")}
-        hint={t("settings.brandingExternalHint")}
-      >
-        <BrandingPanel slug={slug} orgName={orgName} />
-      </BrandingSection>
-    </div>
-  );
-}
-
-function BrandingSection({
-  title,
-  hint,
-  children,
-}: Readonly<{
-  title: string;
-  hint: string;
-  children: React.ReactNode;
-}>): React.JSX.Element {
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <div>
-        <h2 id={headingId} className="font-display text-[19px] font-bold">
-          {title}
-        </h2>
-        <p className="text-ink-soft mt-1 text-[13px]">{hint}</p>
-      </div>
-      {children}
-    </section>
-  );
 }

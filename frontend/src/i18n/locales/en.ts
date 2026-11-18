@@ -1239,10 +1239,9 @@ export const en = {
       privacyUrl: "Privacy statement URL",
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy: "Leave the “Powered by Yivi” line off the hosted page",
-      useWalletLook: "Use the wallet's colours and font",
-      useWalletLookHint:
-        "Turn this off to give external people other colours or another font than your members see.",
-      walletFont: "Wallet: {{name}}",
+      showTheme: "Show this look in the Idem app and on the hosted page",
+      showThemeHint:
+        "Off: they keep their own look. The proofing mail always uses it.",
       discard: "Discard",
       save: "Save branding",
     },
@@ -3110,12 +3109,17 @@ export const en = {
     tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
-    brandingWallet: "Your wallet",
+    brandingWallet: "Look",
     brandingWalletHint:
-      "How the business wallet looks for your members, and the Idem app when a request goes to a member.",
-    brandingExternal: "What external people see",
+      "One look for the business wallet, the proofing mail, the hosted page and the Idem app.",
+    brandingExternal: "Name and contact",
     brandingExternalHint:
-      "The proofing mail, the hosted page and the Idem app for a person outside the organisation. Fields you leave empty use the wallet's.",
+      "What the proofing mail, the hosted page and the Idem app say to a person outside the organisation.",
+    unsaved: {
+      title: "Leave without saving?",
+      message: "Your changes to the branding are not saved.",
+      leave: "Leave",
+    },
     adminOnly: "Only organisation admins can manage settings.",
     discard: "Discard",
     organisation: {

@@ -21,7 +21,6 @@ import (
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/openid4vpverifier"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/proofingprovider"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/safehttp"
-	"github.com/privacybydesign/yivi-businesswallet/backend/internal/themesettings"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/user"
 )
 
@@ -140,11 +139,10 @@ type apiKeyStore interface {
 type orgSettingsStore interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
 	Save(ctx context.Context, orgID uuid.UUID, change SessionSettingsChange, legal *LegalRetention, origins *[]string) (Settings, error)
-	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error)
+	SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error)
 	SyncEngineRetention(ctx context.Context, orgID uuid.UUID, sync func(context.Context, Settings) error) error
 	MarkEngineRetentionStale(ctx context.Context, orgID uuid.UUID) error
 	StaleEngineRetention(ctx context.Context) ([]uuid.UUID, error)
-	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
 }
 
 type pauseStore interface {
@@ -2653,34 +2651,20 @@ func (s *Service) Settings(ctx context.Context, orgID uuid.UUID) (Settings, erro
 	return s.orgSettings.Get(ctx, orgID)
 }
 
-// SaveBranding replaces the org's branding. The colour is a #rrggbb hex, the
-// privacy statement an https URL; empty fields fall back.
-func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding, logo LogoChange) (Settings, error) {
+// SaveBranding replaces what the org's branding says besides its theme. The
+// privacy statement is an https URL; empty fields fall back.
+func (s *Service) SaveBranding(ctx context.Context, orgID uuid.UUID, b Branding) (Settings, error) {
 	b, err := checkBranding(b)
 	if err != nil {
 		return Settings{}, err
 	}
-	return s.orgSettings.SaveBranding(ctx, orgID, b, logo)
+	return s.orgSettings.SaveBranding(ctx, orgID, b)
 }
 
 // checkBranding trims b's fields and refuses one that cannot be saved.
 func checkBranding(b Branding) (Branding, error) {
 	b.DisplayName = strings.TrimSpace(b.DisplayName)
 	b.PrimaryColor = strings.TrimSpace(b.PrimaryColor)
-	b.SecondaryColor = strings.TrimSpace(b.SecondaryColor)
-	b.FontFamily = strings.TrimSpace(b.FontFamily)
-	for name, color := range map[string]*string{
-		"text": &b.TextColor, "surface": &b.SurfaceColor, "border": &b.BorderColor, "link": &b.LinkColor,
-		"success": &b.SuccessColor, "warning": &b.WarningColor, "error": &b.ErrorColor, "top bar": &b.TopbarColor,
-	} {
-		*color = strings.TrimSpace(*color)
-		if *color != "" && !hexColor.MatchString(*color) {
-			return Branding{}, fmt.Errorf("%w: the %s colour must be a hex colour like #1f5b4a", ErrInvalidInput, name)
-		}
-	}
-	if b.FontFamily != "" && !themesettings.ValidFontFamily(b.FontFamily) {
-		return Branding{}, fmt.Errorf("%w: the font must be a comma-separated font-family list", ErrInvalidInput)
-	}
 	b.SupportContact = strings.TrimSpace(b.SupportContact)
 	b.PrivacyURL = strings.TrimSpace(b.PrivacyURL)
 	switch {
@@ -2688,8 +2672,6 @@ func checkBranding(b Branding) (Branding, error) {
 		return Branding{}, fmt.Errorf("%w: the display name is too long", ErrInvalidInput)
 	case b.PrimaryColor != "" && !hexColor.MatchString(b.PrimaryColor):
 		return Branding{}, fmt.Errorf("%w: the primary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
-	case b.SecondaryColor != "" && !hexColor.MatchString(b.SecondaryColor):
-		return Branding{}, fmt.Errorf("%w: the secondary colour must be a hex colour like #1f5b4a", ErrInvalidInput)
 	case len(b.SupportContact) > maxSupportContactLen:
 		return Branding{}, fmt.Errorf("%w: the support contact is too long", ErrInvalidInput)
 	case len(b.PrivacyURL) > maxWebhookURLLength:
@@ -2701,11 +2683,6 @@ func checkBranding(b Branding) (Branding, error) {
 		}
 	}
 	return b, nil
-}
-
-// Logo returns the org's logo, or ErrNoLogo.
-func (s *Service) Logo(ctx context.Context, orgID uuid.UUID) (Logo, error) {
-	return s.orgSettings.Logo(ctx, orgID)
 }
 
 // sessionTTLAllowed is whether a flow may set seconds as its session lifetime:

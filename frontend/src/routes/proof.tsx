@@ -275,7 +275,11 @@ function HostedFlow({
       <div className="bg-topbar text-topbar-fg border-topbar-line flex items-center gap-3 border-b px-6 py-5">
         <BrandMark
           name={organization.name}
-          branding={organization.branding}
+          // The mark wears the page's colour: a flow's own, else the theme's.
+          branding={{
+            ...organization.branding,
+            primaryColor: primaryColor || (theme?.primaryColor ?? ""),
+          }}
           size="lg"
         />
         <span className="font-display text-[16px] font-bold">

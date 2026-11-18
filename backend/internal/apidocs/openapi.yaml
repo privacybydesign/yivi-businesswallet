@@ -8431,12 +8431,12 @@ paths:
                       reasonNl: De Wwft verplicht ons het identiteitsbewijs vijf jaar te bewaren.
                     branding:
                       displayName: Acme Verzekeringen
-                      primaryColor: "#1f6feb"
-                      secondaryColor: ""
+                      primaryColor: ""
                       supportContact: support@acme.example
                       privacyUrl: https://acme.example/privacy
-                      logoUri: /api/v1/orgs/acme/identity-proofing/settings/logo?v=1759397400
+                      logoUri: ""
                       hidePoweredBy: false
+                      showTheme: true
                     allowedRedirectOrigins: [https://portal.acme.example]
         '401':
           $ref: '#/components/responses/Unauthorized'
@@ -8518,20 +8518,13 @@ paths:
       tags: [identity-proofing-internal]
       summary: Set the organisation's branding
       description: >-
-        Requires an administrator role in the organisation. A multipart form:
-        `displayName` (the name the proofing mail signs with; empty is the organisation's
-        name), `primaryColor` (`#rrggbb`; empty is the organisation's in the mail),
-        `secondaryColor` (`#rrggbb`, the Idem app's second colour), the rest of the
-        white-label as the organisation theme has it (`textColor`, `surfaceColor`,
-        `borderColor`, `linkColor`, `successColor`, `warningColor`, `errorColor`,
-        `topbarColor` and `fontFamily`; each one set is the Idem app's and hosted page's, each
-        one left empty is the organisation theme's), `supportContact` and `privacyUrl` (an
-        https URL), each added to the mail and
-        left out when empty,
-        and a `logo` file (PNG, JPEG, GIF or WebP, at most 512 KiB; mail clients do not
-        render SVG) or `removeLogo=true`. `hidePoweredBy=true` leaves the "powered by" line off
-        the organisation's hosted pages, whose accent colour is `primaryColor`. Returns the
-        settings.
+        Requires an administrator role in the organisation. The organisation's theme is
+        the one look of its proofing mail, hosted page and Idem app; this sets what they say
+        besides it. A multipart form: `displayName` (the name the proofing mail signs with;
+        empty is the organisation's name), `supportContact` and `privacyUrl` (an https URL),
+        each added to the mail and left out when empty, `hidePoweredBy=true` to leave the
+        "powered by" line off the hosted pages, and `showTheme` (`false` keeps the Idem app's
+        and the hosted page's own look; left out keeps it as it is). Returns the settings.
       requestBody:
         required: true
         content:
@@ -8570,18 +8563,21 @@ paths:
       summary: Preview the proofing mail of an unsaved branding
       description: >-
         Requires an administrator role in the organisation. The branding form as the
-        organisation's or a flow's branding save takes it (`displayName`, `primaryColor`,
-        `supportContact`, `privacyUrl`, a `logo` file or `removeLogo=true`), plus `flowId`
-        for a flow's own branding with `custom` (`true` for its own fields, else the
-        organisation's) and `locale` (`en` or `nl`; another is the default). Returns the
-        proofing mail an external person would get, rendered as it is sent, with a sample
-        link and its images inline. Nothing is saved.
+        organisation's branding save takes it (`displayName`, `supportContact`,
+        `privacyUrl`), or with `flowId` as a flow's (plus `custom`, `primaryColor`, and a
+        `logo` file or `removeLogo=true`). With `theme=true` it renders in an unsaved
+        organisation theme: `themePrimaryColor`, `themeTextColor`, `themeSurfaceColor`,
+        `themeBorderColor`, `themeLinkColor`, `themeFontFamily`, and a `themeLogo` file,
+        `themeRemoveLogo=true`, or neither to keep the saved logo. `locale` is `en` or `nl`
+        (another is the default). Returns the proofing mail an external person would get,
+        rendered as it is sent, with a sample link and its images inline. Nothing is saved.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/ProofingBrandingForm'
+              type: object
+              additionalProperties: true
       responses:
         '200':
           description: The rendered mail.
@@ -8605,38 +8601,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '413':
           description: The logo is too large (`payload_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /api/v1/orgs/{slug}/identity-proofing/settings/logo:
-    parameters:
-      - name: slug
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Organisation slug.
-    get:
-      tags: [identity-proofing-internal]
-      summary: Get the organisation's proofing logo
-      description: >-
-        Requires organisation membership. The logo image, served with a locked-down
-        content security policy. An organisation without a logo is 404 `not_found`.
-      responses:
-        '200':
-          description: The logo image.
-          content:
-            'image/*':
-              schema:
-                type: string
-                format: binary
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ProofingForbidden'
-        '404':
-          description: The organisation has no logo (`not_found`).
           content:
             application/json:
               schema:
@@ -11216,12 +11180,12 @@ paths:
                       name: Acme Verzekeringen
                       branding:
                         displayName: Acme Verzekeringen
-                        primaryColor: "#1f6feb"
-                        secondaryColor: "#5412c7"
+                        primaryColor: ""
                         supportContact: support@acme.example
                         privacyUrl: https://acme.example/privacy
                         logoUri: /api/v1/proof/BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY/logo?v=1759397400
                         hidePoweredBy: false
+                        showTheme: true
                       dataRetentionDays: 7
                       erasureHandling: review
                     flow:
@@ -17541,34 +17505,17 @@ components:
       required: [state, pendingRetries]
     ProofingBranding:
       type: object
+      description: >-
+        What the proofing mail, hosted page and Idem app say besides the organisation's theme,
+        their one look. The organisation's has no colour or logo; a hosted page's carries its
+        flow's own.
       properties:
         displayName:
           type: string
         primaryColor:
           type: string
+          description: A flow's own colour over the theme's; empty for the organisation's.
           example: '#1f6feb'
-        secondaryColor:
-          type: string
-          example: '#5412c7'
-        textColor:
-          type: string
-        surfaceColor:
-          type: string
-        borderColor:
-          type: string
-        linkColor:
-          type: string
-        successColor:
-          type: string
-        warningColor:
-          type: string
-        errorColor:
-          type: string
-        topbarColor:
-          type: string
-        fontFamily:
-          type: string
-          description: A CSS font-family list; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
@@ -17578,7 +17525,10 @@ components:
           description: Empty without a logo; carries a version so a replaced logo is fetched again.
         hidePoweredBy:
           type: boolean
-      required: [displayName, primaryColor, secondaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy]
+        showTheme:
+          type: boolean
+          description: Whether the Idem app and the hosted page wear the organisation's theme.
+      required: [displayName, primaryColor, supportContact, privacyUrl, logoUri, hidePoweredBy, showTheme]
     ProofingSettings:
       type: object
       description: What the organisation set once for all its flows.
@@ -17688,54 +17638,18 @@ components:
       properties:
         displayName:
           type: string
-        primaryColor:
-          type: string
-          description: '`#rrggbb`; empty is the organisation''s in the mail, and the design''s in a look of the organisation''s own.'
-        secondaryColor:
-          type: string
-          description: '`#rrggbb`, the Idem app''s second colour; empty keeps the design''s in a look of the organisation''s own.'
-        textColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        surfaceColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        borderColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        linkColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        successColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        warningColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        errorColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        topbarColor:
-          type: string
-          description: '`#rrggbb`; empty keeps the design''s.'
-        fontFamily:
-          type: string
-          description: A CSS font-family list, as the organisation theme takes it; empty keeps the design's.
         supportContact:
           type: string
         privacyUrl:
           type: string
           description: An https URL.
-        logo:
-          type: string
-          format: binary
-          description: PNG, JPEG, GIF or WebP, at most 512 KiB.
-        removeLogo:
-          type: string
-          enum: ['true']
         hidePoweredBy:
           type: string
           enum: ['true', 'false']
+        showTheme:
+          type: string
+          enum: ['true', 'false']
+          description: Left out keeps it as it is.
     ProofingFlowBranding:
       type: object
       properties:

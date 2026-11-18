@@ -5,20 +5,11 @@ import { hostedPreviewPage, hostedPreviewTheme } from "./hosted-preview";
 const branding: ProofingBranding = {
   displayName: "Acme Trips",
   primaryColor: "#22337a",
-  secondaryColor: "",
-  textColor: "",
-  surfaceColor: "",
-  borderColor: "",
-  linkColor: "",
-  successColor: "",
-  warningColor: "",
-  errorColor: "",
-  topbarColor: "",
-  fontFamily: "",
   supportContact: "",
   privacyUrl: "",
   logoUri: "",
   hidePoweredBy: false,
+  showTheme: true,
 };
 
 const theme = {
@@ -36,7 +27,7 @@ const theme = {
 };
 
 describe("hosted preview", () => {
-  it("takes each look field of the branding, the wallet theme's for the rest", () => {
+  it("is the wallet theme with a flow's own colour over it", () => {
     expect(hostedPreviewTheme(branding, theme)).toMatchObject({
       primaryColor: "#22337a",
       secondaryColor: "#5412c7",
@@ -44,6 +35,12 @@ describe("hosted preview", () => {
       headerColor: "#0a3d2e",
       fontFamily: '"Nunito", system-ui, sans-serif',
     });
+  });
+
+  it("is none when the org shows no theme", () => {
+    expect(
+      hostedPreviewTheme({ ...branding, showTheme: false }, theme),
+    ).toBeUndefined();
   });
 
   it("is a fresh link that asks nothing in particular without a flow", () => {

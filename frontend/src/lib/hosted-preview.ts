@@ -34,7 +34,7 @@ export interface HostedPreviewInput {
   name: string;
   // The branding the page wears, the flow's own over the org's.
   branding: ProofingBranding;
-  // The wallet's theme, which each look field the branding leaves empty is.
+  // The wallet's theme, the page's look.
   theme: Pick<
     OrgTheme,
     | "primaryColor"
@@ -56,24 +56,28 @@ export interface HostedPreviewInput {
   now: number;
 }
 
-// The look the hosted view carries: each field the branding's when set, else
-// the wallet theme's, as AppBrandingResolver resolves it.
+// The look the hosted view and the Idem app carry, as AppBrandingResolver
+// resolves it: the wallet theme with a flow's own colour over it, or none when
+// the org shows no theme.
 export function hostedPreviewTheme(
   branding: ProofingBranding,
   theme: HostedPreviewInput["theme"],
-): HostedTheme {
+): HostedTheme | undefined {
+  if (!branding.showTheme) {
+    return undefined;
+  }
   return {
     primaryColor: branding.primaryColor || theme.primaryColor,
-    secondaryColor: branding.secondaryColor || theme.accentColor,
-    textColor: branding.textColor || theme.textColor,
-    surfaceColor: branding.surfaceColor || theme.surfaceColor,
-    borderColor: branding.borderColor || theme.borderColor,
-    linkColor: branding.linkColor || theme.linkColor,
-    successColor: branding.successColor || theme.successColor,
-    warningColor: branding.warningColor || theme.warningColor,
-    errorColor: branding.errorColor || theme.errorColor,
-    headerColor: branding.topbarColor || theme.topbarColor,
-    fontFamily: branding.fontFamily || theme.fontFamily,
+    secondaryColor: theme.accentColor,
+    textColor: theme.textColor,
+    surfaceColor: theme.surfaceColor,
+    borderColor: theme.borderColor,
+    linkColor: theme.linkColor,
+    successColor: theme.successColor,
+    warningColor: theme.warningColor,
+    errorColor: theme.errorColor,
+    headerColor: theme.topbarColor,
+    fontFamily: theme.fontFamily,
   };
 }
 

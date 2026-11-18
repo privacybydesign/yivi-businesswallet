@@ -3194,20 +3194,11 @@ describe("effective branding", () => {
   const org: ProofingBranding = {
     displayName: "Acme",
     primaryColor: "#111111",
-    secondaryColor: "#222222",
-    textColor: "#333333",
-    surfaceColor: "#444444",
-    borderColor: "#555555",
-    linkColor: "#666666",
-    successColor: "#777777",
-    warningColor: "#888888",
-    errorColor: "#999999",
-    topbarColor: "#aaaaaa",
-    fontFamily: "Open Sans, sans-serif",
     supportContact: "help@acme.example",
     privacyUrl: "https://acme.example/privacy",
     logoUri: "/org-logo",
     hidePoweredBy: true,
+    showTheme: true,
   };
   const none: ProofingFlowBranding = {
     custom: true,

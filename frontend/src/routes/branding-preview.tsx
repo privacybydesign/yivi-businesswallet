@@ -31,6 +31,20 @@ const PREVIEW_KINDS: readonly PreviewKind[] = ["mail", "app", "hosted"];
 
 const SECONDS_PER_MINUTE = 60;
 
+const UNBRANDED: HostedTheme = {
+  primaryColor: "",
+  secondaryColor: "",
+  textColor: "",
+  surfaceColor: "",
+  borderColor: "",
+  linkColor: "",
+  successColor: "",
+  warningColor: "",
+  errorColor: "",
+  headerColor: "",
+  fontFamily: "",
+};
+
 // The mail is fetched once typing pauses.
 const MAIL_PREVIEW_DEBOUNCE_MS = 400;
 const FRAME_HEIGHT = "h-[720px]";
@@ -101,7 +115,9 @@ export function BrandingPreviews({
   orgName: string;
   // The name the branding signs with.
   name: string;
+  // The branding, its logo the flow's own else the theme's.
   branding: ProofingBranding;
+  // The wallet theme, saved or unsaved: the one look.
   theme: OrgTheme;
   // The flow the page and app show; none asks for nothing in particular.
   flow: ProofingFlow | undefined;
@@ -111,9 +127,12 @@ export function BrandingPreviews({
 }>): React.JSX.Element {
   const { i18n } = useTranslation();
   const [now] = useState(() => Date.now());
+  const look = hostedPreviewTheme(branding, theme);
+  // Without the theme the page and the app show no logo either.
+  const logoUri = look ? branding.logoUri : "";
   const page = hostedPreviewPage({
     name,
-    branding,
+    branding: { ...branding, logoUri },
     theme,
     flow,
     dataRetentionDays,
@@ -127,8 +146,8 @@ export function BrandingPreviews({
         <AppPreviewCard
           name={name}
           orgName={orgName}
-          theme={hostedPreviewTheme(branding, theme)}
-          logoUri={branding.logoUri}
+          theme={look}
+          logoUri={logoUri}
           requestedAttributes={flow?.requestedAttributes ?? []}
           ageOver={flow?.ageOver}
           minutes={Math.round(
@@ -260,7 +279,8 @@ export function AppPreviewCard({
   // The name the branding signs with, and the org's own.
   name: string;
   orgName: string;
-  theme: HostedTheme;
+  // None is the app's own look.
+  theme: HostedTheme | undefined;
   logoUri: string;
   requestedAttributes: readonly string[];
   ageOver?: number;
@@ -268,8 +288,8 @@ export function AppPreviewCard({
   minutes: number;
 }>): React.JSX.Element {
   const { t } = useTranslation();
-  const branded = isIdemBranded(theme, logoUri);
-  const look = idemLook(theme, branded);
+  const branded = theme !== undefined && isIdemBranded(theme, logoUri);
+  const look = idemLook(theme ?? UNBRANDED, branded);
   // Without branding the app names the org itself, by its initial.
   const party = branded ? name : orgName;
   const items = idemItems(requestedAttributes, ageOver, t);

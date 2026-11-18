@@ -1271,10 +1271,9 @@ export const nl: Translation<typeof en> = {
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy:
         "Laat de regel “Mogelijk gemaakt door Yivi” weg op de gehoste pagina",
-      useWalletLook: "Gebruik de kleuren en het lettertype van de wallet",
-      useWalletLookHint:
-        "Zet dit uit om externe personen andere kleuren of een ander lettertype te tonen dan je leden zien.",
-      walletFont: "Wallet: {{name}}",
+      showTheme: "Toon deze uitstraling in de Idem-app en op de gehoste pagina",
+      showThemeHint:
+        "Uit: zij houden hun eigen uitstraling. De verificatiemail gebruikt haar altijd.",
       discard: "Verwerpen",
       save: "Huisstijl opslaan",
     },
@@ -3189,12 +3188,17 @@ export const nl: Translation<typeof en> = {
     tabSigning: "Ondertekenen",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
-    brandingWallet: "Je wallet",
+    brandingWallet: "Uitstraling",
     brandingWalletHint:
-      "Hoe de business wallet eruitziet voor je leden, en de Idem-app als een verzoek naar een lid gaat.",
-    brandingExternal: "Wat externe personen zien",
+      "Eén uitstraling voor de business wallet, de verificatiemail, de gehoste pagina en de Idem-app.",
+    brandingExternal: "Naam en contact",
     brandingExternalHint:
-      "De verificatiemail, de gehoste pagina en de Idem-app voor een persoon buiten de organisatie. Velden die je leeg laat gebruiken die van de wallet.",
+      "Wat de verificatiemail, de gehoste pagina en de Idem-app zeggen tegen een persoon buiten de organisatie.",
+    unsaved: {
+      title: "Weggaan zonder op te slaan?",
+      message: "Je wijzigingen in de huisstijl zijn niet opgeslagen.",
+      leave: "Weggaan",
+    },
     adminOnly: "Alleen organisatiebeheerders kunnen instellingen beheren.",
     discard: "Verwerpen",
     organisation: {

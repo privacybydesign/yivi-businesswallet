@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -23,82 +22,56 @@ const (
 	logoFormField     = "logo"
 )
 
-// brandingResponse is the org's branding as the app shows it; LogoURI is
-// "" without a logo and carries a version so a replaced logo is re-fetched.
+// brandingResponse is a branding as the app shows it. An org's has no colour
+// or logo of its own (its theme is its look); a hosted page's carries its
+// flow's. LogoURI is "" without a logo and carries a version so a replaced
+// logo is re-fetched.
 type brandingResponse struct {
 	DisplayName    string `json:"displayName"`
 	PrimaryColor   string `json:"primaryColor"`
-	SecondaryColor string `json:"secondaryColor"`
-	TextColor      string `json:"textColor"`
-	SurfaceColor   string `json:"surfaceColor"`
-	BorderColor    string `json:"borderColor"`
-	LinkColor      string `json:"linkColor"`
-	SuccessColor   string `json:"successColor"`
-	WarningColor   string `json:"warningColor"`
-	ErrorColor     string `json:"errorColor"`
-	TopbarColor    string `json:"topbarColor"`
-	FontFamily     string `json:"fontFamily"`
 	SupportContact string `json:"supportContact"`
 	PrivacyURL     string `json:"privacyUrl"`
 	LogoURI        string `json:"logoUri"`
 	// HidePoweredBy leaves the "powered by" line off the hosted page.
 	HidePoweredBy bool `json:"hidePoweredBy"`
+	// ShowTheme puts the org's theme on the Idem app and the hosted page.
+	ShowTheme bool `json:"showTheme"`
 }
 
-func newBrandingResponse(slug string, s Settings) brandingResponse {
-	b := brandingResponse{
-		DisplayName: s.Branding.DisplayName, PrimaryColor: s.Branding.PrimaryColor,
-		SecondaryColor: s.Branding.SecondaryColor, TextColor: s.Branding.TextColor,
-		SurfaceColor: s.Branding.SurfaceColor, BorderColor: s.Branding.BorderColor, LinkColor: s.Branding.LinkColor,
-		SuccessColor: s.Branding.SuccessColor, WarningColor: s.Branding.WarningColor, ErrorColor: s.Branding.ErrorColor,
-		TopbarColor: s.Branding.TopbarColor, FontFamily: s.Branding.FontFamily,
-		SupportContact: s.Branding.SupportContact, PrivacyURL: s.Branding.PrivacyURL,
-		HidePoweredBy: s.Branding.HidePoweredBy,
+func newBrandingResponse(s Settings) brandingResponse {
+	return brandingResponse{
+		DisplayName: s.Branding.DisplayName, SupportContact: s.Branding.SupportContact,
+		PrivacyURL: s.Branding.PrivacyURL, HidePoweredBy: s.Branding.HidePoweredBy, ShowTheme: s.Branding.ShowTheme,
 	}
-	if s.Branding.HasLogo {
-		b.LogoURI = fmt.Sprintf("/api/v1/orgs/%s/identity-proofing/settings/logo?v=%d",
-			url.PathEscape(slug), s.UpdatedAt.Unix())
-	}
-	return b
 }
 
-// saveBranding takes a multipart form, like the org theme: the text fields,
-// and a "logo" file to replace the logo or "removeLogo=true" to clear it;
-// neither keeps it.
+// saveBranding takes a multipart form: displayName, supportContact,
+// privacyUrl, hidePoweredBy and showTheme; a form without showTheme keeps it
+// as it is.
 func (h *Handler) saveBranding(w http.ResponseWriter, r *http.Request) error {
-	logo, err := readBrandingForm(w, r)
-	if err != nil {
+	if err := parseBrandingForm(w, r); err != nil {
 		return err
 	}
-	settings, err := h.service.SaveBranding(r.Context(), orgFromRequest(r).ID, Branding{
+	orgID := orgFromRequest(r).ID
+	showTheme := r.FormValue("showTheme") == "true"
+	if !r.Form.Has("showTheme") {
+		current, err := h.service.Settings(r.Context(), orgID)
+		if err != nil {
+			return mapError(err)
+		}
+		showTheme = current.Branding.ShowTheme
+	}
+	settings, err := h.service.SaveBranding(r.Context(), orgID, Branding{
 		DisplayName:    r.FormValue("displayName"),
-		PrimaryColor:   r.FormValue("primaryColor"),
-		SecondaryColor: r.FormValue("secondaryColor"),
-		TextColor:      r.FormValue("textColor"),
-		SurfaceColor:   r.FormValue("surfaceColor"),
-		BorderColor:    r.FormValue("borderColor"),
-		LinkColor:      r.FormValue("linkColor"),
-		SuccessColor:   r.FormValue("successColor"),
-		WarningColor:   r.FormValue("warningColor"),
-		ErrorColor:     r.FormValue("errorColor"),
-		TopbarColor:    r.FormValue("topbarColor"),
-		FontFamily:     r.FormValue("fontFamily"),
 		SupportContact: r.FormValue("supportContact"),
 		PrivacyURL:     r.FormValue("privacyUrl"),
 		HidePoweredBy:  r.FormValue("hidePoweredBy") == "true",
-	}, logo)
+		ShowTheme:      showTheme,
+	})
 	if err != nil {
 		return mapError(err)
 	}
 	return h.respondSettings(w, r, settings)
-}
-
-// readBrandingForm parses a branding form and returns what it does to the logo.
-func readBrandingForm(w http.ResponseWriter, r *http.Request) (LogoChange, error) {
-	if err := parseBrandingForm(w, r); err != nil {
-		return LogoChange{}, err
-	}
-	return parseLogo(r)
 }
 
 func parseBrandingForm(w http.ResponseWriter, r *http.Request) error {
@@ -137,15 +110,6 @@ func parseLogo(r *http.Request) (LogoChange, error) {
 		return LogoChange{}, &respond.APIError{Status: http.StatusBadRequest, Code: "invalid_input", Message: "the logo must be a PNG, JPEG, GIF or WebP image"}
 	}
 	return LogoChange{Replace: true, Logo: Logo{Bytes: data, ContentType: contentType}}, nil
-}
-
-func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) error {
-	logo, err := h.service.Logo(r.Context(), orgFromRequest(r).ID)
-	if err != nil {
-		return mapError(err)
-	}
-	writeLogo(w, r, logo)
-	return nil
 }
 
 func writeLogo(w http.ResponseWriter, r *http.Request, logo Logo) {

@@ -285,10 +285,20 @@ func (s *Service) SendIdentityProofingRequested(ctx context.Context, orgID uuid.
 	return s.sender.Send(cfg, msg)
 }
 
+// PreviewTheme is an unsaved org theme a preview renders with in place of the
+// saved one: its seeds and its logo (none shows the name as the wordmark), or
+// with KeepLogo the saved logo.
+type PreviewTheme struct {
+	Seeds    Seeds
+	Logo     Logo
+	KeepLogo bool
+}
+
 // PreviewIdentityProofingRequested renders m as SendIdentityProofingRequested
 // would send it, with the kind's sample deep link and validity, and its images
-// inline for a sandboxed frame. Needs no SMTP configuration.
-func (s *Service) PreviewIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m ProofingMail) (Body, error) {
+// inline for a sandboxed frame; with theme, in that theme instead of the saved
+// one. Needs no SMTP configuration.
+func (s *Service) PreviewIdentityProofingRequested(ctx context.Context, orgID uuid.UUID, m ProofingMail, theme *PreviewTheme) (Body, error) {
 	locale := s.locale(m.Locale)
 	vars, _ := SampleVariables(KindIdentityProofingRequested, locale, m.OrgName)
 	vars[varRequesterName] = m.RequesterName
@@ -298,15 +308,40 @@ func (s *Service) PreviewIdentityProofingRequested(ctx context.Context, orgID uu
 	if err != nil {
 		return Body{}, err
 	}
-	brand := s.brandWithLogo(ctx, orgID, tpl)
-	if m.Brand != nil {
+	var brand Brand
+	switch {
+	case theme == nil && m.Brand == nil:
+		brand = s.brandWithLogo(ctx, orgID, tpl)
+	case theme == nil:
 		brand = s.proofingBrand(ctx, orgID, tpl, *m.Brand)
+	default:
+		draft := *theme
+		if draft.KeepLogo && templateHasLogoBlock(tpl) {
+			draft.Logo = s.logoFor(ctx, orgID)
+		}
+		brand = previewBrand(tpl, draft, m.Brand)
 	}
 	body, err := Render(KindIdentityProofingRequested, locale, tpl, brand, vars)
 	if err != nil {
 		return Body{}, fmt.Errorf("email: render proofing mail preview: %w", err)
 	}
 	return inlinePreviewLogo(body), nil
+}
+
+// previewBrand is proofingBrand over an unsaved theme.
+func previewBrand(tpl Template, theme PreviewTheme, proofing *ProofingBrand) Brand {
+	seeds := theme.Seeds
+	if proofing != nil && proofing.PrimaryColor != "" {
+		seeds.PrimaryColor = proofing.PrimaryColor
+	}
+	brand := resolveBrand(seeds)
+	if templateHasLogoBlock(tpl) {
+		brand.Logo = theme.Logo
+		if proofing != nil && proofing.Logo.present() {
+			brand.Logo = proofing.Logo
+		}
+	}
+	return brand
 }
 
 func proofingVars(m ProofingMail) map[string]string {

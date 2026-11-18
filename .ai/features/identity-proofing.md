@@ -1158,21 +1158,22 @@ post-review outcome stay the system's.
     - **The org's own purge** (`PurgeRequest`, `DELETE
       /proofing/sessions/{id}`) refuses a check the legal retention still
       holds: 409 `legal_retention` (`RequestStore.HeldUntil`).
-  - **Branding**: display name, `#rrggbb` colour, logo (PNG/JPEG/GIF/WebP,
-    512 KiB; no SVG, mail clients do not render it), support contact, https
-    privacy URL, and whether to hide "powered by" (§7). It applies to the
-    proofing mail of external people (a member's mail is the org's own):
-    subject, heading and requester are the display name, the colour replaces
-    the org's theme primary seed, the logo replaces the org's theme logo (none
-    shows the theme logo, else the name as wordmark), and the `supportContact`
-    / `privacyUrl` paragraphs appear only when set (an all-empty paragraph
-    collapses). The hosted page and the on-screen page show the same display
-    name, colour, logo, support contact and privacy URL.
-  - **White-label** (the same branding save): a second colour
-    (`secondary_color`, the Idem app's), the palette the org theme has (text,
-    surface, border, link, success, warning, error and top bar colours) and a
-    font family, all `#rrggbb` or a CSS font-family list; NULL is the org
-    theme's. It applies to the Idem app and the hosted page (below).
+  - **One look**: the org's wallet theme (`themesettings`: colours, font,
+    logo) is the look of the proofing mail, the hosted page and the Idem app.
+    There is no second palette or logo for them.
+    - The old `identity_proofing_settings` look columns (`primary_color`,
+      `secondary_color`, the palette, `font_family`, `logo_bytes`) are left in
+      place but never read or written.
+  - **Branding** (`PUT .../settings/branding`, multipart): what they say besides
+    the look.
+    - `displayName` signs the mail, its subject and the hosted page (empty is
+      the org's name).
+    - `supportContact` and `privacyUrl` (https) are added to the mail and the
+      page; each is left out when empty.
+    - `hidePoweredBy` leaves "powered by" off the hosted page (§7).
+    - `showTheme` (`show_theme`, default true) puts the theme on the Idem app
+      and the hosted page; off, both keep their own look. A form without it
+      keeps it as it is. The mail always wears the theme.
   - **Idem app branding** (`proofing/app_branding.go`, engine `branding.go`):
     the app session view carries `branding`, so the app looks like the
     requester's own: colours (accent as secondary, top bar as header), font and
@@ -1180,28 +1181,25 @@ post-review outcome stay the system's.
     holding the session. It is resolved from the session alone (tenant = org,
     client reference = request), never from the request, through
     `AppBrandingResolver` over `RequestStore.SubjectKindOf` (the subject kind
-    and the request's flow), the org's settings and the flow's own branding: a
-    request to an external person gets the proofing branding its mail and
-    hosted page wear, the flow's own over the org's (`Settings.brandedFor`).
-    - That branding goes over the org theme field by field
-      (`AppBranding.under`): each colour, the font and the logo it sets win,
-      each one it leaves empty is the theme's.
-    - The logo is the flow's, else the org's proofing logo, else the theme's.
-    - The name is the one the proofing mail signs with.
-    - A request to a member gets the org theme under the org's name, whatever
-      its flow.
-    - Nothing set at either level is no `branding`. `relyingParty` stays the
-      org's own name next to it.
+    and the request's flow), the org's settings and the flow's own branding.
+    - Every request wears the org theme, unless `showTheme` is off: then no
+      `branding`.
+    - A member's is under the org's name, whatever its flow.
+    - An external person's is under the name the proofing mail signs with,
+      with its flow's own colour and logo over the theme's
+      (`Settings.brandedFor`); without a logo of its own, the theme's.
+    - No theme set is no `branding`. `relyingParty` stays the org's own name
+      next to it.
     - The hosted page applies the same look (`theme` in the hosted view).
   - **A flow's own branding** (`identity_proofing_flow_branding`, one row per
     org and flow, `flow_branding.go`; a row is "custom for this flow", none is
     "same as the organisation"): `GET` and `PUT
     /orgs/{slug}/identity-proofing/flows/{flowID}/branding` (multipart; `custom`,
     true or false, is required) and `GET .../branding/logo`, admin only. It holds
-    the org's name, colour, logo, support contact and privacy URL; the
-    white-label colours and font and "powered by" stay the org's. Each field it
-    sets replaces the org's, and one left empty, or no logo, falls back to it;
-    the org's white-label colours and font stay under it (`Branding.over`,
+    its own name, colour, logo, support contact and privacy URL, for a product
+    with its own name or look. Each field it sets replaces the org's (the colour
+    and logo the theme's), and one left empty, or no logo, falls back to it;
+    the rest of the theme and "powered by" stay the org's (`Branding.over`,
     mirrored by `effectiveBranding` in `lib/identity-proofing.ts`). It styles
     the flow's proofing mail (`proofingMail`: a branding that cannot be read
     blocks the mail, a logo that cannot be read leaves the theme's), its
@@ -1217,22 +1215,23 @@ post-review outcome stay the system's.
     before and after. The form is the Branding tab of Edit flow, with the
     branding preview (below).
   - **Allowed redirect origins** (§7).
-  - Settings › Branding holds both looks (the old `?tab=theme` opens it):
-    - "Your wallet": the org theme (`theme-settings.tsx`).
-    - "What external people see": the org's proofing branding, for every
-      flow (`proofing-branding.tsx`). A "use the wallet's colours and font"
-      switch hides the colour and font fields, and turning it on clears
-      them. Empty fields show the wallet's values as placeholders.
+  - Settings › Branding (`branding-settings.tsx`; the old `?tab=theme` opens
+    it) is one form with one Save:
+    - "Look": the theme's fields (`ThemeFields`, `lib/use-theme-draft.ts`).
+    - "Name and contact": the branding above, with the `showTheme` switch.
+    - Leaving with unsaved changes asks first (`useBlocker`, and the browser's
+      own prompt on close or reload).
   - **Branding preview** (`routes/branding-preview.tsx`), beside both branding
     forms, of the unsaved draft:
     - Mail: the real mail, rendered by `POST
-      .../settings/branding/mail-preview` (`mail_preview.go`, the form plus
-      `flowId`/`custom`, nothing saved) in a sandboxed frame.
+      .../settings/branding/mail-preview` (`mail_preview.go`: the form, a
+      flow's with `flowId`/`custom`, and on the Branding tab the unsaved theme
+      with `theme=true`; nothing saved) in a sandboxed frame.
     - Hosted page: the real page (`HostedPage` in `proof.tsx`) in a
       same-origin frame on `/preview/hosted`, so its theme applies to the
       frame alone. The settings post it a hosted view built by
-      `lib/hosted-preview.ts` (the resolver's per-field fallback, the org's
-      default flow or the flow being edited).
+      `lib/hosted-preview.ts` (the theme, a flow's colour over it, none with
+      the switch off; the org's default flow or the flow being edited).
     - Idem app: its consent screen drawn in HTML. `lib/idem-look.ts` copies
       the app's colour rules (vcmrtd `idem/lib/theme/app_theme.dart`: a colour
       that does not read on white is the app's own) and the strings are the
@@ -1860,7 +1859,7 @@ Everything this feature does not do yet, in one place.
   later feature. The hosted page does not follow the app (`waiting` / `connected` /
   `away`) as the on-screen page does, so its session QR stays shown.
 - **Custom domains** for the hosted page are not built: the page is on the
-  wallet's own domain with the org's branding and white-label (§4).
+  wallet's own domain with the org's branding and theme (§4).
 - **Settings still open:**
   - which fields the sender must send with a session, and what a mismatch
     does, cannot be set per flow in the editor (§13 is per session);

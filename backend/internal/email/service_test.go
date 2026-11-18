@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"slices"
 	"strings"
@@ -202,7 +203,7 @@ func TestPreviewIdentityProofingRequested(t *testing.T) {
 	body, err := svc.PreviewIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{
 		OrgName: "Acme Trips", RequesterName: "Acme Trips", SupportContact: "help@acme.example",
 		Brand: &ProofingBrand{PrimaryColor: "#0a7c59"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("PreviewIdentityProofingRequested: %v", err)
 	}
@@ -213,6 +214,26 @@ func TestPreviewIdentityProofingRequested(t *testing.T) {
 	}
 	if strings.Contains(body.HTMLBody, "cid:") {
 		t.Error("preview still references cid: images")
+	}
+}
+
+// A preview with an unsaved theme takes its colours and logo, not the saved
+// ones.
+func TestPreviewIdentityProofingRequestedUnsavedTheme(t *testing.T) {
+	svc := newTestService(&recordingSender{}, stubBrand{
+		seeds: Seeds{PrimaryColor: "#111111"}, logo: Logo{Bytes: []byte("saved-logo"), ContentType: "image/png"},
+	}, LocaleEN)
+	draft := Logo{Bytes: []byte("draft-logo"), ContentType: "image/png"}
+	body, err := svc.PreviewIdentityProofingRequested(context.Background(), uuid.New(), ProofingMail{OrgName: "Acme"},
+		&PreviewTheme{Seeds: Seeds{PrimaryColor: "#0a7c59"}, Logo: draft})
+	if err != nil {
+		t.Fatalf("PreviewIdentityProofingRequested: %v", err)
+	}
+	if !strings.Contains(body.HTMLBody, "#0a7c59") || strings.Contains(body.HTMLBody, "#111111") {
+		t.Error("preview does not use the unsaved theme's colour")
+	}
+	if !strings.Contains(body.HTMLBody, base64.StdEncoding.EncodeToString(draft.Bytes)) {
+		t.Error("preview does not show the unsaved theme's logo")
 	}
 }
 
