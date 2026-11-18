@@ -2,7 +2,8 @@
 // image, the API on another origin; a path is the wallet's own.
 const SAFE_IMAGE_URL = /^(blob:|data:image\/|https?:\/\/|\/(?!\/))/i;
 
-// uri when it can only load an image, else "" (none).
+// uri when it can only load an image, URL-encoded, else "" (none). The
+// encoding leaves the addresses allowed here as they are.
 export function safeImageUrl(uri: string): string {
-  return SAFE_IMAGE_URL.test(uri) ? uri : "";
+  return SAFE_IMAGE_URL.test(uri) ? encodeURI(uri) : "";
 }

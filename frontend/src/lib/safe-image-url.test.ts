@@ -7,7 +7,7 @@ describe("safe image url", () => {
       "blob:http://localhost:5173/1f2e",
       "data:image/png;base64,AAAA",
       "https://api.example.org/logo",
-      "/api/v1/orgs/acme/theme/logo",
+      "/api/v1/orgs/acme/theme/logo?v=1759397400",
     ]) {
       expect(safeImageUrl(uri), uri).toBe(uri);
     }
