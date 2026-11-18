@@ -516,37 +516,51 @@ func nestedClaimLabels(meta *models.CredentialMetadata, lang string) map[string]
 		return out
 	}
 	for _, claim := range meta.Claims {
-		var path []any
-		if err := json.Unmarshal(claim.Path, &path); err != nil || len(path) < 2 {
+		key, sub, ok := nestedClaimPath(claim.Path)
+		if !ok {
 			continue
 		}
-		key, ok := path[0].(string)
-		if !ok || key == "" {
-			continue
-		}
-		segments := make([]string, 0, len(path)-1)
-		for _, seg := range path[1:] {
-			switch v := seg.(type) {
-			case nil, float64:
-				segments = append(segments, "[]")
-			case string:
-				segments = append(segments, v)
-			}
-		}
-		names := make([]localeName, len(claim.Display))
-		for i, d := range claim.Display {
-			names[i] = localeName{name: d.Name, locale: d.Locale}
-		}
-		label := pickLocaleName(names, lang)
+		label := claimDisplayName(claim.Display, lang)
 		if label == "" {
 			continue
 		}
 		if out[key] == nil {
 			out[key] = map[string]string{}
 		}
-		out[key][strings.Join(segments, ".")] = label
+		out[key][sub] = label
 	}
 	return out
+}
+
+// nestedClaimPath splits a claim path of two or more segments into its top-level
+// key and the rest, with "[]" for an array element.
+func nestedClaimPath(raw []byte) (key, sub string, ok bool) {
+	var path []any
+	if err := json.Unmarshal(raw, &path); err != nil || len(path) < 2 {
+		return "", "", false
+	}
+	key, ok = path[0].(string)
+	if !ok || key == "" {
+		return "", "", false
+	}
+	segments := make([]string, 0, len(path)-1)
+	for _, seg := range path[1:] {
+		switch v := seg.(type) {
+		case nil, float64:
+			segments = append(segments, "[]")
+		case string:
+			segments = append(segments, v)
+		}
+	}
+	return key, strings.Join(segments, "."), true
+}
+
+func claimDisplayName(displays []models.ClaimDisplay, lang string) string {
+	names := make([]localeName, len(displays))
+	for i, d := range displays {
+		names[i] = localeName{name: d.Name, locale: d.Locale}
+	}
+	return pickLocaleName(names, lang)
 }
 
 // issuerDisplayName resolves a credential's issuer metadata display name in the

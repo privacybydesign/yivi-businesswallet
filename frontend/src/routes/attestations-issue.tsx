@@ -176,6 +176,13 @@ export function AttestationIssueWizard({
     claimsText ?? (rulebookSample ? formatClaims(rulebookSample) : "");
   const parsedClaims = parseClaims(claimsDraft);
 
+  function reviewValue(key: string): string {
+    if (rulebookId === undefined) {
+      return values[key] || "—";
+    }
+    return claimSummary(parsedClaims.ok ? parsedClaims.claims[key] : undefined);
+  }
+
   const memberEntries = (members.data?.entries ?? []).filter(
     (entry) => entry.userId !== null,
   );
@@ -649,13 +656,7 @@ export function AttestationIssueWizard({
                   {attribute.label || attribute.key}
                 </span>
                 <span className="text-ink min-w-0 truncate font-mono">
-                  {rulebookId !== undefined
-                    ? claimSummary(
-                        parsedClaims.ok
-                          ? parsedClaims.claims[attribute.key]
-                          : undefined,
-                      )
-                    : values[attribute.key] || "—"}
+                  {reviewValue(attribute.key)}
                 </span>
               </div>
             ))}

@@ -26,6 +26,7 @@ import {
   heldStatusLabel,
 } from "../lib/held-credential";
 import type { HeldHistoryEntry, HeldStatus } from "../lib/held-credential";
+import { keyedItems } from "../lib/rulebook-claims";
 import { Button, Card, ConfirmDialog, Icon, Tag, TopBar } from "../ui";
 import type { IconName } from "../ui";
 
@@ -74,11 +75,10 @@ function ClaimValue({
 }>): React.JSX.Element {
   if (Array.isArray(value)) {
     const itemPath = nestedPath(path, "[]");
-    const items: unknown[] = value;
     return (
       <ol className="flex list-decimal flex-col gap-2 pl-5">
-        {items.map((item, index) => (
-          <li key={index}>
+        {keyedItems(value).map(({ key, item }) => (
+          <li key={key}>
             <ClaimValue value={item} labels={labels} path={itemPath} />
           </li>
         ))}

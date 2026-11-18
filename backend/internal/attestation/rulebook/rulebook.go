@@ -226,43 +226,59 @@ func (e *Entry) Attributes() []Attribute {
 // credential metadata.
 func (e *Entry) Claims() []Claim {
 	doc := e.compiled.doc
-	out := []Claim{}
-	seen := map[string]bool{}
+	w := &claimWalker{doc: doc, out: []Claim{}, seen: map[string]bool{}}
 	required := requiredSet(doc)
 	for _, key := range orderedKeys(e.schemaFile, doc) {
 		if _, protocol := protocolClaims[key]; protocol {
 			continue
 		}
-		walk(doc, properties(doc)[key], []any{key}, key, required[key], &out, seen, 0)
+		w.walk(properties(doc)[key], []any{key}, required[key], 0)
 	}
-	return out
+	return w.out
 }
 
 // maxClaimDepth stops the walk on a recursive $ref.
 const maxClaimDepth = 8
 
-func walk(doc map[string]any, node any, path []any, key string, required bool, out *[]Claim, seen map[string]bool, depth int) {
+type claimWalker struct {
+	doc  map[string]any
+	out  []Claim
+	seen map[string]bool
+}
+
+// walk labels an array element after its array: the last name in its path.
+func (w *claimWalker) walk(node any, path []any, required bool, depth int) {
 	if depth > maxClaimDepth {
 		return
 	}
-	n := resolve(doc, node)
+	n := resolve(w.doc, node)
 	id := fmt.Sprint(path...)
-	if !seen[id] {
-		seen[id] = true
-		*out = append(*out, Claim{Path: slices.Clone(path), Label: label(key, n), Required: required})
+	if !w.seen[id] {
+		w.seen[id] = true
+		w.out = append(w.out, Claim{Path: slices.Clone(path), Label: label(lastName(path), n), Required: required})
 	}
 	if items, ok := n["items"]; ok {
-		walk(doc, items, append(slices.Clone(path), nil), key, false, out, seen, depth+1)
+		w.walk(items, append(slices.Clone(path), nil), false, depth+1)
 		return
 	}
 	req := requiredSet(n)
 	allOf, _ := n["allOf"].([]any)
 	for _, branch := range allOf {
-		maps.Copy(req, requiredSet(resolve(doc, branch)))
+		maps.Copy(req, requiredSet(resolve(w.doc, branch)))
 	}
-	for _, k := range sortedKeys(mergedProperties(doc, n)) {
-		walk(doc, mergedProperties(doc, n)[k], append(slices.Clone(path), k), k, required && req[k], out, seen, depth+1)
+	props := mergedProperties(w.doc, n)
+	for _, k := range sortedKeys(props) {
+		w.walk(props[k], append(slices.Clone(path), k), required && req[k], depth+1)
 	}
+}
+
+func lastName(path []any) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if s, ok := path[i].(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 func compile(e *Entry) (compiledSchemas, error) {

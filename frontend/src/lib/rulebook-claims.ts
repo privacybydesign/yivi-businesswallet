@@ -32,3 +32,15 @@ export function claimSummary(value: unknown): string {
   }
   return typeof value === "string" ? value : JSON.stringify(value);
 }
+
+// Keys a claim array's items by their content, numbering repeats, since claim
+// values carry no id of their own.
+export function keyedItems(items: unknown[]): { key: string; item: unknown }[] {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const content = JSON.stringify(item) ?? "";
+    const count = (seen.get(content) ?? 0) + 1;
+    seen.set(content, count);
+    return { key: `${content}#${count}`, item };
+  });
+}

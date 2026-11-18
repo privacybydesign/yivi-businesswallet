@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { claimSummary, formatClaims, parseClaims } from "./rulebook-claims";
+import {
+  claimSummary,
+  formatClaims,
+  keyedItems,
+  parseClaims,
+} from "./rulebook-claims";
 
 describe("parseClaims", () => {
   it("returns the object for valid JSON", () => {
@@ -38,5 +43,14 @@ describe("claimSummary", () => {
     expect(claimSummary("")).toBe("—");
     expect(claimSummary(undefined)).toBe("—");
     expect(claimSummary(null)).toBe("—");
+  });
+});
+
+describe("keyedItems", () => {
+  it("gives repeated items distinct keys", () => {
+    const keys = keyedItems([{ a: 1 }, "x", { a: 1 }]).map(
+      (entry) => entry.key,
+    );
+    expect(new Set(keys).size).toBe(3);
   });
 });
