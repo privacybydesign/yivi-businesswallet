@@ -64,7 +64,9 @@ export function resolveSettingsLocation(
 
   const tab =
     SETTINGS_TABS.find((item) => item.key === value)?.key ??
-    (value === null ? undefined : MOVED_TABS[value]) ??
+    (value !== null && Object.hasOwn(MOVED_TABS, value)
+      ? MOVED_TABS[value]
+      : undefined) ??
     DEFAULT_SETTINGS_TAB;
   return { tab, section: DEFAULT_COMMUNICATION_SECTION };
 }

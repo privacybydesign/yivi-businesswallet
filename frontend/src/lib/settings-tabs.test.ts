@@ -92,6 +92,14 @@ describe("resolveSettingsLocation", () => {
     expect(resolveSettingsLocation("branding").tab).toBe("branding");
   });
 
+  it("opens the default tab for a key the prototype has", () => {
+    for (const value of ["constructor", "toString", "__proto__"]) {
+      expect(resolveSettingsLocation(value).tab, value).toBe(
+        DEFAULT_SETTINGS_TAB,
+      );
+    }
+  });
+
   it("opens Data and privacy on its own key", () => {
     expect(resolveSettingsLocation("privacy")).toEqual({
       tab: "privacy",

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { getOrgTheme, updateOrgTheme } from "./theme";
 import type { OrgTheme, OrgThemeInput } from "./theme";
 import { organizationAuditEventsQueryKey } from "./organization.queries";
+import { brandingMailPreviewQueryKey } from "./identity-proofing.queries";
 import { toast } from "../lib/toast";
 
 export function orgThemeQueryKey(slug: string): readonly string[] {
@@ -32,6 +33,10 @@ export function useUpdateOrgThemeMutation(
     onSuccess: () => {
       toast.success(t("toasts.themeSaved"));
       void queryClient.invalidateQueries({ queryKey: orgThemeQueryKey(slug) });
+      // A mail preview renders in the saved theme.
+      void queryClient.invalidateQueries({
+        queryKey: brandingMailPreviewQueryKey(slug),
+      });
       void queryClient.invalidateQueries({
         queryKey: organizationAuditEventsQueryKey(slug),
       });

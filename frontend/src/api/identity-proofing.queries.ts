@@ -621,6 +621,11 @@ export function useCreateRequestMutation(
   });
 }
 
+// Every mail preview of the org; the wallet theme it renders in is saved apart.
+export function brandingMailPreviewQueryKey(slug: string): readonly string[] {
+  return [...proofingSettingsQueryKey(slug), "mailPreview"];
+}
+
 // The proofing mail an unsaved branding form gives, rendered by the backend.
 // A File hashes as {}, so a picked logo is in the key by its name, size and
 // date as well.
@@ -628,15 +633,11 @@ export function useBrandingMailPreviewQuery(
   slug: string,
   input: BrandingMailPreviewInput,
 ): UseQueryResult<BrandingMailPreview, Error> {
-  const { logo } = input;
-  const logoKey = logo ? `${logo.name}:${logo.size}:${logo.lastModified}` : "";
+  const fileKey = (file?: File): string =>
+    file ? `${file.name}:${file.size}:${file.lastModified}` : "";
+  const logoKey = `${fileKey(input.logo)}|${fileKey(input.theme?.logo)}`;
   return useQuery({
-    queryKey: [
-      ...proofingSettingsQueryKey(slug),
-      "mailPreview",
-      input,
-      logoKey,
-    ],
+    queryKey: [...brandingMailPreviewQueryKey(slug), input, logoKey],
     queryFn: ({ signal }) => previewBrandingMail(slug, input, signal),
     enabled: slug !== "",
     placeholderData: keepPreviousData,
