@@ -4,7 +4,7 @@
 ALTER TABLE issued_attestations
     DROP CONSTRAINT issued_attestations_status_check,
     ADD CONSTRAINT issued_attestations_status_check
-        CHECK (status IN ('offered', 'claimed', 'expired', 'revoked', 'cancelled', 'failed', 'declined'));
+        CHECK (status IN ('offered', 'claimed', 'expired', 'revoked', 'cancelled', 'failed', 'declined')); -- NOSONAR status values are SQL literals; a CHECK cannot use constants
 
 -- +goose Down
 UPDATE issued_attestations SET status = 'cancelled' WHERE status = 'declined';

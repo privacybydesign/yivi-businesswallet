@@ -48,6 +48,13 @@ type onboardingStore interface {
 	SetOnboardingAttestations(ctx context.Context, orgID uuid.UUID, templateIDs []uuid.UUID) ([]OnboardingAttestation, error)
 }
 
+type handlerStore interface {
+	schemaStore
+	templateStore
+	keyStore
+	onboardingStore
+}
+
 type issuanceService interface {
 	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
@@ -106,14 +113,14 @@ type Handler struct {
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle). identity gates issuance to a member whose
 // re-identification is overdue under a "block" policy (see identityGate).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, identity identityGate, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(store handlerStore, service issuanceService, issuerSettings issuerSettingsReader, identity identityGate, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
-		schemas:        schemas,
-		templates:      templates,
-		keys:           keys,
+		schemas:        store,
+		templates:      store,
+		keys:           store,
 		service:        service,
 		issuerSettings: issuerSettings,
-		onboarding:     onboarding,
+		onboarding:     store,
 		identity:       identity,
 		issuerURL:      issuerURL,
 		requireUser:    requireUser,
