@@ -85,6 +85,7 @@ func TestInvalidClaimsAreRejected(t *testing.T) {
 		{"eucc", func(c map[string]any) { c["registration_date"] = "20-05-2020" }, "registration_date"},
 		{"lei", func(c map[string]any) { c["lei_status"] = "ACTIVE" }, "lei_status"},
 		{"lei", func(c map[string]any) { c["lei"] = "TOO-SHORT" }, "lei"},
+		{"lei", func(c map[string]any) { c["unexpected_claim"] = "x" }, "unexpected_claim"},
 		{"vat-id", func(c map[string]any) {
 			unit, _ := c["administrative_unit"].(map[string]any)
 			unit["economic_operator"] = map[string]any{

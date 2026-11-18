@@ -54,6 +54,7 @@ type issuedStore interface {
 	MarkFailed(ctx context.Context, orgID, id uuid.UUID) error
 	MarkClaimed(ctx context.Context, orgID, id uuid.UUID, credentialUUID string) (Issued, error)
 	GetIssued(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	GetClaim(ctx context.Context, token string) (claimRow, error)
@@ -78,7 +79,7 @@ type offerStore interface {
 	ClaimOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 	ReleaseOffer(ctx context.Context, orgID, id uuid.UUID) error
 	AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInput) (HeldAttestation, error)
-	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error
+	DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error)
 }
 
 // holderEngine is the organization's holder-wallet engine seam the service
@@ -107,6 +108,8 @@ type emailNotifier interface {
 // not a claim link.
 type qerdsNotifier interface {
 	SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error
+	// SendOfferDeclined tells the issuer at toAddress that its offer was declined.
+	SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error
 }
 
 // Service coordinates issuance across the ledger store, the hosted issuer and the
@@ -206,7 +209,8 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 		// redeems from its console over the authenticated QERDS channel — a
 		// tx_code there has no one to enter it and would block the accept (see
 		// .ai/features/oid4vci-over-qerds.md §4).
-		UseTxCode: in.Recipient.Kind == RecipientExternal,
+		UseTxCode:   in.Recipient.Kind == RecipientExternal,
+		AwaitRedeem: in.Recipient.Kind == RecipientOrganization,
 	})
 	if err != nil {
 		if failErr := s.store.MarkFailed(ctx, orgID, issued.ID); failErr != nil {
@@ -262,6 +266,39 @@ func (s *Service) Status(ctx context.Context, orgID, id uuid.UUID) (Issued, erro
 	}
 	if credentialUUID, ok := s.reconcile(ctx, s.instanceFor(ctx, orgID), issued.IssuanceID); ok {
 		return s.store.MarkClaimed(ctx, orgID, id, credentialUUID)
+	}
+	return issued, nil
+}
+
+// ListIssued returns the issuance ledger, first reconciling every open offer with
+// the issuer. An organization accepts an offer in its own wallet, so only the
+// issuer can tell this side that it was claimed.
+func (s *Service) ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error) {
+	issued, err := s.store.ListIssued(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	instance, resolved := "", false
+	for i, row := range issued {
+		if row.Status != StatusOffered || row.IssuanceID == "" {
+			continue
+		}
+		if !resolved {
+			instance, resolved = s.instanceFor(ctx, orgID), true
+		}
+		credentialUUID, ok := s.reconcile(ctx, instance, row.IssuanceID)
+		if !ok {
+			continue
+		}
+		claimed, err := s.store.MarkClaimed(ctx, orgID, row.ID, credentialUUID)
+		if errors.Is(err, ErrIssuedNotFound) {
+			// Claimed, cancelled or revoked by a concurrent request since the read.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		issued[i] = claimed
 	}
 	return issued, nil
 }
@@ -437,8 +474,23 @@ func (s *Service) releaseClaim(ctx context.Context, orgID, id uuid.UUID) {
 // DeclineOffer refuses a pending credential offer. Nothing is redeemed, so the
 // credential never reaches the wallet; the QERDS message and its evidence stay in
 // the inbox. Returns ErrOfferNotFound when the offer is absent or already decided.
+// The decline is told back to the issuer over QERDS; the issuer cannot learn it
+// any other way, since nothing is redeemed. A failed send is logged, not
+// returned: the decline itself is recorded and cannot be repeated.
 func (s *Service) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
-	return s.offers.DeclineOffer(ctx, orgID, id)
+	offer, err := s.offers.DeclineOffer(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if offer.SenderAddress == "" {
+		return nil
+	}
+	if err := s.qerds.SendOfferDeclined(ctx, orgID, offer.SenderAddress, offer.CredentialName, offer.Offer); err != nil {
+		slog.ErrorContext(ctx, "attestation: tell issuer of declined offer",
+			slog.String("offerId", offer.ID.String()), slog.String("to", offer.SenderAddress),
+			slog.String("error", err.Error()))
+	}
+	return nil
 }
 
 // HeldClaimsView is a held credential's index metadata plus its disclosed

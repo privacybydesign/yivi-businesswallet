@@ -2446,6 +2446,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`vct_taken`: a schema with that vct already exists. `vct_rulebook`: the vct belongs to a WE BUILD rulebook, which has to be imported instead.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/schemas/{id}:
     parameters:
       - name: slug

@@ -246,12 +246,14 @@ func (s *Store) AcceptOffer(ctx context.Context, orgID, id uuid.UUID, in HeldInp
 // DeclineOffer marks a pending offer declined and audits, in one tx. Nothing is
 // redeemed, so the credential never enters the wallet. Returns ErrOfferNotFound
 // when the offer is absent or already decided.
-func (s *Store) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
-	return database.InTx(ctx, s.db, func(q database.Querier) error {
+func (s *Store) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) (CredentialOffer, error) {
+	var offer CredentialOffer
+	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const update = `UPDATE credential_offers SET status = $3, decided_at = now(), updated_at = now()
 			WHERE id = $1 AND organization_id = $2 AND status = $4
 			RETURNING ` + offerColumns
-		offer, err := scanOffer(q.QueryRow(ctx, update, id, orgID, OfferDeclined, OfferPending))
+		var err error
+		offer, err = scanOffer(q.QueryRow(ctx, update, id, orgID, OfferDeclined, OfferPending))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrOfferNotFound
 		}
@@ -265,4 +267,5 @@ func (s *Store) DeclineOffer(ctx context.Context, orgID, id uuid.UUID) error {
 				"credentialName": offer.CredentialName,
 			}))
 	})
+	return offer, err
 }

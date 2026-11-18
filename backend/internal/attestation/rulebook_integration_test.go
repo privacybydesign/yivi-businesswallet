@@ -12,6 +12,7 @@ import (
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation"
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/eudiholder"
 )
 
 func rulebookTemplate(t *testing.T, ctx context.Context, e env, id string) (attestation.Schema, attestation.Template) {
@@ -92,6 +93,48 @@ func TestIssueRulebookAttestationKeepsNestedClaims(t *testing.T) {
 	})
 	if !errors.Is(err, rulebook.ErrInvalidClaims) {
 		t.Errorf("issue without legal_person_name err = %v, want ErrInvalidClaims", err)
+	}
+}
+
+// TestIssuedToOrganizationClaimedOnceRedeemed: the issuer's ledger shows an offer
+// to another organization as offered until that organization's wallet redeems it.
+func TestIssuedToOrganizationClaimedOnceRedeemed(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	_, tmpl := rulebookTemplate(t, ctx, e, "vat-id")
+	rb, _ := rulebook.Get("vat-id")
+
+	result, err := e.service.Issue(ctx, e.orgID, &e.actorID, "Caesar", attestation.IssueInput{
+		TemplateID: tmpl.ID,
+		Recipient:  attestation.Recipient{Kind: attestation.RecipientOrganization, Ref: "supplier@qerds.example"},
+		Attributes: rb.Sample(),
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	statusOf := func() string {
+		t.Helper()
+		list, err := e.service.ListIssued(ctx, e.orgID)
+		if err != nil {
+			t.Fatalf("ListIssued: %v", err)
+		}
+		for _, row := range list {
+			if row.ID == result.ID {
+				return row.Status
+			}
+		}
+		t.Fatalf("issued %s not listed", result.ID)
+		return ""
+	}
+	if got := statusOf(); got != attestation.StatusOffered {
+		t.Fatalf("status before the recipient redeems = %q, want offered", got)
+	}
+
+	if _, err := eudiholder.NewStubHolder().Redeem(ctx, uuid.New(), result.OfferURI); err != nil {
+		t.Fatalf("recipient redeem: %v", err)
+	}
+	if got := statusOf(); got != attestation.StatusClaimed {
+		t.Fatalf("status after the recipient redeemed = %q, want claimed", got)
 	}
 }
 

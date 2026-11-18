@@ -37,6 +37,11 @@ func (r *recQerds) SendCredentialOffer(_ context.Context, _ uuid.UUID, toAddress
 	return nil
 }
 
+func (r *recQerds) SendOfferDeclined(_ context.Context, _ uuid.UUID, toAddress, _, _ string) error {
+	r.to = append(r.to, toAddress)
+	return nil
+}
+
 // stubInstances resolves every org to the default issuer instance (empty), so
 // the stub issuer's offer/claim loop runs without per-org routing.
 type stubInstances struct{}

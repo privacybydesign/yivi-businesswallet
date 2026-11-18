@@ -114,16 +114,16 @@ func (q *fakeOfferQueue) AcceptOffer(_ context.Context, orgID, id uuid.UUID, in 
 	return attestation.HeldAttestation{}, attestation.ErrOfferNotFound
 }
 
-func (q *fakeOfferQueue) DeclineOffer(_ context.Context, orgID, id uuid.UUID) error {
+func (q *fakeOfferQueue) DeclineOffer(_ context.Context, orgID, id uuid.UUID) (attestation.CredentialOffer, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for i, o := range q.offers {
 		if o.ID == id && o.OrganizationID == orgID && o.Status == attestation.OfferPending {
 			q.offers[i].Status = attestation.OfferDeclined
-			return nil
+			return q.offers[i], nil
 		}
 	}
-	return attestation.ErrOfferNotFound
+	return attestation.CredentialOffer{}, attestation.ErrOfferNotFound
 }
 
 func (q *fakeOfferQueue) queued() []attestation.CredentialOffer {
@@ -221,7 +221,7 @@ func TestOfferReceiverIdempotentOnRedelivery(t *testing.T) {
 	if err := rec.OnInboundMessage(ctx, inbound(orgID, msgID, "blue_gw", "acme@qerds.localhost", body)); err != nil {
 		t.Fatalf("first OnInboundMessage: %v", err)
 	}
-	if err := queue.DeclineOffer(ctx, orgID, queue.queued()[0].ID); err != nil {
+	if _, err := queue.DeclineOffer(ctx, orgID, queue.queued()[0].ID); err != nil {
 		t.Fatalf("decline: %v", err)
 	}
 

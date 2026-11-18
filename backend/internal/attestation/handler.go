@@ -41,10 +41,6 @@ type keyStore interface {
 	SetKeyStatus(ctx context.Context, orgID, id uuid.UUID, status, action string) (Key, error)
 }
 
-type issuedReader interface {
-	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
-}
-
 // onboardingStore reads and replaces an org's onboarding auto-issue set (the
 // templates issued to a new member on accept). Implemented by the attestation Store.
 type onboardingStore interface {
@@ -55,6 +51,7 @@ type onboardingStore interface {
 type issuanceService interface {
 	Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUID, orgName string, in IssueInput) (IssueResult, error)
 	Status(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
+	ListIssued(ctx context.Context, orgID uuid.UUID) ([]Issued, error)
 	Revoke(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	Cancel(ctx context.Context, orgID, id uuid.UUID) (Issued, error)
 	ClaimStatus(ctx context.Context, token string) (ClaimView, error)
@@ -94,7 +91,6 @@ type Handler struct {
 	schemas        schemaStore
 	templates      templateStore
 	keys           keyStore
-	issued         issuedReader
 	service        issuanceService
 	issuerSettings issuerSettingsReader
 	onboarding     onboardingStore
@@ -110,12 +106,11 @@ type Handler struct {
 // issuerSettings resolves an org's issuer instance + branding for the per-org
 // bundle generator (see issuerBundle). identity gates issuance to a member whose
 // re-identification is overdue under a "block" policy (see identityGate).
-func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, issued issuedReader, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, identity identityGate, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
+func NewHandler(schemas schemaStore, templates templateStore, keys keyStore, service issuanceService, issuerSettings issuerSettingsReader, onboarding onboardingStore, identity identityGate, issuerURL string, requireUser, authorize func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		schemas:        schemas,
 		templates:      templates,
 		keys:           keys,
-		issued:         issued,
 		service:        service,
 		issuerSettings: issuerSettings,
 		onboarding:     onboarding,
@@ -497,6 +492,13 @@ func (h *Handler) createSchema(w http.ResponseWriter, r *http.Request) error {
 	req, err := decodeSchema(r)
 	if err != nil {
 		return err
+	}
+	// A WE BUILD type must follow its rulebook, which only an imported schema enforces.
+	if rb, ok := rulebook.ForVCT(req.VCT); ok {
+		return &respond.APIError{
+			Status: http.StatusConflict, Code: "vct_rulebook",
+			Message: fmt.Sprintf("this credential type belongs to the WE BUILD %s rulebook. Import that rulebook instead", rb.ID),
+		}
 	}
 	org := organization.OrgFromContext(r.Context())
 	sc, err := h.schemas.CreateSchema(r.Context(), org.ID, Schema{
@@ -964,7 +966,7 @@ type issueRequest struct {
 
 func (h *Handler) listIssued(w http.ResponseWriter, r *http.Request) error {
 	org := organization.OrgFromContext(r.Context())
-	issued, err := h.issued.ListIssued(r.Context(), org.ID)
+	issued, err := h.service.ListIssued(r.Context(), org.ID)
 	if err != nil {
 		return fmt.Errorf("listing issued attestations: %w", err)
 	}

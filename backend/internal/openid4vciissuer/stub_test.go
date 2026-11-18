@@ -78,3 +78,20 @@ func TestStubClaimDelay(t *testing.T) {
 		}
 	}
 }
+
+func TestStubAwaitRedeemPendingUntilRedeemed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	issuer := openid4vciissuer.NewStubIssuer()
+	offer, err := issuer.CreateOffer(ctx, openid4vciissuer.OfferRequest{VCT: "uri:eu.eudi.vat.2", AwaitRedeem: true})
+	if err != nil {
+		t.Fatalf("CreateOffer: %v", err)
+	}
+	if st, _ := issuer.Status(ctx, "", offer.IssuanceID); st.Status != openid4vciissuer.StatusPending {
+		t.Fatalf("status before redeem = %q, want pending", st.Status)
+	}
+	openid4vciissuer.MarkStubRedeemed(offer.OfferURI)
+	if st, _ := issuer.Status(ctx, "", offer.IssuanceID); st.Status != openid4vciissuer.StatusIssued {
+		t.Fatalf("status after redeem = %q, want issued", st.Status)
+	}
+}

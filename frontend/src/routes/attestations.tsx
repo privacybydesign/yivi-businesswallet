@@ -82,6 +82,7 @@ function issuedTone(status: string): IssuedTone {
     case "failed":
       return "red";
     case "cancelled":
+    case "declined":
     case "expired":
       return "default";
     default:

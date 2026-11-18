@@ -2665,6 +2665,7 @@ export const nl: Translation<typeof en> = {
       attestationClaimed: "Attestatie geclaimd",
       attestationRevoked: "Attestatie ingetrokken",
       attestationOfferCancelled: "Attestatieaanbod geannuleerd",
+      attestationDeclined: "Ontvanger heeft een attestatieaanbod geweigerd",
       attestationKeyAdded: "Attestatiesleutel toegevoegd",
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",

@@ -418,7 +418,10 @@ func attestationIssuerURL(cfg config.Config) string {
 // as a QERDS message to its digital address, carrying a structured OpenID4VCI
 // credential offer in the body (the recipient's wallet redeems it), not a claim
 // link.
-type qerdsOfferSender struct{ svc *qerds.Service }
+type qerdsOfferSender struct {
+	svc  *qerds.Service
+	orgs *organization.Store
+}
 
 func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UUID, toAddress, orgName, credentialName, offerURI string) error {
 	body, err := attestation.MarshalCredentialOfferEnvelope(orgName, credentialName, offerURI)
@@ -426,6 +429,20 @@ func (a qerdsOfferSender) SendCredentialOffer(ctx context.Context, orgID uuid.UU
 		return err
 	}
 	subject := fmt.Sprintf("Credential offer: %s", credentialName)
+	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
+	return err
+}
+
+func (a qerdsOfferSender) SendOfferDeclined(ctx context.Context, orgID uuid.UUID, toAddress, credentialName, offerURI string) error {
+	org, err := a.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	body, err := attestation.MarshalOfferDeclinedEnvelope(org.Name, credentialName, offerURI)
+	if err != nil {
+		return err
+	}
+	subject := fmt.Sprintf("Credential offer declined: %s", credentialName)
 	_, err = a.svc.Send(ctx, orgID, "", toAddress, subject, body, nil)
 	return err
 }
@@ -1030,6 +1047,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	logQerdsInboundPolicy(ctx, cfg, trustedSenders)
 	w.qerdsService.SetInboundConsumer(chainedInboundConsumer{
 		attestation.NewOfferReceiver(attestationStore, trustedSenders),
+		attestation.NewDeclineReceiver(attestationStore),
 		openid4vppresenter.NewReceiver(presenterService),
 	})
 
@@ -1037,7 +1055,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// credential offer is received without an operator being logged in.
 	startQerdsInboundPoller(ctx, w.qerdsService, cfg.QerdsInboundPollInterval)
 	attestationService := attestation.NewService(
-		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{w.qerdsService}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
+		attestationStore, attIssuer, issuerSettingsStore, w.emailService, qerdsOfferSender{svc: w.qerdsService, orgs: w.orgStore}, attestationStore, attestationStore, attHolder, cfg.AppBaseURL,
 	)
 	// Re-read the issuer status list of every held credential, so a credential
 	// revoked after it was received stops reading as valid. Deploys come more
@@ -1047,7 +1065,7 @@ func (w *wiring) buildAttestations(ctx context.Context) error {
 	// an invitation. Wired via a setter (like the inbound QERDS consumer) because
 	// the org service is constructed before the attestation service.
 	w.orgService.SetOnboardingIssuer(attestation.NewOnboardingIssuer(attestationStore, attestationService))
-	w.attestationHandler = attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
+	w.attestationHandler = attestation.NewHandler(attestationStore, attestationStore, attestationStore, attestationService, issuerSettingsStore, attestationStore, w.orgStore, attestationIssuerURL(cfg), w.requireUser, w.orgHandler.Authorize)
 
 	// Org-admin WSCA holder-wallet lifecycle (activate / rotate). It shares the
 	// sealed-secret store + keystore layout with the holder redeem path so a wallet

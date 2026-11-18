@@ -2608,6 +2608,7 @@ export const en = {
       attestationClaimed: "Claimed attestation",
       attestationRevoked: "Revoked attestation",
       attestationOfferCancelled: "Cancelled attestation offer",
+      attestationDeclined: "Recipient declined an attestation offer",
       attestationKeyAdded: "Added attestation key",
       attestationKeySuspended: "Suspended attestation key",
       attestationKeyRevoked: "Revoked attestation key",

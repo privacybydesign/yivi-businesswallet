@@ -15,6 +15,11 @@ import (
 
 const stubIssuanceIDBytes = 16
 
+// stubAwaitingRedeem holds the issuance ids of AwaitRedeem offers the stub holder
+// has not redeemed yet. Package-level because the stub holder shares the process
+// but has no handle on the issuer.
+var stubAwaitingRedeem sync.Map
+
 // The stub offer link: its prefix, and the query parameters that carry the
 // credential type and its claims to the stub holder.
 const (
@@ -23,6 +28,7 @@ const (
 	stubParamName   = "name"
 	stubParamIssuer = "issuer"
 	stubParamClaims = "claims"
+	stubParamID     = "id"
 )
 
 // StubOffer is what a stub offer link carries to the stub holder.
@@ -67,7 +73,7 @@ func (s StubIssuer) CreateOffer(_ context.Context, req OfferRequest) (Offer, err
 	}
 	q := url.Values{}
 	q.Set("credential", req.CredentialConfigID)
-	q.Set("id", id)
+	q.Set(stubParamID, id)
 	// The type and claims ride along so the stub holder can hold what was
 	// issued rather than a placeholder. Dev / CI only: a real offer is a
 	// pre-authorized code, and the claims stay at the issuer.
@@ -87,6 +93,9 @@ func (s StubIssuer) CreateOffer(_ context.Context, req OfferRequest) (Offer, err
 		}
 		q.Set(stubParamClaims, base64.RawURLEncoding.EncodeToString(claims))
 	}
+	if req.AwaitRedeem {
+		stubAwaitingRedeem.Store(id, struct{}{})
+	}
 	offer := Offer{
 		IssuanceID: id,
 		OfferURI:   stubOfferPrefix + q.Encode(),
@@ -104,6 +113,9 @@ func (s StubIssuer) CreateOffer(_ context.Context, req OfferRequest) (Offer, err
 // the revoke path has a stable handle to key on. The instance is ignored (the
 // stub has no per-instance routing).
 func (s StubIssuer) Status(_ context.Context, _, issuanceID string) (IssuanceStatus, error) {
+	if _, waiting := stubAwaitingRedeem.Load(issuanceID); waiting {
+		return IssuanceStatus{Status: StatusPending}, nil
+	}
 	if s.created != nil {
 		if at, ok := s.created.Load(issuanceID); ok && time.Since(at.(time.Time)) < s.claimDelay {
 			return IssuanceStatus{Status: StatusPending}, nil
@@ -154,4 +166,18 @@ func StubOfferContent(offerURI string) (StubOffer, bool) {
 		IssuerName:  q.Get(stubParamIssuer),
 		Claims:      claims,
 	}, true
+}
+
+// MarkStubRedeemed records that the stub holder collected the credential of a
+// stub offer link, so StubIssuer reports it issued from then on.
+func MarkStubRedeemed(offerURI string) {
+	rest, found := strings.CutPrefix(offerURI, stubOfferPrefix)
+	if !found {
+		return
+	}
+	q, err := url.ParseQuery(rest)
+	if err != nil {
+		return
+	}
+	stubAwaitingRedeem.Delete(q.Get(stubParamID))
 }
