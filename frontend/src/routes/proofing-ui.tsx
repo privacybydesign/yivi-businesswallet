@@ -8,6 +8,7 @@ import type {
   WebhookHealth,
 } from "../api/identity-proofing";
 import { absoluteApiUrl } from "../api/http";
+import { safeImageUrl } from "../lib/safe-image-url";
 import { useWhenFormatter } from "../lib/format-when";
 import {
   isHexColor,
@@ -66,11 +67,11 @@ export function BrandMark({
   if (branding.logoUri && !failed) {
     return (
       <img
-        src={
+        src={safeImageUrl(
           ABSOLUTE_URL.test(branding.logoUri)
             ? branding.logoUri
-            : absoluteApiUrl(branding.logoUri)
-        }
+            : absoluteApiUrl(branding.logoUri),
+        )}
         alt=""
         onError={() => setFailed(true)}
         className={`bg-surface-3 shrink-0 object-contain ${MARK_SIZES[size]}`}

@@ -96,11 +96,11 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 		HostedURL string `json:"hostedUrl"`
 	}](t, resp).HostedURL, "/p/")
 	hostedPath := "/api/v1/proof/" + token
-	wantPage := func(when, name, own, color string, logo []byte) {
+	wantPage := func(when string, want hostedPageLook) {
 		t.Helper()
-		wantHostedPageBranding(t, env, hostedPath, when, name, own, color, logo)
+		wantHostedPageBranding(t, env, hostedPath, when, want)
 	}
-	wantPage("custom", "Acme Reizen", "#22337A", "#22337A", logo)
+	wantPage("custom", hostedPageLook{name: "Acme Reizen", own: "#22337A", color: "#22337A", logo: logo})
 
 	// Back to the org's branding: the flow's fields and logo are gone, and the
 	// page wears the org's name and theme.
@@ -108,7 +108,7 @@ func TestFlowBrandingHTTPFlow(t *testing.T) {
 	if got := decodeJSON[brandingView](t, resp); got.Custom || got.DisplayName != "" || got.LogoURI != "" {
 		t.Errorf("after going back = %+v, want the org's", got)
 	}
-	wantPage("the org's", "Acme Identity", "", "#1F5B4A", orgLogo.Bytes())
+	wantPage("the org's", hostedPageLook{name: "Acme Identity", color: "#1F5B4A", logo: orgLogo.Bytes()})
 	wantProofingError(t, "the logo of a flow without one", env.do(http.MethodGet, path+"/logo", nil), http.StatusNotFound, "not_found")
 }
 
@@ -125,11 +125,18 @@ type flowHostedPage struct {
 	} `json:"theme"`
 }
 
-// wantHostedPageBranding checks that the hosted page at hostedPath wears name,
-// own as the branding's colour, color as the theme's, and the logo bytes, over
-// the org's contact and the theme's second colour.
-func wantHostedPageBranding(t *testing.T, env *testEnv, hostedPath, when, name, own, color string, logo []byte) {
+// hostedPageLook is what a hosted page should wear: its name, the branding's
+// own colour, the theme's colour, and the logo's bytes.
+type hostedPageLook struct {
+	name, own, color string
+	logo             []byte
+}
+
+// wantHostedPageBranding checks that the hosted page at hostedPath wears want,
+// over the org's contact and the theme's second colour.
+func wantHostedPageBranding(t *testing.T, env *testEnv, hostedPath, when string, want hostedPageLook) {
 	t.Helper()
+	name, own, color, logo := want.name, want.own, want.color, want.logo
 	page := decodeJSON[flowHostedPage](t, env.apiCall(http.MethodGet, hostedPath, "", nil))
 	b := page.Organization.Branding
 	if page.Organization.Name != name || b.DisplayName != name || b.PrimaryColor != own ||

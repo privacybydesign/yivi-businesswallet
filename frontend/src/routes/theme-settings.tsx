@@ -7,6 +7,7 @@ import {
   HEX_PATTERN,
   type ThemeDraft,
 } from "../lib/use-theme-draft";
+import { safeImageUrl } from "../lib/safe-image-url";
 import { Button, Select } from "../ui";
 
 const EYEBROW =
@@ -155,7 +156,7 @@ export function ThemeFields({
           <div className="flex items-center gap-2">
             {draft.logoPreviewSrc && (
               <img
-                src={draft.logoPreviewSrc}
+                src={safeImageUrl(draft.logoPreviewSrc)}
                 alt={t("themeSettings.logoPreviewAlt")}
                 className="max-h-9 max-w-[120px]"
               />

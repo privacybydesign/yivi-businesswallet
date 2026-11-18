@@ -16,7 +16,12 @@ const TILE_FILL_LIGHTEN = 0.9;
 const TILE_BORDER_LIGHTEN = 0.8;
 // The fonts the app bundles; a branded session without one takes the design
 // pair, Montserrat for headings and Nunito for body text.
-const BUNDLED_FONTS = ["alexandria", "montserrat", "nunito", "open sans"];
+const BUNDLED_FONTS = new Set([
+  "alexandria",
+  "montserrat",
+  "nunito",
+  "open sans",
+]);
 const DESIGN_HEADING_FONT = '"Montserrat", system-ui, sans-serif';
 const DESIGN_BODY_FONT = '"Nunito", system-ui, sans-serif';
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -70,7 +75,7 @@ function idemFont(css: string): string | undefined {
         .replace(/^["']|["']$/g, "")
         .toLowerCase(),
     )
-    .find((name) => BUNDLED_FONTS.includes(name));
+    .find((name) => BUNDLED_FONTS.has(name));
   return known === undefined
     ? undefined
     : `"${known.replace(/\b\w/g, (c) => c.toUpperCase())}", system-ui, sans-serif`;

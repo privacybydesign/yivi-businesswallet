@@ -19,6 +19,7 @@ import {
   hostedPreviewTheme,
 } from "../lib/hosted-preview";
 import { idemLook, isIdemBranded } from "../lib/idem-look";
+import { safeImageUrl } from "../lib/safe-image-url";
 import { proofingErrorMessage } from "../lib/identity-proofing";
 import { useDebouncedValue } from "../lib/use-debounced-value";
 import { Icon } from "../ui";
@@ -294,6 +295,36 @@ export function AppPreviewCard({
   const party = branded ? name : orgName;
   const items = idemItems(requestedAttributes, ageOver, t);
   const heading = { fontFamily: look.headingFont };
+  // The logo tile: the org's initial without branding, else its logo, else
+  // its name.
+  let mark: React.ReactNode;
+  if (!branded) {
+    mark = (
+      <span
+        className="text-[36px] font-bold"
+        style={{ ...heading, color: look.primary }}
+      >
+        {party.charAt(0).toUpperCase() || "?"}
+      </span>
+    );
+  } else if (logoUri) {
+    mark = (
+      <img
+        src={safeImageUrl(logoUri)}
+        alt=""
+        className="h-14 w-14 object-contain"
+      />
+    );
+  } else {
+    mark = (
+      <span
+        className="max-w-[80px] truncate text-[28px] font-bold"
+        style={heading}
+      >
+        {name}
+      </span>
+    );
+  }
   return (
     <div className="flex flex-col gap-2">
       <div
@@ -319,23 +350,7 @@ export function AppPreviewCard({
               borderColor: look.tileBorder,
             }}
           >
-            {!branded ? (
-              <span
-                className="text-[36px] font-bold"
-                style={{ ...heading, color: look.primary }}
-              >
-                {party.charAt(0).toUpperCase() || "?"}
-              </span>
-            ) : logoUri ? (
-              <img src={logoUri} alt="" className="h-14 w-14 object-contain" />
-            ) : (
-              <span
-                className="max-w-[80px] truncate text-[28px] font-bold"
-                style={heading}
-              >
-                {name}
-              </span>
-            )}
+            {mark}
           </span>
           <h4
             className="mt-3.5 text-center text-[24px] leading-[1.25] font-bold"

@@ -89,8 +89,8 @@ export function useThemeDraft(settings: OrgTheme): ThemeDraft {
   const anyColorInvalid = THEME_COLOR_FIELDS.some(
     (field) => colors[field] !== "" && !HEX_PATTERN.test(colors[field]),
   );
-  const showStoredLogo =
-    settings.logoUri !== "" && !removeLogo && logoFile === null;
+  const storedLogo =
+    settings.logoUri !== "" && !removeLogo ? settings.logoUri : null;
   const dirty =
     logoFile !== null ||
     (removeLogo && settings.logoUri !== "") ||
@@ -104,11 +104,7 @@ export function useThemeDraft(settings: OrgTheme): ThemeDraft {
     fontFamily,
     setFontFamily,
     logoFile,
-    logoPreviewSrc: logoFile
-      ? newLogoUrl
-      : showStoredLogo
-        ? settings.logoUri
-        : null,
+    logoPreviewSrc: logoFile ? newLogoUrl : storedLogo,
     removeLogo,
     logoError,
     selectLogo: (file) => {

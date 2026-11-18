@@ -52,7 +52,7 @@ func fromTheme(name string, theme themesettings.Settings) AppBranding {
 // ErrNoAppLogo is AppBrandingResolver.Logo's answer for a request without one.
 var ErrNoAppLogo = errors.New("proofing: no app branding logo")
 
-type appBrandingSettings interface {
+type settingsGetter interface {
 	Get(ctx context.Context, orgID uuid.UUID) (Settings, error)
 }
 
@@ -74,12 +74,12 @@ type appBrandingThemes interface {
 // with its flow's own colour and logo over the theme's.
 type AppBrandingResolver struct {
 	requests *RequestStore
-	settings appBrandingSettings
+	settings settingsGetter
 	flows    appBrandingFlows
 	themes   appBrandingThemes
 }
 
-func NewAppBrandingResolver(requests *RequestStore, settings appBrandingSettings, flows appBrandingFlows, themes appBrandingThemes) *AppBrandingResolver {
+func NewAppBrandingResolver(requests *RequestStore, settings settingsGetter, flows appBrandingFlows, themes appBrandingThemes) *AppBrandingResolver {
 	return &AppBrandingResolver{requests: requests, settings: settings, flows: flows, themes: themes}
 }
 
