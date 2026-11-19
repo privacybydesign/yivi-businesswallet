@@ -11,6 +11,7 @@ import {
   SIGNING_MODE,
   SIGNING_STATUS,
   downloadSignedDocument,
+  getSigningDocumentPreview,
 } from "../api/signing";
 import type {
   Placement,
@@ -51,9 +52,10 @@ import {
 } from "../lib/signing-document";
 import { placementsIncomplete } from "../lib/placement";
 import { toast } from "../lib/toast";
-import { Avatar, Button, Card, Icon, Input, Tag, TopBar } from "../ui";
+import { Avatar, Button, Card, Icon, Input, Modal, Tag, TopBar } from "../ui";
 import { SigningHistoryPanel } from "./signing-history";
 import { DeclineDialog } from "./signing-decline-dialog";
+import { SigningDocumentViewer } from "./signing-document-viewer";
 
 // The placement editor pulls in pdf.js, which is larger than the rest of the app put
 // together, so it is a chunk of its own: nobody who is not placing a signature on a
@@ -420,6 +422,9 @@ function ToSignTab({
   const decline = useDeclineSignRequestMutation(slug);
   const [signingId, setSigningId] = useState<string | null>(null);
   const [decliningId, setDecliningId] = useState<string | null>(null);
+  // The request whose document is open: a member signs from the viewer, with the
+  // document in front of them, never from the list.
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
 
   const onSign = (id: string): void => {
     setSigningId(id);
@@ -447,6 +452,7 @@ function ToSignTab({
   };
 
   const requests = pending.data ?? [];
+  const reviewing = requests.find((req) => req.id === reviewingId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -505,19 +511,57 @@ function ToSignTab({
               >
                 {t("signing.decline.button")}
               </Button>
-              <Button
-                type="button"
-                onClick={() => onSign(req.id)}
-                loading={start.isPending && signingId === req.id}
-                disabled={
-                  !isLinked || (start.isPending && signingId === req.id)
-                }
-              >
-                {t("signing.signButton")}
+              <Button type="button" onClick={() => setReviewingId(req.id)}>
+                {t("signing.reviewButton")}
               </Button>
             </div>
           </Card>
         ))
+      )}
+      {reviewing && (
+        <Modal
+          wide
+          title={reviewing.filename}
+          closeLabel={t("common.close")}
+          onClose={() => setReviewingId(null)}
+          footer={
+            <>
+              {!isLinked && (
+                <p className="text-ink-soft mr-auto text-[13px]">
+                  {t("signing.signNeedsCredential")}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setReviewingId(null);
+                  setDecliningId(reviewing.id);
+                }}
+              >
+                {t("signing.decline.button")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => onSign(reviewing.id)}
+                loading={start.isPending && signingId === reviewing.id}
+                disabled={
+                  !isLinked || (start.isPending && signingId === reviewing.id)
+                }
+              >
+                {t("signing.signButton")}
+              </Button>
+            </>
+          }
+        >
+          <SigningDocumentViewer
+            key={reviewing.id}
+            filename={reviewing.filename}
+            load={(signal) =>
+              getSigningDocumentPreview(slug, reviewing.id, signal)
+            }
+          />
+        </Modal>
       )}
       {decliningId && (
         <DeclineDialog

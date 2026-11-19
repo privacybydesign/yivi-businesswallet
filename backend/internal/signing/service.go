@@ -758,6 +758,22 @@ func (s *Service) GetSignedDocument(ctx context.Context, orgID, userID, id uuid.
 	return s.store.GetSignedDocument(ctx, orgID, id)
 }
 
+// GetDocumentPreview returns the request's document as it stands now, with the
+// signatures made so far, for a signer to read before they sign. The access rule
+// is the signed document's: an admin, or a member the request involves.
+func (s *Service) GetDocumentPreview(ctx context.Context, orgID, userID, id uuid.UUID, isAdmin bool) ([]byte, string, error) {
+	if !isAdmin {
+		req, err := s.store.GetRequest(ctx, orgID, id)
+		if err != nil {
+			return nil, "", err
+		}
+		if !involves(req, userID) {
+			return nil, "", ErrNotFound
+		}
+	}
+	return s.store.GetLatestDocument(ctx, orgID, id)
+}
+
 // ListPending returns the requests awaiting the acting user's signature (their turn).
 func (s *Service) ListPending(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error) {
 	reqs, err := s.store.ListPendingForUser(ctx, orgID, userID)

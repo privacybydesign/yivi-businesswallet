@@ -163,6 +163,16 @@ func TestExternalSigneeSignsAlongsideAMember(t *testing.T) {
 		t.Errorf("document = %q, %d bytes; want the once-signed Contract.pdf", filename, len(afterAlice))
 	}
 
+	// A member the request involves reads the same document in the wallet; a
+	// member it does not involve is told there is no such request.
+	preview, _, err := svc.GetDocumentPreview(ctx, orgID, alice, requestID, false)
+	if err != nil || len(preview) != len(afterAlice) {
+		t.Errorf("GetDocumentPreview (signer) = %d bytes, %v; want the once-signed document", len(preview), err)
+	}
+	if _, _, err := svc.GetDocumentPreview(ctx, orgID, uuid.New(), requestID, false); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetDocumentPreview (stranger) = %v, want ErrNotFound", err)
+	}
+
 	// Link their own credential, then sign — the same two ceremonies a member runs.
 	extLink, err := svc.StartExternalLink(ctx, token)
 	if err != nil {

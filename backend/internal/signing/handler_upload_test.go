@@ -49,6 +49,10 @@ func (s *recordingService) GetRequest(context.Context, uuid.UUID, uuid.UUID, uui
 	panic("unused")
 }
 
+func (s *recordingService) GetDocumentPreview(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, bool) ([]byte, string, error) {
+	return nil, "", nil
+}
+
 func (s *recordingService) GetSignedDocument(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, bool) ([]byte, string, error) {
 	panic("unused")
 }
