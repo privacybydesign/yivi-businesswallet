@@ -123,7 +123,7 @@ func (s *Store) ResolveAccess(ctx context.Context, slug string, userID uuid.UUID
 	)
 	o := &a.Org
 	err := s.db.QueryRow(ctx, accessQuery, slug, userID).Scan(
-		&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt,
+		&o.ID, &o.Name, &o.Slug, &o.KVKNumber, &o.EUID, &o.DigitalAddress, &o.Status, &o.BootstrappedAt, &o.TestMode,
 		&memberID, &role, &jobTitle, &departmentID, &canReview,
 		&a.Authority.LegalRepresentative, &a.Authority.Granted, &orgWide, &full)
 	if errors.Is(err, pgx.ErrNoRows) {
