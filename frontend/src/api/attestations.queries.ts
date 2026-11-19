@@ -13,6 +13,8 @@ import {
   deleteHeldAttestation,
   getAttestationClaim,
   getAttestationKeys,
+  getAttestationRulebooks,
+  importAttestationRulebook,
   getAttestationSchemaIssuerConfig,
   getAttestationSchemas,
   getAttestationTemplates,
@@ -38,6 +40,7 @@ import type {
   AttestationIssuerConfig,
   AttestationKey,
   AttestationKeyInput,
+  AttestationRulebook,
   AttestationSchema,
   AttestationSchemaInput,
   AttestationSchemaUpdate,
@@ -78,6 +81,10 @@ export function attestationSchemaIssuerConfigQueryKey(
     schemaId,
     "issuer-config",
   ];
+}
+
+export function attestationRulebooksQueryKey(slug: string): readonly string[] {
+  return ["organizations", "detail", slug, "attestations", "rulebooks"];
 }
 
 export function attestationTemplatesQueryKey(slug: string): readonly string[] {
@@ -257,6 +264,37 @@ export function useIssuedAttestationQuery(
       query.state.data?.status === OFFERED_STATUS
         ? OFFERED_POLL_INTERVAL_MS
         : false,
+  });
+}
+
+export function useAttestationRulebooksQuery(
+  slug: string,
+  enabled = true,
+): UseQueryResult<AttestationRulebook[], Error> {
+  return useQuery({
+    queryKey: attestationRulebooksQueryKey(slug),
+    queryFn: ({ signal }) => getAttestationRulebooks(slug, signal),
+    enabled: enabled && slug !== "",
+    staleTime: Infinity,
+  });
+}
+
+// Imports a WE BUILD rulebook as a schema plus nothing else: the admin makes a
+// template for it like for any schema.
+export function useImportAttestationRulebookMutation(
+  slug: string,
+): UseMutationResult<AttestationSchema, Error, string> {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: (rulebookId) => importAttestationRulebook(slug, rulebookId),
+    meta: { suppressErrorToast: true },
+    onSuccess: () => {
+      toast.success(t("toasts.attestationRulebookImported"));
+      void queryClient.invalidateQueries({
+        queryKey: attestationSchemasQueryKey(slug),
+      });
+    },
   });
 }
 

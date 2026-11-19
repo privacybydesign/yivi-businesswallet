@@ -17,6 +17,7 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.1.1
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/pressly/goose/v3 v3.27.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/crypto v0.57.0
@@ -252,7 +253,6 @@ require (
 	github.com/ryancurrah/gomodguard/v2 v2.1.3 // indirect
 	github.com/ryanrolds/sqlclosecheck v0.6.0 // indirect
 	github.com/sanposhiho/wastedassign/v2 v2.1.0 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sashamelentyev/interfacebloat v1.1.0 // indirect
 	github.com/sashamelentyev/usestdlibvars v1.29.0 // indirect
 	github.com/securego/gosec/v2 v2.26.1 // indirect

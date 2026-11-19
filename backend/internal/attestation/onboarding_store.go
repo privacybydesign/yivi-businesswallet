@@ -110,7 +110,7 @@ func (s *Store) checkOnboardingTemplates(ctx context.Context, orgID uuid.UUID, i
 	if len(ids) == 0 {
 		return nil
 	}
-	const query = `SELECT t.id, s.subject_type
+	const query = `SELECT t.id, s.subject_type, COALESCE(s.rulebook, '')
 		FROM attestation_templates t
 		JOIN attestation_schemas s ON s.id = t.schema_id
 		WHERE t.organization_id = $1 AND t.id = ANY($2)`
@@ -121,15 +121,18 @@ func (s *Store) checkOnboardingTemplates(ctx context.Context, orgID uuid.UUID, i
 	defer rows.Close()
 
 	subjects := make(map[uuid.UUID]string, len(ids))
+	rulebooks := make(map[uuid.UUID]string, len(ids))
 	for rows.Next() {
 		var (
-			id      uuid.UUID
-			subject string
+			id       uuid.UUID
+			subject  string
+			rulebook string
 		)
-		if err := rows.Scan(&id, &subject); err != nil {
+		if err := rows.Scan(&id, &subject, &rulebook); err != nil {
 			return fmt.Errorf("attestation: check onboarding templates scan: %w", err)
 		}
 		subjects[id] = subject
+		rulebooks[id] = rulebook
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("attestation: check onboarding templates rows: %w", err)
@@ -142,6 +145,9 @@ func (s *Store) checkOnboardingTemplates(ctx context.Context, orgID uuid.UUID, i
 		}
 		if subject != SubjectNaturalPerson {
 			return ErrOnboardingSubject
+		}
+		if rulebooks[id] != "" {
+			return ErrOnboardingRulebook
 		}
 	}
 	return nil

@@ -68,6 +68,7 @@ const ACTION_VISUAL: Record<string, { icon: IconName; tone: AuditTone }> = {
   "attestation.claimed": { icon: "valid", tone: "green" },
   "attestation.revoked": { icon: "close", tone: "red" },
   "attestation.offer_cancelled": { icon: "close", tone: "amber" },
+  "attestation.declined": { icon: "close", tone: "slate" },
   "attestation.key_added": { icon: "add", tone: "green" },
   "attestation.key_suspended": { icon: "warning", tone: "amber" },
   "attestation.key_revoked": { icon: "close", tone: "red" },
@@ -379,6 +380,8 @@ export function auditActionLabel(action: string, t: TFunction): string {
       return t("auditLog.actions.attestationRevoked");
     case "attestation.offer_cancelled":
       return t("auditLog.actions.attestationOfferCancelled");
+    case "attestation.declined":
+      return t("auditLog.actions.attestationDeclined");
     case "attestation.key_added":
       return t("auditLog.actions.attestationKeyAdded");
     case "attestation.key_suspended":

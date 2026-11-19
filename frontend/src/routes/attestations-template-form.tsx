@@ -137,11 +137,13 @@ export function AttestationTemplateForm({
 
   // The attribute list to prefill: from the chosen schema when creating, or
   // baked into the template when editing.
+  // A rulebook template has none: the wizard starts from the rulebook's example.
   const attributes = useMemo<AttestationAttribute[]>(() => {
     if (isEdit && template) {
-      return template.attributes;
+      return template.rulebook === undefined ? template.attributes : [];
     }
-    return schemas.find((s) => s.id === schemaId)?.attributes ?? [];
+    const picked = schemas.find((s) => s.id === schemaId);
+    return picked?.rulebook === undefined ? (picked?.attributes ?? []) : [];
   }, [isEdit, template, schemas, schemaId]);
 
   // The subject type drives which subject fields an attribute can be copied from.

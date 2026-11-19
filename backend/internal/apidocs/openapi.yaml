@@ -2324,6 +2324,77 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/rulebooks:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+    get:
+      tags: [attestation]
+      summary: List the WE BUILD attestation rulebooks
+      description: The rulebooks a schema can be imported from, each with its attributes and a sample of valid claims. Requires an administrator role in the organisation.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orgs/{slug}/attestations/rulebooks/{id}/import:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organisation slug.
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Rulebook id (eucc, eu-poa, lei, vat-id, ubo).
+    post:
+      tags: [attestation]
+      summary: Import a WE BUILD rulebook as an attestation schema
+      description: Creates a schema whose vct and attributes are fixed by the rulebook; issued claims are validated against the rulebook's JSON schema. The optional body sets credentialConfigId (default we-build-<id>). Requires an administrator role in the organisation.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON request payload; see the endpoint description.
+      responses:
+        '2XX':
+          description: Successful response.
+          content:
+            application/json:
+              schema:
+                description: Response payload; shape depends on the endpoint.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`vct_taken`: the organisation already imported this rulebook.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/schemas:
     parameters:
       - name: slug
@@ -2375,6 +2446,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`vct_taken`: a schema with that vct already exists. `vct_rulebook`: the vct belongs to a WE BUILD rulebook, which has to be imported instead.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/orgs/{slug}/attestations/schemas/{id}:
     parameters:
       - name: slug

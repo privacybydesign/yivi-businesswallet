@@ -13,6 +13,9 @@ type HeldAttribute struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Value any    `json:"value"`
+	// NestedLabels labels the claims inside an object or array value, keyed by
+	// their path below Key ("post_code", "[].full_name").
+	NestedLabels map[string]string `json:"nestedLabels,omitempty"`
 }
 
 // HeldCredential is a held credential's display metadata and disclosed attributes,

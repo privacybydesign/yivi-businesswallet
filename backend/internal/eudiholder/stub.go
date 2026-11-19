@@ -110,6 +110,7 @@ func (h *StubHolder) Redeem(ctx context.Context, orgID uuid.UUID, offerURI strin
 	if err != nil {
 		return Redeemed{}, err
 	}
+	openid4vciissuer.MarkStubRedeemed(offerURI)
 	if ok {
 		h.mu.Lock()
 		if h.displays[orgID] == nil {

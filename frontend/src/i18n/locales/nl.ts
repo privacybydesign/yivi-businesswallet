@@ -2394,6 +2394,7 @@ export const nl: Translation<typeof en> = {
     postguardFileSent: "Versleuteld bestand verstuurd",
     postguardNotificationsSaved: "Notificatie-instellingen opgeslagen",
     attestationSchemaCreated: "Schema aangemaakt",
+    attestationRulebookImported: "Rulebook geïmporteerd",
     attestationSchemaUpdated: "Schema bijgewerkt",
     attestationSchemaDeleted: "Schema verwijderd",
     attestationTemplateCreated: "Sjabloon aangemaakt",
@@ -2682,6 +2683,7 @@ export const nl: Translation<typeof en> = {
       attestationClaimed: "Attestatie geclaimd",
       attestationRevoked: "Attestatie ingetrokken",
       attestationOfferCancelled: "Attestatieaanbod geannuleerd",
+      attestationDeclined: "Ontvanger heeft een attestatieaanbod geweigerd",
       attestationKeyAdded: "Attestatiesleutel toegevoegd",
       attestationKeySuspended: "Attestatiesleutel opgeschort",
       attestationKeyRevoked: "Attestatiesleutel ingetrokken",
@@ -4422,6 +4424,9 @@ export const nl: Translation<typeof en> = {
         attributes: "Attributen",
         noAttributes: "Deze credential geeft geen attributen vrij.",
         doesNotExpire: "Verloopt niet",
+        rulebookMatch: "Voldoet aan het WE BUILD-rulebook {{rulebook}}.",
+        rulebookMismatch:
+          "Voldoet niet aan het WE BUILD-rulebook {{rulebook}}. Andere WE BUILD-wallets kunnen hem weigeren.",
       },
     },
     schemas: {
@@ -4429,6 +4434,20 @@ export const nl: Translation<typeof en> = {
       newAction: "Nieuw schema",
       delete: "Schema verwijderen",
       confirmDelete: "Schema “{{name}}” verwijderen?",
+    },
+    rulebooks: {
+      openAction: "Importeren uit WE BUILD",
+      title: "Een WE BUILD-rulebook importeren",
+      intro:
+        "Een rulebook-schema volgt het WE BUILD-attestatierulebook precies. Type en attributen liggen vast, en elke uitgegeven credential wordt tegen het rulebook gecontroleerd.",
+      import: "Importeren",
+      imported: "Geïmporteerd",
+      importError: "Het rulebook importeren mislukt: {{message}}",
+      aboutOrganization: "Over een organisatie",
+      aboutPerson: "Over een persoon",
+      attributeCount_one: "{{count}} attribuut",
+      attributeCount_other: "{{count}} attributen",
+      tag: "WE BUILD",
     },
     keys: {
       empty: "Nog geen sleutels.",
@@ -4477,6 +4496,8 @@ export const nl: Translation<typeof en> = {
       status: "Status",
       qualified: "Gekwalificeerd credential",
       attributes: "Attributen",
+      rulebookFixed:
+        "WE BUILD legt de attributen en het onderwerp van dit schema vast. Die zijn hier niet te wijzigen.",
       addAttribute: "Attribuut toevoegen",
       attributesRequired: "Voeg minstens één attribuut toe.",
       attrKey: "Sleutel",
@@ -4585,6 +4606,15 @@ export const nl: Translation<typeof en> = {
       unknownAttribute:
         "Een van de attributen hoort niet bij het schema van dit sjabloon.",
       missingAttribute: "Een verplicht attribuut ontbreekt.",
+      invalidClaims: "De claims voldoen niet aan het rulebook. {{message}}",
+      rulebookClaimsIntro:
+        "Dit sjabloon volgt een WE BUILD-rulebook. Bewerk de claims als JSON. Ze beginnen bij het voorbeeld uit het rulebook en worden bij het uitgeven tegen het rulebook gecontroleerd.",
+      rulebookClaimsLabel: "Claims (JSON)",
+      rulebookClaimsReset: "Opnieuw beginnen bij het voorbeeld",
+      claims: {
+        invalidJson: "Dit is geen geldige JSON.",
+        notAnObject: "De claims moeten een JSON-object zijn.",
+      },
     },
   },
   postguard: {

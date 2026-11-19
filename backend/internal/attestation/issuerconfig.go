@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
 )
 
 // This file generates the Veramo issuer provisioning for a schema. In the target
@@ -32,6 +34,8 @@ const (
 	// vctSelectiveDisclosure marks a claim as selectively disclosable in a VCT
 	// document (the "sd" field), matching the existing conf/vct/*.json files.
 	vctSelectiveDisclosure = "allowed"
+	// vctNoSelectiveDisclosure marks a claim the rulebook says is always disclosed.
+	vctNoSelectiveDisclosure = "never"
 
 	// Placeholder tokens the openid4vc-poc-ops repo substitutes at deploy time
 	// (see veramo-issuer.tf). Emitting them makes a generated issuer bundle a
@@ -56,9 +60,9 @@ type localeDisplay struct {
 }
 
 // claimConfig is one attribute in a credential configuration: its disclosure
-// path plus localized labels.
+// path plus localized labels. A nil path segment means every array element.
 type claimConfig struct {
-	Path      []string        `json:"path"`
+	Path      []any           `json:"path"`
 	Mandatory bool            `json:"mandatory,omitempty"`
 	Display   []localeDisplay `json:"display,omitempty"`
 }
@@ -104,8 +108,8 @@ type vctDocumentBody struct {
 }
 
 type vctClaim struct {
-	Path []string `json:"path"`
-	SD   string   `json:"sd"`
+	Path []any  `json:"path"`
+	SD   string `json:"sd"`
 }
 
 // IssuerConfig is the generated Veramo provisioning for a schema: the metadata
@@ -125,16 +129,7 @@ type IssuerConfig struct {
 // it is embedded into the per-credential display so a wallet renders it on the
 // credential card.
 func BuildIssuerConfig(s Schema, issuerURL, logoDataURI string) IssuerConfig {
-	claims := make([]claimConfig, 0, len(s.Attributes))
-	vctClaims := make([]vctClaim, 0, len(s.Attributes))
-	for _, a := range s.Attributes {
-		claims = append(claims, claimConfig{
-			Path:      []string{a.Key},
-			Mandatory: a.Required,
-			Display:   labelDisplays(a.Display),
-		})
-		vctClaims = append(vctClaims, vctClaim{Path: []string{a.Key}, SD: vctSelectiveDisclosure})
-	}
+	claims, vctClaims := schemaClaims(s)
 
 	credDisplay := credentialDisplays(s, logoDataURI)
 	cfg := credentialConfiguration{
@@ -169,6 +164,42 @@ func BuildIssuerConfig(s Schema, issuerURL, logoDataURI string) IssuerConfig {
 			},
 		},
 	}
+}
+
+// schemaClaims lists a schema's claim paths for the issuer metadata and the VCT
+// document. A rulebook schema lists every nested path the rulebook defines, with
+// the rulebook's selective disclosure; an organization-defined one lists its flat
+// attributes.
+func schemaClaims(s Schema) ([]claimConfig, []vctClaim) {
+	if rb, ok := rulebook.Get(s.Rulebook); ok {
+		sd := vctSelectiveDisclosure
+		if !rb.SelectivelyDisclosable {
+			sd = vctNoSelectiveDisclosure
+		}
+		rbClaims := rb.Claims()
+		claims := make([]claimConfig, 0, len(rbClaims))
+		vctClaims := make([]vctClaim, 0, len(rbClaims))
+		for _, c := range rbClaims {
+			claims = append(claims, claimConfig{
+				Path:      c.Path,
+				Mandatory: c.Required,
+				Display:   []localeDisplay{{Name: c.Label, Locale: defaultVctLanguage}},
+			})
+			vctClaims = append(vctClaims, vctClaim{Path: c.Path, SD: sd})
+		}
+		return claims, vctClaims
+	}
+	claims := make([]claimConfig, 0, len(s.Attributes))
+	vctClaims := make([]vctClaim, 0, len(s.Attributes))
+	for _, a := range s.Attributes {
+		claims = append(claims, claimConfig{
+			Path:      []any{a.Key},
+			Mandatory: a.Required,
+			Display:   labelDisplays(a.Display),
+		})
+		vctClaims = append(vctClaims, vctClaim{Path: []any{a.Key}, SD: vctSelectiveDisclosure})
+	}
+	return claims, vctClaims
 }
 
 // --- Per-organization issuer bundle (full GitOps drop-in) ---

@@ -108,6 +108,7 @@ const (
 	AttestationClaimed         = "attestation.claimed"
 	AttestationRevoked         = "attestation.revoked"
 	AttestationOfferCancelled  = "attestation.offer_cancelled"
+	AttestationDeclined        = "attestation.declined"
 	AttestationKeyAdded        = "attestation.key_added"
 	AttestationKeySuspended    = "attestation.key_suspended"
 	AttestationKeyRevoked      = "attestation.key_revoked"

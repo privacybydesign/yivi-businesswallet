@@ -2341,6 +2341,7 @@ export const en = {
     postguardFileSent: "Encrypted file sent",
     postguardNotificationsSaved: "Notification settings saved",
     attestationSchemaCreated: "Schema created",
+    attestationRulebookImported: "Rulebook imported",
     attestationSchemaUpdated: "Schema updated",
     attestationSchemaDeleted: "Schema deleted",
     attestationTemplateCreated: "Template created",
@@ -2625,6 +2626,7 @@ export const en = {
       attestationClaimed: "Claimed attestation",
       attestationRevoked: "Revoked attestation",
       attestationOfferCancelled: "Cancelled attestation offer",
+      attestationDeclined: "Recipient declined an attestation offer",
       attestationKeyAdded: "Added attestation key",
       attestationKeySuspended: "Suspended attestation key",
       attestationKeyRevoked: "Revoked attestation key",
@@ -4318,6 +4320,9 @@ export const en = {
         attributes: "Attributes",
         noAttributes: "This credential discloses no attributes.",
         doesNotExpire: "Does not expire",
+        rulebookMatch: "Matches the WE BUILD {{rulebook}} rulebook.",
+        rulebookMismatch:
+          "Does not match the WE BUILD {{rulebook}} rulebook. Other WE BUILD wallets may refuse it.",
       },
     },
     schemas: {
@@ -4325,6 +4330,20 @@ export const en = {
       newAction: "New schema",
       delete: "Delete schema",
       confirmDelete: "Delete schema “{{name}}”?",
+    },
+    rulebooks: {
+      openAction: "Import from WE BUILD",
+      title: "Import a WE BUILD rulebook",
+      intro:
+        "A rulebook schema follows the WE BUILD attestation rulebook exactly. Its type and attributes are fixed, and every credential issued from it is checked against the rulebook.",
+      import: "Import",
+      imported: "Imported",
+      importError: "Could not import the rulebook: {{message}}",
+      aboutOrganization: "About an organization",
+      aboutPerson: "About a person",
+      attributeCount_one: "{{count}} attribute",
+      attributeCount_other: "{{count}} attributes",
+      tag: "WE BUILD",
     },
     keys: {
       empty: "No keys yet.",
@@ -4373,6 +4392,8 @@ export const en = {
       status: "Status",
       qualified: "Qualified credential",
       attributes: "Attributes",
+      rulebookFixed:
+        "WE BUILD fixes the attributes and subject of this schema. They cannot be changed here.",
       addAttribute: "Add attribute",
       attributesRequired: "Add at least one attribute.",
       attrKey: "Key",
@@ -4480,6 +4501,15 @@ export const en = {
       unknownAttribute:
         "One of the attributes is not part of this template's schema.",
       missingAttribute: "A required attribute is missing.",
+      invalidClaims: "The claims do not match the rulebook. {{message}}",
+      rulebookClaimsIntro:
+        "This template follows a WE BUILD rulebook. Edit the claims as JSON. They start from the rulebook's example and are checked against the rulebook when you issue.",
+      rulebookClaimsLabel: "Claims (JSON)",
+      rulebookClaimsReset: "Start again from the example",
+      claims: {
+        invalidJson: "This is not valid JSON.",
+        notAnObject: "The claims must be a JSON object.",
+      },
     },
   },
   postguard: {
