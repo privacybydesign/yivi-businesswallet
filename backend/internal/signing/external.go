@@ -37,6 +37,7 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 		Mode:         req.Mode,
 		SignerCount:  len(req.Signers),
 		CreatedAt:    req.CreatedAt,
+		ReturnURL:    returnLink(req, *me),
 	}
 	for _, sg := range req.Signers {
 		if sg.Status == SignerSigned {

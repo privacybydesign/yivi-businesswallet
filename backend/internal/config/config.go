@@ -225,11 +225,13 @@ const (
 	// rotated by different decisions, and one key per purpose keeps a rotation from
 	// taking out a capability nobody meant to touch.
 	envProvisioningEncryptionKey = "PROVISIONING_ENCRYPTION_KEY"
-	// CSC_ENCRYPTION_KEY (hex 32 bytes) encrypts the per-org CSC signing-provider
-	// client secret at rest. Its own key rather than sharing another: the two are
-	// rotated by different decisions, and one key per purpose keeps a rotation from
-	// taking out a capability nobody meant to touch. Without it an org cannot store
-	// a CSC client secret (internal/csc).
+	// CSC_ENCRYPTION_KEY (hex 32 bytes) seals what signing keeps at rest: the
+	// signing keys and certificate authority of the wallet's own signing service
+	// (internal/yivicsc), and the per-org client secret of any other CSC provider
+	// (internal/csc). Its own key rather than sharing another: the two are rotated
+	// by different decisions, and one key per purpose keeps a rotation from taking
+	// out a capability nobody meant to touch. Without it the wallet's own signing
+	// service is off and an org cannot store a CSC client secret.
 	envCSCEncryptionKey = "CSC_ENCRYPTION_KEY"
 	// SIGNING_OAUTH_ISSUER_INTERNAL overrides the OAuth issuer base the backend uses
 	// for its own server-side token exchange during the signing ceremony, when that

@@ -479,3 +479,39 @@ func TestIdentityIssuedAtIsZeroWhenUnavailable(t *testing.T) {
 		})
 	}
 }
+
+// A signing disclosure asks who the signer is and nothing more: the name and
+// date of birth, from whichever one source the holder picks. No nationality, no
+// photo, no BSN.
+func TestSigningQueryAsksOnlyTheSignersName(t *testing.T) {
+	q := stagingVCTs.signingQuery(SigningRequest{Sources: []string{
+		SourcePassport, SourceIdentityCard, SourceResidencePermit, SourcePersonalData,
+	}})
+	wantOptions := [][]string{{credIDPassport}, {credIDIDCard}, {credIDResidencePermit}, {credIDPersonalData}}
+	if len(q.CredentialSets) != 1 || !slices.EqualFunc(q.CredentialSets[0].Options, wantOptions, slices.Equal[[]string]) {
+		t.Fatalf("options = %v, want any one of %v", q.CredentialSets, wantOptions)
+	}
+	claimsOf := func(c dcqlCredential) []string {
+		var names []string
+		for _, claim := range c.Claims {
+			names = append(names, claim.Path[0])
+		}
+		return names
+	}
+	document := []string{ClaimGivenNames, ClaimFamilyName, ClaimDateOfBirth}
+	for _, c := range q.Credentials[:3] {
+		if got := claimsOf(c); !slices.Equal(got, document) {
+			t.Errorf("%s claims = %v, want %v", c.ID, got, document)
+		}
+	}
+	personal := []string{ClaimPersonalFirstNames, ClaimPersonalPrefix, ClaimPersonalFamilyName, ClaimPersonalDateOfBirth}
+	if got := claimsOf(q.Credentials[3]); !slices.Equal(got, personal) {
+		t.Errorf("personal data claims = %v, want %v", got, personal)
+	}
+
+	// Signing with a certificate issued on the personal data asks that alone.
+	q = stagingVCTs.signingQuery(SigningRequest{Sources: []string{SourcePersonalData}})
+	if len(q.Credentials) != 1 || q.Credentials[0].ID != credIDPersonalData {
+		t.Errorf("personal data only = %+v", q)
+	}
+}

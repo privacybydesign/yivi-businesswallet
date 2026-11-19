@@ -61,6 +61,7 @@ import Settings from "./routes/settings";
 import Signing from "./routes/signing";
 import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
+import SigningAuthorize from "./routes/signing-authorize";
 import Proof from "./routes/proof";
 import HostedPreview from "./routes/hosted-preview";
 import ReviewLink from "./routes/review-link";
@@ -214,6 +215,10 @@ export const router = createBrowserRouter([
       // An external signee has no account, so their signing page is public and keyed
       // by the one-time token from their invitation mail.
       { path: "/sign/:token", Component: SigningExternal },
+      // The built-in signing service's authorization page, where a signing
+      // ceremony sends the signer's browser to approve in the Yivi app: public,
+      // keyed by the authorization id, for a member and an external signee alike.
+      { path: "/signing/authorize/:id", Component: SigningAuthorize },
       // An external person verifying from a hosted link: public, keyed by
       // the link's token, on the subject's own device.
       { path: "/p/:token", Component: Proof },

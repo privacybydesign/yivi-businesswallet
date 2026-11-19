@@ -1614,6 +1614,10 @@ export const en = {
       subtitle:
         "Everything in the Business Wallet works without setup. Come here only to do the same from your own software: mint a token to call the API, and add an endpoint that receives results.",
       adminOnly: "Only an administrator can see this page.",
+      signingApi: {
+        title: "Signing API",
+        note: "The same API tokens also open the signing API at {{path}}: create a signing request with a PDF and its signers, get each signee's signing link, read the status and download the signed PDF.",
+      },
     },
     apiKeys: {
       title: "API tokens",
@@ -2862,10 +2866,10 @@ export const en = {
   },
   signing: {
     title: "Sign documents",
-    subtitle: "Qualified electronic signatures via your CSC signing provider",
+    subtitle: "Electronic signatures via your organization's signing provider",
     credentialTitle: "Signing credential",
     credentialDescription:
-      "Your qualified signing certificate is fetched once and reused for each signature. Linking opens your wallet to authorize it.",
+      "Your signing certificate is fetched once and reused for each signature. To link it, you identify with your wallet app.",
     credentialIdLabel: "Credential ID",
     keyAlgoLabel: "Key algorithm",
     notLinked: "No signing credential is linked yet.",
@@ -2875,7 +2879,7 @@ export const en = {
     linkFailedToast: "Linking the signing credential was not completed.",
     credentialLoadError: "Could not load your signing credential.",
     walletHint:
-      "You will be redirected to the signing provider to authorize with your wallet, then returned here.",
+      "You will be redirected to the signing provider to identify with your wallet app, then returned here.",
     signTitle: "Sign a document",
     signDescription:
       "Upload a PDF. Its hash is authorized with your wallet, signed by the provider, and the signed PDF is returned to you.",
@@ -2993,6 +2997,7 @@ export const en = {
     toSignEmpty: "No documents are waiting for your signature.",
     toSignError: "Could not load documents awaiting your signature.",
     requestedBy: "Requested by {{name}}",
+    requestedViaApi: "Requested through the API",
     alreadySigned: "You have already signed this document.",
     notYourTurn: "An earlier signer must sign first.",
     signInProgress: "Another signature is in progress; try again shortly.",
@@ -3045,7 +3050,7 @@ export const en = {
       progress: "{{signed}} of {{total}}",
       reviewDocument: "Open the document",
       needsCredential:
-        "Link a signing certificate first. This opens your wallet once; after that you can sign.",
+        "Link your signing certificate first. You identify with your wallet app once; after that you can sign.",
       linkButton: "Link signing certificate",
       signButton: "Sign document",
       declineButton: "Decline",
@@ -3072,7 +3077,47 @@ export const en = {
       errorTitle: "Something went wrong",
       errorHint: "Could not load this signing request. Try again later.",
       walletHint:
-        "You will be sent to the signing provider to authorize with your wallet, then returned here.",
+        "You will be sent to the signing provider to identify with your wallet app, then returned here.",
+      returnTo: "Return to {{host}}",
+    },
+    authorize: {
+      link: {
+        title: "Identify yourself to get your signing certificate",
+        choose:
+          "In the Yivi app you choose what to share: your passport, identity card or residence permit, or your registered personal data (BRP).",
+        name: "The name you share is the name on your signature.",
+      },
+      sign: {
+        title: "Approve signing {{document}}",
+        titleUnnamed: "Approve signing this document",
+        intro: "Approve this signature in the Yivi app.",
+        sourceMrtd:
+          "Share your passport, identity card or residence permit. It has to be the same one your signing certificate was issued with.",
+        sourceBrp:
+          "Share your registered personal data (BRP). It has to be the same data your signing certificate was issued with.",
+      },
+      scanHint:
+        "Scan the QR code with the Yivi app, or open the app on this device.",
+      openYivi: "Open the Yivi app",
+      cancelError: "Could not cancel. Try again.",
+      leaving: "Taking you back…",
+      denied: {
+        title: "Not approved",
+        identityMismatch:
+          "The identity you shared is not the one your signing certificate was issued to.",
+        identityIncomplete:
+          "What you shared carried no name or date of birth, so it cannot be used to sign.",
+        generic: "This was not approved.",
+        continue: "Continue",
+      },
+      expired: {
+        title: "This authorization has expired",
+        message: "Start again from the signing page.",
+      },
+      error: {
+        title: "Something went wrong",
+        message: "Could not load this authorization. Try again later.",
+      },
     },
   },
   signedDocuments: {
@@ -3735,14 +3780,19 @@ export const en = {
     loadError: "Could not load the signing provider settings: {{message}}",
     heading: "CSC signing provider",
     description:
-      "Connect to a remote QTSP over the Cloud Signature Consortium (CSC) API v2 to create qualified signatures. This sets up the connection; the signing flow itself is added separately.",
+      "Documents are signed through a signing provider that speaks the Cloud Signature Consortium (CSC) API v2. The built-in signing service works without setup; connect a remote QTSP instead to create qualified signatures.",
     providerKind: "Provider",
     kinds: {
+      yivi: "Built-in signing service (recommended)",
       sample: "Sample QTSP (self-hosted)",
       custom: "Custom CSC endpoint",
     },
     sampleHint:
       "The sample provider is the bundled reference QTSP. Run it with `docker compose --profile signer up`; it listens on http://localhost:8085.",
+    builtInHint:
+      "The wallet's own signing service, and the default. Signers identify with the Yivi app, using their passport, identity card, residence permit or registered personal data (BRP), and sign with an advanced electronic signature. There is nothing to configure.",
+    builtInUnavailable:
+      "This deployment does not run the built-in signing service. Choose another provider.",
     baseUrl: "CSC base URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth client ID",

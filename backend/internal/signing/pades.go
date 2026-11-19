@@ -87,6 +87,11 @@ func openPDF(input []byte) (r *pdf.Reader, err error) {
 	return rdr, nil
 }
 
+// signatureReason is the reason a signature states. It claims no more than the
+// wallet can know: whether the certificate behind a signature is a qualified one is
+// the signing provider's to say, and the wallet's own service issues none.
+const signatureReason = "Electronic signature"
+
 // startPAdES begins a PAdES signing pass over input using cred's certificate, and
 // returns the session plus the digest that must be signed (over which the OAuth
 // authorize step is bound). The signing certificate must already be known, since
@@ -142,7 +147,7 @@ func startPAdES(input []byte, cred signingprovider.Credential, placements []Plac
 				DocMDPPerm: sign.DoNotAllowAnyChangesPerms,
 				Info: sign.SignDataSignatureInfo{
 					Name:   name,
-					Reason: "Qualified electronic signature",
+					Reason: signatureReason,
 					Date:   signedAt,
 				},
 			},

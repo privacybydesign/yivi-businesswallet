@@ -41,6 +41,13 @@ type Service struct {
 	// backend container (qtsp-authz:8084); in production the two are the same URL and
 	// this stays empty. Only the host differs — the token/claims are unaffected.
 	issuerInternal string
+	// hostedBaseURL and hostedRedirectURI are the wallet's own signing service
+	// (internal/yivicsc), when the deployment runs it: its CSC base URL, and the
+	// callback its built-in client is registered with. A ceremony against that base
+	// URL returns to that callback rather than to redirectURI, which is the one a
+	// remote provider registered and, unset, points at localhost.
+	hostedBaseURL     string
+	hostedRedirectURI string
 
 	mu       sync.Mutex
 	sessions map[string]*ceremony
@@ -76,6 +83,9 @@ type ceremony struct {
 	clientSecret string
 	issuer       string
 	pkceVerifier string
+	// redirectURI is the callback this ceremony's authorization named, which the
+	// token exchange has to repeat.
+	redirectURI string
 
 	// sign flow only:
 	requestID    uuid.UUID
@@ -137,11 +147,25 @@ func NewService(store *Store, p provider, settings connectionResolver, members m
 	}
 }
 
+// CallbackPath is the OAuth callback's path under the API prefix.
+const CallbackPath = "/signing/callback"
+
+// UseHostedProvider tells the service the deployment runs the wallet's own signing
+// service at baseURL, whose built-in client returns to redirectURI. Call it before
+// the service serves a request.
+func (s *Service) UseHostedProvider(baseURL, redirectURI string) {
+	s.hostedBaseURL, s.hostedRedirectURI = baseURL, redirectURI
+}
+
 // tokenIssuer returns the OAuth issuer base to use for the backend's own
 // server-side token exchange: the internal override when configured (local Docker,
 // where the browser-facing issuer host is not reachable from the backend), else
 // the issuer discovered from the provider (the production case).
 func (s *Service) tokenIssuer(discovered string) string {
+	// The wallet's own signing service is answered in process: it has no other host.
+	if s.hostedBaseURL != "" && discovered == s.hostedBaseURL {
+		return discovered
+	}
 	if s.issuerInternal != "" {
 		return s.issuerInternal
 	}
@@ -172,7 +196,7 @@ func (s *Service) startLink(ctx context.Context, orgID uuid.UUID, ref signerRef,
 	}
 	authURL := s.provider.AuthorizeURL(info.OAuth2, signingprovider.AuthorizeParams{
 		ClientID:      conn.clientID,
-		RedirectURI:   s.redirectURI,
+		RedirectURI:   conn.redirectURI,
 		State:         state,
 		CodeChallenge: pkce.Challenge,
 		Scope:         signingprovider.ScopeService,
@@ -180,7 +204,7 @@ func (s *Service) startLink(ctx context.Context, orgID uuid.UUID, ref signerRef,
 	s.put(state, &ceremony{
 		flow: flowLink, orgID: orgID, signer: ref, slug: slug,
 		baseURL: conn.baseURL, clientID: conn.clientID, clientSecret: conn.clientSecret,
-		issuer: info.OAuth2, pkceVerifier: pkce.Verifier,
+		issuer: info.OAuth2, pkceVerifier: pkce.Verifier, redirectURI: conn.redirectURI,
 	})
 	return Start{AuthorizeURL: authURL}, nil
 }
@@ -193,14 +217,22 @@ func (s *Service) startLink(ctx context.Context, orgID uuid.UUID, ref signerRef,
 // parallel mode. slug is used to build the signing link in the notifications sent to
 // the member signers.
 func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, slug, filename string, pdf []byte, in []SignerInput, mode string, rec RecipientInput) (uuid.UUID, error) {
+	id, _, err := s.createRequest(ctx, orgID, MemberOrigin(createdBy), slug, filename, pdf, in, mode, rec)
+	return id, err
+}
+
+// createRequest is CreateRequest for either origin. It also returns the signing
+// links of the external signees it asked without mailing them (an API request made
+// with no mail), keyed by signer id; the caller is who hands those out.
+func (s *Service) createRequest(ctx context.Context, orgID uuid.UUID, origin Origin, slug, filename string, pdf []byte, in []SignerInput, mode string, rec RecipientInput) (uuid.UUID, map[uuid.UUID]string, error) {
 	if _, err := s.connection(ctx, orgID); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	if mode != ModeParallel && mode != ModeSequential {
-		return uuid.Nil, ErrInvalidRequest
+		return uuid.Nil, nil, ErrInvalidRequest
 	}
 	if err := validateRecipient(rec); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	// Reading the geometry doubles as the upload check: a file whose pages cannot be
 	// measured is one the signing pass could not open either. The placements are
@@ -208,19 +240,19 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 	// or past the last page would otherwise only surface when that signer signs.
 	geometry, err := readGeometry(pdf)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	members, err := s.members.ListMembers(ctx, orgID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	signers, err := validateSigners(in, members, geometry)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
-	requestID, created, err := s.store.CreateRequest(ctx, orgID, createdBy, filename, pdf, mode, signers, rec)
+	requestID, created, err := s.store.CreateRequestFrom(ctx, orgID, origin, filename, pdf, mode, signers, rec)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	// Notify the signers it is their turn: everyone in parallel mode, only the first
 	// (lowest order) in sequential mode — later signers are notified as their turn
@@ -229,10 +261,35 @@ func (s *Service) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID,
 	if mode == ModeSequential {
 		notify = created[:1]
 	}
+	links := map[uuid.UUID]string{}
 	for _, sg := range notify {
-		s.notifySigner(ctx, orgID, slug, filename, requestID, sg, members)
+		if origin.notifySigners {
+			s.notifySigner(ctx, orgID, slug, filename, requestID, sg, members)
+			continue
+		}
+		// No mail was asked for: the caller hands the signee their link, so it is
+		// made here and returned. A member needs none; they sign in the wallet.
+		if sg.Kind != KindExternal {
+			continue
+		}
+		link, err := s.externalLink(ctx, requestID, sg.ID)
+		if err != nil {
+			slog.ErrorContext(ctx, "signing: issue external signing link", slog.String("error", err.Error()))
+			continue
+		}
+		links[sg.ID] = link
 	}
-	return requestID, nil
+	return requestID, links, nil
+}
+
+// externalLink issues an external signee's invitation token and returns the page
+// it opens. Issuing again replaces the token, so an earlier link stops working.
+func (s *Service) externalLink(ctx context.Context, requestID, signerID uuid.UUID) (string, error) {
+	token, err := s.store.IssueExternalToken(ctx, requestID, signerID)
+	if err != nil {
+		return "", err
+	}
+	return s.appBaseURL + ExternalSignPath(token), nil
 }
 
 // validateSigners checks the selected signers and assigns their 1-based order: an
@@ -373,12 +430,14 @@ func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, r
 	digestB64 := base64.StdEncoding.EncodeToString(digest)
 	authURL := s.provider.AuthorizeURL(info.OAuth2, signingprovider.AuthorizeParams{
 		ClientID:      conn.clientID,
-		RedirectURI:   s.redirectURI,
+		RedirectURI:   conn.redirectURI,
 		State:         state,
 		CodeChallenge: pkce.Challenge,
 		Scope:         signingprovider.ScopeCredential,
 		CredentialID:  cred.ID,
 		NumSignatures: 1,
+		// What the signer is about to sign, for the authorization page to show them.
+		Description: req.Filename,
 		// The authorize `hashes` param is base64url (the QTSP decodes it with
 		// getUrlDecoder); the token claim it becomes — and therefore the signHash
 		// request below — is standard base64 (digestB64). Same digest, two encodings.
@@ -388,7 +447,7 @@ func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, r
 	s.put(state, &ceremony{
 		flow: flowSign, orgID: orgID, signer: ref, slug: slug,
 		baseURL: conn.baseURL, clientID: conn.clientID, clientSecret: conn.clientSecret,
-		issuer: info.OAuth2, pkceVerifier: pkce.Verifier,
+		issuer: info.OAuth2, pkceVerifier: pkce.Verifier, redirectURI: conn.redirectURI,
 		requestID: requestID, credentialID: cred.ID, digestB64: digestB64, pades: pades,
 	})
 	return Start{RequestID: &requestID, AuthorizeURL: authURL}, nil
@@ -404,7 +463,12 @@ func (s *Service) HandleCallback(ctx context.Context, code, state string) string
 	}
 	dest := s.resultURL(c, "")
 
-	token, err := s.provider.ExchangeToken(ctx, s.tokenIssuer(c.issuer), c.clientID, c.clientSecret, code, c.pkceVerifier, s.redirectURI)
+	// A signer who cancelled, or whose disclosure was refused, comes back with an
+	// OAuth error and no code: there is nothing to exchange.
+	if code == "" {
+		return s.failCeremony(ctx, c, "the authorization was not completed", ErrAuthorizationDenied)
+	}
+	token, err := s.provider.ExchangeToken(ctx, s.tokenIssuer(c.issuer), c.clientID, c.clientSecret, code, c.pkceVerifier, c.redirectURI)
 	if err != nil {
 		return s.failCeremony(ctx, c, "authorization could not be completed", err)
 	}
@@ -586,7 +650,7 @@ func (s *Service) notifyNextSequential(ctx context.Context, orgID uuid.UUID, slu
 		slog.WarnContext(ctx, "signing: load request to notify next signer", slog.String("error", err.Error()))
 		return
 	}
-	if req.Mode != ModeSequential {
+	if req.Mode != ModeSequential || !req.NotifySigners {
 		return
 	}
 	var next *Signer
@@ -692,7 +756,7 @@ func (s *Service) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (L
 	return LinkedCredential{CredentialID: cred.ID, KeyAlgo: joinAlgo(cred.KeyAlgo)}, nil
 }
 
-type connection struct{ baseURL, clientID, clientSecret string }
+type connection struct{ baseURL, clientID, clientSecret, redirectURI string }
 
 // Available reports whether the org has a signing provider configured and
 // enabled. It is member-safe, so the signing feature can be gated for members who
@@ -709,7 +773,11 @@ func (s *Service) connection(ctx context.Context, orgID uuid.UUID) (connection, 
 	if baseURL == "" || clientID == "" {
 		return connection{}, ErrNotConfigured
 	}
-	return connection{baseURL: baseURL, clientID: clientID, clientSecret: clientSecret}, nil
+	redirectURI := s.redirectURI
+	if s.hostedBaseURL != "" && baseURL == s.hostedBaseURL {
+		redirectURI = s.hostedRedirectURI
+	}
+	return connection{baseURL: baseURL, clientID: clientID, clientSecret: clientSecret, redirectURI: redirectURI}, nil
 }
 
 // enrich fills CreatedByName and per-signer name/email from the member directory. A

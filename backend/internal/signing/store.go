@@ -135,19 +135,27 @@ func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject
 // returns the request id and the persisted signer rows — the caller needs their row
 // ids to invite the external signees, who have no user id to be addressed by.
 func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, []Signer, error) {
+	return s.CreateRequestFrom(ctx, orgID, MemberOrigin(createdBy), filename, pdf, mode, signers, rec)
+}
+
+// CreateRequestFrom is CreateRequest for either origin: a member in the wallet, or
+// the organisation's own software with an API key.
+func (s *Store) CreateRequestFrom(ctx context.Context, orgID uuid.UUID, origin Origin, filename string, pdf []byte, mode string, signers []SignerInput, rec RecipientInput) (uuid.UUID, []Signer, error) {
 	id := uuid.New()
 	created := make([]Signer, 0, len(signers))
 	err := database.InTx(ctx, s.db, func(q database.Querier) error {
 		const insert = `INSERT INTO signing_requests
 			(id, organization_id, created_by, status, filename, original_document, signing_mode,
-			 recipient_channel, recipient_address, recipient_name, message, delivery_status)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
+			 recipient_channel, recipient_address, recipient_name, message, delivery_status,
+			 created_via, api_key_id, notify_signers, return_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 		deliveryStatus := DeliveryNotRequested
 		if rec.Channel != ChannelNone {
 			deliveryStatus = DeliveryPending
 		}
-		if _, err := q.Exec(ctx, insert, id, orgID, createdBy, StatusAwaitingSignatures, filename, pdf, mode,
-			rec.Channel, rec.Address, rec.Name, rec.Message, deliveryStatus); err != nil {
+		if _, err := q.Exec(ctx, insert, id, orgID, origin.createdBy, StatusAwaitingSignatures, filename, pdf, mode,
+			rec.Channel, rec.Address, rec.Name, rec.Message, deliveryStatus,
+			origin.via(), origin.apiKeyID, origin.notifySigners, origin.returnURL); err != nil {
 			return fmt.Errorf("signing: create request org %s: %w", orgID, err)
 		}
 		const insertSigner = `INSERT INTO signing_request_signers
@@ -186,7 +194,7 @@ func (s *Store) CreateRequest(ctx context.Context, orgID, createdBy uuid.UUID, f
 			audit.Created(map[string]any{
 				"filename": filename, "mode": mode, "signers": len(signers),
 				"externalSigners": external, "recipientChannel": rec.Channel,
-				"placements": placements,
+				"placements": placements, "createdVia": origin.via(),
 			}))
 	})
 	if err != nil {
@@ -404,9 +412,7 @@ func (s *Store) DeclineSigner(ctx context.Context, orgID, id, signerID uuid.UUID
 // (without names — the service enriches those from the member directory). Scoped by
 // org; caller-level authorization (creator/signer/admin) is enforced above.
 func (s *Store) GetRequest(ctx context.Context, orgID, id uuid.UUID) (Request, error) {
-	const query = `SELECT id, status, filename, signing_mode, created_by, recipient_channel,
-			recipient_name, recipient_address, message, delivery_status, delivery_error, error, created_at, updated_at
-		FROM signing_requests WHERE id=$1 AND organization_id=$2`
+	const query = `SELECT ` + requestColumns + ` FROM signing_requests r WHERE r.id=$1 AND r.organization_id=$2`
 	req, updatedAt, err := scanRequest(s.db.QueryRow(ctx, query, id, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Request{}, ErrNotFound
@@ -461,9 +467,7 @@ func (s *Store) GetSignedDocument(ctx context.Context, orgID, id uuid.UUID) ([]b
 // lower sign_order has already signed. Newest first.
 func (s *Store) ListPendingForUser(ctx context.Context, orgID, userID uuid.UUID) ([]Request, error) {
 	const query = `
-		SELECT r.id, r.status, r.filename, r.signing_mode, r.created_by, r.recipient_channel,
-			r.recipient_name, r.recipient_address, r.message, r.delivery_status, r.delivery_error,
-			r.error, r.created_at, r.updated_at
+		SELECT ` + requestColumns + `
 		FROM signing_requests r
 		JOIN signing_request_signers me ON me.request_id = r.id AND me.user_id = $2
 		WHERE r.organization_id = $1
@@ -499,6 +503,18 @@ const (
 // An empty cursor starts at the newest; the returned cursor is empty when there is
 // no further page.
 func (s *Store) ListRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+	return s.listRequests(ctx, orgID, "", cursor, limit)
+}
+
+// ListAPIRequests is ListRequests narrowed to the requests the organisation's own
+// software made with an API key, which are the ones a key may read.
+func (s *Store) ListAPIRequests(ctx context.Context, orgID uuid.UUID, cursor string, limit int) ([]Request, string, error) {
+	return s.listRequests(ctx, orgID, CreatedViaAPI, cursor, limit)
+}
+
+// listRequests pages the org's requests; a non-empty createdVia keeps only the
+// requests made that way.
+func (s *Store) listRequests(ctx context.Context, orgID uuid.UUID, createdVia, cursor string, limit int) ([]Request, string, error) {
 	if limit <= 0 || limit > maxPageLimit {
 		limit = defaultPageLimit
 	}
@@ -507,21 +523,20 @@ func (s *Store) ListRequests(ctx context.Context, orgID uuid.UUID, cursor string
 		return nil, "", err
 	}
 	var rows pgx.Rows
-	const cols = `r.id, r.status, r.filename, r.signing_mode, r.created_by, r.recipient_channel,
-		r.recipient_name, r.recipient_address, r.message, r.delivery_status, r.delivery_error,
-		r.error, r.created_at, r.updated_at`
+	const cols = requestColumns
 	if hasCursor {
 		//nolint:gosec // limit is clamped to [1,100] above.
 		query := `SELECT ` + cols + ` FROM signing_requests r
 			WHERE r.organization_id=$1 AND (r.created_at, r.id) < ($2, $3)
+				AND ($4 = '' OR r.created_via = $4)
 			ORDER BY r.created_at DESC, r.id DESC LIMIT ` + strconv.Itoa(limit+1)
-		rows, err = s.db.Query(ctx, query, orgID, curTime, curID)
+		rows, err = s.db.Query(ctx, query, orgID, curTime, curID, createdVia)
 	} else {
 		//nolint:gosec // limit is clamped to [1,100] above.
 		query := `SELECT ` + cols + ` FROM signing_requests r
-			WHERE r.organization_id=$1
+			WHERE r.organization_id=$1 AND ($2 = '' OR r.created_via = $2)
 			ORDER BY r.created_at DESC, r.id DESC LIMIT ` + strconv.Itoa(limit+1)
-		rows, err = s.db.Query(ctx, query, orgID)
+		rows, err = s.db.Query(ctx, query, orgID, createdVia)
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("signing: list requests org %s: %w", orgID, err)
@@ -655,14 +670,26 @@ type scanRow interface {
 	Scan(dest ...any) error
 }
 
-// scanRequest scans one request row (in the fixed column order used above) and
-// returns the request plus its updated_at (used to derive CompletedAt).
+// requestColumns are a request's columns as every read selects them, from
+// signing_requests aliased r, in the order scanRequest reads them.
+const requestColumns = `r.id, r.status, r.filename, r.signing_mode, r.created_by, r.created_via,
+	r.notify_signers, r.return_url, r.recipient_channel, r.recipient_name, r.recipient_address,
+	r.message, r.delivery_status, r.delivery_error, r.error, r.created_at, r.updated_at`
+
+// scanRequest scans one request row (requestColumns) and returns the request plus
+// its updated_at (used to derive CompletedAt). A request made over the API has no
+// creator: its CreatedBy stays the zero id.
 func scanRequest(row scanRow) (Request, time.Time, error) {
 	var r Request
 	var updatedAt time.Time
-	err := row.Scan(&r.ID, &r.Status, &r.Filename, &r.Mode, &r.CreatedBy, &r.RecipientChannel,
+	var createdBy *uuid.UUID
+	err := row.Scan(&r.ID, &r.Status, &r.Filename, &r.Mode, &createdBy, &r.CreatedVia,
+		&r.NotifySigners, &r.ReturnURL, &r.RecipientChannel,
 		&r.RecipientName, &r.RecipientAddress, &r.Message, &r.DeliveryStatus, &r.DeliveryError,
 		&r.Error, &r.CreatedAt, &updatedAt)
+	if createdBy != nil {
+		r.CreatedBy = *createdBy
+	}
 	return r, updatedAt, err
 }
 

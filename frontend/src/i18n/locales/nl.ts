@@ -1659,6 +1659,10 @@ export const nl: Translation<typeof en> = {
       subtitle:
         "Alles in de Business Wallet werkt zonder installatie. Kom hier alleen om hetzelfde vanuit je eigen software te doen: maak een token om de API aan te roepen en voeg een endpoint toe dat de resultaten ontvangt.",
       adminOnly: "Alleen een beheerder kan deze pagina zien.",
+      signingApi: {
+        title: "Onderteken-API",
+        note: "Dezelfde API-tokens openen ook de onderteken-API op {{path}}: maak een ondertekenverzoek met een pdf en de ondertekenaars, haal de ondertekenlink van elke ondertekenaar op, lees de status en download de ondertekende pdf.",
+      },
     },
     apiKeys: {
       title: "API-tokens",
@@ -2931,10 +2935,10 @@ export const nl: Translation<typeof en> = {
   signing: {
     title: "Documenten ondertekenen",
     subtitle:
-      "Gekwalificeerde elektronische handtekeningen via je CSC-ondertekenprovider",
+      "Elektronische handtekeningen via de ondertekenprovider van je organisatie",
     credentialTitle: "Ondertekencertificaat",
     credentialDescription:
-      "Je gekwalificeerde ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Bij het koppelen opent je wallet om het te autoriseren.",
+      "Je ondertekencertificaat wordt eenmalig opgehaald en voor elke handtekening hergebruikt. Om het te koppelen identificeer je je met je wallet-app.",
     credentialIdLabel: "Certificaat-ID",
     keyAlgoLabel: "Sleutelalgoritme",
     notLinked: "Er is nog geen ondertekencertificaat gekoppeld.",
@@ -2945,7 +2949,7 @@ export const nl: Translation<typeof en> = {
       "Het koppelen van het ondertekencertificaat is niet voltooid.",
     credentialLoadError: "Kon je ondertekencertificaat niet laden.",
     walletHint:
-      "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+      "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
     signTitle: "Een document ondertekenen",
     signDescription:
       "Upload een PDF. De hash wordt met je wallet geautoriseerd, door de provider ondertekend en de ondertekende PDF wordt aan je teruggegeven.",
@@ -3066,6 +3070,7 @@ export const nl: Translation<typeof en> = {
     toSignError:
       "Kon de documenten die op jouw handtekening wachten niet laden.",
     requestedBy: "Aangevraagd door {{name}}",
+    requestedViaApi: "Aangevraagd via de API",
     alreadySigned: "Je hebt dit document al ondertekend.",
     notYourTurn: "Een eerdere ondertekenaar moet eerst tekenen.",
     signInProgress:
@@ -3119,7 +3124,7 @@ export const nl: Translation<typeof en> = {
       progress: "{{signed}} van {{total}}",
       reviewDocument: "Het document openen",
       needsCredential:
-        "Koppel eerst een ondertekencertificaat. Daarvoor opent je wallet één keer; daarna kun je ondertekenen.",
+        "Koppel eerst je ondertekencertificaat. Daarvoor identificeer je je één keer met je wallet-app; daarna kun je ondertekenen.",
       linkButton: "Ondertekencertificaat koppelen",
       signButton: "Document ondertekenen",
       declineButton: "Weigeren",
@@ -3150,7 +3155,47 @@ export const nl: Translation<typeof en> = {
       errorHint:
         "Kon dit ondertekenverzoek niet laden. Probeer het later opnieuw.",
       walletHint:
-        "Je wordt doorgestuurd naar de ondertekenprovider om te autoriseren met je wallet en daarna teruggebracht.",
+        "Je wordt doorgestuurd naar de ondertekenprovider om je te identificeren met je wallet-app en daarna teruggebracht.",
+      returnTo: "Terug naar {{host}}",
+    },
+    authorize: {
+      link: {
+        title: "Identificeer je om je ondertekencertificaat te krijgen",
+        choose:
+          "In de Yivi-app kies je wat je deelt: je paspoort, identiteitskaart of verblijfsvergunning, of je geregistreerde persoonsgegevens (BRP).",
+        name: "De naam die je deelt is de naam bij je handtekening.",
+      },
+      sign: {
+        title: "Keur het ondertekenen van {{document}} goed",
+        titleUnnamed: "Keur het ondertekenen van dit document goed",
+        intro: "Keur deze handtekening goed in de Yivi-app.",
+        sourceMrtd:
+          "Deel je paspoort, identiteitskaart of verblijfsvergunning. Het moet hetzelfde document zijn als waarmee je ondertekencertificaat is uitgegeven.",
+        sourceBrp:
+          "Deel je geregistreerde persoonsgegevens (BRP). Het moeten dezelfde gegevens zijn als waarmee je ondertekencertificaat is uitgegeven.",
+      },
+      scanHint:
+        "Scan de QR-code met de Yivi-app, of open de app op dit apparaat.",
+      openYivi: "Open de Yivi-app",
+      cancelError: "Kon niet annuleren. Probeer het opnieuw.",
+      leaving: "Je wordt teruggebracht…",
+      denied: {
+        title: "Niet goedgekeurd",
+        identityMismatch:
+          "De identiteit die je deelde is niet die waarvoor je ondertekencertificaat is uitgegeven.",
+        identityIncomplete:
+          "Wat je deelde bevatte geen naam of geboortedatum en kan dus niet worden gebruikt om te ondertekenen.",
+        generic: "Dit is niet goedgekeurd.",
+        continue: "Doorgaan",
+      },
+      expired: {
+        title: "Deze autorisatie is verlopen",
+        message: "Begin opnieuw vanaf de ondertekenpagina.",
+      },
+      error: {
+        title: "Er ging iets mis",
+        message: "Kon deze autorisatie niet laden. Probeer het later opnieuw.",
+      },
     },
   },
   signedDocuments: {
@@ -3832,14 +3877,19 @@ export const nl: Translation<typeof en> = {
       "Kon de instellingen van de ondertekenprovider niet laden: {{message}}",
     heading: "CSC-ondertekenprovider",
     description:
-      "Verbind met een externe QTSP via de Cloud Signature Consortium (CSC) API v2 om gekwalificeerde handtekeningen te maken. Dit stelt de verbinding in; het ondertekenen zelf wordt apart toegevoegd.",
+      "Documenten worden ondertekend via een ondertekenprovider die de Cloud Signature Consortium (CSC) API v2 spreekt. De ingebouwde ondertekendienst werkt zonder instellen; verbind in plaats daarvan met een externe QTSP om gekwalificeerde handtekeningen te maken.",
     providerKind: "Provider",
     kinds: {
+      yivi: "Ingebouwde ondertekendienst (aanbevolen)",
       sample: "Voorbeeld-QTSP (zelf gehost)",
       custom: "Eigen CSC-endpoint",
     },
     sampleHint:
       "De voorbeeldprovider is de meegeleverde referentie-QTSP. Start hem met `docker compose --profile signer up`; hij draait op http://localhost:8085.",
+    builtInHint:
+      "De eigen ondertekendienst van de wallet, en de standaard. Ondertekenaars identificeren zich met de Yivi-app, met hun paspoort, identiteitskaart, verblijfsvergunning of geregistreerde persoonsgegevens (BRP), en ondertekenen met een geavanceerde elektronische handtekening. Er valt niets in te stellen.",
+    builtInUnavailable:
+      "Deze omgeving draait de ingebouwde ondertekendienst niet. Kies een andere provider.",
     baseUrl: "CSC-basis-URL",
     baseUrlPlaceholder: "https://qtsp.example.org",
     clientId: "OAuth-client-ID",

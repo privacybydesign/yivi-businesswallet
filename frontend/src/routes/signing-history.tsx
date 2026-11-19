@@ -14,6 +14,7 @@ import {
   channelLabel,
   deliveryStatusLabel,
   requestStatusLabel,
+  requestedByLabel,
 } from "../lib/signing-labels";
 import { useWhenFormatter } from "../lib/format-when";
 import { toast } from "../lib/toast";
@@ -96,7 +97,7 @@ export function SigningHistoryPanel({
                       {req.filename}
                     </span>
                     <span className="text-ink-soft text-[12px]">
-                      {t("signing.requestedBy", { name: req.createdByName })}
+                      {requestedByLabel(t, req)}
                     </span>
                   </Table.Cell>
                   <Table.Cell>

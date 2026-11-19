@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import * as React from "react";
 import { ApiError } from "../api/http";
 import {
@@ -14,19 +15,39 @@ import {
   useLinkExternalCredentialMutation,
   useStartExternalSignMutation,
 } from "../api/signing.queries";
+import { returnLinkHost } from "../lib/return-link";
 import { modeLabel } from "../lib/signing-labels";
 import { toast } from "../lib/toast";
-import { Button, Card, Logo, Outcome } from "../ui";
+import { Button, Card, Logo, Outcome, buttonClassName } from "../ui";
 import { DeclineDialog } from "./signing-decline-dialog";
 
 // The external signing page. An external signee was added to a co-signing request by
 // name + e-mail, so they have no account here and no session: this page is reached
 // with nothing but the one-time link from their mail, and every call it makes is keyed
 // by that token. They run the same two ceremonies a member does — link a signing
-// credential with their own EUDI wallet, then sign — which is what makes the finished
-// PDF carry one qualified signature per signer regardless of who is inside the org.
+// certificate by identifying with their own wallet app, then sign — which is what
+// makes the finished PDF carry one signature per signer regardless of who is inside
+// the org. A signee sent here by another site (a request made over the signing API)
+// is offered a link back to it once they are done; they are never sent there unasked.
 
 const NOT_FOUND_STATUS = 404;
+
+// The way back to the site that sent the signee here, for a signee who is done.
+// Nothing when there is no such site.
+function returnLink(
+  returnUrl: string | undefined,
+  t: TFunction,
+): React.ReactNode {
+  const host = returnLinkHost(returnUrl);
+  if (host === null) {
+    return undefined;
+  }
+  return (
+    <a href={returnUrl} className={buttonClassName("primary")}>
+      {t("signing.external.returnTo", { host })}
+    </a>
+  );
+}
 
 export default function SigningExternal(): React.JSX.Element {
   const { t } = useTranslation();
@@ -122,6 +143,7 @@ export default function SigningExternal(): React.JSX.Element {
                   ? t("signing.external.requestDeclinedHint")
                   : t("signing.external.signedWaitingHint")
             }
+            action={returnLink(view.data.returnUrl, t)}
           />
         ) : view.data.signerStatus === SIGNER_STATUS.declined ? (
           <Outcome
@@ -129,6 +151,7 @@ export default function SigningExternal(): React.JSX.Element {
             icon="close"
             title={t("signing.external.declinedTitle")}
             message={t("signing.external.declinedHint")}
+            action={returnLink(view.data.returnUrl, t)}
           />
         ) : view.data.status === SIGNING_STATUS.failed ? (
           <Outcome

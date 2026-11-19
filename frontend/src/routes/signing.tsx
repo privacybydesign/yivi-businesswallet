@@ -39,6 +39,7 @@ import type { MemberListEntry } from "../api/organization";
 import {
   channelLabel,
   modeLabel,
+  requestedByLabel,
   signerKindLabel,
   signerStatusLabel,
 } from "../lib/signing-labels";
@@ -488,7 +489,7 @@ function ToSignTab({
                 {req.filename}
               </p>
               <p className="text-ink-soft mt-0.5 text-[12px]">
-                {t("signing.requestedBy", { name: req.createdByName })}
+                {requestedByLabel(t, req)}
                 {" · "}
                 {modeLabel(t, req.mode)}
               </p>
