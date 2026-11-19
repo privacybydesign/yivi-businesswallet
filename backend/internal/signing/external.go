@@ -67,7 +67,7 @@ func (s *Service) ExternalView(ctx context.Context, token string) (ExternalView,
 		}
 		view.OrgName = name
 	}
-	if _, err := s.store.GetCredential(ctx, ext.OrgID, externalSubject(me.Email)); err == nil {
+	if _, err := s.linkedCredential(ctx, ext.OrgID, externalSubject(me.Email)); err == nil {
 		view.HasCredential = true
 	} else if !errors.Is(err, ErrNoCredential) {
 		return ExternalView{}, err

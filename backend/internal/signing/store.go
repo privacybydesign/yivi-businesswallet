@@ -68,8 +68,9 @@ func (s subject) String() string {
 
 // UpsertCredential caches a signer's linked signing credential (id, certificate +
 // chain as PEM, key algo) and audits the link. The subject is an internal member or
-// an external signee; neither shares a row with the other.
-func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subject, cred signingprovider.Credential) error {
+// an external signee; neither shares a row with the other. providerURL is the base
+// URL of the provider that holds the credential: its id means nothing to another.
+func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subject, providerURL string, cred signingprovider.Credential) error {
 	certPEM := encodeCertPEM(cred.Certificate)
 	chainPEM := encodeChainPEM(cred.Chain)
 	keyAlgo := strings.Join(cred.KeyAlgo, ",")
@@ -78,22 +79,24 @@ func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subj
 		// The two subject kinds have their own partial unique index, so each needs its
 		// own conflict target; a single ON CONFLICT cannot name both.
 		const upsertMember = `INSERT INTO signing_credentials
-			(organization_id, user_id, credential_id, certificate_pem, chain_pem, key_algo)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, user_id, credential_id, certificate_pem, chain_pem, key_algo, provider_base_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (organization_id, user_id) WHERE user_id IS NOT NULL DO UPDATE SET
 				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
-				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
+				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo,
+				provider_base_url = EXCLUDED.provider_base_url, updated_at = now()`
 		const upsertExternal = `INSERT INTO signing_credentials
-			(organization_id, external_email, credential_id, certificate_pem, chain_pem, key_algo)
-			VALUES ($1,$2,$3,$4,$5,$6)
+			(organization_id, external_email, credential_id, certificate_pem, chain_pem, key_algo, provider_base_url)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (organization_id, lower(external_email)) WHERE user_id IS NULL DO UPDATE SET
 				credential_id = EXCLUDED.credential_id, certificate_pem = EXCLUDED.certificate_pem,
-				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo, updated_at = now()`
+				chain_pem = EXCLUDED.chain_pem, key_algo = EXCLUDED.key_algo,
+				provider_base_url = EXCLUDED.provider_base_url, updated_at = now()`
 		upsert, key := upsertMember, any(subj.userID)
 		if subj.isExternal() {
 			upsert, key = upsertExternal, subj.email
 		}
-		if _, err := q.Exec(ctx, upsert, orgID, key, cred.ID, certPEM, chainPEM, keyAlgo); err != nil {
+		if _, err := q.Exec(ctx, upsert, orgID, key, cred.ID, certPEM, chainPEM, keyAlgo, providerURL); err != nil {
 			return fmt.Errorf("signing: upsert credential org %s subject %s: %w", orgID, subj, err)
 		}
 		return s.audit.Record(ctx, q, audit.SigningCredentialLinked,
@@ -102,18 +105,21 @@ func (s *Store) UpsertCredential(ctx context.Context, orgID uuid.UUID, subj subj
 	})
 }
 
-// GetCredential returns a subject's linked credential, or ErrNoCredential if none.
-func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject) (signingprovider.Credential, error) {
+// GetCredential returns the credential a subject linked at the provider with base
+// URL providerURL, or ErrNoCredential if none. One linked at another provider does
+// not count: after the organisation changes provider its signers link again.
+func (s *Store) GetCredential(ctx context.Context, orgID uuid.UUID, subj subject, providerURL string) (signingprovider.Credential, error) {
 	const selectMember = `SELECT credential_id, certificate_pem, chain_pem, key_algo
-		FROM signing_credentials WHERE organization_id = $1 AND user_id = $2`
+		FROM signing_credentials WHERE organization_id = $1 AND user_id = $2 AND provider_base_url = $3`
 	const selectExternal = `SELECT credential_id, certificate_pem, chain_pem, key_algo
-		FROM signing_credentials WHERE organization_id = $1 AND user_id IS NULL AND lower(external_email) = $2`
+		FROM signing_credentials WHERE organization_id = $1 AND user_id IS NULL AND lower(external_email) = $2
+			AND provider_base_url = $3`
 	query, key := selectMember, any(subj.userID)
 	if subj.isExternal() {
 		query, key = selectExternal, subj.email
 	}
 	var credID, certPEM, chainPEM, keyAlgo string
-	err := s.db.QueryRow(ctx, query, orgID, key).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
+	err := s.db.QueryRow(ctx, query, orgID, key, providerURL).Scan(&credID, &certPEM, &chainPEM, &keyAlgo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return signingprovider.Credential{}, ErrNoCredential
 	}

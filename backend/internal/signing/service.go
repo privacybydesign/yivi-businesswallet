@@ -3,6 +3,7 @@ package signing
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/mail"
@@ -400,7 +401,7 @@ func (s *Service) startSign(ctx context.Context, orgID uuid.UUID, req Request, r
 	if !s.reserveSign(requestID, ref.signerID) {
 		return Start{}, ErrSignInProgress
 	}
-	cred, err := s.store.GetCredential(ctx, orgID, ref.subj)
+	cred, err := s.store.GetCredential(ctx, orgID, ref.subj, conn.baseURL)
 	if err != nil {
 		s.release(requestID)
 		return Start{}, err
@@ -495,7 +496,7 @@ func (s *Service) finishLink(ctx context.Context, c *ceremony, accessToken strin
 	if err != nil {
 		return s.failCeremony(ctx, c, "could not read the credential", err)
 	}
-	if err := s.store.UpsertCredential(ctx, c.orgID, c.signer.subj, cred); err != nil {
+	if err := s.store.UpsertCredential(ctx, c.orgID, c.signer.subj, c.baseURL, cred); err != nil {
 		return s.failCeremony(ctx, c, "could not store the credential", err)
 	}
 	return s.resultURL(c, "link=ok")
@@ -780,11 +781,24 @@ func (s *Service) ListRequests(ctx context.Context, orgID uuid.UUID, cursor stri
 // GetCredential reports the acting user's linked credential (for the UI to show
 // whether linking is needed). Returns ErrNoCredential if none.
 func (s *Service) GetCredential(ctx context.Context, orgID, userID uuid.UUID) (LinkedCredential, error) {
-	cred, err := s.store.GetCredential(ctx, orgID, internalSubject(userID))
+	cred, err := s.linkedCredential(ctx, orgID, internalSubject(userID))
 	if err != nil {
 		return LinkedCredential{}, err
 	}
 	return LinkedCredential{CredentialID: cred.ID, KeyAlgo: joinAlgo(cred.KeyAlgo)}, nil
+}
+
+// linkedCredential returns the credential a subject linked at the organisation's
+// current signing provider. With no provider there is none to have linked at.
+func (s *Service) linkedCredential(ctx context.Context, orgID uuid.UUID, subj subject) (signingprovider.Credential, error) {
+	conn, err := s.connection(ctx, orgID)
+	if errors.Is(err, ErrNotConfigured) {
+		return signingprovider.Credential{}, ErrNoCredential
+	}
+	if err != nil {
+		return signingprovider.Credential{}, err
+	}
+	return s.store.GetCredential(ctx, orgID, subj, conn.baseURL)
 }
 
 type connection struct{ baseURL, clientID, clientSecret, redirectURI string }
