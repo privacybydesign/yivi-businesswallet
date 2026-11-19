@@ -54,18 +54,11 @@ func TestValidateAttributesRequiresTheIdentifierOnOrganizationSchemas(t *testing
 func TestBuildIssuerConfigListsTheIdentifierForOrganizationSchemas(t *testing.T) {
 	s := sampleSchema()
 	s.SubjectType = SubjectOrganization
-	var paths []string
+	var paths [][]any
 	for _, c := range BuildIssuerConfig(s, "", "").VCT.Document.Claims {
-		p := ""
-		for i, seg := range c.Path {
-			if i > 0 {
-				p += "."
-			}
-			p += seg.(string)
-		}
-		paths = append(paths, p)
+		paths = append(paths, c.Path)
 	}
-	want := []string{"email", "role", "identifier", "identifier.euid", "identifier.lei", "identifier.tax", "identifier.other"}
+	want := [][]any{{"email"}, {"role"}, {"identifier"}, {"identifier", "euid"}, {"identifier", "lei"}, {"identifier", "tax"}, {"identifier", "other"}}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("claim paths = %v, want %v", paths, want)
 	}
