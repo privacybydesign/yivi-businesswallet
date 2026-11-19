@@ -256,8 +256,10 @@ type hostedViewResponse struct {
 	EmbedOrigins []string `json:"embedOrigins"`
 	// Language is the page's language (en/nl); absent leaves the browser's.
 	// Locales are the languages the flow's page offers; empty is every one.
-	Language     string         `json:"language,omitempty"`
-	Locales      []email.Locale `json:"locales"`
+	Language string         `json:"language,omitempty"`
+	Locales  []email.Locale `json:"locales"`
+	// Test is a session of an org in test mode, labelled so on the page.
+	Test         bool `json:"test,omitempty"`
 	Organization struct {
 		Name              string           `json:"name"`
 		Branding          brandingResponse `json:"branding"`
@@ -370,6 +372,7 @@ func (h *Handler) hostedView(w http.ResponseWriter, r *http.Request) error {
 	out.SessionID = publicSessionID(hosted.Request.ID)
 	out.RedirectURL = liveRedirect(hosted.Request.RedirectURL, hosted.Settings, hosted.FlowSettings)
 	out.Language = string(hosted.Request.Language)
+	out.Test = hosted.Request.Test
 
 	st := hosted.Settings
 	out.EmbedOrigins = append([]string{}, st.RedirectOrigins...)

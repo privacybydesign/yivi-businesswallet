@@ -410,6 +410,8 @@ type requestResponse struct {
 	// ExpectedSubject is a request for one known person: only subjectName,
 	// born on the date it was sent with, is approved.
 	ExpectedSubject bool `json:"expectedSubject"`
+	// Test is a request made while the org was in test mode.
+	Test bool `json:"test,omitempty"`
 	// ReviewReason is why the kept Verzekeringsbericht went to review
 	// (no_current_employment, current_benefit, current_other_income); absent
 	// otherwise. EmploymentReview is where that review stands, and
@@ -466,7 +468,7 @@ func newRequestResponse(req Request, now time.Time) requestResponse {
 		FlowID: req.FlowID, FlowName: req.FlowName, FlowVersion: req.FlowVersion, Method: string(req.Method), Status: req.EffectiveStatus(now),
 		AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel, ErrorCode: req.ErrorCode,
 		LinkExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
-		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, DocumentScan: documentScanState(req),
+		PurgeAt: req.PurgeAt, PurgedAt: req.PurgedAt, ExpectedSubject: req.ExpectsSubject, Test: req.Test, DocumentScan: documentScanState(req),
 		AppDone:      req.appDone,
 		ReviewReason: req.ReviewReason, EmploymentReview: req.EmploymentReview, EmploymentReviewedAt: req.EmploymentReviewedAt,
 		DiplomasReview: req.DiplomasReview, DiplomasReviewedAt: req.DiplomasReviewedAt,

@@ -2317,6 +2317,8 @@ export const en = {
     vogRequested_other: "VOG requested from {{count}} members",
     organizationUpdated: "Organization updated",
     organizationDeleted: "Organization deleted",
+    testModeOn: "{{name}} is now in test mode",
+    testModeOff: "{{name}} is now live",
     departmentAdded: "Department added",
     departmentRenamed: "Department renamed",
     departmentDeleted: "Department deleted",
@@ -2557,6 +2559,7 @@ export const en = {
       orgCreated: "Created organization",
       orgUpdated: "Updated organization",
       orgDeleted: "Deleted organization",
+      orgTestModeChanged: "Changed test mode",
       memberInvited: "Invited member",
       inviteResent: "Resent invitation",
       inviteRevoked: "Revoked invitation",
@@ -3886,6 +3889,22 @@ export const en = {
       organizationsHint: "Total in this deployment",
     },
     viewAll: "View all organizations",
+  },
+  testMode: {
+    banner:
+      "Test mode: identity checks in this organization are test sessions, kept apart from its real ones.",
+    label: "Test",
+    live: "Live",
+    hostedNotice: "Test session: {{organization}} is testing this check.",
+    column: "Mode",
+    switchToTest: "Switch to test",
+    switchToLive: "Switch to live",
+    confirmTestTitle: "Put {{name}} in test mode?",
+    confirmTestMessage:
+      "Its new identity checks become test sessions. Its real sessions are hidden until it is live again; nothing is deleted.",
+    confirmLiveTitle: "Make {{name}} live?",
+    confirmLiveMessage:
+      "Its new identity checks are real again. Its test sessions are hidden, and shown again if it goes back to test mode; retention still deletes them on schedule.",
   },
   allOrganizations: {
     title: "Organizations",

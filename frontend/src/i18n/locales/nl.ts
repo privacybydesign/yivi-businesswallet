@@ -2370,6 +2370,8 @@ export const nl: Translation<typeof en> = {
     vogRequested_other: "VOG aangevraagd bij {{count}} leden",
     organizationUpdated: "Organisatie bijgewerkt",
     organizationDeleted: "Organisatie verwijderd",
+    testModeOn: "{{name}} staat nu in testmodus",
+    testModeOff: "{{name}} is nu live",
     departmentAdded: "Afdeling toegevoegd",
     departmentRenamed: "Afdeling hernoemd",
     departmentDeleted: "Afdeling verwijderd",
@@ -2613,6 +2615,7 @@ export const nl: Translation<typeof en> = {
       orgCreated: "Organisatie aangemaakt",
       orgUpdated: "Organisatie bijgewerkt",
       orgDeleted: "Organisatie verwijderd",
+      orgTestModeChanged: "Testmodus gewijzigd",
       memberInvited: "Lid uitgenodigd",
       inviteResent: "Uitnodiging opnieuw verstuurd",
       inviteRevoked: "Uitnodiging ingetrokken",
@@ -3985,6 +3988,22 @@ export const nl: Translation<typeof en> = {
       organizationsHint: "Totaal in deze deployment",
     },
     viewAll: "Alle organisaties bekijken",
+  },
+  testMode: {
+    banner:
+      "Testmodus: identiteitscontroles in deze organisatie zijn testsessies, gescheiden van de echte.",
+    label: "Test",
+    live: "Live",
+    hostedNotice: "Testsessie: {{organization}} test deze controle.",
+    column: "Modus",
+    switchToTest: "Naar testmodus",
+    switchToLive: "Live zetten",
+    confirmTestTitle: "{{name}} in testmodus zetten?",
+    confirmTestMessage:
+      "Nieuwe identiteitscontroles worden testsessies. De echte sessies zijn verborgen tot de organisatie weer live is; er wordt niets verwijderd.",
+    confirmLiveTitle: "{{name}} live zetten?",
+    confirmLiveMessage:
+      "Nieuwe identiteitscontroles zijn weer echt. De testsessies worden verborgen en komen terug als de organisatie weer in testmodus gaat; de bewaartermijn verwijdert ze nog steeds op tijd.",
   },
   allOrganizations: {
     title: "Organisaties",

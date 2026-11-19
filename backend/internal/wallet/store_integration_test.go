@@ -82,6 +82,9 @@ func TestRegisterOrganization(t *testing.T) {
 	if org.Slug != slug || org.Name != att.LegalName || org.KVKNumber != stubKVK {
 		t.Fatalf("org = %q/%q/%q, want %q/%q/%q", org.Slug, org.Name, org.KVKNumber, slug, att.LegalName, stubKVK)
 	}
+	if !org.TestMode {
+		t.Error("a registered org starts live, want test mode")
+	}
 	if org.Status != organization.StatusActive {
 		t.Fatalf("status = %q, want active", org.Status)
 	}

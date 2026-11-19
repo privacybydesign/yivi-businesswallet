@@ -147,6 +147,11 @@ func (h *Handler) requireAPIKey(scope string, next respond.HandlerFunc) http.Han
 			return err
 		}
 
+		// Every answer to a key of an org in test mode says so.
+		if caller.TestMode {
+			w.Header().Set(headerTestMode, "true")
+		}
+
 		if err := rateLimited(w, h.apiCalls, caller.Org.ID.String()); err != nil {
 			return err
 		}
@@ -303,6 +308,8 @@ type apiSessionResponse struct {
 	// birthDate: only that name and birth date are approved (IDENTITY_MISMATCH
 	// otherwise).
 	ExpectedSubject bool `json:"expectedSubject"`
+	// Test is a session made while the org was in test mode.
+	Test bool `json:"test,omitempty"`
 	// FlowKind is what the session is for: identity, or data_access /
 	// data_erasure, which goes to the org's review once the person is proven.
 	// DataExportUntil is until when an approved data_access session's data
@@ -321,7 +328,7 @@ func newAPISessionResponse(req Request, now time.Time) apiSessionResponse {
 		ProofedName: req.ProofedName, AssuranceLevel: req.AssuranceLevel, EIDASLevel: req.EIDASLevel,
 		ErrorCode: req.ErrorCode, ExpiresAt: req.LinkExpiresAt, CreatedAt: req.CreatedAt, CompletedAt: req.CompletedAt,
 		CancelledAt: req.CancelledAt, CancelledBy: req.CancelledBy, ExpiryReason: req.ExpiryReason(now), PurgedAt: req.PurgedAt,
-		ExpectedSubject: req.ExpectsSubject, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
+		ExpectedSubject: req.ExpectsSubject, Test: req.Test, FlowKind: req.FlowKind, DataExportUntil: req.DataExportUntil,
 		AddressReview: req.AddressReview,
 	}
 }

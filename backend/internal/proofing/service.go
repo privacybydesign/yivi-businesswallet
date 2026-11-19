@@ -86,6 +86,7 @@ type requestStore interface {
 	Stats(ctx context.Context, orgID uuid.UUID, requestedBy *uuid.UUID, since time.Time) ([]StatsRow, error)
 	GetExternal(ctx context.Context, orgID, id uuid.UUID) (Request, error)
 	Get(ctx context.Context, orgID, id uuid.UUID) (Request, error)
+	Reread(ctx context.Context, req Request) (Request, error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]Request, error)
 	NextDeadline(ctx context.Context, now time.Time) (time.Time, error)
 	GetBySession(ctx context.Context, sessionID string) (Request, error)
@@ -1662,7 +1663,7 @@ func (s *Service) matchDataRequest(ctx context.Context, tenant proofingprovider.
 	}
 	// Another reconcile may have finished between this one's read
 	// and the lock.
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		release()
 		slog.WarnContext(ctx, "identity proofing: read the data request to match failed",
@@ -1876,7 +1877,7 @@ func (s *Service) CancelRequest(ctx context.Context, orgID, id uuid.UUID) (Reque
 	if errors.Is(err, errCancelSessionMoved) {
 		// A hosted start raced the cancel; a session is attached once, so the
 		// second read holds the last one.
-		if req, err = s.requests.Get(ctx, req.OrganizationID, req.ID); err != nil {
+		if req, err = s.requests.Reread(ctx, req); err != nil {
 			return Request{}, err
 		}
 		err = s.cancelOnce(ctx, req)
@@ -2085,7 +2086,7 @@ func (s *Service) purge(ctx context.Context, req Request) error {
 	if err := s.purgeOnce(ctx, req); !errors.Is(err, errPurgeSessionMoved) {
 		return err
 	}
-	fresh, err := s.requests.Get(ctx, req.OrganizationID, req.ID)
+	fresh, err := s.requests.Reread(ctx, req)
 	if err != nil {
 		return err
 	}

@@ -286,6 +286,14 @@ function HostedFlow({
           {organization.name}
         </span>
       </div>
+      {page.test && (
+        <p
+          role="status"
+          className="bg-warning-bg text-warning-fg px-6 py-2 text-[13px] font-semibold"
+        >
+          {t("testMode.hostedNotice", { organization: organization.name })}
+        </p>
+      )}
       <div className="flex flex-col gap-6 p-6">
         {dataRequest && (
           <p className="text-ink text-[13.5px]">

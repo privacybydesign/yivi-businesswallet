@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import {
   useDeleteOrganizationMutation,
   useOrganizationsQuery,
+  useSetTestModeMutation,
 } from "../api/organization.queries";
+import type { Organization } from "../api/organization";
 import {
   useProofingPausesQuery,
   useSetPlatformPauseMutation,
@@ -22,7 +24,7 @@ import {
 } from "../ui";
 import * as React from "react";
 
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 export default function AllOrganizations(): React.JSX.Element {
   const { t } = useTranslation();
@@ -102,6 +104,7 @@ export default function AllOrganizations(): React.JSX.Element {
                 <Table.HeaderCell>
                   {t("identityProofing.pause.platformColumn")}
                 </Table.HeaderCell>
+                <Table.HeaderCell>{t("testMode.column")}</Table.HeaderCell>
                 <Table.HeaderCell className="text-right">
                   {t("allOrganizations.columnActions")}
                 </Table.HeaderCell>
@@ -154,6 +157,9 @@ export default function AllOrganizations(): React.JSX.Element {
                           loaded={pauses.isSuccess}
                           failed={pauses.isError}
                         />
+                      </Table.Cell>
+                      <Table.Cell>
+                        <TestModeCell org={org} />
                       </Table.Cell>
                       <Table.Cell className="text-right">
                         <Button
@@ -255,6 +261,61 @@ function ProofingPauseCell({
           onClose={() => {
             set.reset();
             setConfirmingPause(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Whether an org runs in test mode, and the platform admin's switch for it.
+// Both ways are confirmed: the org's proofing lists change with its mode.
+function TestModeCell({
+  org,
+}: Readonly<{ org: Organization }>): React.JSX.Element {
+  const { t } = useTranslation();
+  const set = useSetTestModeMutation();
+  const [confirming, setConfirming] = useState(false);
+  const next = !org.testMode;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      // The row opens the org; this cell's button must not.
+      onClick={(event) => event.stopPropagation()}
+    >
+      {org.testMode ? (
+        <Tag tone="amber">{t("testMode.label")}</Tag>
+      ) : (
+        <Tag tone="green">{t("testMode.live")}</Tag>
+      )}
+      <Button size="sm" variant="secondary" onClick={() => setConfirming(true)}>
+        {next ? t("testMode.switchToTest") : t("testMode.switchToLive")}
+      </Button>
+      {confirming && (
+        <ConfirmDialog
+          title={
+            next
+              ? t("testMode.confirmTestTitle", { name: org.name })
+              : t("testMode.confirmLiveTitle", { name: org.name })
+          }
+          message={
+            next
+              ? t("testMode.confirmTestMessage")
+              : t("testMode.confirmLiveMessage")
+          }
+          confirmLabel={
+            next ? t("testMode.switchToTest") : t("testMode.switchToLive")
+          }
+          busy={set.isPending}
+          onConfirm={() =>
+            set.mutate(
+              { id: org.id, testMode: next },
+              { onSuccess: () => setConfirming(false) },
+            )
+          }
+          onClose={() => {
+            set.reset();
+            setConfirming(false);
           }}
         />
       )}

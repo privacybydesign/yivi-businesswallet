@@ -1238,11 +1238,27 @@ post-review outcome stay the system's.
       app's `.arb` ones. A change in the app's consent screen needs a change
       here.
 
-## 5. No test mode
+## 5. Test mode
 
-There are no test keys, scripted outcomes or `livemode`: every key and session
-is real. `IDENTITY_PROOFING_PROVIDER=stub` is the only stand-in, for dev and
+There are no test keys or scripted outcomes: every session runs the real
+check. `IDENTITY_PROOFING_PROVIDER=stub` is the only stand-in, for dev and
 tests (§0).
+
+An org that registers itself (`wallet.Store.RegisterOrganization`) starts in
+test mode; seeded orgs start live. A platform admin switches it
+(`PUT /admin/organizations/{id}/test-mode`, `organizations.test_mode`; the org
+cannot see or change it). Each request then made is stored with `test = true`,
+and every org-scoped read keeps to the org's current mode (`inOrgMode` in
+`request_store.go`): lists, counts, the overview, stats, data request
+matches, the webhook delivery log and a request by id. Going live hides the
+test requests (nothing is deleted; retention still runs), going back to test
+shows them again. Reads by link token or engine session ignore the mode, and so does
+`RequestStore.Reread` (a step re-reading the request it holds), so a
+session keeps running whatever the org switches to. Test sessions carry
+`test: true` in the API, the webhooks and the hosted page, which labels them;
+every API answer to a key of a test-mode org carries `Test-Mode: true`;
+members see a banner. The audit recorder marks every event about a test
+request (`audit_events.test`), whatever records it; the audit log labels it.
 
 ## 6. A new Idem code mid-session
 

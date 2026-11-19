@@ -41,7 +41,7 @@ var (
 )
 
 // overviewWhere takes $1 the org, $2 the sender or NULL, $3 the external kind.
-const overviewWhere = `r.organization_id = $1 AND ($2::uuid IS NULL OR r.requested_by = $2)
+const overviewWhere = `r.organization_id = $1 AND ` + inOrgMode + ` AND ($2::uuid IS NULL OR r.requested_by = $2)
 		AND r.subject_kind = $3`
 
 // Overview matches on the effective status, as the per-status lists do.

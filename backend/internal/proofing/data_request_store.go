@@ -152,10 +152,11 @@ func (s *DataRequestStore) Candidates(ctx context.Context, req Request, requeste
 	}
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
 		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2 AND r.identity_match_key = $5
+			AND r.test = $6
 			AND r.purged_at IS NULL AND r.ips_session_id IS NOT NULL
 			AND (r.status IN ('approved', 'rejected') OR (r.status = 'needs_review' AND r.flow_kind = $3))
 			AND r.error_code IS DISTINCT FROM $4
-		ORDER BY r.created_at`, req.OrganizationID, req.ID, string(FlowIdentity), errorIdentityMismatch, key)
+		ORDER BY r.created_at`, req.OrganizationID, req.ID, string(FlowIdentity), errorIdentityMismatch, key, req.Test)
 }
 
 // UnfinishedCandidates is every unfinished external session of req's org
@@ -164,9 +165,9 @@ func (s *DataRequestStore) Candidates(ctx context.Context, req Request, requeste
 // (MatchName), there being no proofed identity in them.
 func (s *DataRequestStore) UnfinishedCandidates(ctx context.Context, req Request) ([]Request, error) {
 	return s.scanRequests(ctx, `SELECT `+requestColumns+requestFrom+`
-		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2
+		WHERE r.organization_id = $1 AND r.subject_kind = 'external' AND r.id <> $2 AND r.test = $3
 			AND r.purged_at IS NULL AND r.status IN ('pending', 'in_progress', 'expired', 'cancelled')
-		ORDER BY r.created_at`, req.OrganizationID, req.ID)
+		ORDER BY r.created_at`, req.OrganizationID, req.ID, req.Test)
 }
 
 // matchingLockKey namespaces TryLockMatching's advisory lock.

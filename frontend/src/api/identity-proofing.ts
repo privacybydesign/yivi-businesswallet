@@ -1737,6 +1737,8 @@ const hostedProofingSchema = hostedProgressSchema.extend({
   language: z.string().optional(),
   // The languages the flow's page offers; empty is every one.
   locales: z.array(z.string()),
+  // A session of an org in test mode.
+  test: z.boolean().optional(),
   organization: z.object({
     name: z.string(),
     branding: proofingBrandingSchema,
