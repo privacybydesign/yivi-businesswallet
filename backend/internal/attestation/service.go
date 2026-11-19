@@ -99,6 +99,7 @@ type holderEngine interface {
 	Validities(ctx context.Context, orgID uuid.UUID) (map[string]eudiholder.HeldValidity, error)
 	RefreshStatuses(ctx context.Context, orgID uuid.UUID) (int, error)
 	RefreshStatus(ctx context.Context, orgID uuid.UUID, ref string) (int, error)
+	Payload(ctx context.Context, orgID uuid.UUID, ref string) (map[string]any, error)
 }
 
 // emailNotifier delivers a person-facing "your credential is ready" e-mail.
@@ -177,6 +178,11 @@ func (s *Service) Issue(ctx context.Context, orgID uuid.UUID, issuedBy *uuid.UUI
 	}
 	if err := validateAttributes(detail, in.Attributes); err != nil {
 		return IssueResult{}, err
+	}
+	if detail.SchemaRulebook == "" && detail.SubjectType == SubjectOrganization {
+		identifier, _ := normalizeIdentifier(in.Attributes[IdentifierClaim])
+		in.Attributes = maps.Clone(in.Attributes)
+		in.Attributes[IdentifierClaim] = identifier
 	}
 
 	expirationSeconds := defaultExpirationSeconds
@@ -600,7 +606,11 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 		return HeldClaimsView{}, fmt.Errorf("attestation: held validity %s from engine: %w", id, err)
 	}
 	validity := validities[held.CredentialRef]
-	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes)
+	payload, err := s.holder.Payload(ctx, orgID, held.CredentialRef)
+	if err != nil {
+		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s payload from engine: %w", id, err)
+	}
+	rulebookID, violations, err := checkRulebook(held.VCT, cred.Attributes, payload)
 	if err != nil {
 		return HeldClaimsView{}, fmt.Errorf("attestation: held claims %s rulebook check: %w", id, err)
 	}
@@ -622,18 +632,24 @@ func (s *Service) HeldClaims(ctx context.Context, orgID, id uuid.UUID, lang stri
 	}, nil
 }
 
-// checkRulebook validates a held credential's claims against the WE BUILD rulebook
-// its vct belongs to. It returns no rulebook for any other vct.
-func checkRulebook(vct string, attrs []eudiholder.HeldAttribute) (string, []string, error) {
+// checkRulebook validates a held credential against the WE BUILD rulebook its vct
+// belongs to: the whole signed payload (vct, cnf, status and every claim) when the
+// engine holds one, else the disclosed claims. It returns no rulebook for any other vct.
+func checkRulebook(vct string, attrs []eudiholder.HeldAttribute, payload map[string]any) (string, []string, error) {
 	rb, ok := rulebook.ForVCT(vct)
 	if !ok {
 		return "", nil, nil
 	}
-	claims := make(map[string]any, len(attrs))
-	for _, a := range attrs {
-		claims[a.Key] = a.Value
+	var err error
+	if payload != nil {
+		err = rb.ValidatePayload(payload)
+	} else {
+		claims := make(map[string]any, len(attrs))
+		for _, a := range attrs {
+			claims[a.Key] = a.Value
+		}
+		err = rb.ValidateClaims(claims)
 	}
-	err := rb.ValidateClaims(claims)
 	var ve *rulebook.ValidationError
 	if errors.As(err, &ve) {
 		return rb.ID, ve.Violations, nil
@@ -742,7 +758,18 @@ func validateAttributes(detail TemplateDetail, provided map[string]any) error {
 	for _, a := range detail.SchemaAttributes {
 		byKey[a.Key] = a
 	}
+	if detail.SubjectType == SubjectOrganization {
+		if _, err := normalizeIdentifier(provided[IdentifierClaim]); err != nil {
+			if provided[IdentifierClaim] == nil {
+				return fmt.Errorf("%w: %q", ErrMissingAttribute, IdentifierClaim)
+			}
+			return err
+		}
+	}
 	for key, value := range provided {
+		if key == IdentifierClaim && detail.SubjectType == SubjectOrganization {
+			continue
+		}
 		if _, ok := byKey[key]; !ok {
 			return fmt.Errorf("%w: %q", ErrUnknownAttribute, key)
 		}

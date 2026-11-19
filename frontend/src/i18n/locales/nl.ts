@@ -4684,6 +4684,16 @@ export const nl: Translation<typeof en> = {
       recipientRequired: "Kies een ontvanger.",
       noAttributes: "Dit sjabloon heeft geen attributen om in te vullen.",
       attributeRequired: "Dit attribuut is verplicht.",
+      identifierTitle: "Identificatie (WE BUILD)",
+      identifierHint:
+        "WE BUILD vereist minstens één identificatie van de organisatie. De EUID komt uit het adresboek.",
+      identifierRequired: "Vul minstens één identificatie in.",
+      identifierFields: {
+        euid: "EUID",
+        lei: "LEI",
+        tax: "Fiscaal nummer",
+        other: "Andere identificatie",
+      },
       reviewTemplate: "Sjabloon",
       reviewRecipient: "Ontvanger",
       offerHint:

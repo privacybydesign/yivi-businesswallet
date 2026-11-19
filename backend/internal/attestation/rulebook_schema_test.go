@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/privacybydesign/yivi-businesswallet/backend/internal/attestation/rulebook"
@@ -148,20 +149,56 @@ func TestCheckRulebook(t *testing.T) {
 		attrs = append(attrs, eudiholder.HeldAttribute{Key: k, Value: v})
 	}
 
-	id, violations, err := checkRulebook(rb.VCT, attrs)
+	id, violations, err := checkRulebook(rb.VCT, attrs, nil)
 	if err != nil || id != "lei" || len(violations) != 0 {
 		t.Errorf("valid LEI: id=%q violations=%v err=%v", id, violations, err)
 	}
 
 	broken := append(slices.Clone(attrs), eudiholder.HeldAttribute{Key: "lei_status", Value: "ACTIVE"})
-	_, violations, err = checkRulebook(rb.VCT, broken)
+	_, violations, err = checkRulebook(rb.VCT, broken, nil)
 	if err != nil || len(violations) == 0 {
 		t.Errorf("invalid LEI: violations=%v err=%v", violations, err)
 	}
 
-	id, violations, err = checkRulebook("nl.yivi.email", attrs)
+	id, violations, err = checkRulebook("nl.yivi.email", attrs, nil)
 	if err != nil || id != "" || violations != nil {
 		t.Errorf("non-rulebook vct: id=%q violations=%v err=%v", id, violations, err)
+	}
+}
+
+// heldPayload is a held EUCC as a WE BUILD conformant issuer signs it.
+func heldPayload() (*rulebook.Entry, map[string]any) {
+	rb, _ := rulebook.Get("eucc")
+	payload := rb.Sample()
+	payload["vct"] = rb.VCT
+	payload["iss"] = "did:web:issuer.example"
+	payload["iat"] = 1736935200
+	payload["exp"] = 1768471200
+	payload["cnf"] = map[string]any{"jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": "AQ", "y": "AQ"}}
+	payload["status"] = map[string]any{"status_list": map[string]any{"idx": 7, "uri": "https://issuer.example/sl/1"}}
+	return rb, payload
+}
+
+func TestCheckRulebookChecksTheWholeSignedPayload(t *testing.T) {
+	rb, payload := heldPayload()
+	if _, violations, err := checkRulebook(rb.VCT, nil, payload); err != nil || len(violations) != 0 {
+		t.Fatalf("conformant EUCC: violations=%v err=%v", violations, err)
+	}
+
+	// What an issuer that ignores the rulebook signs: claims the WE BUILD schema
+	// does not allow and a key binding it does not accept.
+	_, broken := heldPayload()
+	broken["fed"] = "https://issuer.example/org"
+	broken["cnf"] = map[string]any{"kid": "did:key:zDnae#0"}
+	_, violations, err := checkRulebook(rb.VCT, nil, broken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(violations, " ")
+	for _, want := range []string{"fed", "jwk"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("violations %v do not name %q", violations, want)
+		}
 	}
 }
 
