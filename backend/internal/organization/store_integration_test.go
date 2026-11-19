@@ -308,6 +308,15 @@ func TestStoreSetTestMode(t *testing.T) {
 			t.Fatalf("SetTestMode(%v) = %+v, %v", on, org, err)
 		}
 	}
+	if _, err := store.SetTestMode(ctx, created.ID, true); err != nil {
+		t.Fatalf("SetTestMode: %v", err)
+	}
+	if access, err := store.ResolveAccess(ctx, "acme", uuid.New()); err != nil || !access.Org.TestMode {
+		t.Errorf("ResolveAccess = %+v, %v; want the org in test mode", access.Org, err)
+	}
+	if _, err := store.SetTestMode(ctx, created.ID, false); err != nil {
+		t.Fatalf("SetTestMode: %v", err)
+	}
 	if got, err := store.GetBySlug(ctx, "acme"); err != nil || got.TestMode {
 		t.Errorf("GetBySlug = %+v, %v; want live", got, err)
 	}
@@ -316,8 +325,8 @@ func TestStoreSetTestMode(t *testing.T) {
 		audit.OrganizationTestModeChanged, created.ID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Errorf("test mode audited %d times, want 2 (a repeat changes nothing)", n)
+	if n != 4 {
+		t.Errorf("test mode audited %d times, want 4 (a repeat changes nothing)", n)
 	}
 	if _, err := store.SetTestMode(ctx, uuid.New(), true); !errors.Is(err, organization.ErrNotFound) {
 		t.Errorf("unknown org = %v, want ErrNotFound", err)
