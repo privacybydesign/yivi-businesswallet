@@ -1239,17 +1239,11 @@ export const en = {
       privacyUrl: "Privacy statement URL",
       privacyPlaceholder: "https://example.nl/privacy",
       hidePoweredBy: "Leave the “Powered by Yivi” line off the hosted page",
+      showTheme: "Show this look in the Idem app and on the hosted page",
+      showThemeHint:
+        "Off: they keep their own look. The proofing mail always uses it.",
       discard: "Discard",
       save: "Save branding",
-      preview: {
-        caption: "Preview · proofing mail",
-        heading: "{{name}} asks you to verify your identity",
-        body: "{{name}} asked you to verify your identity with your passport or identity card and your face, in the Idem app on your phone.",
-        button: "Open in the Idem app",
-        support: "Questions about this request? Contact {{contact}}.",
-        privacy: "How your data is handled: {{url}}",
-        footer: "Identity check by Yivi",
-      },
     },
     legalRetention: {
       title: "Legal retention",
@@ -1766,9 +1760,33 @@ export const en = {
         caption: "Preview",
         mail: "Proofing mail",
         app: "Idem app",
-        start: "Start",
+        hosted: "Hosted page",
         appNote:
-          "How the Idem app shows this flow's name, logo and colour when the person opens the request.",
+          "The first screen of the Idem app when the person opens the request.",
+        idem: {
+          title: "Request",
+          heading: "{{party}} wants to verify your identity",
+          requestedBy: "Requested by {{org}}",
+          expiresIn_one: "This request expires in {{count}} minute.",
+          expiresIn_other: "This request expires in {{count}} minutes.",
+          theyWillReceive: "They will receive",
+          stepByStep:
+            "Your details go to the verification service step by step, so you can continue on another device. {{party}} only receives them when you finish. If you stop, they are deleted when this request expires.",
+          continue: "Continue",
+          decline: "Decline",
+          items: {
+            documentIdentity:
+              "Document identity (name, date of birth, document number, expiry)",
+            additionalDetails:
+              "Additional personal details (personal number, place of birth)",
+            facePhoto: "Your face photo from the document chip",
+            chipChecks: "Document authenticity checks",
+            biometrics: "Face verification result",
+            ageOver: "Whether you are {{age}} or older",
+            ageCheck: "Whether you are old enough",
+            everything: "Everything the app reads from your document",
+          },
+        },
       },
       dropConfirm: {
         title: "Use the organisation's branding?",
@@ -2788,14 +2806,6 @@ export const en = {
     requestIdentificationHint:
       "Asks this member to re-confirm their identity now. They get an e-mail with a link.",
     identityRequested: "Identification requested",
-    proofing: {
-      flow: "Identity proofing flow",
-      send: "Send identity proofing",
-      hint: "Mails this member a QR code and a link for the Idem app. The session starts when the mail is sent and runs for 10 minutes; after that, send a new request.",
-      noFlows:
-        "No flow is available to members yet. Create one and tick it under",
-      lastRequest: "Last proofing:",
-    },
     vogValidUntil: "VOG valid until",
     vogNone: "No VOG on file",
     requestVog: "Request VOG",
@@ -3088,7 +3098,6 @@ export const en = {
     tabScreening: "Screening (VOG)",
     tabBranding: "Branding",
     tabPrivacy: "Data and privacy",
-    tabTheme: "Wallet theme",
     tabCommunication: "Communication",
     tabEmail: "E-mail",
     tabMailTemplates: "Mail templates",
@@ -3100,6 +3109,17 @@ export const en = {
     tabSigning: "Signing",
     tabPostguard: "PostGuard",
     tabWallets: "Wallets",
+    brandingWallet: "Look",
+    brandingWalletHint:
+      "One look for the business wallet, the proofing mail, the hosted page and the Idem app.",
+    brandingExternal: "Name and contact",
+    brandingExternalHint:
+      "What the proofing mail, the hosted page and the Idem app say to a person outside the organisation.",
+    unsaved: {
+      title: "Leave without saving?",
+      message: "Your changes to the branding are not saved.",
+      leave: "Leave",
+    },
     adminOnly: "Only organisation admins can manage settings.",
     discard: "Discard",
     organisation: {

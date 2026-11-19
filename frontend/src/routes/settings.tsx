@@ -24,12 +24,11 @@ import { OrgProfileSettings } from "./org-profile-settings";
 import { PostguardApiKeyCard } from "./postguard-api-key";
 import { PostguardEncryptionKeyCard } from "./postguard-encryption-key";
 import { PostguardNotificationsCard } from "./postguard-notifications";
-import { BrandingPanel } from "./proofing-branding";
+import { BrandingSettings } from "./branding-settings";
 import { PrivacySettingsPanel } from "./settings-privacy";
 import { ProvisioningSettingsPanel } from "./provisioning-settings";
 import { SlackSettingsPanel } from "./slack-settings";
 import { TeamsSettingsPanel } from "./teams-settings";
-import { ThemeSettingsPanel } from "./theme-settings";
 import { WalletUnitPanel } from "./wallet-unit-panel";
 import { WscaWalletPanel } from "./wsca-wallet-settings";
 import * as React from "react";
@@ -168,7 +167,7 @@ function SettingsPanel({
     case "org":
       return <OrgProfileSettings org={org} />;
     case "branding":
-      return <BrandingPanel slug={slug} orgName={org.name} />;
+      return <BrandingSettings slug={slug} orgName={org.name} />;
     case "privacy":
       return <PrivacySettingsPanel slug={slug} />;
     case "mandates":
@@ -177,8 +176,6 @@ function SettingsPanel({
       return <IdentitySettingsPanel slug={slug} />;
     case "screening":
       return <ScreeningSettingsPanel slug={slug} />;
-    case "theme":
-      return <ThemeSettingsPanel slug={slug} />;
     case "issuer":
       return <IssuerSettingsPanel slug={slug} />;
     case "provisioning":

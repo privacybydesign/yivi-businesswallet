@@ -35,7 +35,6 @@ import type {
   WebhookDelivery,
 } from "../api/identity-proofing";
 import type { AuditEvent } from "../api/organization";
-import type { OrgTheme } from "../api/theme";
 import { SUPPORTED_LANGUAGES } from "../i18n/language";
 import type { Language } from "../i18n/language";
 import { errorCode } from "./api-error";
@@ -2415,57 +2414,6 @@ export function dropsOwnBranding(
   custom: boolean,
 ): boolean {
   return saved.custom && !custom;
-}
-
-// The fields that give a branding a look of its own in the Idem app: a colour
-// or the font. A name, logo, support contact or privacy link alone do not.
-const APP_LOOK_FIELDS = [
-  "primaryColor",
-  "secondaryColor",
-  "textColor",
-  "surfaceColor",
-  "borderColor",
-  "linkColor",
-  "successColor",
-  "warningColor",
-  "errorColor",
-  "topbarColor",
-  "fontFamily",
-] as const satisfies readonly (keyof ProofingBranding)[];
-
-// What the Idem app shows a person outside the org of a flow's branding (see
-// effectiveBranding): the name its mail signs with, its colour, the app's
-// header and the logo; "" keeps the app's own. A branding with a look of its
-// own is shown as it is; otherwise the org's theme, with the branding's logo
-// when it has one. Mirrors AppBrandingResolver and whiteLabeled in
-// backend/internal/proofing/app_branding.go.
-export interface AppLook {
-  name: string;
-  primaryColor: string;
-  headerColor: string;
-  logoUri: string;
-}
-
-export function appLook(
-  branding: ProofingBranding,
-  theme: Pick<OrgTheme, "primaryColor" | "topbarColor" | "logoUri">,
-  orgName: string,
-): AppLook {
-  const name = branding.displayName || orgName;
-  if (APP_LOOK_FIELDS.some((field) => branding[field] !== "")) {
-    return {
-      name,
-      primaryColor: branding.primaryColor,
-      headerColor: branding.topbarColor,
-      logoUri: branding.logoUri,
-    };
-  }
-  return {
-    name,
-    primaryColor: theme.primaryColor,
-    headerColor: theme.topbarColor,
-    logoUri: branding.logoUri || theme.logoUri,
-  };
 }
 
 // The languages a hosted page form shows ticked: none saved is every one.

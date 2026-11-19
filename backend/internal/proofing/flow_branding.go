@@ -225,24 +225,11 @@ func (s *Service) FlowBrandingLogo(ctx context.Context, org Org, flowID string) 
 	return s.flowBrandings.Logo(ctx, org.ID, flowID)
 }
 
-// brandLogo is the logo a flow's branding shows: its own, else the org's.
+// brandLogo is a flow's own logo, or ErrNoLogo: the org's theme logo shows
+// instead.
 func (s *Service) brandLogo(ctx context.Context, orgID uuid.UUID, flowID string, fb FlowBranding) (Logo, error) {
-	return flowOrOrgLogo(ctx, s.flowBrandings, s.orgSettings, orgID, flowID, fb)
-}
-
-type flowLogoReader interface {
-	Logo(ctx context.Context, orgID uuid.UUID, flowID string) (Logo, error)
-}
-
-type orgLogoReader interface {
-	Logo(ctx context.Context, orgID uuid.UUID) (Logo, error)
-}
-
-// flowOrOrgLogo is the logo fb shows: the flow's own when it is custom and has
-// one, else the org's proofing logo.
-func flowOrOrgLogo(ctx context.Context, flows flowLogoReader, org orgLogoReader, orgID uuid.UUID, flowID string, fb FlowBranding) (Logo, error) {
-	if fb.Custom && fb.HasLogo {
-		return flows.Logo(ctx, orgID, flowID)
+	if !fb.Custom || !fb.HasLogo || s.flowBrandings == nil {
+		return Logo{}, ErrNoLogo
 	}
-	return org.Logo(ctx, orgID)
+	return s.flowBrandings.Logo(ctx, orgID, flowID)
 }

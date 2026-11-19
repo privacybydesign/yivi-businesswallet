@@ -16,6 +16,7 @@ import {
   proofingRequestQueryKey,
 } from "./api/identity-proofing.queries";
 import { personName } from "./lib/proofing-reviews";
+import { HOSTED_PREVIEW_PATH } from "./lib/hosted-preview";
 import { fullName } from "./lib/name";
 import Root from "./routes/root";
 import RootRedirect from "./routes/root-redirect";
@@ -61,6 +62,7 @@ import Signing from "./routes/signing";
 import CredentialRequests from "./routes/credential-requests";
 import SigningExternal from "./routes/signing-external";
 import Proof from "./routes/proof";
+import HostedPreview from "./routes/hosted-preview";
 import ReviewLink from "./routes/review-link";
 import AdminDashboard from "./routes/admin-dashboard";
 import AllOrganizations from "./routes/all-organizations";
@@ -215,6 +217,8 @@ export const router = createBrowserRouter([
       // An external person verifying from a hosted link: public, keyed by
       // the link's token, on the subject's own device.
       { path: "/p/:token", Component: Proof },
+      // The hosted page the branding settings frame, from the page they send.
+      { path: HOSTED_PREVIEW_PATH, Component: HostedPreview },
       { path: "/r/:token", Component: ReviewLink },
       { path: "*", Component: NotFound },
       {

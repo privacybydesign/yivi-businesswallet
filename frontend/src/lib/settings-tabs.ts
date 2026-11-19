@@ -23,7 +23,6 @@ export const SETTINGS_TABS = [
   { key: "mandates", labelKey: "settings.tabMandates" },
   { key: "identity", labelKey: "settings.tabIdentity" },
   { key: "screening", labelKey: "settings.tabScreening" },
-  { key: "theme", labelKey: "settings.tabTheme" },
   { key: "communication", labelKey: "settings.tabCommunication" },
   { key: "issuer", labelKey: "settings.tabIssuer" },
   { key: "provisioning", labelKey: "settings.tabProvisioning" },
@@ -52,6 +51,11 @@ export type SettingsLocation = {
   section: CommunicationSection;
 };
 
+// The wallet theme was a tab of its own before it moved into Branding.
+const MOVED_TABS: Readonly<Record<string, SettingsTab>> = {
+  theme: "branding",
+};
+
 export function resolveSettingsLocation(
   value: string | null,
 ): SettingsLocation {
@@ -60,6 +64,9 @@ export function resolveSettingsLocation(
 
   const tab =
     SETTINGS_TABS.find((item) => item.key === value)?.key ??
+    (value !== null && Object.hasOwn(MOVED_TABS, value)
+      ? MOVED_TABS[value]
+      : undefined) ??
     DEFAULT_SETTINGS_TAB;
   return { tab, section: DEFAULT_COMMUNICATION_SECTION };
 }

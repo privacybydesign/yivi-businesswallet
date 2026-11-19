@@ -510,43 +510,20 @@ const webhookHealthSchema = z.object({
 
 export type WebhookHealth = z.infer<typeof webhookHealthSchema>;
 
-// The rest of the org's proofing white-label, the same colours as the org
-// theme has (bar its sidebar); empty keeps the design's own.
-export const PROOFING_THEME_COLOR_FIELDS = [
-  "textColor",
-  "surfaceColor",
-  "borderColor",
-  "linkColor",
-  "successColor",
-  "warningColor",
-  "errorColor",
-  "topbarColor",
-] as const;
-
-export type ProofingThemeColorField =
-  (typeof PROOFING_THEME_COLOR_FIELDS)[number];
-
-// Empty strings fall back: in the mail, the org's name, the org's colour, no logo.
+// What the proofing mail, hosted page and Idem app say besides the org's
+// theme, their one look. Empty strings fall back to the org's name, or leave
+// a line out. An org's has no colour or logo; a hosted page's carries its
+// flow's own.
 const proofingBrandingSchema = z.object({
   displayName: z.string(),
   primaryColor: z.string(),
-  // The Idem app's second colour; empty keeps the design's.
-  secondaryColor: z.string(),
-  textColor: z.string(),
-  surfaceColor: z.string(),
-  borderColor: z.string(),
-  linkColor: z.string(),
-  successColor: z.string(),
-  warningColor: z.string(),
-  errorColor: z.string(),
-  topbarColor: z.string(),
-  // A CSS font-family list, as the org theme's.
-  fontFamily: z.string(),
   supportContact: z.string(),
   privacyUrl: z.string(),
   logoUri: z.string(),
   // Leaves the "powered by" line off the hosted pages.
   hidePoweredBy: z.boolean(),
+  // Puts the org's theme on the Idem app and the hosted page.
+  showTheme: z.boolean().catch(true),
 });
 
 export type ProofingBranding = z.infer<typeof proofingBrandingSchema>;
@@ -669,19 +646,12 @@ export type WebhookDelivery = z.infer<typeof webhookDeliverySchema>;
 
 // A branding save: the text fields, and a new logo file or its removal
 // (neither keeps it).
-export interface ProofingBrandingInput extends Record<
-  ProofingThemeColorField,
-  string
-> {
+export interface ProofingBrandingInput {
   displayName: string;
-  primaryColor: string;
-  secondaryColor: string;
-  fontFamily: string;
   supportContact: string;
   privacyUrl: string;
   hidePoweredBy: boolean;
-  logo?: File;
-  removeLogo?: boolean;
+  showTheme: boolean;
 }
 
 // A flow's own branding over the org's: not custom is the org's, with empty
@@ -697,15 +667,15 @@ const proofingFlowBrandingSchema = z.object({
 
 export type ProofingFlowBranding = z.infer<typeof proofingFlowBrandingSchema>;
 
-export type ProofingFlowBrandingInput = Pick<
-  ProofingBrandingInput,
-  | "displayName"
-  | "primaryColor"
-  | "supportContact"
-  | "privacyUrl"
-  | "logo"
-  | "removeLogo"
-> & { custom: boolean };
+export interface ProofingFlowBrandingInput {
+  custom: boolean;
+  displayName: string;
+  primaryColor: string;
+  supportContact: string;
+  privacyUrl: string;
+  logo?: File;
+  removeLogo?: boolean;
+}
 
 // Whether an org's identity proofing is paused by a platform admin, and by
 // whom.
@@ -1086,19 +1056,90 @@ export function saveProofingBranding(
 ): Promise<ProofingSettings> {
   const form = new FormData();
   form.set("displayName", input.displayName);
-  form.set("primaryColor", input.primaryColor);
-  form.set("secondaryColor", input.secondaryColor);
-  for (const field of PROOFING_THEME_COLOR_FIELDS) {
-    form.set(field, input[field]);
-  }
-  form.set("fontFamily", input.fontFamily);
   form.set("supportContact", input.supportContact);
   form.set("privacyUrl", input.privacyUrl);
   form.set("hidePoweredBy", String(input.hidePoweredBy));
-  setLogoFields(form, input);
+  form.set("showTheme", String(input.showTheme));
   return request(`${base(slug)}/settings/branding`, {
     schema: proofingSettingsSchema,
     method: "PUT",
+    body: form,
+    signal,
+  });
+}
+
+// An unsaved branding form: the org's, or a flow's with flowId (custom false
+// shows the org's saved branding), and theme the unsaved wallet theme (none
+// is the saved one).
+export interface BrandingMailPreviewInput {
+  flowId?: string;
+  custom?: boolean;
+  displayName: string;
+  primaryColor?: string;
+  supportContact: string;
+  privacyUrl: string;
+  logo?: File;
+  removeLogo?: boolean;
+  theme?: MailPreviewTheme;
+  locale: string;
+}
+
+// The unsaved theme a mail preview renders in: its mail colours and font,
+// and its logo (a picked file, removed, or else the saved one).
+export interface MailPreviewTheme {
+  primaryColor: string;
+  textColor: string;
+  surfaceColor: string;
+  borderColor: string;
+  linkColor: string;
+  fontFamily: string;
+  logo?: File;
+  removeLogo: boolean;
+}
+
+const brandingMailPreviewSchema = z.object({
+  subject: z.string(),
+  html: z.string(),
+});
+
+export type BrandingMailPreview = z.infer<typeof brandingMailPreviewSchema>;
+
+// The backend renders the proofing mail as it is sent, so the preview cannot
+// drift from it.
+export function previewBrandingMail(
+  slug: string,
+  input: BrandingMailPreviewInput,
+  signal?: AbortSignal,
+): Promise<BrandingMailPreview> {
+  const form = new FormData();
+  if (input.flowId) {
+    form.set("flowId", input.flowId);
+    form.set("custom", String(input.custom === true));
+  }
+  form.set("displayName", input.displayName);
+  form.set("primaryColor", input.primaryColor ?? "");
+  form.set("supportContact", input.supportContact);
+  form.set("privacyUrl", input.privacyUrl);
+  form.set("locale", input.locale);
+  setLogoFields(form, input);
+  const { theme } = input;
+  if (theme) {
+    form.set("theme", "true");
+    form.set("themePrimaryColor", theme.primaryColor);
+    form.set("themeTextColor", theme.textColor);
+    form.set("themeSurfaceColor", theme.surfaceColor);
+    form.set("themeBorderColor", theme.borderColor);
+    form.set("themeLinkColor", theme.linkColor);
+    form.set("themeFontFamily", theme.fontFamily);
+    if (theme.logo) {
+      form.set("themeLogo", theme.logo);
+    } else if (theme.removeLogo) {
+      form.set("themeRemoveLogo", "true");
+    }
+  }
+  return request(`${base(slug)}/settings/branding/mail-preview`, {
+    schema: brandingMailPreviewSchema,
+    method: "POST",
     body: form,
     signal,
   });

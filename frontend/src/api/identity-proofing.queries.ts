@@ -1,10 +1,18 @@
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { followReviewEvents } from "./review-events";
 import { DEFAULT_LANGUAGE, isSupportedLanguage } from "../i18n/language";
 import {
+  previewBrandingMail,
+  type BrandingMailPreview,
+  type BrandingMailPreviewInput,
   activateProofingFlowVersion,
   checkReviewLinkSeals,
   decideReviewLinkItem,
@@ -66,54 +74,52 @@ import {
   submitProofingAddress,
   lookUpAddress,
   uploadProofingDocuments,
-} from "./identity-proofing";
-import type {
-  AddressReviewInput,
-  ReviewLinkPage,
-  ReviewTarget,
-  ReviewItemCounts,
-  StepReviewKind,
-  ProofingSettings,
-  ProofingSettingsUpdate,
-  ProofingFlow,
-  ProofingFlowSelection,
-  ProofingFlowSpec,
-  ProofingRequest,
-  ProofingRequestInput,
-  ProofingSent,
-  ProofingStats,
-  CreatedProofingApiKey,
-  ProofingApiKey,
-  ProofingBrandingInput,
-  ProofingWebhook,
-  WebhookDelivery,
-  ProofingClaimLink,
-  ProofingChosenMethod,
-  ProofingAppMethod,
-  ProofingApp,
-  ProofingYiviDisclosure,
-  ProofingYiviStart,
-  ProofingDocumentScanStart,
-  ProofingProgress,
-  ProofingMethod,
-  HostedProofing,
-  HostedProgress,
-  HostedStart,
-  VerifyTarget,
-  ProofingReviewInput,
-  ProofingResult,
-  ProofingPause,
-  ProofingFlowBranding,
-  ProofingFlowBrandingInput,
-  ProofingFlowHosted,
-  DiplomaMode,
-  AddressMode,
-  RegisterAddress,
-  ProofingAddressInput,
-  EmploymentMode,
-  DocumentVerdict,
-  ProofingDataMatch,
-  ProofingOverview,
+  type AddressReviewInput,
+  type ReviewLinkPage,
+  type ReviewTarget,
+  type ReviewItemCounts,
+  type StepReviewKind,
+  type ProofingSettings,
+  type ProofingSettingsUpdate,
+  type ProofingFlow,
+  type ProofingFlowSelection,
+  type ProofingFlowSpec,
+  type ProofingRequest,
+  type ProofingRequestInput,
+  type ProofingSent,
+  type ProofingStats,
+  type CreatedProofingApiKey,
+  type ProofingApiKey,
+  type ProofingBrandingInput,
+  type ProofingWebhook,
+  type WebhookDelivery,
+  type ProofingClaimLink,
+  type ProofingChosenMethod,
+  type ProofingAppMethod,
+  type ProofingApp,
+  type ProofingYiviDisclosure,
+  type ProofingYiviStart,
+  type ProofingDocumentScanStart,
+  type ProofingProgress,
+  type ProofingMethod,
+  type HostedProofing,
+  type HostedProgress,
+  type HostedStart,
+  type VerifyTarget,
+  type ProofingReviewInput,
+  type ProofingResult,
+  type ProofingPause,
+  type ProofingFlowBranding,
+  type ProofingFlowBrandingInput,
+  type ProofingFlowHosted,
+  type DiplomaMode,
+  type AddressMode,
+  type RegisterAddress,
+  type ProofingAddressInput,
+  type EmploymentMode,
+  type DocumentVerdict,
+  type ProofingDataMatch,
+  type ProofingOverview,
 } from "./identity-proofing";
 import type { AuditEvent } from "./organization";
 import { toast } from "../lib/toast";
@@ -448,24 +454,6 @@ export function useProofingOverviewQuery(
   });
 }
 
-// The requests sent to one member, newest first. Under the requests key, so
-// everything that refreshes the org's requests refreshes these too.
-export function useMemberRequestsQuery(
-  slug: string,
-  userId: string,
-): UseQueryResult<ProofingRequest[], Error> {
-  return useQuery({
-    queryKey: [...proofingRequestsQueryKey(slug), "member", userId],
-    queryFn: ({ signal }) =>
-      getProofingRequests(slug, { subjectUserId: userId }, signal),
-    enabled: slug !== "" && userId !== "",
-    refetchInterval: (query) =>
-      query.state.data?.some((r) => isProofingLive(r.status))
-        ? REQUESTS_POLL_INTERVAL_MS
-        : false,
-  });
-}
-
 // Re-reads the org's requests each time the backend says its reviews changed,
 // and each time the stream (re)connects, for what changed while it was down:
 // the sidebar's count and the Reviews lists follow at once, with no timer.
@@ -628,6 +616,29 @@ export function useCreateRequestMutation(
         toast.error(t("toasts.identityProofingMailNotSent"));
       }
     },
+  });
+}
+
+// Every mail preview of the org; the wallet theme it renders in is saved apart.
+export function brandingMailPreviewQueryKey(slug: string): readonly string[] {
+  return [...proofingSettingsQueryKey(slug), "mailPreview"];
+}
+
+// The proofing mail an unsaved branding form gives, rendered by the backend.
+// A File hashes as {}, so a picked logo is in the key by its name, size and
+// date as well.
+export function useBrandingMailPreviewQuery(
+  slug: string,
+  input: BrandingMailPreviewInput,
+): UseQueryResult<BrandingMailPreview, Error> {
+  const fileKey = (file?: File): string =>
+    file ? `${file.name}:${file.size}:${file.lastModified}` : "";
+  const logoKey = `${fileKey(input.logo)}|${fileKey(input.theme?.logo)}`;
+  return useQuery({
+    queryKey: [...brandingMailPreviewQueryKey(slug), input, logoKey],
+    queryFn: ({ signal }) => previewBrandingMail(slug, input, signal),
+    enabled: slug !== "",
+    placeholderData: keepPreviousData,
   });
 }
 

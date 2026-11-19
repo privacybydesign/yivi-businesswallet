@@ -281,7 +281,7 @@ function darken(hex: string, amount: number): string {
 }
 
 // lighten mixes a colour towards white by the given fraction (0–1).
-function lighten(hex: string, amount: number): string {
+export function lighten(hex: string, amount: number): string {
   const rgb = parseHex(hex);
   if (!rgb) {
     return hex;
